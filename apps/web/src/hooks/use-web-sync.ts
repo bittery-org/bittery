@@ -164,7 +164,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 			if (!client) {
 				throw new Error(`No API client for account ${accountId}`);
 			}
-			return client as unknown as OutboundQueueApiClient;
+			return client;
 		},
 		[clientId],
 	);

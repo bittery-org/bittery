@@ -93,6 +93,14 @@ export interface TauriStore {
  * That implementation keeps every key in one JSON blob under a single OS keychain entry,
  * which is why a missing key answers `Ok(None)` rather than erroring and why the empty
  * string round-trips as a value — it is a map entry, not a zero-length credential.
+ *
+ * This restates a generated shape, which ADR 0012 allows only behind a drift guard. The
+ * generated argument types live in the desktop app (`apps/desktop/src/generated/`) and a
+ * package cannot depend on an app, so the guard lives on the other side of the seam:
+ * `apps/desktop/src/lib/storage-invoke.ts` asserts this declaration and the generated
+ * commands are mutually assignable, and `desktop`'s `check-types` runs it in CI. The
+ * desktop app is the only consumer of this adapter, so that is the one place where both
+ * halves are visible at once.
  */
 export interface TauriInvoke {
 	(cmd: "keychain_set", args: { key: string; value: string }): Promise<void>;

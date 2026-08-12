@@ -1,6 +1,13 @@
 use sqlx::{query_as, PgPool};
 
-use crate::{config::SELF_HOSTED_MODE, db::models::DbTeamBillingEntitlementRow, error::AppError};
+use crate::{
+    config::SELF_HOSTED_MODE,
+    db::{
+        enums::{BillingPlan, BillingStatus},
+        models::DbTeamBillingEntitlementRow,
+    },
+    error::AppError,
+};
 
 const TEAM_BILLING_ENTITLEMENT_QUERY: &str =
     "SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1";
@@ -41,27 +48,27 @@ pub(crate) async fn load_team_billing_entitlement(
         })
 }
 
-pub(crate) fn billing_is_active(billing_status: &str) -> bool {
-    matches!(billing_status, "active" | "trialing")
+fn is_active(billing_status: Option<BillingStatus>) -> bool {
+    billing_status.is_some_and(|status| status.is_active())
 }
 
 pub(crate) fn team_management_enabled(
     mode: &str,
-    billing_plan: Option<&str>,
-    billing_status: Option<&str>,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 ) -> bool {
     if mode == SELF_HOSTED_MODE {
         return true;
     }
 
-    let is_active = billing_status.map(billing_is_active).unwrap_or(false);
-    matches!(billing_plan, Some("family") | Some("team")) && is_active
+    matches!(billing_plan, Some(BillingPlan::Family | BillingPlan::Team))
+        && is_active(billing_status)
 }
 
 pub(crate) fn resolve_share_links_policy(
     mode: &str,
-    billing_plan: Option<&str>,
-    billing_status: Option<&str>,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 ) -> ShareLinksPolicy {
     if mode == SELF_HOSTED_MODE {
         return ShareLinksPolicy {
@@ -70,25 +77,20 @@ pub(crate) fn resolve_share_links_policy(
         };
     }
 
-    let is_active = billing_status.map(billing_is_active).unwrap_or(false);
-
     ShareLinksPolicy {
-        enabled: matches!(
-            billing_plan,
-            Some("personal") | Some("family") | Some("team")
-        ) && is_active,
+        enabled: billing_plan.is_some_and(|plan| plan.is_paid()) && is_active(billing_status),
         max_active_links: match billing_plan {
-            Some("personal") => Some(5),
-            Some("family") | Some("team") => None,
-            _ => Some(0),
+            Some(BillingPlan::Personal) => Some(5),
+            Some(BillingPlan::Family | BillingPlan::Team) => None,
+            Some(BillingPlan::Free) | None => Some(0),
         },
     }
 }
 
 pub(crate) fn resolve_vault_sharing_entitlement(
     mode: &str,
-    billing_plan: Option<&str>,
-    billing_status: Option<&str>,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 ) -> VaultSharingEntitlement {
     if mode == SELF_HOSTED_MODE {
         return VaultSharingEntitlement {
@@ -97,14 +99,14 @@ pub(crate) fn resolve_vault_sharing_entitlement(
         };
     }
 
-    let is_active = billing_status.map(billing_is_active).unwrap_or(false);
+    let is_active = is_active(billing_status);
 
     match billing_plan {
-        Some("family") if is_active => VaultSharingEntitlement {
+        Some(BillingPlan::Family) if is_active => VaultSharingEntitlement {
             allowed: true,
             shared_vault_limit: Some(5),
         },
-        Some("team") if is_active => VaultSharingEntitlement {
+        Some(BillingPlan::Team) if is_active => VaultSharingEntitlement {
             allowed: true,
             shared_vault_limit: None,
         },
@@ -117,8 +119,8 @@ pub(crate) fn resolve_vault_sharing_entitlement(
 
 pub(crate) fn resolve_attachment_entitlement(
     mode: &str,
-    billing_plan: Option<&str>,
-    billing_status: Option<&str>,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 ) -> AttachmentEntitlement {
     if mode == SELF_HOSTED_MODE {
         return AttachmentEntitlement {
@@ -128,20 +130,20 @@ pub(crate) fn resolve_attachment_entitlement(
         };
     }
 
-    let is_active = billing_status.map(billing_is_active).unwrap_or(false);
+    let is_active = is_active(billing_status);
 
     match billing_plan {
-        Some("personal") if is_active => AttachmentEntitlement {
+        Some(BillingPlan::Personal) if is_active => AttachmentEntitlement {
             enabled: true,
             max_file_size_bytes: Some(10 * MB),
             storage_bytes: Some(250 * MB),
         },
-        Some("family") if is_active => AttachmentEntitlement {
+        Some(BillingPlan::Family) if is_active => AttachmentEntitlement {
             enabled: true,
             max_file_size_bytes: Some(25 * MB),
             storage_bytes: Some(GB),
         },
-        Some("team") if is_active => AttachmentEntitlement {
+        Some(BillingPlan::Team) if is_active => AttachmentEntitlement {
             enabled: true,
             max_file_size_bytes: Some(50 * MB),
             storage_bytes: Some(2 * GB),
@@ -164,33 +166,41 @@ mod tests {
         assert!(team_management_enabled(SELF_HOSTED_MODE, None, None));
         assert!(team_management_enabled(
             "cloud",
-            Some("team"),
-            Some("active")
+            Some(BillingPlan::Team),
+            Some(BillingStatus::Active)
         ));
         assert!(team_management_enabled(
             "cloud",
-            Some("family"),
-            Some("trialing")
+            Some(BillingPlan::Family),
+            Some(BillingStatus::Trialing)
         ));
         assert!(!team_management_enabled(
             "cloud",
-            Some("personal"),
-            Some("active")
+            Some(BillingPlan::Personal),
+            Some(BillingStatus::Active)
         ));
         assert!(!team_management_enabled(
             "cloud",
-            Some("team"),
-            Some("past_due")
+            Some(BillingPlan::Team),
+            Some(BillingStatus::PastDue)
         ));
     }
 
     #[test]
     fn share_links_policy_keeps_personal_limit_when_inactive() {
-        let active = resolve_share_links_policy("cloud", Some("personal"), Some("active"));
+        let active = resolve_share_links_policy(
+            "cloud",
+            Some(BillingPlan::Personal),
+            Some(BillingStatus::Active),
+        );
         assert!(active.enabled);
         assert_eq!(active.max_active_links, Some(5));
 
-        let inactive = resolve_share_links_policy("cloud", Some("personal"), Some("past_due"));
+        let inactive = resolve_share_links_policy(
+            "cloud",
+            Some(BillingPlan::Personal),
+            Some(BillingStatus::PastDue),
+        );
         assert!(!inactive.enabled);
         assert_eq!(inactive.max_active_links, Some(5));
 
@@ -201,27 +211,47 @@ mod tests {
 
     #[test]
     fn vault_sharing_entitlement_matches_existing_plan_rules() {
-        let family = resolve_vault_sharing_entitlement("cloud", Some("family"), Some("active"));
+        let family = resolve_vault_sharing_entitlement(
+            "cloud",
+            Some(BillingPlan::Family),
+            Some(BillingStatus::Active),
+        );
         assert!(family.allowed);
         assert_eq!(family.shared_vault_limit, Some(5));
 
-        let team = resolve_vault_sharing_entitlement("cloud", Some("team"), Some("trialing"));
+        let team = resolve_vault_sharing_entitlement(
+            "cloud",
+            Some(BillingPlan::Team),
+            Some(BillingStatus::Trialing),
+        );
         assert!(team.allowed);
         assert_eq!(team.shared_vault_limit, None);
 
-        let free = resolve_vault_sharing_entitlement("cloud", Some("free"), Some("active"));
+        let free = resolve_vault_sharing_entitlement(
+            "cloud",
+            Some(BillingPlan::Free),
+            Some(BillingStatus::Active),
+        );
         assert!(!free.allowed);
         assert_eq!(free.shared_vault_limit, Some(0));
     }
 
     #[test]
     fn attachment_entitlement_returns_expected_quotas() {
-        let personal = resolve_attachment_entitlement("cloud", Some("personal"), Some("active"));
+        let personal = resolve_attachment_entitlement(
+            "cloud",
+            Some(BillingPlan::Personal),
+            Some(BillingStatus::Active),
+        );
         assert!(personal.enabled);
         assert_eq!(personal.max_file_size_bytes, Some(10 * MB));
         assert_eq!(personal.storage_bytes, Some(250 * MB));
 
-        let inactive = resolve_attachment_entitlement("cloud", Some("team"), Some("past_due"));
+        let inactive = resolve_attachment_entitlement(
+            "cloud",
+            Some(BillingPlan::Team),
+            Some(BillingStatus::PastDue),
+        );
         assert!(!inactive.enabled);
         assert_eq!(inactive.max_file_size_bytes, Some(0));
         assert_eq!(inactive.storage_bytes, Some(0));

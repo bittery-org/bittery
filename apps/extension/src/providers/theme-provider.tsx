@@ -9,6 +9,8 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { isBackgroundEvent } from "../background/events";
+import { sendMessage } from "../lib/messaging";
 import {
 	applyResolvedTheme,
 	getSystemTheme,
@@ -17,11 +19,6 @@ import {
 	type ThemePreference,
 	writeStoredThemePreference,
 } from "../lib/theme";
-
-interface DesktopThemeStatus {
-	available: boolean;
-	theme?: ThemePreference | null;
-}
 
 interface ThemeContextValue {
 	/** The extension's own stored preference. */
@@ -66,21 +63,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
 	// Desktop status carries the desktop app's appearance setting. When the
 	// desktop app is running it overrides the extension's local preference.
-	const desktopStatusQuery = useQuery<DesktopThemeStatus | null>({
+	const desktopStatusQuery = useQuery({
 		queryKey: ["desktopStatus"],
 		queryFn: async () => {
-			return await new Promise<DesktopThemeStatus | null>((resolve) => {
-				try {
-					chrome.runtime.sendMessage(
-						{ type: "CHECK_DESKTOP_STATUS" },
-						(response: DesktopThemeStatus | undefined) => {
-							resolve(response?.available ? response : null);
-						},
-					);
-				} catch {
-					resolve(null);
-				}
-			});
+			const response = await sendMessage({
+				type: "CHECK_DESKTOP_STATUS",
+			}).catch(() => null);
+			return response?.success && response.available ? response : null;
 		},
 		refetchInterval: 5000,
 		staleTime: 2000,
@@ -89,7 +78,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 	// The background worker forwards the desktop `theme_changed` event as a
 	// runtime message; refetch desktop status so the override applies instantly.
 	useEffect(() => {
-		const handleMessage = (message: { type?: string }) => {
+		const handleMessage = (message: unknown) => {
+			if (!isBackgroundEvent(message)) {
+				return;
+			}
 			if (
 				message.type === "THEME_CHANGED" ||
 				message.type === "DESKTOP_LOCKED" ||

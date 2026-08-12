@@ -14,8 +14,7 @@
  * instead of duplicating crypto.
  */
 
-import type { KeyRef } from "@bittery/crypto-port";
-import type { EncryptedData } from "@bittery/types";
+import type { EncryptedData, KeyRef } from "@bittery/crypto-port";
 import type { VaultCrypto } from "./vault-crypto";
 
 /** Identifies the vault/account/attachment an encryption context is bound to. */

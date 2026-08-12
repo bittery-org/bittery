@@ -1,4 +1,4 @@
-import type { KdfProfile } from "@bittery/types";
+import type { KdfProfile } from "@bittery/crypto-port";
 import policy from "../../crypto/kdf-policy.json";
 
 type UntrustedKdfProfile = {

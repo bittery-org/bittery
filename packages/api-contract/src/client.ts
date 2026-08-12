@@ -455,7 +455,7 @@ export interface ApiClient {
 	};
 	readonly billing: {
 		entitlements(): Promise<ApiResult<Final.BillingEntitlements>>;
-		status(): Promise<ApiResult<Final.BillingStatus>>;
+		status(): Promise<ApiResult<Final.BillingStatusSummary>>;
 		attachmentUsage(): Promise<ApiResult<Final.AttachmentUsage>>;
 		checkout(
 			input: Final.CheckoutSessionInput,

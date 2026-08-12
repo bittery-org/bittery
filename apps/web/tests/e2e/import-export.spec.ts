@@ -524,15 +524,14 @@ test("a Chrome .csv import puts every row, duplicates included, into one vault",
 		),
 	).toBeVisible();
 
+	const expectedVaultName = `${prefix} ${uiText("vaults_import_source_vault_chrome_passwords")}`;
 	const [targetVaultName] = await prefixTargetVaultNames(dialog, prefix, 1);
-	expect(targetVaultName).toBe(
-		`${prefix} ${uiText("vaults_import_source_vault_chrome_passwords")}`,
-	);
+	expect(targetVaultName).toBe(expectedVaultName);
 	await confirmImport(dialog, { imported: 4, skipped: 0, newVaults: 1 });
 
 	// Chrome writes one row per affiliated domain, so "example.com" arrives twice
 	// and both rows have to survive as separate items.
-	expect(await importedVaultItemTitles(targetVaultName, 4)).toEqual([
+	expect(await importedVaultItemTitles(expectedVaultName, 4)).toEqual([
 		"example.com",
 		"example.com",
 		"example.org",
@@ -558,11 +557,12 @@ test("a Firefox .csv import skips the Sync account entry and says so", async () 
 		dialog.getByText(uiText("vaults_import_warning_sync_account_skipped")),
 	).toBeVisible();
 
+	const expectedVaultName = `${prefix} Firefox`;
 	const [targetVaultName] = await prefixTargetVaultNames(dialog, prefix, 1);
-	expect(targetVaultName).toBe(`${prefix} Firefox`);
+	expect(targetVaultName).toBe(expectedVaultName);
 	await confirmImport(dialog, { imported: 9, skipped: 1, newVaults: 1 });
 
-	expect(await importedVaultItemTitles(targetVaultName, 9)).toEqual(
+	expect(await importedVaultItemTitles(expectedVaultName, 9)).toEqual(
 		[
 			"github.com",
 			"konto.example.de",

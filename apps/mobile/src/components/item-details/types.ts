@@ -1,7 +1,8 @@
+import type { DecryptedItem } from "@bittery/shared/types";
 import type { AppIcon } from "@/components/ui";
 
 export interface ItemDetailProps {
-	item: any; // Will be typed from useVaultItems
+	item: DecryptedItem;
 	onCopy: (value: string, label: string) => Promise<void>;
 }
 

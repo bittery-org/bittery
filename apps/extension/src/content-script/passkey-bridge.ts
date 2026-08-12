@@ -1,3 +1,5 @@
+import type { RuntimeMessage } from "../background/router/contract";
+import { sendMessage } from "../lib/messaging";
 import {
 	BITTERY_PASSKEY_CANCEL_REQUEST,
 	BITTERY_PASSKEY_CREATE_REQUEST,
@@ -100,25 +102,21 @@ function postSerializedResponse(input: {
 	});
 }
 
-function sendRuntimeMessage(
-	runtimeType: "PASSKEY_CREATE" | "PASSKEY_GET" | "PASSKEY_CANCEL",
-	payload: Record<string, unknown>,
+type PasskeyRuntimeMessage = Extract<
+	RuntimeMessage,
+	{ type: "PASSKEY_CREATE" | "PASSKEY_GET" | "PASSKEY_CANCEL" }
+>;
+
+/**
+ * A worker that never answered leaves the page waiting on WebAuthn, so a
+ * missing response is reported as "fall back to the platform authenticator"
+ * rather than surfacing as `undefined`.
+ */
+async function sendRuntimeMessage(
+	message: PasskeyRuntimeMessage,
 ): Promise<PasskeyBackgroundResponse> {
-	return new Promise<PasskeyBackgroundResponse>((resolve, reject) => {
-		chrome.runtime.sendMessage(
-			{
-				type: runtimeType,
-				payload,
-			},
-			(response: PasskeyBackgroundResponse) => {
-				if (chrome.runtime.lastError) {
-					reject(new Error(chrome.runtime.lastError.message));
-					return;
-				}
-				resolve(response ?? { success: false, fallbackToNative: true });
-			},
-		);
-	});
+	const response = await sendMessage(message);
+	return response ?? { success: false, fallbackToNative: true };
 }
 
 async function executePasskeyFlow(input: {
@@ -145,10 +143,22 @@ async function executePasskeyFlow(input: {
 		mediation: input.message.payload.mediation,
 	});
 
-	let response = await sendRuntimeMessage(runtimeType, {
-		requestId: input.message.requestId,
-		...input.message.payload,
-	});
+	let response =
+		input.message.type === BITTERY_PASSKEY_CREATE_REQUEST
+			? await sendRuntimeMessage({
+					type: "PASSKEY_CREATE",
+					payload: {
+						requestId: input.message.requestId,
+						...input.message.payload,
+					},
+				})
+			: await sendRuntimeMessage({
+					type: "PASSKEY_GET",
+					payload: {
+						requestId: input.message.requestId,
+						...input.message.payload,
+					},
+				});
 
 	console.info("[Passkey bridge] runtime response received", {
 		requestId: input.message.requestId,
@@ -195,7 +205,7 @@ async function executePasskeyFlow(input: {
 				...input.message.payload,
 				selectedCredentialId,
 			};
-			response = await sendRuntimeMessage("PASSKEY_GET", payload);
+			response = await sendRuntimeMessage({ type: "PASSKEY_GET", payload });
 			console.info("[Passkey bridge] runtime response after picker", {
 				requestId: input.message.requestId,
 				success: response.success,
@@ -229,7 +239,7 @@ async function executePasskeyFlow(input: {
 				...input.message.payload,
 				createDecision,
 			};
-			response = await sendRuntimeMessage("PASSKEY_CREATE", payload);
+			response = await sendRuntimeMessage({ type: "PASSKEY_CREATE", payload });
 			console.info("[Passkey bridge] runtime response after create decision", {
 				requestId: input.message.requestId,
 				success: response.success,
@@ -285,8 +295,9 @@ async function handleRequest(
 			});
 		}
 		try {
-			await sendRuntimeMessage("PASSKEY_CANCEL", {
-				requestId: message.requestId,
+			await sendRuntimeMessage({
+				type: "PASSKEY_CANCEL",
+				payload: { requestId: message.requestId },
 			});
 		} catch (error) {
 			console.debug("[Passkey bridge] cancel propagation failed:", error);

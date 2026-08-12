@@ -1,5 +1,6 @@
 import { useTheme } from "next-themes";
 import { useEffect } from "react";
+import { setUiTheme } from "@/lib/tauri-commands";
 
 /**
  * Keeps the Rust-side UI theme preference in sync with next-themes.
@@ -23,9 +24,8 @@ export function ThemeSync() {
 		let cancelled = false;
 		void (async () => {
 			try {
-				const { invoke } = await import("@tauri-apps/api/core");
 				if (!cancelled) {
-					await invoke("set_ui_theme", { theme });
+					await setUiTheme({ theme });
 				}
 			} catch (error) {
 				console.error("[theme-sync] Failed to sync UI theme:", error);

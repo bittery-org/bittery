@@ -1,12 +1,14 @@
-import type { VaultItemCounts } from "@bittery/core/hooks";
+import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
 import {
 	Button,
 	cn,
+	type DragItemData,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	type DropVaultData,
 	getTagColorFromName,
 	SidebarCount,
 	SidebarSection,
@@ -22,23 +24,20 @@ import {
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
-import {
-	type DragItemData,
-	type DropVaultData,
-	useVaultDnd,
-} from "@/providers/vault-dnd-provider";
+import { useVaultDnd } from "@/providers/vault-dnd-provider";
 
-interface VaultInfo {
-	vaultId: string;
-	vaultName: string;
-	vaultType: string;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	role: string;
-}
+/**
+ * What one sidebar row renders: the vault fields of a held vault key, and nothing else.
+ * Narrowed from the canonical `VaultKeyWithAccount` so the sidebar never asks for the
+ * wrapped key material or the account metadata it does not group by.
+ */
+type SidebarVault = Pick<
+	VaultKeyWithAccount,
+	"vaultId" | "vaultName" | "vaultType" | "vaultIcon" | "vaultImageUrl" | "role"
+>;
 
 interface DroppableVaultEntryProps {
-	vault: VaultInfo;
+	vault: SidebarVault;
 	isActive: boolean;
 	count?: number;
 	onEditVault: (vault: {
@@ -203,7 +202,7 @@ function DroppableVaultEntry({
 }
 
 interface VaultNavSidebarProps {
-	vaults: VaultInfo[];
+	vaults: readonly SidebarVault[];
 	tags: string[];
 	/** Omitted while items load, so counts appear only once they are real. */
 	itemCounts?: VaultItemCounts;

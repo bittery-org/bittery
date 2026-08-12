@@ -12594,8 +12594,7 @@
             "maxLength": 65536
           },
           "role": {
-            "type": "string",
-            "maxLength": 16
+            "$ref": "#/components/schemas/VaultRole"
           }
         },
         "additionalProperties": false
@@ -12628,7 +12627,7 @@
             }
           },
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -12956,7 +12955,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "secretKeyHint": {
             "type": "string"
@@ -12980,9 +12979,13 @@
             ]
           },
           "teamType": {
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TeamType"
+              }
             ]
           }
         }
@@ -13002,7 +13005,7 @@
             "maxLength": 65536
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultIcon": {
             "type": [
@@ -13023,7 +13026,7 @@
             "type": "string"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
       },
@@ -13086,12 +13089,35 @@
             "type": "string"
           },
           "plan": {
-            "type": "string"
+            "$ref": "#/components/schemas/BillingPlan"
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/BillingStatus"
           }
         }
+      },
+      "BillingPlan": {
+        "type": "string",
+        "description": "Billing plan — maps to PostgreSQL `billing_plan` enum.",
+        "enum": [
+          "free",
+          "personal",
+          "family",
+          "team"
+        ]
+      },
+      "BillingStatus": {
+        "type": "string",
+        "description": "Billing status — maps to PostgreSQL `billing_status` enum.",
+        "enum": [
+          "none",
+          "incomplete",
+          "trialing",
+          "active",
+          "past_due",
+          "canceled",
+          "unpaid"
+        ]
       },
       "BillingStatusResponse": {
         "type": "object",
@@ -13124,7 +13150,7 @@
             "type": "boolean"
           },
           "plan": {
-            "type": "string"
+            "$ref": "#/components/schemas/BillingPlan"
           },
           "requiresPayment": {
             "type": "boolean"
@@ -13137,7 +13163,7 @@
             "format": "int32"
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/BillingStatus"
           },
           "stripeCustomerId": {
             "type": [
@@ -13241,7 +13267,7 @@
             }
           },
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -13365,10 +13391,10 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
       },
@@ -13399,7 +13425,7 @@
         ],
         "properties": {
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "encryptedData": {
             "type": "string",
@@ -13499,8 +13525,7 @@
             "maxLength": 65536
           },
           "targetType": {
-            "type": "string",
-            "maxLength": 16
+            "$ref": "#/components/schemas/VaultType"
           }
         },
         "additionalProperties": false
@@ -13515,10 +13540,10 @@
         ],
         "properties": {
           "newType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           },
           "previousType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           },
           "success": {
             "type": "boolean"
@@ -13586,7 +13611,7 @@
         ],
         "properties": {
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "encryptedData": {
             "type": "string",
@@ -13628,7 +13653,7 @@
         ],
         "properties": {
           "accessMode": {
-            "$ref": "#/components/schemas/ShareAccessMode"
+            "$ref": "#/components/schemas/ShareLinkAccessMode"
           },
           "allowedEmails": {
             "type": [
@@ -13694,9 +13719,13 @@
             "type": "string"
           },
           "teamType": {
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TeamType"
+              }
             ]
           }
         },
@@ -13731,8 +13760,7 @@
             "maxLength": 200
           },
           "vaultType": {
-            "type": "string",
-            "maxLength": 16
+            "$ref": "#/components/schemas/VaultType"
           }
         },
         "additionalProperties": false
@@ -13775,7 +13803,7 @@
                   "maxLength": 65536
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/VaultRole"
                 },
                 "vaultIcon": {
                   "type": [
@@ -13796,7 +13824,7 @@
                   "type": "string"
                 },
                 "vaultType": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/VaultType"
                 }
               }
             },
@@ -13845,7 +13873,7 @@
               ],
               "properties": {
                 "category": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ItemCategory"
                 },
                 "createdAt": {
                   "type": "string"
@@ -13957,10 +13985,10 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/TeamRole"
                 },
                 "status": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/InvitationStatus"
                 }
               }
             },
@@ -14011,7 +14039,7 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/TeamRole"
                 },
                 "teamId": {
                   "type": "string"
@@ -14225,7 +14253,7 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/TeamRole"
                 },
                 "userId": {
                   "type": "string"
@@ -14463,7 +14491,7 @@
                   }
                 },
                 "category": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ItemCategory"
                 },
                 "createdAt": {
                   "type": "string"
@@ -14556,7 +14584,7 @@
               ],
               "properties": {
                 "category": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ItemCategory"
                 },
                 "createdAt": {
                   "type": "string"
@@ -14671,10 +14699,10 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/VaultRole"
                 },
                 "vaultType": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/VaultType"
                 }
               }
             },
@@ -14720,7 +14748,7 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/VaultRole"
                 },
                 "userId": {
                   "type": "string"
@@ -14776,7 +14804,7 @@
         ],
         "properties": {
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -15026,6 +15054,44 @@
           }
         }
       },
+      "ErrorCode": {
+        "type": "string",
+        "description": "A stable, machine-readable Bittery error code.",
+        "enum": [
+          "INTERNAL_ERROR",
+          "BAD_REQUEST",
+          "NOT_FOUND",
+          "FORBIDDEN",
+          "UNAUTHORIZED",
+          "CONFLICT",
+          "RATE_LIMITED",
+          "PAYLOAD_TOO_LARGE",
+          "INVALID_REQUEST",
+          "UNSUPPORTED_MEDIA_TYPE",
+          "PRECONDITION_REQUIRED",
+          "VERSION_CONFLICT",
+          "API_ROUTE_NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "SERVICE_UNAVAILABLE",
+          "INVALID_QUERY",
+          "INVALID_PAGE_LIMIT",
+          "INVALID_LIMIT",
+          "INVALID_CURSOR",
+          "INVALID_IF_MATCH",
+          "INVALID_VERSION",
+          "INVALID_ITEM_STATE",
+          "INVALID_EMAIL",
+          "FIELD_CANNOT_BE_CLEARED",
+          "SEARCH_TOO_LONG",
+          "TOO_MANY_HIDDEN_VAULTS",
+          "INVALID_IDEMPOTENCY_KEY",
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_NOT_ALLOWED",
+          "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+          "IDEMPOTENCY_OUTCOME_INDETERMINATE",
+          "IDEMPOTENCY_RESPONSE_UNAVAILABLE"
+        ]
+      },
       "EventSource": {
         "type": "string",
         "enum": [
@@ -15170,10 +15236,10 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/InvitationStatus"
           },
           "teamId": {
             "type": "string"
@@ -15211,12 +15277,33 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/InvitationStatus"
           }
         }
+      },
+      "InvitationStatus": {
+        "type": "string",
+        "description": "Invitation status — maps to PostgreSQL `invitation_status` enum.",
+        "enum": [
+          "pending",
+          "accepted",
+          "declined",
+          "expired"
+        ]
+      },
+      "ItemCategory": {
+        "type": "string",
+        "description": "Item category — maps to PostgreSQL `item_category` enum.",
+        "enum": [
+          "login",
+          "secure-note",
+          "credit-card",
+          "identity",
+          "totp"
+        ]
       },
       "ItemResponseDto": {
         "type": "object",
@@ -15237,7 +15324,7 @@
         ],
         "properties": {
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -15421,7 +15508,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "secretKeyHint": {
             "type": [
@@ -15448,9 +15535,13 @@
             ]
           },
           "teamType": {
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TeamType"
+              }
             ]
           }
         }
@@ -15570,7 +15661,7 @@
             "minimum": 0
           },
           "accessMode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ShareLinkAccessMode"
           },
           "createdAt": {
             "type": "string"
@@ -15602,7 +15693,7 @@
             "minimum": 0
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/ShareLinkStatus"
           }
         }
       },
@@ -15632,10 +15723,10 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
       },
@@ -15748,7 +15839,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "teamId": {
             "type": "string"
@@ -15788,9 +15879,11 @@
       },
       "PresignedUploadResponse": {
         "type": "object",
+        "description": "The authorization to upload one object to storage.\n\n`publicUrl` is always present and is null whenever the uploaded object is not publicly\nservable: attachments never are, and images only are when the deployment serves assets from\na CDN.",
         "required": [
           "key",
-          "uploadUrl"
+          "uploadUrl",
+          "publicUrl"
         ],
         "properties": {
           "key": {
@@ -15821,7 +15914,7 @@
         ],
         "properties": {
           "code": {
-            "type": "string"
+            "$ref": "#/components/schemas/ErrorCode"
           },
           "detail": {
             "type": "string"
@@ -15901,7 +15994,7 @@
         ],
         "properties": {
           "accessMode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ShareLinkAccessMode"
           },
           "expiresAt": {
             "type": [
@@ -16386,7 +16479,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "userId": {
             "type": "string"
@@ -16521,7 +16614,7 @@
             "maxItems": 100
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           }
         },
         "additionalProperties": false
@@ -16653,13 +16746,6 @@
           }
         }
       },
-      "ShareAccessMode": {
-        "type": "string",
-        "enum": [
-          "anyone",
-          "email-restricted"
-        ]
-      },
       "ShareExpiration": {
         "type": "string",
         "enum": [
@@ -16668,6 +16754,14 @@
           "7days",
           "14days",
           "30days"
+        ]
+      },
+      "ShareLinkAccessMode": {
+        "type": "string",
+        "description": "Share link access mode — maps to PostgreSQL `share_link_access_mode` enum.",
+        "enum": [
+          "anyone",
+          "email-restricted"
         ]
       },
       "ShareLinkListEntryResponse": {
@@ -16688,7 +16782,7 @@
             "format": "int32"
           },
           "accessMode": {
-            "type": "string"
+            "$ref": "#/components/schemas/ShareLinkAccessMode"
           },
           "allowedEmails": {
             "type": "array",
@@ -16723,7 +16817,7 @@
             "format": "int32"
           },
           "status": {
-            "type": "string"
+            "$ref": "#/components/schemas/ShareLinkStatus"
           }
         }
       },
@@ -16745,6 +16839,16 @@
             "maxItems": 100
           }
         }
+      },
+      "ShareLinkStatus": {
+        "type": "string",
+        "description": "Share link status — maps to PostgreSQL `share_link_status` enum.",
+        "enum": [
+          "active",
+          "expired",
+          "exhausted",
+          "revoked"
+        ]
       },
       "ShareToken": {
         "type": "string",
@@ -16965,6 +17069,17 @@
           }
         }
       },
+      "SyncEntityType": {
+        "type": "string",
+        "description": "Sync entity type — maps to PostgreSQL `sync_entity_type` enum.",
+        "enum": [
+          "item",
+          "vault",
+          "vault_member",
+          "vault_key",
+          "user"
+        ]
+      },
       "SyncEventResponse": {
         "type": "object",
         "required": [
@@ -16987,7 +17102,7 @@
             "type": "string"
           },
           "entityType": {
-            "type": "string"
+            "$ref": "#/components/schemas/SyncEntityType"
           },
           "id": {
             "type": "string"
@@ -16997,7 +17112,7 @@
             "$ref": "#/components/schemas/DecimalString"
           },
           "type": {
-            "type": "string"
+            "$ref": "#/components/schemas/SyncEventType"
           },
           "userId": {
             "type": "string"
@@ -17013,6 +17128,26 @@
             "format": "int32"
           }
         }
+      },
+      "SyncEventType": {
+        "type": "string",
+        "description": "Sync event type — maps to PostgreSQL `sync_event_type` enum.",
+        "enum": [
+          "item_created",
+          "item_updated",
+          "item_deleted",
+          "item_restored",
+          "item_permanently_deleted",
+          "item_moved",
+          "vault_created",
+          "vault_updated",
+          "vault_deleted",
+          "vault_access_revoked",
+          "vault_member_added",
+          "vault_member_removed",
+          "vault_key_rotated",
+          "travel_mode_updated"
+        ]
       },
       "TeamDetailsResponse": {
         "type": "object",
@@ -17060,13 +17195,13 @@
             "type": "string"
           },
           "teamType": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamType"
           },
           "updatedAt": {
             "type": "string"
           },
           "userRole": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           }
         }
       },
@@ -17226,12 +17361,21 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "userId": {
             "type": "string"
           }
         }
+      },
+      "TeamRole": {
+        "type": "string",
+        "description": "Team role — maps to PostgreSQL `team_role` enum.",
+        "enum": [
+          "owner",
+          "admin",
+          "member"
+        ]
       },
       "TeamSeatInvoicePreviewLineResponse": {
         "type": "object",
@@ -17329,12 +17473,21 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamRole"
           },
           "teamType": {
-            "type": "string"
+            "$ref": "#/components/schemas/TeamType"
           }
         }
+      },
+      "TeamType": {
+        "type": "string",
+        "description": "Team type — maps to PostgreSQL `team_type` enum.",
+        "enum": [
+          "personal",
+          "family",
+          "organization"
+        ]
       },
       "TeamVaultResponse": {
         "type": "object",
@@ -17518,7 +17671,7 @@
         ],
         "properties": {
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           }
         },
         "additionalProperties": false
@@ -17669,10 +17822,10 @@
             "type": "string"
           },
           "userRole": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
       },
@@ -17702,7 +17855,7 @@
             }
           },
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -17769,7 +17922,7 @@
         ],
         "properties": {
           "category": {
-            "type": "string"
+            "$ref": "#/components/schemas/ItemCategory"
           },
           "createdAt": {
             "type": "string"
@@ -17932,10 +18085,10 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
       },
@@ -17955,12 +18108,22 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "userId": {
             "type": "string"
           }
         }
+      },
+      "VaultRole": {
+        "type": "string",
+        "description": "Vault role — maps to PostgreSQL `vault_role` enum.",
+        "enum": [
+          "owner",
+          "admin",
+          "member",
+          "read-only"
+        ]
       },
       "VaultRotationDataResponse": {
         "type": "object",
@@ -18041,7 +18204,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "userId": {
             "type": "string"
@@ -18100,12 +18263,20 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultRole"
           },
           "vaultType": {
-            "type": "string"
+            "$ref": "#/components/schemas/VaultType"
           }
         }
+      },
+      "VaultType": {
+        "type": "string",
+        "description": "Vault type — maps to PostgreSQL `vault_type` enum.",
+        "enum": [
+          "personal",
+          "team"
+        ]
       },
       "VerifyRecoveryRequest": {
         "type": "object",

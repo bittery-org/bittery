@@ -1390,11 +1390,11 @@ export interface components {
         };
         readonly AddVaultMemberBody: {
             readonly encryptedVaultKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
         };
         readonly AllItemResponse: {
             readonly attachments?: readonly components["schemas"]["VaultAttachmentResponse"][] | null;
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -1474,21 +1474,21 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly publicKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["TeamRole"];
             readonly secretKeyHint: string;
             readonly teamAvatarUrl?: string | null;
             readonly teamId?: string | null;
             readonly teamName?: string | null;
-            readonly teamType?: string | null;
+            readonly teamType?: null | components["schemas"]["TeamType"];
         };
         readonly AuthVaultKeyResponse: {
             readonly encryptedVaultKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
             readonly vaultIcon?: string | null;
             readonly vaultId: string;
             readonly vaultImageUrl?: string | null;
             readonly vaultName: string;
-            readonly vaultType: string;
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly BillingEntitlements: {
             readonly attachments: boolean;
@@ -1504,20 +1504,30 @@ export interface components {
             readonly isActive: boolean;
             readonly limits: components["schemas"]["EntitlementLimits"];
             readonly mode: string;
-            readonly plan: string;
-            readonly status: string;
+            readonly plan: components["schemas"]["BillingPlan"];
+            readonly status: components["schemas"]["BillingStatus"];
         };
+        /**
+         * @description Billing plan — maps to PostgreSQL `billing_plan` enum.
+         * @enum {string}
+         */
+        readonly BillingPlan: "free" | "personal" | "family" | "team";
+        /**
+         * @description Billing status — maps to PostgreSQL `billing_status` enum.
+         * @enum {string}
+         */
+        readonly BillingStatus: "none" | "incomplete" | "trialing" | "active" | "past_due" | "canceled" | "unpaid";
         readonly BillingStatusResponse: {
             readonly cancelAtPeriodEnd: boolean;
             readonly currentPeriodEnd?: string | null;
             readonly enabled: boolean;
             readonly isActive: boolean;
             readonly isStripeConfigured: boolean;
-            readonly plan: string;
+            readonly plan: components["schemas"]["BillingPlan"];
             readonly requiresPayment: boolean;
             /** Format: int32 */
             readonly seatsPurchased?: number | null;
-            readonly status: string;
+            readonly status: components["schemas"]["BillingStatus"];
             readonly stripeCustomerId?: string | null;
             readonly stripePriceId?: string | null;
             readonly stripeSubscriptionId?: string | null;
@@ -1539,7 +1549,7 @@ export interface components {
         };
         readonly BootstrapItemResponse: {
             readonly attachments: readonly components["schemas"]["BootstrapAttachmentResponse"][];
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -1569,14 +1579,14 @@ export interface components {
             readonly id: string;
             readonly imageUrl?: string | null;
             readonly name: string;
-            readonly role: string;
-            readonly vaultType: string;
+            readonly role: components["schemas"]["VaultRole"];
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly BulkImportBody: {
             readonly items: readonly components["schemas"]["BulkImportItemInput"][];
         };
         readonly BulkImportItemInput: {
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
@@ -1599,11 +1609,11 @@ export interface components {
         };
         readonly ConvertVaultBody: {
             readonly personalEncryptedVaultKey?: string | null;
-            readonly targetType: string;
+            readonly targetType: components["schemas"]["VaultType"];
         };
         readonly ConvertVaultTypeResponse: {
-            readonly newType: string;
-            readonly previousType: string;
+            readonly newType: components["schemas"]["VaultType"];
+            readonly previousType: components["schemas"]["VaultType"];
             readonly success: boolean;
             readonly vaultId: string;
         };
@@ -1621,7 +1631,7 @@ export interface components {
             readonly attachmentId: string;
         };
         readonly CreateItemBody: {
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
@@ -1631,7 +1641,7 @@ export interface components {
             readonly itemId: string;
         };
         readonly CreateShareLinkRequest: {
-            readonly accessMode: components["schemas"]["ShareAccessMode"];
+            readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly allowedEmails?: readonly components["schemas"]["EmailAddress"][] | null;
             readonly encryptedItemData: string;
             readonly encryptedShareKey: string;
@@ -1648,14 +1658,14 @@ export interface components {
         };
         readonly CreateTeamRequest: {
             readonly name: string;
-            readonly teamType?: string | null;
+            readonly teamType?: null | components["schemas"]["TeamType"];
         };
         readonly CreateVaultBody: {
             readonly encryptedVaultKey: string;
             readonly icon?: string | null;
             readonly imageKey?: string | null;
             readonly name: string;
-            readonly vaultType: string;
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly CreateVaultResponse: {
             readonly vaultId: string;
@@ -1664,19 +1674,19 @@ export interface components {
             readonly hasMore: boolean;
             readonly items: readonly {
                 readonly encryptedVaultKey: string;
-                readonly role: string;
+                readonly role: components["schemas"]["VaultRole"];
                 readonly vaultIcon?: string | null;
                 readonly vaultId: string;
                 readonly vaultImageUrl?: string | null;
                 readonly vaultName: string;
-                readonly vaultType: string;
+                readonly vaultType: components["schemas"]["VaultType"];
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
         readonly CursorPage_DeletedVaultItemWithVaultResponse: {
             readonly hasMore: boolean;
             readonly items: readonly {
-                readonly category: string;
+                readonly category: components["schemas"]["ItemCategory"];
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
                 readonly encryptedByUserId: string;
@@ -1704,8 +1714,8 @@ export interface components {
                 readonly expiresAt: string;
                 readonly id: string;
                 readonly invitedBy: string;
-                readonly role: string;
-                readonly status: string;
+                readonly role: components["schemas"]["TeamRole"];
+                readonly status: components["schemas"]["InvitationStatus"];
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
@@ -1715,7 +1725,7 @@ export interface components {
                 readonly expiresAt: string;
                 readonly id: string;
                 readonly invitedBy: string;
-                readonly role: string;
+                readonly role: components["schemas"]["TeamRole"];
                 readonly teamId: string;
                 readonly teamName: string;
             }[];
@@ -1757,7 +1767,7 @@ export interface components {
                 readonly email: string;
                 readonly joinedAt: string;
                 readonly name: string;
-                readonly role: string;
+                readonly role: components["schemas"]["TeamRole"];
                 readonly userId: string;
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
@@ -1804,7 +1814,7 @@ export interface components {
             readonly hasMore: boolean;
             readonly items: readonly {
                 readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
-                readonly category: string;
+                readonly category: components["schemas"]["ItemCategory"];
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
                 readonly encryptedByUserId: string;
@@ -1826,7 +1836,7 @@ export interface components {
         readonly CursorPage_VaultItemResponse: {
             readonly hasMore: boolean;
             readonly items: readonly {
-                readonly category: string;
+                readonly category: components["schemas"]["ItemCategory"];
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
                 readonly encryptedByUserId: string;
@@ -1855,8 +1865,8 @@ export interface components {
                 readonly imageUrl?: string | null;
                 readonly itemCount: string;
                 readonly name: string;
-                readonly role: string;
-                readonly vaultType: string;
+                readonly role: components["schemas"]["VaultRole"];
+                readonly vaultType: components["schemas"]["VaultType"];
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
@@ -1865,7 +1875,7 @@ export interface components {
             readonly items: readonly {
                 readonly email: string;
                 readonly name: string;
-                readonly role: string;
+                readonly role: components["schemas"]["VaultRole"];
                 readonly userId: string;
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
@@ -1875,7 +1885,7 @@ export interface components {
             readonly confirmEmail: string;
         };
         readonly DeletedVaultItemWithVaultResponse: {
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -1935,6 +1945,11 @@ export interface components {
             readonly shareLinks?: null | components["schemas"]["DecimalString"];
             readonly sharedVaults?: null | components["schemas"]["DecimalString"];
         };
+        /**
+         * @description A stable, machine-readable Bittery error code.
+         * @enum {string}
+         */
+        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE";
         /** @enum {string} */
         readonly EventSource: "audit_log" | "share_access_log";
         readonly FavoriteBody: {
@@ -1969,8 +1984,8 @@ export interface components {
             readonly expiresAt: string;
             readonly id: string;
             readonly invitedByName: string;
-            readonly role: string;
-            readonly status: string;
+            readonly role: components["schemas"]["TeamRole"];
+            readonly status: components["schemas"]["InvitationStatus"];
             readonly teamId: string;
             readonly teamName: string;
         };
@@ -1980,11 +1995,21 @@ export interface components {
             readonly expiresAt: string;
             readonly id: string;
             readonly invitedBy: string;
-            readonly role: string;
-            readonly status: string;
+            readonly role: components["schemas"]["TeamRole"];
+            readonly status: components["schemas"]["InvitationStatus"];
         };
+        /**
+         * @description Invitation status — maps to PostgreSQL `invitation_status` enum.
+         * @enum {string}
+         */
+        readonly InvitationStatus: "pending" | "accepted" | "declined" | "expired";
+        /**
+         * @description Item category — maps to PostgreSQL `item_category` enum.
+         * @enum {string}
+         */
+        readonly ItemCategory: "login" | "secure-note" | "credit-card" | "identity" | "totp";
         readonly ItemResponseDto: {
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -2037,12 +2062,12 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly publicKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["TeamRole"];
             readonly secretKeyHint?: string | null;
             readonly teamAvatarUrl?: string | null;
             readonly teamId?: string | null;
             readonly teamName?: string | null;
-            readonly teamType?: string | null;
+            readonly teamType?: null | components["schemas"]["TeamType"];
         };
         readonly MemberAccessResponse: {
             /** Format: int32 */
@@ -2067,7 +2092,7 @@ export interface components {
         readonly MemberShareLinkResponse: {
             /** Format: int32 */
             readonly accessCount: number;
-            readonly accessMode: string;
+            readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly createdAt: string;
             readonly expiresAt: string;
             readonly id: string;
@@ -2076,7 +2101,7 @@ export interface components {
             readonly lastAccessedAt?: string | null;
             /** Format: int32 */
             readonly maxAccessCount?: number | null;
-            readonly status: string;
+            readonly status: components["schemas"]["ShareLinkStatus"];
         };
         readonly MemberVaultAccessResponse: {
             readonly grantedAt: string;
@@ -2084,8 +2109,8 @@ export interface components {
             /** Format: int32 */
             readonly itemCount: number;
             readonly name: string;
-            readonly role: string;
-            readonly vaultType: string;
+            readonly role: components["schemas"]["VaultRole"];
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly MoveItemBody: {
             readonly encryptedData: string;
@@ -2114,7 +2139,7 @@ export interface components {
             readonly expiresAt: string;
             readonly id: string;
             readonly invitedBy: string;
-            readonly role: string;
+            readonly role: components["schemas"]["TeamRole"];
             readonly teamId: string;
             readonly teamName: string;
         };
@@ -2125,13 +2150,20 @@ export interface components {
         readonly PortalSessionResponse: {
             readonly url: string;
         };
+        /**
+         * @description The authorization to upload one object to storage.
+         *
+         *     `publicUrl` is always present and is null whenever the uploaded object is not publicly
+         *     servable: attachments never are, and images only are when the deployment serves assets from
+         *     a CDN.
+         */
         readonly PresignedUploadResponse: {
             readonly key: string;
-            readonly publicUrl?: string | null;
+            readonly publicUrl: string | null;
             readonly uploadUrl: string;
         };
         readonly ProblemDetails: {
-            readonly code: string;
+            readonly code: components["schemas"]["ErrorCode"];
             readonly detail: string;
             readonly errors?: readonly components["schemas"]["ProblemFieldError"][];
             readonly instance: string;
@@ -2153,7 +2185,7 @@ export interface components {
             readonly shareKeyIv: string;
         };
         readonly PublicShareInfoResponse: {
-            readonly accessMode: string;
+            readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly expiresAt?: string | null;
             readonly isOneTimeUse?: boolean | null;
             readonly reason?: string | null;
@@ -2269,7 +2301,7 @@ export interface components {
         };
         readonly RotationMemberResponse: {
             readonly publicKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
             readonly userId: string;
         };
         readonly RotationReEncryptedItemInput: {
@@ -2300,7 +2332,7 @@ export interface components {
         readonly SendInvitationRequest: {
             readonly email: string;
             readonly pendingVaultKeys?: readonly components["schemas"]["PendingVaultKeyRequest"][] | null;
-            readonly role?: string;
+            readonly role?: components["schemas"]["TeamRole"];
         };
         readonly SendInvitationResponse: {
             readonly existingUserPublicKey?: string | null;
@@ -2330,13 +2362,16 @@ export interface components {
             readonly userAgent?: string | null;
         };
         /** @enum {string} */
-        readonly ShareAccessMode: "anyone" | "email-restricted";
-        /** @enum {string} */
         readonly ShareExpiration: "1hour" | "1day" | "7days" | "14days" | "30days";
+        /**
+         * @description Share link access mode — maps to PostgreSQL `share_link_access_mode` enum.
+         * @enum {string}
+         */
+        readonly ShareLinkAccessMode: "anyone" | "email-restricted";
         readonly ShareLinkListEntryResponse: {
             /** Format: int32 */
             readonly accessCount: number;
-            readonly accessMode: string;
+            readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly allowedEmails: readonly components["schemas"]["AllowedEmailResponse"][];
             readonly createdAt: string;
             readonly expiresAt: string;
@@ -2345,12 +2380,17 @@ export interface components {
             readonly lastAccessedAt?: string | null;
             /** Format: int32 */
             readonly maxAccessCount?: number | null;
-            readonly status: string;
+            readonly status: components["schemas"]["ShareLinkStatus"];
         };
         readonly ShareLinkListResponse: {
             readonly baseShareUrl: string;
             readonly links: readonly components["schemas"]["ShareLinkListEntryResponse"][];
         };
+        /**
+         * @description Share link status — maps to PostgreSQL `share_link_status` enum.
+         * @enum {string}
+         */
+        readonly ShareLinkStatus: "active" | "expired" | "exhausted" | "revoked";
         readonly ShareToken: string;
         readonly SignupRequest: {
             readonly email: string;
@@ -2401,19 +2441,29 @@ export interface components {
         readonly SyncCursorResponse: {
             readonly id: string;
         };
+        /**
+         * @description Sync entity type — maps to PostgreSQL `sync_entity_type` enum.
+         * @enum {string}
+         */
+        readonly SyncEntityType: "item" | "vault" | "vault_member" | "vault_key" | "user";
         readonly SyncEventResponse: {
             readonly clientId?: string | null;
             readonly entityId: string;
-            readonly entityType: string;
+            readonly entityType: components["schemas"]["SyncEntityType"];
             readonly id: string;
             readonly metadata?: unknown;
             readonly timestamp: components["schemas"]["DecimalString"];
-            readonly type: string;
+            readonly type: components["schemas"]["SyncEventType"];
             readonly userId: string;
             readonly vaultId?: string | null;
             /** Format: int32 */
             readonly version: number;
         };
+        /**
+         * @description Sync event type — maps to PostgreSQL `sync_event_type` enum.
+         * @enum {string}
+         */
+        readonly SyncEventType: "item_created" | "item_updated" | "item_deleted" | "item_restored" | "item_permanently_deleted" | "item_moved" | "vault_created" | "vault_updated" | "vault_deleted" | "vault_access_revoked" | "vault_member_added" | "vault_member_removed" | "vault_key_rotated" | "travel_mode_updated";
         readonly TeamDetailsResponse: {
             readonly createdAt: string;
             readonly id: string;
@@ -2424,9 +2474,9 @@ export interface components {
             readonly name: string;
             readonly ownerId: string;
             readonly ownerName: string;
-            readonly teamType: string;
+            readonly teamType: components["schemas"]["TeamType"];
             readonly updatedAt: string;
-            readonly userRole: string;
+            readonly userRole: components["schemas"]["TeamRole"];
         };
         readonly TeamEvent: {
             readonly action: string;
@@ -2464,9 +2514,14 @@ export interface components {
             readonly email: string;
             readonly joinedAt: string;
             readonly name: string;
-            readonly role: string;
+            readonly role: components["schemas"]["TeamRole"];
             readonly userId: string;
         };
+        /**
+         * @description Team role — maps to PostgreSQL `team_role` enum.
+         * @enum {string}
+         */
+        readonly TeamRole: "owner" | "admin" | "member";
         readonly TeamSeatInvoicePreviewLineResponse: {
             readonly amountCents: components["schemas"]["DecimalString"];
             readonly currency: string;
@@ -2487,9 +2542,14 @@ export interface components {
             readonly memberLimit?: number | null;
             readonly name: string;
             readonly ownerId: string;
-            readonly role: string;
-            readonly teamType: string;
+            readonly role: components["schemas"]["TeamRole"];
+            readonly teamType: components["schemas"]["TeamType"];
         };
+        /**
+         * @description Team type — maps to PostgreSQL `team_type` enum.
+         * @enum {string}
+         */
+        readonly TeamType: "personal" | "family" | "organization";
         readonly TeamVaultResponse: {
             readonly encryptedVaultKey?: string | null;
             readonly id: string;
@@ -2532,7 +2592,7 @@ export interface components {
             readonly name?: string | null;
         };
         readonly UpdateVaultMemberRoleBody: {
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
         };
         readonly UpdateVaultResponse: {
             readonly icon?: string | null;
@@ -2569,12 +2629,12 @@ export interface components {
             readonly itemCount: components["schemas"]["DecimalString"];
             readonly memberCount: components["schemas"]["DecimalString"];
             readonly name: string;
-            readonly userRole: string;
-            readonly vaultType: string;
+            readonly userRole: components["schemas"]["VaultRole"];
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly VaultItemDetailsResponse: {
             readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -2592,7 +2652,7 @@ export interface components {
             readonly version: number;
         };
         readonly VaultItemResponse: {
-            readonly category: string;
+            readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
             readonly deletedAt?: string | null;
             readonly encryptedByUserId: string;
@@ -2632,15 +2692,20 @@ export interface components {
             readonly imageUrl?: string | null;
             readonly itemCount: string;
             readonly name: string;
-            readonly role: string;
-            readonly vaultType: string;
+            readonly role: components["schemas"]["VaultRole"];
+            readonly vaultType: components["schemas"]["VaultType"];
         };
         readonly VaultMemberResponse: {
             readonly email: string;
             readonly name: string;
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
             readonly userId: string;
         };
+        /**
+         * @description Vault role — maps to PostgreSQL `vault_role` enum.
+         * @enum {string}
+         */
+        readonly VaultRole: "owner" | "admin" | "member" | "read-only";
         readonly VaultRotationDataResponse: {
             readonly items: readonly components["schemas"]["VaultRotationItemResponse"][];
             /** Format: int32 */
@@ -2661,7 +2726,7 @@ export interface components {
         };
         readonly VaultRotationMemberResponse: {
             readonly publicKey: string;
-            readonly role: string;
+            readonly role: components["schemas"]["VaultRole"];
             readonly userId: string;
         };
         readonly VaultStatsResponseDto: {
@@ -2676,9 +2741,14 @@ export interface components {
             readonly id: string;
             readonly imageUrl?: string | null;
             readonly name: string;
-            readonly role: string;
-            readonly vaultType: string;
+            readonly role: components["schemas"]["VaultRole"];
+            readonly vaultType: components["schemas"]["VaultType"];
         };
+        /**
+         * @description Vault type — maps to PostgreSQL `vault_type` enum.
+         * @enum {string}
+         */
+        readonly VaultType: "personal" | "team";
         readonly VerifyRecoveryRequest: {
             readonly code: string;
             readonly email: string;

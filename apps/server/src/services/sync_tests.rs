@@ -12,6 +12,7 @@ use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
+use crate::db::enums::{SyncEntityType, SyncEventType};
 use crate::error::AppErrorCode;
 use crate::{
     services::session_control::record_session_revocations,
@@ -107,9 +108,9 @@ fn sync_event_dto_parses_metadata_and_rejects_invalid_json() {
     let payload = sync_event_dto(DbSyncEventRow {
         id: "event-1".to_string(),
         seq: 1,
-        event_type: "item_updated".to_string(),
+        event_type: SyncEventType::ItemUpdated,
         entity_id: "item-1".to_string(),
-        entity_type: "item".to_string(),
+        entity_type: SyncEntityType::Item,
         vault_id: Some("vault-1".to_string()),
         version: 2,
         client_id: Some("client-1".to_string()),
@@ -125,9 +126,9 @@ fn sync_event_dto_parses_metadata_and_rejects_invalid_json() {
     let error = sync_event_dto(DbSyncEventRow {
         id: "event-2".to_string(),
         seq: 2,
-        event_type: "item_updated".to_string(),
+        event_type: SyncEventType::ItemUpdated,
         entity_id: "item-1".to_string(),
-        entity_type: "item".to_string(),
+        entity_type: SyncEntityType::Item,
         vault_id: Some("vault-1".to_string()),
         version: 3,
         client_id: None,

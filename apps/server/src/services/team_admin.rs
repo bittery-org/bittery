@@ -2,6 +2,7 @@ use sqlx::PgPool;
 
 use crate::{
     config::{bittery_mode, SELF_HOSTED_MODE},
+    db::enums::BillingPlan,
     error::AppError,
     repo::audit::load_actor,
     services::team_billing::team_management_enabled,
@@ -30,13 +31,13 @@ pub(crate) async fn authorize_team_admin(
         .clone()
         .ok_or_else(|| AppError::not_found("Team not found"))?;
 
-    if actor.role != "owner" && actor.role != "admin" {
+    if !actor.role.can_manage() {
         return Err(AppError::forbidden(
             "Only team owner or admin can access this console",
         ));
     }
 
-    if bittery_mode() != SELF_HOSTED_MODE && actor.billing_plan.as_deref() != Some("team") {
+    if bittery_mode() != SELF_HOSTED_MODE && actor.billing_plan != Some(BillingPlan::Team) {
         return Err(AppError::forbidden(
             "This console is only available on Team plans",
         ));
@@ -44,8 +45,8 @@ pub(crate) async fn authorize_team_admin(
 
     if !team_management_enabled(
         bittery_mode(),
-        Some("team"),
-        actor.billing_status.as_deref(),
+        Some(BillingPlan::Team),
+        actor.billing_status,
     ) {
         return Err(AppError::forbidden(
             "Team management is unavailable until billing is active",

@@ -1,7 +1,10 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import type { AppApiClient } from "@bittery/shared/api-client";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
-import type { ServerEncryptedItem } from "@bittery/shared/item-mapping";
+import type {
+	EncryptedItemPayload,
+	ServerEncryptedItem,
+} from "@bittery/shared/item-mapping";
 import {
 	stripToDecryptedData,
 	toCachedItem,
@@ -30,18 +33,14 @@ import type {
 	CachedVaultMetadata,
 	ItemSyncAcknowledgement,
 	ItemSyncCommand,
+	VaultSummary,
 } from "@bittery/types";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import { isVaultHidden } from "./travel-mode-service";
 import type { ItemWriteScope, VaultCrypto } from "./vault-crypto";
 
-export interface VaultView {
-	id: string;
-	name: string;
-	type: string;
-	icon: string | null;
-	imageUrl: string | null;
-}
+/** The vault a repository item names — the canonical {@link VaultSummary}. */
+export type VaultView = VaultSummary;
 
 export interface VaultRepositoryItem extends DecryptedItem {
 	accountId?: string;
@@ -61,13 +60,12 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	vault: VaultView;
 }
 
-export interface EncryptedPayload {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
+/**
+ * The ciphertext triple as the crypto port returns it — `@bittery/shared`'s
+ * {@link EncryptedItemPayload}, whose only consumer this is. Aliased rather than restated
+ * so `toEncryptedPayload`, the one rename into the store's spelling, keeps its input pinned.
+ */
+export type EncryptedPayload = EncryptedItemPayload;
 
 type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
 

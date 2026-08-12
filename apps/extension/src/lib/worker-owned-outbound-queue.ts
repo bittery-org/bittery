@@ -1,5 +1,16 @@
 import type { IPendingMutationQueue, ItemSyncCommand } from "@bittery/types";
+import type {
+	OutboundCommandClaim,
+	RoutePayload,
+	RuntimeMessage,
+} from "../background/router/contract";
 
+/**
+ * What this queue reads off a worker answer. Deliberately a permissive
+ * projection rather than the routes' response union: the queue treats every
+ * outcome the same way (`success`, then `code`, then `error`), and a test double
+ * only has to supply the fields it exercises.
+ */
 export interface WorkerQueueResponse {
 	success?: boolean;
 	error?: string;
@@ -8,23 +19,29 @@ export interface WorkerQueueResponse {
 	nextClaimAt?: number;
 }
 
+/**
+ * The four routes this queue owns, each with the claim it always sends.
+ * `DRAIN_OUTBOUND_QUEUE` accepts a partial claim from other callers; from here
+ * it is always complete, so the narrower shape is what gets checked.
+ */
 export type WorkerQueueMessage =
 	| {
 			type: "ENQUEUE_ITEM_COMMAND";
-			payload: { command: ItemSyncCommand; claimId: string };
+			payload: RoutePayload<"ENQUEUE_ITEM_COMMAND">;
 	  }
-	| {
-			type: "DRAIN_OUTBOUND_QUEUE";
-			payload: { accountId: string; operationId: string; claimId: string };
-	  }
-	| {
-			type: "CANCEL_STAGED_ITEM_COMMAND";
-			payload: { accountId: string; operationId: string; claimId: string };
-	  }
+	| { type: "DRAIN_OUTBOUND_QUEUE"; payload: OutboundCommandClaim }
+	| { type: "CANCEL_STAGED_ITEM_COMMAND"; payload: OutboundCommandClaim }
 	| {
 			type: "CLAIM_STAGED_ITEM_COMMANDS";
-			payload: { claimId: string };
+			payload: RoutePayload<"CLAIM_STAGED_ITEM_COMMANDS">;
 	  };
+
+/**
+ * A narrowing of the contract, not a second copy of it: this fails to compile
+ * if a route above drifts from `RouteContract`.
+ */
+export type WorkerQueueMessagesAreRoutes =
+	WorkerQueueMessage extends RuntimeMessage ? true : never;
 
 interface WorkerOwnedOutboundQueueOptions {
 	sendMessage: (

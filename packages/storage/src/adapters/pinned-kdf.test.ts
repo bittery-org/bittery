@@ -17,9 +17,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import type { CryptoPort } from "@bittery/crypto-port";
+import type { CryptoPort, KdfProfile } from "@bittery/crypto-port";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
-import type { KdfProfile } from "@bittery/types";
 import { type AccountStore, createAccountStore } from "../account-store";
 import { accountKey, globalKey } from "../keys";
 import {

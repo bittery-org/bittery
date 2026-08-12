@@ -1,31 +1,16 @@
-/**
- * Sync event types
- */
-export type SyncEventType =
-	| "item_created"
-	| "item_updated"
-	| "item_deleted"
-	| "item_restored"
-	| "item_permanently_deleted"
-	| "item_moved"
-	| "vault_created"
-	| "vault_updated"
-	| "vault_deleted"
-	| "vault_access_revoked"
-	| "vault_member_added"
-	| "vault_member_removed"
-	| "vault_key_rotated"
-	| "travel_mode_updated";
+import type {
+	SyncEntityType,
+	SyncEventType,
+	SyncEvent as WireSyncEvent,
+} from "@bittery/api-contract";
+import type { VaultKeyEntry } from "@bittery/types";
 
 /**
- * Entity types that can be synced
+ * The two closed sets an event is identified by. Rust enums in
+ * `apps/server/src/db/enums.rs` that reach OpenAPI as string enums, so the client unions are
+ * generated rather than typed twice — aliased here, never restated (ADR 0012).
  */
-export type SyncEntityType =
-	| "item"
-	| "vault"
-	| "vault_member"
-	| "vault_key"
-	| "user";
+export type { SyncEntityType, SyncEventType };
 
 /**
  * Typed metadata per event type.
@@ -83,21 +68,52 @@ export interface SyncMetadataMap {
 }
 
 /**
- * Sync event received from server
+ * A sync event as this package handles it.
+ *
+ * The identity fields — `id`, `type`, `entityId`, `entityType`, `version`, `userId` — are
+ * the wire's and are subtracted from it rather than restated, so a server-side rename fails
+ * to compile here. Three fields are deliberately re-typed, and `types.drift-guard.ts` pins
+ * every one of them at both ends:
+ *
+ * - `timestamp` is a `bigint` below the seam and a `number` above it. See
+ *   {@link toClientTimestamp} for why that conversion is safe and where it stops being so.
+ * - `vaultId` and `clientId` are optional-or-null on the wire and resolved to an explicit
+ *   `null` here, so a consumer never has to distinguish "absent" from "no vault".
+ * - `metadata` is `unknown` on the wire; {@link SyncMetadataMap} is the per-event-type
+ *   narrowing, which is genuinely sync-local — the server types the column as free JSON.
  */
-export interface SyncEvent {
-	id: string;
-	type: SyncEventType;
-	entityId: string;
-	entityType: SyncEntityType;
+export type SyncEvent = Omit<
+	WireSyncEvent,
+	"timestamp" | "vaultId" | "clientId" | "metadata"
+> & {
 	vaultId: string | null;
-	version: number;
 	clientId: string | null;
-	userId: string;
 	timestamp: number;
 	metadata?: SyncMetadataBase & { [key: string]: unknown };
+};
+
+/**
+ * The wire→client half of the `timestamp` conversion, written down rather than left as a
+ * bare `Number()` at the one call site.
+ *
+ * The transport spells the server's `i64` as a decimal string because an `i64` in general
+ * exceeds `Number.MAX_SAFE_INTEGER`. This particular `i64` does not: it is epoch
+ * milliseconds (`services::sync::timestamp_millis`), and `Number.MAX_SAFE_INTEGER` ms is the
+ * year 287396. So the narrowing is lossless for every value the server can produce from a
+ * real clock, and only a corrupt or non-epoch value could lose precision here.
+ *
+ * This is not the sync cursor. The cursor is {@link SyncCursor}, an opaque event id;
+ * `timestamp` only ever feeds `SyncStatus.lastSyncTime`, which is display state.
+ */
+export function toClientTimestamp(timestamp: bigint): number {
+	return Number(timestamp);
 }
 
+/**
+ * Where a client has consumed the event log up to. An opaque server-minted event id — not a
+ * time, and not derived from one, so nothing about it depends on clock skew or on
+ * {@link toClientTimestamp}.
+ */
 export interface SyncCursor {
 	id: string;
 }
@@ -187,18 +203,14 @@ export interface SyncManagerOptions {
 
 /**
  * A vault key as delta sync hands it back after refreshing from the server.
- * Structurally identical to `VaultKeyData` in `@bittery/storage/types`; restated
- * here because `packages/sync` deliberately does not depend on storage.
+ *
+ * This used to be a restatement of `VaultKeyData` in `@bittery/storage/types`, justified by
+ * the fact that `packages/sync` deliberately does not depend on storage. That constraint is
+ * still real; the restatement no longer follows from it, because both packages already
+ * depend on `@bittery/types`, where the shape now lives once and derives from the generated
+ * contract (ADR 0012).
  */
-export interface SyncVaultKeyEntry {
-	vaultId: string;
-	vaultName: string;
-	vaultType: "personal" | "team";
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	encryptedVaultKey: string;
-	role: "owner" | "admin" | "member" | "read-only";
-}
+export type SyncVaultKeyEntry = VaultKeyEntry;
 
 /**
  * The encrypted-blob cache, as sync sees it. Names match `ItemCache`

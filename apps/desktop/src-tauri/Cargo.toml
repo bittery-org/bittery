@@ -36,6 +36,7 @@ base64 = "0.23"
 
 # Native crypto
 bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
 
 # OS keychain access (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 # Platform-specific features must be enabled for actual keychain storage

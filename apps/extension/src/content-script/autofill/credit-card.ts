@@ -1,4 +1,5 @@
 import type { DecryptedItem } from "@bittery/shared/types";
+import { sendMessage } from "../../lib/messaging";
 import { contentState } from "../state";
 import type { CreditCardField } from "../types";
 import { hideAutofillOverlay } from "./credential";
@@ -28,9 +29,12 @@ export async function handleCreditCardFieldFocus(field: CreditCardField) {
 
 	contentState.currentFocusedCreditCardField = field;
 
-	const response = await chrome.runtime.sendMessage({
-		type: "CHECK_AUTOFILL_AUTH",
-	});
+	const response = await sendMessage({ type: "CHECK_AUTOFILL_AUTH" });
+	// A route-level failure reads exactly like a locked vault, which is what the
+	// overlay showed before this response was typed.
+	const authenticated = response.success && response.authenticated;
+	const needsReauth = response.success && response.needsReauth === true;
+	const desktopLocked = response.success && response.desktopLocked === true;
 
 	if (contentState.currentFocusedCreditCardField !== field) return;
 
@@ -42,13 +46,13 @@ export async function handleCreditCardFieldFocus(field: CreditCardField) {
 		}
 	};
 
-	if (!response.authenticated) {
+	if (!authenticated) {
 		field.hasItems = false;
 		showFieldIcon(field, false, handleIconToggle);
 
-		if (response.needsReauth) {
+		if (needsReauth) {
 			showCreditCardReauthPrompt(field);
-		} else if (response.desktopLocked) {
+		} else if (desktopLocked) {
 			showCreditCardDesktopUnlockPrompt(field);
 		} else {
 			showCreditCardUnlockPrompt(field);
@@ -56,18 +60,19 @@ export async function handleCreditCardFieldFocus(field: CreditCardField) {
 		return;
 	}
 
-	const itemsResponse = await chrome.runtime.sendMessage({
+	const itemsResponse = await sendMessage({
 		type: "GET_AUTOFILL_CREDIT_CARDS",
 	});
 
 	if (contentState.currentFocusedCreditCardField !== field) return;
 
-	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	const items = itemsResponse.success ? itemsResponse.items : [];
+	const hasItems = items.length > 0;
 	field.hasItems = hasItems;
 
 	if (hasItems) {
 		showFieldIcon(field, true, handleIconToggle);
-		showCreditCardAutofillOverlay(field, itemsResponse.items);
+		showCreditCardAutofillOverlay(field, items);
 	} else {
 		showFieldIcon(field, false, handleIconToggle);
 	}

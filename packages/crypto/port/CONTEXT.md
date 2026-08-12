@@ -15,7 +15,7 @@ adapter suite can and cannot establish.
                          Rust crypto core      algorithms and formats
 ```
 
-`CryptoPort` has 39 required, asynchronous members. Callers never feature-detect a crypto
+`CryptoPort` has 40 required, asynchronous members. Callers never feature-detect a crypto
 capability and adapters never choose policy: each adapter satisfies the same complete
 contract or fails to typecheck. The algorithms and persisted formats remain in the single
 Rust core described by ADR 0001.

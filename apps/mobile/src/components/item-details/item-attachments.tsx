@@ -257,9 +257,10 @@ export function ItemAttachments({
 			multiple: false,
 		});
 
-		if (result.canceled || result.assets.length === 0) return;
+		if (result.canceled) return;
 
-		const asset = result.assets[0];
+		const [asset] = result.assets;
+		if (!asset) return;
 
 		if (
 			attachmentMaxFileSizeBytes !== null &&

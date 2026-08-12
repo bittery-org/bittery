@@ -6,28 +6,25 @@
  * desktop bridge invalidation stay consistent.
  */
 
+import type { EncryptedItemPayload } from "@bittery/shared/item-mapping";
 import {
 	toCachedItemMetadata,
 	toEncryptedPayload,
 	toNewCachedItem,
 	withEncryptedPayload,
 } from "@bittery/shared/item-mapping";
+import type { ItemCategory } from "@bittery/shared/types";
 import type { CachedEncryptedItem } from "@bittery/types";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
 
-interface EncryptedPayload {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
+/** The ciphertext triple as the crypto port returns it — one definition, in `@bittery/shared`. */
+type EncryptedPayload = EncryptedItemPayload;
 
 interface LocalItemCreatedInput {
 	itemId: string;
 	vaultId: string;
-	category: string;
+	category: ItemCategory;
 	encryptedData: EncryptedPayload;
 	accountEmail?: string;
 }

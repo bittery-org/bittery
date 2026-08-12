@@ -134,8 +134,7 @@ export function useVaultExport() {
 
 			const exportedItems: ExportedItem[] = [];
 
-			for (let i = 0; i < allItems.length; i++) {
-				const item = allItems[i];
+			for (const [i, item] of allItems.entries()) {
 				const vaultKey = vaultKeyCache.get(item.vaultId);
 				if (!vaultKey) {
 					setProgress((prev) => ({

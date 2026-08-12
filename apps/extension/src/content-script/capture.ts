@@ -3,6 +3,7 @@ import {
 	getAllInputs,
 	isFieldVisible,
 } from "../lib/field-detection";
+import { sendMessage } from "../lib/messaging";
 import { showSavePrompt } from "./save-prompt";
 import { contentState, FORM_SUBMISSION_DEBOUNCE_MS } from "./state";
 import type {
@@ -268,11 +269,9 @@ async function shouldSaveCredentials(
 
 	// Check if extension is unlocked
 	try {
-		const authResponse = await chrome.runtime.sendMessage({
-			type: "CHECK_AUTH",
-		});
+		const authResponse = await sendMessage({ type: "CHECK_AUTH" });
 
-		if (!authResponse.unlocked) {
+		if (!(authResponse.success && authResponse.unlocked)) {
 			return {
 				shouldSave: false,
 				reason: "Extension is locked",

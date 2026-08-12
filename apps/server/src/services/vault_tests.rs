@@ -3,6 +3,7 @@ use super::{
     encrypted_attachment_storage_size, pending_attachment_upload_expiry, toggle_vault_favorite,
     ToggleFavoriteInput,
 };
+use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
@@ -512,11 +513,11 @@ async fn set_team_billing(pool: &PgPool, team_id: &str, plan: &str, status: &str
 
 #[test]
 fn assert_item_write_access_rejects_read_only_access() {
-    assert_item_write_access("owner", "write denied").unwrap();
-    assert_item_write_access("admin", "write denied").unwrap();
-    assert_item_write_access("member", "write denied").unwrap();
+    assert_item_write_access(VaultRole::Owner, "write denied").unwrap();
+    assert_item_write_access(VaultRole::Admin, "write denied").unwrap();
+    assert_item_write_access(VaultRole::Member, "write denied").unwrap();
 
-    let error = assert_item_write_access("read-only", "write denied").unwrap_err();
+    let error = assert_item_write_access(VaultRole::ReadOnly, "write denied").unwrap_err();
     assert_eq!(error.code, AppErrorCode::Forbidden);
     assert_eq!(error.message, "write denied");
 }

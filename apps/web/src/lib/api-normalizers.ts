@@ -1,25 +1,20 @@
 import type { ItemCategory } from "@bittery/shared";
-import type { CloudPlanId, EntitlementKey } from "@bittery/shared/billing";
+import type {
+	CloudPlanId,
+	EntitlementLimits,
+	Entitlements,
+} from "@bittery/shared/billing";
 
-type BillingEntitlementsLike = Partial<Record<EntitlementKey, boolean>> & {
-	sentinel?: boolean;
-	teamManagement?: boolean;
-	vaultSharing?: boolean;
-	shareLinks?: boolean;
-	billingPortal?: boolean;
-	attachments?: boolean;
-};
+/**
+ * What the two billing normalizers accept: the wire's own shapes, with every field
+ * optional because a call site reads them off a query that may not have resolved. Both
+ * key sets are derived from the contract, so neither can drift from what the server sends.
+ */
+type BillingEntitlementsLike = Partial<Entitlements>;
 
-type BillingLimitsLike = {
-	shareLinks?: bigint | number | null;
-	sharedVaults?: bigint | number | null;
-	attachmentMaxFileSizeBytes?: bigint | number | null;
-	attachmentStorageBytes?: bigint | number | null;
-	share_links?: bigint | number | null;
-	shared_vaults?: bigint | number | null;
-	attachment_max_file_size_bytes?: bigint | number | null;
-	attachment_storage_bytes?: bigint | number | null;
-};
+type BillingLimitsLike = Partial<
+	Record<keyof EntitlementLimits, bigint | number | null>
+>;
 
 export function normalizeDeploymentMode(
 	mode: string | null | undefined,
@@ -65,22 +60,20 @@ export function normalizeItemCategory(category: string): ItemCategory {
 	}
 }
 
+/**
+ * Missing means denied: an entitlement absent from an unresolved query reads `false`, never
+ * `undefined`. The `Entitlements` return type is the exhaustiveness check — a new wire
+ * entitlement fails to compile here rather than defaulting to whatever a call site assumes.
+ */
 export function normalizeEntitlements(
 	entitlements: BillingEntitlementsLike | null | undefined,
-): Partial<Record<EntitlementKey, boolean>> {
+): Entitlements {
 	return {
 		sentinel: entitlements?.sentinel === true,
-		team_management:
-			entitlements?.team_management === true ||
-			entitlements?.teamManagement === true,
-		vault_sharing:
-			entitlements?.vault_sharing === true ||
-			entitlements?.vaultSharing === true,
-		share_links:
-			entitlements?.share_links === true || entitlements?.shareLinks === true,
-		billing_portal:
-			entitlements?.billing_portal === true ||
-			entitlements?.billingPortal === true,
+		teamManagement: entitlements?.teamManagement === true,
+		vaultSharing: entitlements?.vaultSharing === true,
+		shareLinks: entitlements?.shareLinks === true,
+		billingPortal: entitlements?.billingPortal === true,
 		attachments: entitlements?.attachments === true,
 	};
 }
@@ -93,20 +86,15 @@ function normalizeNullableNumber(
 
 export function normalizeEntitlementLimits(
 	limits: BillingLimitsLike | null | undefined,
-) {
+): EntitlementLimits {
 	return {
-		shareLinks: normalizeNullableNumber(
-			limits?.shareLinks ?? limits?.share_links,
-		),
-		sharedVaults: normalizeNullableNumber(
-			limits?.sharedVaults ?? limits?.shared_vaults,
-		),
+		shareLinks: normalizeNullableNumber(limits?.shareLinks),
+		sharedVaults: normalizeNullableNumber(limits?.sharedVaults),
 		attachmentMaxFileSizeBytes: normalizeNullableNumber(
-			limits?.attachmentMaxFileSizeBytes ??
-				limits?.attachment_max_file_size_bytes,
+			limits?.attachmentMaxFileSizeBytes,
 		),
 		attachmentStorageBytes: normalizeNullableNumber(
-			limits?.attachmentStorageBytes ?? limits?.attachment_storage_bytes,
+			limits?.attachmentStorageBytes,
 		),
 	};
 }

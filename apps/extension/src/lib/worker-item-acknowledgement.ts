@@ -1,10 +1,13 @@
 import type { ItemSyncAcknowledgement, ItemSyncCommand } from "@bittery/types";
+import type { BackgroundEventOf } from "../background/events/contract";
 
-export interface WorkerItemCommandAcknowledgedMessage {
-	type: "SYNC_ITEM_COMMAND_ACKNOWLEDGED";
-	command: ItemSyncCommand;
-	acknowledgement: ItemSyncAcknowledgement;
-}
+/**
+ * The acknowledgement push, named. The shape is the contract's, not a second
+ * copy of it — only the runtime validation below is local, because this payload
+ * is the one push whose fields are consumed rather than merely signalled.
+ */
+export type WorkerItemCommandAcknowledgedMessage =
+	BackgroundEventOf<"SYNC_ITEM_COMMAND_ACKNOWLEDGED">;
 
 export function isWorkerItemCommandAcknowledgedMessage(
 	message: unknown,

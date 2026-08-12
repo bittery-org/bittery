@@ -1,7 +1,4 @@
-import type { UnifiedItem } from "@bittery/core/hooks";
-import type { DecryptedItem } from "@bittery/shared/types";
-
-type Item = DecryptedItem | UnifiedItem;
+import type { Item } from "@/types/item";
 
 export type ItemSectionKind = "favorites" | "all";
 

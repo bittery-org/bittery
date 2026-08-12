@@ -18,12 +18,11 @@
  * `onUnlockStateChanged` once at startup and does its own `broadcast_unlock_event`.
  */
 
-import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import type { CryptoPort, KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
 } from "@bittery/shared/crypto";
-import type { KdfProfile } from "@bittery/types";
 import {
 	findAccountById,
 	findAccountByServerUser,

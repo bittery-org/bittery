@@ -1,4 +1,4 @@
-import { generateTotp, type TotpResult } from "@bittery/crypto-react-native";
+import type { TotpResult } from "@bittery/crypto-port";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
@@ -7,6 +7,7 @@ import { useCallback, useRef, useState } from "react";
 import { Animated, Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { IconCheck, IconCopy, iconSize } from "@/components/ui";
+import { crypto } from "@/lib/crypto";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -26,8 +27,8 @@ interface TotpDisplayProps {
 }
 
 /** Seconds left at which the ring escalates from accent to warning, then danger. */
-const WARNING_THRESHOLD_SECONDS = 10n;
-const DANGER_THRESHOLD_SECONDS = 5n;
+const WARNING_THRESHOLD_SECONDS = 10;
+const DANGER_THRESHOLD_SECONDS = 5;
 const COPY_FEEDBACK_MS = 2000;
 /** A one-time code is worthless after its window; the clipboard should be too. */
 const CLIPBOARD_CLEAR_MS = 30000;
@@ -46,7 +47,7 @@ function CountdownRing({
 	variant,
 }: {
 	progress: number;
-	remainingSeconds: bigint | null;
+	remainingSeconds: number | null;
 	color: string;
 	trackColor: string;
 	variant: keyof typeof RING;
@@ -136,11 +137,11 @@ export function TotpDisplay({
 		}
 
 		try {
-			const result = await generateTotp(
+			const result = await crypto.generateTotp(
 				totpSecret,
 				totpAlgorithm,
 				totpDigits,
-				BigInt(totpPeriod),
+				totpPeriod,
 			);
 
 			if (previousCodeRef.current && previousCodeRef.current !== result.code) {

@@ -3,55 +3,35 @@ import type {
 	SyncBootstrapItem,
 	Vault,
 	VaultDetails,
+	VaultRole,
+	VaultType,
 } from "@bittery/api-contract";
+import type { VaultKeyEntry, VaultSummary } from "@bittery/types";
 
-export type VaultType = "personal" | "team";
-export type VaultRole = "owner" | "admin" | "member" | "read-only";
+/**
+ * `VaultType` and `VaultRole` are closed sets owned by `apps/server/src/db/enums.rs` and
+ * generated into the contract; `VaultSummary` is the canonical decoded vault and
+ * `VaultKeyEntry` the canonical stored vault key. All four are re-exported so
+ * `@bittery/shared/vault-mapping` stays the one import for the vault vocabulary — aliasing
+ * a generated type is allowed, restating it is not (ADR 0012).
+ */
+export type { VaultRole, VaultType, VaultKeyEntry, VaultSummary };
 
-/** Structural wire shape keeps client-specific API interfaces checked at compile time. */
-export interface ServerVaultSummary {
-	id: string;
-	name: string;
-	vaultType: string;
-	icon?: string | null;
-	imageUrl?: string | null;
-}
+/**
+ * The vault fields every server payload carries. Derived from the generated vault-list
+ * entry rather than restated, so a rename server-side fails to compile here; the guards
+ * at the foot of the file check that the *other* vault-bearing endpoints still fit.
+ */
+export type ServerVaultSummary = Pick<
+	Vault,
+	"id" | "name" | "vaultType" | "icon" | "imageUrl"
+>;
 
-export interface ServerVaultListEntry extends ServerVaultSummary {
-	encryptedVaultKey: string;
-	role: string;
-}
+export type ServerVaultListEntry = ServerVaultSummary &
+	Pick<Vault, "encryptedVaultKey" | "role">;
 
 /** Wire DTO returned as part of signup and recovery auth payloads. */
-export interface ServerAuthVaultKeyEntry {
-	vaultId: string;
-	vaultName: string;
-	vaultType: string;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	encryptedVaultKey: string;
-	role: string;
-}
-
-/** Local shape stored per vault the user holds a key for. */
-export interface VaultKeyEntry {
-	vaultId: string;
-	vaultName: string;
-	vaultType: VaultType;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	encryptedVaultKey: string;
-	role: VaultRole;
-}
-
-/** Canonical vault metadata used by item caches and downstream domain models. */
-export interface VaultSummary {
-	id: string;
-	name: string;
-	type: VaultType;
-	icon: string | null;
-	imageUrl: string | null;
-}
+export type ServerAuthVaultKeyEntry = AuthVaultKey;
 
 export function decodeVaultType(
 	vaultType: string | null | undefined,
@@ -71,15 +51,9 @@ export function decodeVaultRole(role: string | null | undefined): VaultRole {
 	}
 }
 
-function toCanonicalVaultKeyEntry(input: {
-	vaultId: string;
-	vaultName: string;
-	vaultType: string;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	encryptedVaultKey: string;
-	role: string;
-}): VaultKeyEntry {
+function toCanonicalVaultKeyEntry(
+	input: ServerAuthVaultKeyEntry,
+): VaultKeyEntry {
 	return {
 		vaultId: input.vaultId,
 		vaultName: input.vaultName,
@@ -125,18 +99,14 @@ export function toAuthVaultKeyEntry(
 	return toCanonicalVaultKeyEntry(vault);
 }
 
-// Schema drift fails type checks here rather than silently corrupting a cache write.
-const _listEntryMatchesServer = (entry: Vault): ServerVaultListEntry => entry;
-const _authVaultKeyMatchesServer = (
-	entry: AuthVaultKey,
-): ServerAuthVaultKeyEntry => entry;
+// The vault-list entry and the auth vault key are no longer restated — the shapes above
+// derive from them — so only the endpoints that carry a vault *without* being one need a
+// guard: drift there fails type checks rather than silently corrupting a cache write.
 const _bootstrapSummaryMatchesServer = (
 	summary: NonNullable<SyncBootstrapItem["vault"]>,
 ): ServerVaultListEntry => summary;
 const _detailsMatchServer = (details: VaultDetails): ServerVaultSummary =>
 	details;
 
-void _listEntryMatchesServer;
-void _authVaultKeyMatchesServer;
 void _bootstrapSummaryMatchesServer;
 void _detailsMatchServer;

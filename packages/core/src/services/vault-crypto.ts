@@ -27,6 +27,9 @@
 import type {
 	CryptoPort,
 	DecryptManyResult,
+	EncryptedData,
+	EncryptionContext,
+	KdfProfile,
 	KeyRef,
 } from "@bittery/crypto-port";
 import { getRecoveryKeyHint, getSecretKeyHint } from "@bittery/shared/crypto";
@@ -36,12 +39,7 @@ import {
 } from "@bittery/shared/kdf-policy";
 import type { VaultKeyEntry } from "@bittery/shared/vault-mapping";
 import type { SessionExpiryInput } from "@bittery/storage/types";
-import type {
-	CachedEncryptedItem,
-	EncryptedData,
-	EncryptionContext,
-	KdfProfile,
-} from "@bittery/types";
+import type { CachedEncryptedItem } from "@bittery/types";
 
 // ============================================================================
 // The encryption contexts (AAD)

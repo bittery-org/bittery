@@ -6,6 +6,7 @@ import {
 	isFieldVisible,
 } from "../../lib/field-detection";
 import { hostnameMatches } from "../../lib/hostname";
+import { sendMessage } from "../../lib/messaging";
 import { contentState } from "../state";
 import type { CredentialField } from "../types";
 import { hideFieldIcon, showFieldIcon } from "./icon";
@@ -28,9 +29,12 @@ export async function handleFieldFocus(field: CredentialField) {
 
 	contentState.currentFocusedField = field;
 
-	const response = await chrome.runtime.sendMessage({
-		type: "CHECK_AUTOFILL_AUTH",
-	});
+	const response = await sendMessage({ type: "CHECK_AUTOFILL_AUTH" });
+	// A route-level failure reads exactly like a locked vault, which is what the
+	// overlay showed before this response was typed.
+	const authenticated = response.success && response.authenticated;
+	const needsReauth = response.success && response.needsReauth === true;
+	const desktopLocked = response.success && response.desktopLocked === true;
 
 	if (contentState.currentFocusedField !== field) return;
 
@@ -42,13 +46,13 @@ export async function handleFieldFocus(field: CredentialField) {
 		}
 	};
 
-	if (!response.authenticated) {
+	if (!authenticated) {
 		field.hasItems = false;
 		showFieldIcon(field, false, handleIconToggle);
 
-		if (response.needsReauth) {
+		if (needsReauth) {
 			showReauthPrompt(field);
-		} else if (response.desktopLocked) {
+		} else if (desktopLocked) {
 			showDesktopUnlockPrompt(field);
 		} else {
 			showUnlockPrompt(field);
@@ -56,19 +60,20 @@ export async function handleFieldFocus(field: CredentialField) {
 		return;
 	}
 
-	const itemsResponse = await chrome.runtime.sendMessage({
+	const itemsResponse = await sendMessage({
 		type: "GET_AUTOFILL_ITEMS",
 		payload: { hostname: new URL(window.location.href).hostname },
 	});
 
 	if (contentState.currentFocusedField !== field) return;
 
-	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	const items = itemsResponse.success ? itemsResponse.items : [];
+	const hasItems = items.length > 0;
 	field.hasItems = hasItems;
 
 	if (hasItems) {
 		showFieldIcon(field, true, handleIconToggle);
-		showAutofillOverlay(field, itemsResponse.items);
+		showAutofillOverlay(field, items);
 	} else {
 		showFieldIcon(field, false, handleIconToggle);
 	}

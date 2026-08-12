@@ -14,6 +14,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use super::{
     dto::{CursorPage, PageCursor, PageRequest, MAX_PAGE_SIZE},
     error::ApiError,
+    error_code::ErrorCode,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -59,7 +60,7 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let Query(request) = Query::<PageRequest>::from_request_parts(parts, state)
             .await
-            .map_err(|error| ApiError::bad_request("INVALID_QUERY", error.body_text()))?;
+            .map_err(|error| ApiError::bad_request(ErrorCode::InvalidQuery, error.body_text()))?;
         validate_page_request(&request)?;
         Ok(Self(request))
     }
@@ -148,7 +149,7 @@ fn decode_cursor(
 
 fn invalid_cursor() -> ApiError {
     ApiError::bad_request(
-        "INVALID_CURSOR",
+        ErrorCode::InvalidCursor,
         "The page cursor is invalid for this request.",
     )
 }
@@ -231,7 +232,7 @@ where
 pub(crate) fn validate_page_request(request: &PageRequest) -> Result<(), ApiError> {
     if request.limit == 0 || request.limit > MAX_PAGE_SIZE {
         return Err(ApiError::bad_request(
-            "INVALID_PAGE_LIMIT",
+            ErrorCode::InvalidPageLimit,
             format!("limit must be between 1 and {MAX_PAGE_SIZE}"),
         ));
     }
@@ -406,7 +407,7 @@ mod tests {
                 key,
             )
             .unwrap_err();
-            assert_eq!(error.code(), "INVALID_CURSOR");
+            assert_eq!(error.code(), ErrorCode::InvalidCursor);
         }
     }
 
@@ -454,7 +455,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.code(), "PAYLOAD_TOO_LARGE");
+        assert_eq!(error.code(), ErrorCode::PayloadTooLarge);
     }
 
     #[test]
@@ -467,6 +468,6 @@ mod tests {
 
         let error = truncate_serialized(&mut values, 16).unwrap_err();
 
-        assert_eq!(error.code(), "PAYLOAD_TOO_LARGE");
+        assert_eq!(error.code(), ErrorCode::PayloadTooLarge);
     }
 }

@@ -235,16 +235,12 @@ function formatEntitlementLabel(key: string, m: BillingMessageCatalog): string {
 		case "sentinel":
 			return m.billing_entitlement_sentinel();
 		case "teamManagement":
-		case "team_management":
 			return m.billing_entitlement_team_management();
 		case "vaultSharing":
-		case "vault_sharing":
 			return m.billing_entitlement_vault_sharing();
 		case "shareLinks":
-		case "share_links":
 			return m.billing_entitlement_share_links();
 		case "billingPortal":
-		case "billing_portal":
 			return m.billing_entitlement_billing_portal();
 		case "attachments":
 			return m.billing_entitlement_attachments();

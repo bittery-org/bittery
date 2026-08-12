@@ -1,6 +1,8 @@
 use sqlx::FromRow;
 use time::OffsetDateTime;
 
+use crate::db::enums::{ItemCategory, SyncEntityType, SyncEventType, VaultRole, VaultType};
+
 #[derive(Clone, Debug, FromRow)]
 pub struct DbSyncConflictRow {
     pub version: i32,
@@ -46,9 +48,9 @@ pub struct DbSyncEventIdRow {
 pub struct DbSyncEventRow {
     pub id: String,
     pub seq: i64,
-    pub event_type: String,
+    pub event_type: SyncEventType,
     pub entity_id: String,
-    pub entity_type: String,
+    pub entity_type: SyncEntityType,
     pub vault_id: Option<String>,
     pub version: i32,
     pub client_id: Option<String>,
@@ -61,11 +63,11 @@ pub struct DbSyncEventRow {
 pub struct DbBootstrapVaultAccessRow {
     pub vault_id: String,
     pub vault_name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub vault_icon: Option<String>,
     pub vault_image_key: Option<String>,
     pub encrypted_vault_key: String,
-    pub role: String,
+    pub role: VaultRole,
 }
 
 /// Column list for `item` SELECTs that populate `DbBootstrapItemRow`.
@@ -76,7 +78,7 @@ pub(crate) const BOOTSTRAP_ITEM_COLUMNS: &str = "id, vault_id, category::text AS
 pub struct DbBootstrapItemRow {
     pub id: String,
     pub vault_id: String,
-    pub category: String,
+    pub category: ItemCategory,
     pub favorite: bool,
     pub encrypted_data: String,
     pub encryption_iv: String,

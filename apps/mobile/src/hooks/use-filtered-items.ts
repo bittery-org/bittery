@@ -1,8 +1,6 @@
-import type { UnifiedItem } from "@bittery/core/hooks";
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { ItemCategory } from "@bittery/shared/types";
 import { useMemo } from "react";
-
-type Item = DecryptedItem | UnifiedItem;
+import type { Item } from "@/types/item";
 
 export interface UseFilteredItemsOptions {
 	items: Item[];

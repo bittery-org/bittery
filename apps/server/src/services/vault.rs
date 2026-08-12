@@ -4,11 +4,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
-use utoipa::ToSchema;
 
 use crate::{
     config::{bittery_mode, format_timestamp},
-    db::models::*,
+    db::{
+        enums::{
+            BillingPlan, BillingStatus, ItemCategory, SyncEntityType, SyncEventType, VaultRole,
+            VaultType,
+        },
+        models::*,
+    },
     error::{AppError, AppErrorCode},
     integrations::storage,
     repo::common::{generate_resource_id, insert_audit_event, insert_sync_event},
@@ -18,7 +23,19 @@ use crate::{
         VaultSharingEntitlement,
     },
     services::vault_key::validate_encrypted_vault_key,
-    shapes::{attachment_shape, item_shape, rotation_item_shape},
+    shapes::{
+        attachment_download_shape, attachment_shape, bulk_import_item_shape,
+        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
+        create_item_shape, create_vault_shape, item_shape, remove_vault_member_shape,
+        rotation_item_shape, success_shape, update_item_shape, update_vault_shape,
+        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
+        vault_member_shape, vault_rotation_data_shape, vault_rotation_member_shape,
+        vault_rotation_summary_shape, vault_stats_shape, vault_summary_shape,
+    },
+};
+
+pub use crate::services::vault_key::{
+    RotationMemberKeyInput, RotationReEncryptedItemInput, VaultKeyRotationInput,
 };
 
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
@@ -59,14 +76,14 @@ fn bounded_page_ids(
     ))
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VaultIdInput {
     pub vault_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateVaultImageUploadInput {
@@ -75,14 +92,14 @@ pub struct CreateVaultImageUploadInput {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ItemIdInput {
     pub item_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateAttachmentUploadInput {
@@ -92,7 +109,7 @@ pub struct CreateAttachmentUploadInput {
     pub file_size: i32,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateAttachmentInput {
@@ -106,20 +123,20 @@ pub struct CreateAttachmentInput {
     pub file_size: i32,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateAttachmentResponse {
-    pub attachment_id: String,
-}
+create_attachment_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateAttachmentResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentIdInput {
     pub attachment_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateAttachmentInput {
@@ -129,27 +146,27 @@ pub struct UpdateAttachmentInput {
     pub encryption_algorithm: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateVaultMemberRoleInput {
     pub vault_id: String,
     pub user_id: String,
-    pub role: String,
+    pub role: VaultRole,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AddVaultMemberInput {
     pub vault_id: String,
     pub user_id: String,
-    pub role: String,
+    pub role: VaultRole,
     pub encrypted_vault_key: String,
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetVaultRotationDataInput {
@@ -157,32 +174,7 @@ pub struct GetVaultRotationDataInput {
     pub exclude_user_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct RotationMemberKeyInput {
-    pub user_id: String,
-    pub encrypted_vault_key: String,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct RotationReEncryptedItemInput {
-    pub item_id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct VaultKeyRotationInput {
-    pub member_keys: Vec<RotationMemberKeyInput>,
-    pub re_encrypted_items: Vec<RotationReEncryptedItemInput>,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RemoveVaultMemberInput {
@@ -192,39 +184,33 @@ pub struct RemoveVaultMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateItemInput {
     pub item_id: Option<String>,
     pub vault_id: String,
-    pub category: String,
+    pub category: ItemCategory,
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateItemResponse {
-    pub item_id: String,
-    pub id: String,
-}
+create_item_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateItemResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct BulkImportItemInput {
-    pub item_id: String,
-    pub category: String,
-    pub favorite: Option<bool>,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-}
+bulk_import_item_shape!(service_struct {
+    #[derive(Debug, Clone, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    #[serde(deny_unknown_fields)]
+    pub struct BulkImportItemInput
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BulkImportItemsInput {
@@ -233,15 +219,13 @@ pub struct BulkImportItemsInput {
     pub items: Vec<BulkImportItemInput>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BulkImportItemsResponse {
-    pub success: bool,
-    pub imported_count: usize,
-    pub item_ids: Vec<String>,
-}
+bulk_import_result_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BulkImportItemsResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateItemInput {
@@ -253,14 +237,13 @@ pub struct UpdateItemInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateItemResponse {
-    pub success: bool,
-    pub version: i32,
-}
+update_item_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct UpdateItemResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct MoveItemInput {
@@ -274,7 +257,7 @@ pub struct MoveItemInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ToggleFavoriteInput {
@@ -284,7 +267,7 @@ pub struct ToggleFavoriteInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ItemClientInput {
@@ -293,13 +276,13 @@ pub struct ItemClientInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateVaultInput {
     pub vault_id: Option<String>,
     pub name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub encrypted_vault_key: String,
     pub icon: Option<String>,
     pub image_key: Option<String>,
@@ -307,49 +290,30 @@ pub struct CreateVaultInput {
 }
 
 item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct VaultItemResponse {}
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultListEntryResponse {
-    pub id: String,
-    #[schema(max_length = 200)]
-    pub name: String,
-    pub vault_type: String,
-    pub icon: Option<String>,
-    pub image_url: Option<String>,
-    pub role: String,
-    #[schema(pattern = r"^(0|[1-9][0-9]*)$")]
-    pub item_count: String,
-    #[schema(max_length = 65536)]
-    pub encrypted_vault_key: String,
-    pub created_by_id: String,
-}
+vault_list_entry_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultListEntryResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultDetailsResponse {
-    pub id: String,
-    pub name: String,
-    pub vault_type: String,
-    pub icon: Option<String>,
-    pub image_url: Option<String>,
-    pub user_role: String,
-    pub item_count: i64,
-    pub member_count: i64,
-    pub created_at: String,
-}
+vault_details_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultDetailsResponse
+}, count = i64);
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateVaultResponse {
-    pub vault_id: String,
-}
+create_vault_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateVaultResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateVaultInput {
@@ -360,67 +324,55 @@ pub struct UpdateVaultInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateVaultResponse {
-    pub id: String,
-    pub name: String,
-    pub icon: Option<String>,
-    pub image_url: Option<String>,
-}
+update_vault_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct UpdateVaultResponse
+});
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ConvertVaultTypeInput {
     pub vault_id: String,
-    pub target_type: String,
+    pub target_type: VaultType,
     pub personal_encrypted_vault_key: Option<String>,
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ConvertVaultTypeResponse {
-    pub success: bool,
-    pub vault_id: String,
-    pub previous_type: String,
-    pub new_type: String,
-}
+convert_vault_type_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ConvertVaultTypeResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct SuccessResponse {
-    pub success: bool,
-}
+success_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    pub struct SuccessResponse
+});
 
 attachment_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct VaultAttachmentResponse {}
 }
 
 item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct VaultItemDetailsResponse {
         attachments: Vec<VaultAttachmentResponse>,
     }
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultSummaryResponse {
-    pub id: String,
-    pub name: String,
-    pub vault_type: String,
-    pub icon: Option<String>,
-    pub image_url: Option<String>,
-    pub encrypted_vault_key: String,
-    pub role: String,
-}
+vault_summary_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultSummaryResponse
+});
 
 item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct VaultItemWithVaultResponse {
         attachments: Vec<VaultAttachmentResponse>,
@@ -429,88 +381,66 @@ item_shape! {
 }
 
 item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct DeletedVaultItemWithVaultResponse {
         vault: Option<VaultSummaryResponse>,
     }
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultStatsResponse {
-    pub team_count: i32,
-    pub vault_count: i64,
-    pub item_count: i64,
-}
+vault_stats_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultStatsResponse
+}, count = i64);
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultMemberResponse {
-    pub user_id: String,
-    pub name: String,
-    pub email: String,
-    pub role: String,
-}
+vault_member_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultMemberResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultAvailableMemberResponse {
-    pub user_id: String,
-    pub name: String,
-    pub email: String,
-    pub public_key: String,
-}
+vault_available_member_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultAvailableMemberResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultRotationMemberResponse {
-    pub user_id: String,
-    pub public_key: String,
-    pub role: String,
-}
+vault_rotation_member_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultRotationMemberResponse
+});
 
 rotation_item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct VaultRotationItemResponse {}
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultRotationDataResponse {
-    pub key_version: i32,
-    pub members: Vec<VaultRotationMemberResponse>,
-    pub items: Vec<VaultRotationItemResponse>,
-}
+vault_rotation_data_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultRotationDataResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultKeyRotationSummaryResponse {
-    pub id: String,
-    pub new_key_version: i32,
-    pub items_re_encrypted: usize,
-    pub members_updated: usize,
-}
+vault_rotation_summary_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultKeyRotationSummaryResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveVaultMemberResponse {
-    pub success: bool,
-    pub key_rotation: VaultKeyRotationSummaryResponse,
-}
+remove_vault_member_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RemoveVaultMemberResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachmentDownloadResponse {
-    pub download_url: String,
-    pub encrypted_name: String,
-    pub encrypted_content_type: String,
-    pub encryption_iv: String,
-    pub encrypted_content_type_iv: String,
-    pub encryption_algorithm: String,
-    pub file_size: i32,
-}
+attachment_download_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct AttachmentDownloadResponse
+});
 
 struct AttachmentActor {
     team_id: String,
@@ -664,7 +594,7 @@ pub(crate) async fn create_vault_image_upload(
         let Some(role) = role else {
             return Err(AppError::forbidden("Access denied"));
         };
-        if role.role != "owner" && role.role != "admin" {
+        if !role.role.can_manage() {
             return Err(AppError::forbidden("Access denied"));
         }
     }
@@ -692,7 +622,7 @@ pub(crate) async fn create_vault_attachment_upload(
     let actor = load_attachment_actor(pool, user_id).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     if let Some(max_bytes) = actor.attachment_max_file_size_bytes {
         if i64::from(input.file_size) > max_bytes {
             return Err(AppError::bad_request(
@@ -789,7 +719,7 @@ pub(crate) async fn create_vault_attachment(
     let _actor = load_attachment_actor(pool, user_id).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     let is_valid_key =
         storage::is_valid_attachment_upload_key(&input.storage_key, user_id, &input.item_id, None)
             .map_err(|error| {
@@ -866,7 +796,7 @@ pub(crate) async fn create_vault_attachment(
         })?;
     insert_item_sync_event(
         &mut transaction,
-        "item_updated",
+        SyncEventType::ItemUpdated,
         &input.item_id,
         &scoped_item.vault_id,
         user_id,
@@ -942,7 +872,7 @@ pub(crate) async fn update_vault_attachment(
 ) -> Result<SuccessResponse, AppError> {
     let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
-    assert_item_write_access(&attachment.role, "Access denied")?;
+    assert_item_write_access(attachment.role, "Access denied")?;
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start attachment update transaction");
         AppError::internal("Failed to start attachment update transaction")
@@ -959,7 +889,7 @@ pub(crate) async fn update_vault_attachment(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to update attachment"); AppError::internal("Failed to update attachment") })?;
     insert_item_sync_event(
         &mut transaction,
-        "item_updated",
+        SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
         user_id,
@@ -982,14 +912,15 @@ pub(crate) async fn delete_vault_attachment(
 ) -> Result<SuccessResponse, AppError> {
     let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
-    if attachment.role == "member" {
-        if attachment.uploaded_by != user_id {
+    match attachment.role {
+        VaultRole::Owner | VaultRole::Admin => {}
+        VaultRole::Member if attachment.uploaded_by == user_id => {}
+        VaultRole::Member => {
             return Err(AppError::forbidden(
                 "You can only delete your own attachments",
-            ));
+            ))
         }
-    } else if attachment.role != "owner" && attachment.role != "admin" {
-        return Err(AppError::forbidden("Access denied"));
+        VaultRole::ReadOnly => return Err(AppError::forbidden("Access denied")),
     }
     storage::delete_object(&attachment.storage_key)
         .await
@@ -1012,7 +943,7 @@ pub(crate) async fn delete_vault_attachment(
         })?;
     insert_item_sync_event(
         &mut transaction,
-        "item_updated",
+        SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
         user_id,
@@ -1039,9 +970,6 @@ pub(crate) async fn create_vault(
     {
         return Err(AppError::bad_request("Invalid params"));
     }
-    if input.vault_type != "personal" && input.vault_type != "team" {
-        return Err(AppError::bad_request("Invalid params"));
-    }
 
     let vault_id = input
         .vault_id
@@ -1049,7 +977,7 @@ pub(crate) async fn create_vault(
         .unwrap_or_else(|| generate_resource_id("vault"));
     let mut team_id: Option<String> = None;
     let mut shared_vault_limit: Option<i64> = None;
-    if input.vault_type == "team" {
+    if input.vault_type == VaultType::Team {
         let actor =
             load_team_billing_entitlement(pool, user_id, "Failed to load team membership").await?;
         let Some(actor) = actor else {
@@ -1062,12 +990,12 @@ pub(crate) async fn create_vault(
                 "You must belong to a team to create a team vault",
             ));
         };
-        let Some(plan) = actor.billing_plan.as_deref() else {
+        let Some(plan) = actor.billing_plan else {
             return Err(AppError::bad_request(
                 "You must belong to a team to create a team vault",
             ));
         };
-        let Some(status) = actor.billing_status.as_deref() else {
+        let Some(status) = actor.billing_status else {
             return Err(AppError::bad_request(
                 "You must belong to a team to create a team vault",
             ));
@@ -1087,7 +1015,7 @@ pub(crate) async fn create_vault(
         tracing::error!(error = %e, "Failed to start vault transaction");
         AppError::internal("Failed to start vault transaction")
     })?;
-    if input.vault_type == "team" {
+    if input.vault_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (team_id.as_deref(), shared_vault_limit) {
             query("SELECT pg_advisory_xact_lock(hashtext($1))")
                 .bind(format!("shared-vaults:{team_id}"))
@@ -1169,7 +1097,7 @@ pub(crate) async fn update_vault(
 	else {
 		return Err(AppError::forbidden("Access denied"));
 	};
-    if current_vault.role != "owner" && current_vault.role != "admin" {
+    if !current_vault.role.can_manage() {
         return Err(AppError::forbidden("Access denied"));
     }
 
@@ -1237,9 +1165,6 @@ pub(crate) async fn convert_vault_type(
     request_client_id: Option<&str>,
     input: ConvertVaultTypeInput,
 ) -> Result<ConvertVaultTypeResponse, AppError> {
-    if input.target_type != "personal" && input.target_type != "team" {
-        return Err(AppError::bad_request("Invalid params"));
-    }
     if let Some(personal_key) = input.personal_encrypted_vault_key.as_deref() {
         validate_encrypted_vault_key(personal_key)?;
     }
@@ -1254,7 +1179,7 @@ pub(crate) async fn convert_vault_type(
 	else {
 		return Err(AppError::forbidden("Only the vault owner can convert vault type"));
 	};
-    if owner_vault.role != "owner" {
+    if owner_vault.role != VaultRole::Owner {
         return Err(AppError::forbidden(
             "Only the vault owner can convert vault type",
         ));
@@ -1266,7 +1191,7 @@ pub(crate) async fn convert_vault_type(
 
     let mut target_team_id = owner_vault.team_id.clone();
     let mut shared_vault_limit: Option<i64> = None;
-    if previous_type == "personal" && input.target_type == "team" {
+    if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
         let actor =
             load_team_billing_entitlement(pool, user_id, "Failed to load team membership").await?;
         let Some(actor) = actor else {
@@ -1279,12 +1204,12 @@ pub(crate) async fn convert_vault_type(
                 "You must belong to a team to convert to a shared vault",
             ));
         };
-        let Some(plan) = actor.billing_plan.as_deref() else {
+        let Some(plan) = actor.billing_plan else {
             return Err(AppError::bad_request(
                 "You must belong to a team to convert to a shared vault",
             ));
         };
-        let Some(status) = actor.billing_status.as_deref() else {
+        let Some(status) = actor.billing_status else {
             return Err(AppError::bad_request(
                 "You must belong to a team to convert to a shared vault",
             ));
@@ -1303,7 +1228,7 @@ pub(crate) async fn convert_vault_type(
         tracing::error!(error = %e, "Failed to start vault conversion transaction");
         AppError::internal("Failed to start vault conversion transaction")
     })?;
-    if previous_type == "personal" && input.target_type == "team" {
+    if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (target_team_id.as_deref(), shared_vault_limit) {
             query("SELECT pg_advisory_xact_lock(hashtext($1))")
                 .bind(format!("shared-vaults:{team_id}"))
@@ -1336,7 +1261,7 @@ pub(crate) async fn convert_vault_type(
 			.execute(&mut *transaction)
 			.await
 			.map_err(|e| { tracing::error!(error = %e, "Failed to convert vault to team"); AppError::internal("Failed to convert vault to team") })?;
-    } else if previous_type == "team" && input.target_type == "personal" {
+    } else if previous_type == VaultType::Team && input.target_type == VaultType::Personal {
         let member_rows = query_as::<_, DbVaultRoleRow>(
 			"SELECT vault_id, role::text AS role FROM vault_key WHERE vault_id = $1 ORDER BY created_at ASC",
 		)
@@ -1353,7 +1278,7 @@ pub(crate) async fn convert_vault_type(
                     tracing::error!(error = %e, "Failed to count vault members");
                     AppError::internal("Failed to count vault members")
                 })?;
-        if member_count != 1 || member_rows.first().map(|row| row.role.as_str()) != Some("owner") {
+        if member_count != 1 || member_rows.first().map(|row| row.role) != Some(VaultRole::Owner) {
             return Err(AppError::bad_request(
                 "Team vault can only be converted to personal when the owner is the only member",
             ));
@@ -1413,7 +1338,7 @@ pub(crate) async fn delete_vault(
 	else {
 		return Err(AppError::forbidden("Only the vault owner can delete the vault"));
 	};
-    if vault.role != "owner" {
+    if vault.role != VaultRole::Owner {
         return Err(AppError::forbidden(
             "Only the vault owner can delete the vault",
         ));
@@ -1838,7 +1763,7 @@ pub(crate) async fn create_vault_item(
     input: CreateItemInput,
 ) -> Result<CreateItemResponse, AppError> {
     let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Read-only access cannot create items")?;
+    assert_item_write_access(access.role, "Read-only access cannot create items")?;
     let item_id = input
         .item_id
         .clone()
@@ -1853,7 +1778,7 @@ pub(crate) async fn create_vault_item(
 	)
 	.bind(&item_id)
 	.bind(&input.vault_id)
-	.bind(&input.category)
+	.bind(input.category)
 	.bind(&input.encrypted_data)
 	.bind(&input.encryption_iv)
 	.bind(&input.encryption_algorithm)
@@ -1864,7 +1789,7 @@ pub(crate) async fn create_vault_item(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to create item"); AppError::internal("Failed to create item") })?;
     insert_item_sync_event(
         &mut transaction,
-        "item_created",
+        SyncEventType::ItemCreated,
         &item_id,
         &input.vault_id,
         user_id,
@@ -1897,7 +1822,7 @@ pub(crate) async fn bulk_import_vault_items(
     input: BulkImportItemsInput,
 ) -> Result<BulkImportItemsResponse, AppError> {
     let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Read-only access cannot create items")?;
+    assert_item_write_access(access.role, "Read-only access cannot create items")?;
     if input.items.is_empty() {
         return Ok(BulkImportItemsResponse {
             success: true,
@@ -1934,7 +1859,7 @@ pub(crate) async fn bulk_import_vault_items(
 		)
 		.bind(&item.item_id)
 		.bind(&input.vault_id)
-		.bind(&item.category)
+		.bind(item.category)
 		.bind(item.favorite.unwrap_or(false))
 		.bind(&item.encrypted_data)
 		.bind(&item.encryption_iv)
@@ -1979,7 +1904,7 @@ pub(crate) async fn update_vault_item(
 ) -> Result<UpdateItemResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
     let updates_ciphertext = input.encrypted_data.is_some()
         || input.encryption_iv.is_some()
@@ -2006,7 +1931,7 @@ pub(crate) async fn update_vault_item(
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
-        "item_updated",
+        SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
         user_id,
@@ -2036,7 +1961,7 @@ pub(crate) async fn toggle_vault_favorite(
 ) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
 
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2059,7 +1984,7 @@ pub(crate) async fn toggle_vault_favorite(
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
-        "item_updated",
+        SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
         user_id,
@@ -2082,7 +2007,7 @@ pub(crate) async fn delete_vault_item(
 ) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2106,7 +2031,7 @@ pub(crate) async fn delete_vault_item(
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
-        "item_deleted",
+        SyncEventType::ItemDeleted,
         &input.item_id,
         &existing_item.vault_id,
         user_id,
@@ -2210,7 +2135,7 @@ pub(crate) async fn restore_vault_item(
         return Err(AppError::bad_request("Item is not deleted"));
     }
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2233,7 +2158,7 @@ pub(crate) async fn restore_vault_item(
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
-        "item_restored",
+        SyncEventType::ItemRestored,
         &input.item_id,
         &existing_item.vault_id,
         user_id,
@@ -2275,14 +2200,11 @@ pub(crate) async fn move_vault_item(
     }
     let source_access = load_vault_access(pool, &input.source_vault_id, user_id).await?;
     assert_item_write_access(
-        &source_access.role,
+        source_access.role,
         "Cannot move items from a read-only vault",
     )?;
     let target_access = load_vault_access(pool, &input.target_vault_id, user_id).await?;
-    assert_item_write_access(
-        &target_access.role,
-        "Cannot move items to a read-only vault",
-    )?;
+    assert_item_write_access(target_access.role, "Cannot move items to a read-only vault")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2306,7 +2228,7 @@ pub(crate) async fn move_vault_item(
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event_with_metadata(
         &mut transaction,
-        "item_moved",
+        SyncEventType::ItemMoved,
         &input.item_id,
         &input.target_vault_id,
         user_id,
@@ -2350,7 +2272,7 @@ pub(crate) async fn permanently_delete_vault_item(
         ));
     }
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(&access.role, "Access denied")?;
+    assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2371,7 +2293,7 @@ pub(crate) async fn permanently_delete_vault_item(
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
-        "item_permanently_deleted",
+        SyncEventType::ItemPermanentlyDeleted,
         &input.item_id,
         &existing_item.vault_id,
         user_id,
@@ -2440,7 +2362,7 @@ pub(crate) mod member_handlers {
         input: VaultIdInput,
     ) -> Result<Vec<VaultMemberResponse>, AppError> {
         let _access = load_vault_access(pool, &input.vault_id, user_id).await?;
-        let members = query_as::<_, DbTeamMemberRow>(
+        let members = query_as::<_, DbVaultMemberRow>(
 			"SELECT vk.user_id, u.name, u.email, vk.role::text AS role, vk.created_at AS joined_at FROM vault_key vk INNER JOIN \"user\" u ON vk.user_id = u.id WHERE vk.vault_id = $1 ORDER BY vk.created_at ASC",
 		)
 		.bind(&input.vault_id)
@@ -2499,7 +2421,7 @@ pub(crate) mod member_handlers {
         user_id: &str,
         input: UpdateVaultMemberRoleInput,
     ) -> Result<SuccessResponse, AppError> {
-        let role = validate_vault_member_role(&input.role)?;
+        let role = validate_vault_member_role(input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         if input.user_id == user_id {
             return Err(AppError::bad_request("Cannot change your own role"));
@@ -2513,10 +2435,10 @@ pub(crate) mod member_handlers {
                     error
                 }
             })?;
-        if target_access.role == "owner" {
+        if target_access.role == VaultRole::Owner {
             return Err(AppError::forbidden("Cannot change vault owner's role"));
         }
-        if actor.role == "admin" && target_access.role == "admin" {
+        if actor.role == VaultRole::Admin && target_access.role == VaultRole::Admin {
             return Err(AppError::forbidden("Admins cannot change other admins"));
         }
         query("UPDATE vault_key SET role = $1::vault_role WHERE vault_id = $2 AND user_id = $3")
@@ -2539,7 +2461,7 @@ pub(crate) mod member_handlers {
         input: AddVaultMemberInput,
     ) -> Result<SuccessResponse, AppError> {
         validate_encrypted_vault_key(&input.encrypted_vault_key)?;
-        let role = validate_vault_member_role(&input.role)?;
+        let role = validate_vault_member_role(input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let target_user = query_as::<_, DbVaultLookupUserRow>(
             "SELECT id, name, email, public_key, team_id FROM \"user\" WHERE id = $1 LIMIT 1",
@@ -2589,7 +2511,7 @@ pub(crate) mod member_handlers {
 		.map_err(|e| { tracing::error!(error = %e, "Failed to add vault member"); AppError::internal("Failed to add vault member") })?;
         insert_vault_member_sync_event(
             &mut transaction,
-            "vault_member_added",
+            SyncEventType::VaultMemberAdded,
             &input.user_id,
             &input.vault_id,
             user_id,
@@ -2686,10 +2608,10 @@ pub(crate) mod member_handlers {
                     error
                 }
             })?;
-        if target_access.role == "owner" {
+        if target_access.role == VaultRole::Owner {
             return Err(AppError::forbidden("Cannot remove vault owner"));
         }
-        if actor.role == "admin" && target_access.role == "admin" {
+        if actor.role == VaultRole::Admin && target_access.role == VaultRole::Admin {
             return Err(AppError::forbidden("Admins cannot remove other admins"));
         }
         let current_vault = query_as::<_, DbTeamRotationVaultRow>(
@@ -2799,7 +2721,7 @@ pub(crate) mod member_handlers {
 			.await?;
 			insert_vault_member_sync_event(
 				&mut transaction,
-				"vault_member_removed",
+				SyncEventType::VaultMemberRemoved,
 				&input.user_id,
 				&input.vault_id,
 				user_id,
@@ -2866,7 +2788,7 @@ pub(crate) mod member_handlers {
     }
 
     struct ManagedVaultActor {
-        role: String,
+        role: VaultRole,
         team_id: Option<String>,
     }
 
@@ -2888,12 +2810,12 @@ pub(crate) mod member_handlers {
             load_team_billing_entitlement(pool, user_id, "Failed to load billing entitlements")
                 .await?;
         assert_vault_sharing_available(billing.as_ref())?;
-        if actor.role != "owner" && actor.role != "admin" {
+        if !actor.role.can_manage() {
             return Err(AppError::forbidden(
                 "Only vault owner or admin can manage members",
             ));
         }
-        if actor.vault_type != "team" || actor.team_id.is_none() {
+        if actor.vault_type != VaultType::Team || actor.team_id.is_none() {
             return Err(AppError::bad_request(
                 "Only team vaults support adding members",
             ));
@@ -2916,8 +2838,8 @@ pub(crate) mod member_handlers {
 			));
         };
         let entitlement = resolve_vault_sharing_entitlement(
-            billing.billing_plan.as_deref().unwrap_or("free"),
-            billing.billing_status.as_deref().unwrap_or("none"),
+            billing.billing_plan.unwrap_or(BillingPlan::Free),
+            billing.billing_status.unwrap_or(BillingStatus::None),
         );
         if !entitlement.allowed {
             return Err(AppError::forbidden(
@@ -2927,11 +2849,11 @@ pub(crate) mod member_handlers {
         Ok(())
     }
 
-    fn validate_vault_member_role(role: &str) -> Result<&str, AppError> {
-        if matches!(role, "admin" | "member" | "read-only") {
-            Ok(role)
-        } else {
-            Err(AppError::bad_request("Invalid member role"))
+    /// A vault has exactly one owner — created with the vault — so `owner` is not grantable.
+    fn validate_vault_member_role(role: VaultRole) -> Result<VaultRole, AppError> {
+        match role {
+            VaultRole::Admin | VaultRole::Member | VaultRole::ReadOnly => Ok(role),
+            VaultRole::Owner => Err(AppError::bad_request("Invalid member role")),
         }
     }
 
@@ -2939,7 +2861,7 @@ pub(crate) mod member_handlers {
     mod tests {
         use super::{
             assert_vault_sharing_available, bittery_mode, resolve_vault_sharing_entitlement,
-            validate_vault_member_role,
+            validate_vault_member_role, BillingPlan, BillingStatus, VaultRole,
         };
         use crate::db::models::DbTeamBillingEntitlementRow;
         use crate::error::AppErrorCode;
@@ -2972,14 +2894,14 @@ pub(crate) mod member_handlers {
 
         #[test]
         fn validate_vault_member_role_accepts_supported_roles() {
-            for role in ["admin", "member", "read-only"] {
+            for role in [VaultRole::Admin, VaultRole::Member, VaultRole::ReadOnly] {
                 assert_eq!(validate_vault_member_role(role).unwrap(), role);
             }
         }
 
         #[test]
         fn validate_vault_member_role_rejects_invalid_roles() {
-            let error = validate_vault_member_role("owner").unwrap_err();
+            let error = validate_vault_member_role(VaultRole::Owner).unwrap_err();
 
             assert_eq!(error.code, AppErrorCode::BadRequest);
             assert_eq!(error.message, "Invalid member role");
@@ -3005,21 +2927,25 @@ pub(crate) mod member_handlers {
         #[test]
         fn resolve_vault_sharing_entitlement_respects_plan_status_and_mode() {
             with_bittery_mode(None, || {
-                let family = resolve_vault_sharing_entitlement("family", "active");
+                let family =
+                    resolve_vault_sharing_entitlement(BillingPlan::Family, BillingStatus::Active);
                 assert!(family.allowed);
                 assert_eq!(family.shared_vault_limit, Some(5));
 
-                let team = resolve_vault_sharing_entitlement("team", "trialing");
+                let team =
+                    resolve_vault_sharing_entitlement(BillingPlan::Team, BillingStatus::Trialing);
                 assert!(team.allowed);
                 assert_eq!(team.shared_vault_limit, None);
 
-                let free = resolve_vault_sharing_entitlement("free", "active");
+                let free =
+                    resolve_vault_sharing_entitlement(BillingPlan::Free, BillingStatus::Active);
                 assert!(!free.allowed);
                 assert_eq!(free.shared_vault_limit, Some(0));
             });
 
             with_bittery_mode(Some("self-hosted"), || {
-                let entitlement = resolve_vault_sharing_entitlement("free", "none");
+                let entitlement =
+                    resolve_vault_sharing_entitlement(BillingPlan::Free, BillingStatus::None);
                 assert!(entitlement.allowed);
                 assert_eq!(entitlement.shared_vault_limit, None);
             });
@@ -3031,8 +2957,8 @@ pub(crate) mod member_handlers {
                 assert!(
                     assert_vault_sharing_available(Some(&DbTeamBillingEntitlementRow {
                         team_id: Some("team_123".to_string()),
-                        billing_plan: Some("family".to_string()),
-                        billing_status: Some("active".to_string()),
+                        billing_plan: Some(BillingPlan::Family),
+                        billing_status: Some(BillingStatus::Active),
                     }))
                     .is_ok()
                 );
@@ -3047,8 +2973,8 @@ pub(crate) mod member_handlers {
                 let free_plan =
                     assert_vault_sharing_available(Some(&DbTeamBillingEntitlementRow {
                         team_id: Some("team_123".to_string()),
-                        billing_plan: Some("free".to_string()),
-                        billing_status: Some("active".to_string()),
+                        billing_plan: Some(BillingPlan::Free),
+                        billing_status: Some(BillingStatus::Active),
                     }))
                     .unwrap_err();
                 assert_eq!(free_plan.code, AppErrorCode::Forbidden);
@@ -3061,17 +2987,17 @@ pub(crate) mod member_handlers {
     }
 }
 
-fn assert_item_write_access(role: &str, message: &str) -> Result<(), AppError> {
-    if role == "read-only" {
-        Err(AppError::forbidden(message))
-    } else {
+fn assert_item_write_access(role: VaultRole, message: &str) -> Result<(), AppError> {
+    if role.can_write() {
         Ok(())
+    } else {
+        Err(AppError::forbidden(message))
     }
 }
 
 async fn insert_item_sync_event(
     transaction: &mut Transaction<'_, Postgres>,
-    event_type: &str,
+    event_type: SyncEventType,
     item_id: &str,
     vault_id: &str,
     user_id: &str,
@@ -3082,7 +3008,7 @@ async fn insert_item_sync_event(
         &mut **transaction,
         event_type,
         item_id,
-        "item",
+        SyncEntityType::Item,
         vault_id,
         user_id,
         version,
@@ -3095,7 +3021,7 @@ async fn insert_item_sync_event(
 #[allow(clippy::too_many_arguments)]
 async fn insert_item_sync_event_with_metadata(
     transaction: &mut Transaction<'_, Postgres>,
-    event_type: &str,
+    event_type: SyncEventType,
     item_id: &str,
     vault_id: &str,
     user_id: &str,
@@ -3107,7 +3033,7 @@ async fn insert_item_sync_event_with_metadata(
         &mut **transaction,
         event_type,
         item_id,
-        "item",
+        SyncEntityType::Item,
         vault_id,
         user_id,
         version,
@@ -3138,7 +3064,7 @@ async fn insert_item_audit_log(
 
 async fn insert_vault_member_sync_event(
     transaction: &mut Transaction<'_, Postgres>,
-    event_type: &str,
+    event_type: SyncEventType,
     entity_id: &str,
     vault_id: &str,
     user_id: &str,
@@ -3149,7 +3075,7 @@ async fn insert_vault_member_sync_event(
         &mut **transaction,
         event_type,
         entity_id,
-        "vault_member",
+        SyncEntityType::VaultMember,
         vault_id,
         user_id,
         1,
@@ -3169,9 +3095,9 @@ async fn insert_vault_access_revoked_sync_event_with_metadata(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_access_revoked",
+        SyncEventType::VaultAccessRevoked,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         version,
@@ -3191,9 +3117,9 @@ async fn insert_vault_key_rotated_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_key_rotated",
+        SyncEventType::VaultKeyRotated,
         vault_id,
-        "vault_key",
+        SyncEntityType::VaultKey,
         vault_id,
         user_id,
         version,
@@ -3282,12 +3208,7 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
     let Some(_team_id) = actor.team_id else {
         return Ok(false);
     };
-    Ok(resolve_attachment_entitlement(
-        mode,
-        actor.billing_plan.as_deref(),
-        actor.billing_status.as_deref(),
-    )
-    .enabled)
+    Ok(resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status).enabled)
 }
 
 async fn load_attachment_actor(pool: &PgPool, user_id: &str) -> Result<AttachmentActor, AppError> {
@@ -3326,11 +3247,8 @@ async fn load_attachment_actor(pool: &PgPool, user_id: &str) -> Result<Attachmen
             attachment_storage_bytes: None,
         });
     }
-    let entitlement = resolve_attachment_entitlement(
-        mode,
-        actor.billing_plan.as_deref(),
-        actor.billing_status.as_deref(),
-    );
+    let entitlement =
+        resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status);
     if !entitlement.enabled {
         return Err(AppError::forbidden(
             "Attachments are only available on paid plans with active billing.",
@@ -3408,7 +3326,7 @@ async fn insert_vault(
 	)
 	.bind(vault_id)
 	.bind(input.name.trim())
-	.bind(&input.vault_type)
+	.bind(input.vault_type)
 	.bind(input.icon.as_deref())
 	.bind(input.image_key.as_deref())
 	.bind(user_id)
@@ -3449,9 +3367,9 @@ async fn insert_vault_created_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_created",
+        SyncEventType::VaultCreated,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         1,
@@ -3486,9 +3404,9 @@ async fn insert_vault_updated_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_updated",
+        SyncEventType::VaultUpdated,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         1,
@@ -3507,9 +3425,9 @@ async fn insert_vault_updated_sync_event_with_metadata(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_updated",
+        SyncEventType::VaultUpdated,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         1,
@@ -3563,9 +3481,9 @@ async fn insert_vault_deleted_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_deleted",
+        SyncEventType::VaultDeleted,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         1,
@@ -3583,9 +3501,9 @@ async fn insert_vault_access_revoked_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_access_revoked",
+        SyncEventType::VaultAccessRevoked,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         1,
@@ -3612,7 +3530,10 @@ async fn insert_vault_deleted_audit_log(
     .await
 }
 
-fn resolve_vault_sharing_entitlement(plan: &str, status: &str) -> VaultSharingEntitlement {
+fn resolve_vault_sharing_entitlement(
+    plan: BillingPlan,
+    status: BillingStatus,
+) -> VaultSharingEntitlement {
     shared_resolve_vault_sharing_entitlement(bittery_mode(), Some(plan), Some(status))
 }
 

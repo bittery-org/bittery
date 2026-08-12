@@ -1,7 +1,8 @@
+import type { VaultMember } from "@bittery/api-contract";
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
+import type { KeyRotationResult } from "@bittery/crypto-port";
 import { useApiClient } from "@bittery/shared/api";
-import type { KeyRotationResult } from "@bittery/types";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -35,16 +36,9 @@ import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
-interface VaultMember {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-}
-
 interface VaultMemberListProps {
 	vaultId: string;
-	members: VaultMember[];
+	members: readonly VaultMember[];
 	userRole: string;
 }
 

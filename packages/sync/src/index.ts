@@ -44,7 +44,12 @@ export {
 } from "./terminal-command-status";
 export * from "./types";
 // React hooks
-export type { SyncEventContext, SyncSource, UseSyncOptions } from "./use-sync";
+export type {
+	SyncContextValue,
+	SyncEventContext,
+	SyncSource,
+	UseSyncOptions,
+} from "./use-sync";
 export {
 	buildDefaultSyncSourceId,
 	generateClientId,

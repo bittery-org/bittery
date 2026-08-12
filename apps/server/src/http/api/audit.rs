@@ -12,11 +12,11 @@ use crate::{
 use super::{
     dto::ProblemDetails,
     error::ApiError,
+    error_code::ErrorCode,
     extract::{ApiQuery, AuthenticatedRequest},
 };
 
-const MAX_AUDIT_EVENTS: u16 = 100;
-const MAX_SEARCH_BYTES: usize = 200;
+use super::limits::{MAX_AUDIT_EVENTS, MAX_AUDIT_SEARCH_BYTES as MAX_SEARCH_BYTES};
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -274,7 +274,7 @@ fn validate_query(query: &AuditEventsQuery) -> Result<(), ApiError> {
         .is_some_and(|limit| limit == 0 || limit > MAX_AUDIT_EVENTS)
     {
         return Err(ApiError::bad_request(
-            "INVALID_LIMIT",
+            ErrorCode::InvalidLimit,
             format!("The audit event limit must be between 1 and {MAX_AUDIT_EVENTS}."),
         ));
     }
@@ -284,7 +284,7 @@ fn validate_query(query: &AuditEventsQuery) -> Result<(), ApiError> {
         .is_some_and(|search| search.len() > MAX_SEARCH_BYTES)
     {
         return Err(ApiError::bad_request(
-            "SEARCH_TOO_LONG",
+            ErrorCode::SearchTooLong,
             format!("Audit search text may contain at most {MAX_SEARCH_BYTES} bytes."),
         ));
     }

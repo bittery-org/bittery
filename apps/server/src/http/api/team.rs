@@ -9,18 +9,29 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     config::db_pool,
-    integrations::storage::PresignedUploadResult,
+    db::enums::{
+        InvitationStatus, ShareLinkAccessMode, ShareLinkStatus, TeamRole, TeamType, VaultRole,
+        VaultType,
+    },
     services::{
         access::{self, MemberAccessInput},
         team::{self, invitation_handlers, member_handlers},
     },
-    shapes::rotation_item_shape,
+    shapes::{
+        rotation_data_shape, rotation_item_shape, rotation_member_key_shape, rotation_member_shape,
+        rotation_reencrypted_item_shape, rotation_vault_shape, team_details_shape,
+        team_summary_shape, vault_key_rotation_shape,
+    },
     AppState, NotifySyncExt,
 };
 
 use super::{
-    dto::{CursorPage, DecimalString, PageRequest, PatchField, ProblemDetails},
+    dto::{
+        CursorPage, DecimalString, PageRequest, PatchField, PresignedUploadResponse,
+        ProblemDetails, SuccessResponse,
+    },
     error::ApiError,
+    error_code::ErrorCode,
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest},
     idempotency,
     pagination::{page_values, ApiPageQuery},
@@ -55,7 +66,7 @@ macro_rules! response_dto {
 
 request_dto!(CreateTeamRequest {
     name: String,
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
 });
 request_dto!(UpdateTeamRequest {
     #[serde(default)]
@@ -77,26 +88,37 @@ request_dto!(PendingVaultKeyRequest {
 request_dto!(SendInvitationRequest {
     email: String,
     #[serde(default = "default_member_role")]
-    role: String,
+    role: TeamRole,
     #[schema(max_items = 100)]
     pending_vault_keys: Option<Vec<PendingVaultKeyRequest>>,
 });
-request_dto!(RotationMemberKeyRequest {
-    user_id: String,
-    #[schema(max_length = 65536)]
-    encrypted_vault_key: String,
+rotation_member_key_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct RotationMemberKeyRequest
 });
-request_dto!(RotationItemRequest {
-    item_id: String,
-    encrypted_data: String,
-    encryption_iv: String,
+rotation_member_key_shape!(shape_from {
+    RotationMemberKeyRequest => team::RotationMemberKeyInput
 });
-request_dto!(VaultKeyRotationRequest {
-    #[schema(max_items = 100)]
-    member_keys: Vec<RotationMemberKeyRequest>,
-    #[schema(max_items = 100)]
-    re_encrypted_items: Vec<RotationItemRequest>,
+
+rotation_reencrypted_item_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct RotationItemRequest
 });
+rotation_reencrypted_item_shape!(shape_from {
+    RotationItemRequest => team::RotationReEncryptedItemInput
+});
+
+vault_key_rotation_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct VaultKeyRotationRequest
+}, member = RotationMemberKeyRequest, item = RotationItemRequest);
+vault_key_rotation_shape!(shape_from {
+    VaultKeyRotationRequest => team::VaultKeyRotationInput
+}, member = RotationMemberKeyRequest, item = RotationItemRequest);
+
 request_dto!(RotationVaultRequest {
     vault_id: String,
     key_rotation: VaultKeyRotationRequest,
@@ -110,76 +132,23 @@ request_dto!(RemoveTeamMemberRequest {
     vault_rotations: Vec<RotationVaultRequest>,
 });
 
-response_dto!(SuccessResponse from team::SuccessResponse {
-    success: bool,
-});
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct TeamSummaryResponse {
-    id: String,
-    name: String,
-    team_type: String,
-    owner_id: String,
-    role: String,
-    member_count: DecimalString,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    member_limit: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    image_url: Option<String>,
-    created_at: String,
-}
+team_summary_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct TeamSummaryResponse
+}, count = DecimalString);
+team_summary_shape!(shape_from {
+    team::TeamSummaryResponse => TeamSummaryResponse
+}, count = DecimalString);
 
-impl From<team::TeamSummaryResponse> for TeamSummaryResponse {
-    fn from(value: team::TeamSummaryResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            team_type: value.team_type,
-            owner_id: value.owner_id,
-            role: value.role,
-            member_count: value.member_count.into(),
-            member_limit: value.member_limit,
-            image_url: value.image_url,
-            created_at: value.created_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct TeamDetailsResponse {
-    id: String,
-    name: String,
-    team_type: String,
-    owner_id: String,
-    owner_name: String,
-    user_role: String,
-    member_count: DecimalString,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    member_limit: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    image_url: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-impl From<team::TeamDetailsResponse> for TeamDetailsResponse {
-    fn from(value: team::TeamDetailsResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            team_type: value.team_type,
-            owner_id: value.owner_id,
-            owner_name: value.owner_name,
-            user_role: value.user_role,
-            member_count: value.member_count.into(),
-            member_limit: value.member_limit,
-            image_url: value.image_url,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-        }
-    }
-}
+team_details_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct TeamDetailsResponse
+}, count = DecimalString);
+team_details_shape!(shape_from {
+    team::TeamDetailsResponse => TeamDetailsResponse
+}, count = DecimalString);
 response_dto!(TeamVaultResponse from team::TeamVaultResponse {
     id: String,
     name: String,
@@ -191,7 +160,7 @@ response_dto!(TeamMemberResponse from team::TeamMemberResponse {
     user_id: String,
     name: String,
     email: String,
-    role: String,
+    role: TeamRole,
     joined_at: String,
 });
 response_dto!(InvitationDetailsResponse from team::TeamInvitationDetailsResponse {
@@ -199,8 +168,8 @@ response_dto!(InvitationDetailsResponse from team::TeamInvitationDetailsResponse
     email: String,
     team_id: String,
     team_name: String,
-    role: String,
-    status: String,
+    role: TeamRole,
+    status: InvitationStatus,
     invited_by_name: String,
     expires_at: String,
     created_at: String,
@@ -209,15 +178,15 @@ response_dto!(PendingInvitationResponse from team::PendingTeamInvitationResponse
     id: String,
     team_id: String,
     team_name: String,
-    role: String,
+    role: TeamRole,
     invited_by: String,
     expires_at: String,
 });
 response_dto!(InvitationListResponse from invitation_handlers::TeamInvitationListEntry {
     id: String,
     email: String,
-    role: String,
-    status: String,
+    role: TeamRole,
+    status: InvitationStatus,
     invited_by: String,
     created_at: String,
     expires_at: String,
@@ -237,32 +206,14 @@ response_dto!(AcceptInvitationResponse from team::AcceptInvitationResponse {
     team_name: String,
 });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct PresignedUploadResponse {
-    key: String,
-    upload_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public_url: Option<String>,
-}
-
-impl From<PresignedUploadResult> for PresignedUploadResponse {
-    fn from(value: PresignedUploadResult) -> Self {
-        Self {
-            key: value.key,
-            upload_url: value.upload_url,
-            public_url: value.public_url,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RotationMemberResponse {
-    user_id: String,
-    public_key: String,
-    role: String,
-}
+rotation_member_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct RotationMemberResponse
+});
+rotation_member_shape!(shape_from {
+    team::RotationMemberResponse => RotationMemberResponse
+});
 
 rotation_item_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -270,62 +221,37 @@ rotation_item_shape! {
     struct RotationItemResponse {}
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RotationVaultResponse {
-    vault_id: String,
-    vault_name: String,
-    key_version: i32,
-    #[schema(max_items = 100)]
-    members: Vec<RotationMemberResponse>,
-    #[schema(max_items = 100)]
-    items: Vec<RotationItemResponse>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RotationDataResponse {
-    #[schema(max_items = 100)]
-    vaults: Vec<RotationVaultResponse>,
-}
-
-impl From<team::RotationDataResponse> for RotationDataResponse {
-    fn from(value: team::RotationDataResponse) -> Self {
-        Self {
-            vaults: value
-                .vaults
-                .into_iter()
-                .map(|vault| RotationVaultResponse {
-                    vault_id: vault.vault_id,
-                    vault_name: vault.vault_name,
-                    key_version: vault.key_version,
-                    members: vault
-                        .members
-                        .into_iter()
-                        .map(|member| RotationMemberResponse {
-                            user_id: member.user_id,
-                            public_key: member.public_key,
-                            role: member.role,
-                        })
-                        .collect(),
-                    items: vault
-                        .items
-                        .into_iter()
-                        .map(|item| RotationItemResponse::compose(item.decompose().0))
-                        .collect(),
-                })
-                .collect(),
-        }
+impl From<team::RotationItemResponse> for RotationItemResponse {
+    fn from(value: team::RotationItemResponse) -> Self {
+        Self::compose(value.decompose().0)
     }
 }
+
+rotation_vault_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct RotationVaultResponse
+});
+rotation_vault_shape!(shape_from {
+    team::RotationVaultResponse => RotationVaultResponse
+});
+
+rotation_data_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct RotationDataResponse
+});
+rotation_data_shape!(shape_from {
+    team::RotationDataResponse => RotationDataResponse
+});
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct MemberVaultAccessResponse {
     id: String,
     name: String,
-    vault_type: String,
-    role: String,
+    vault_type: VaultType,
+    role: VaultRole,
     granted_at: String,
     item_count: u32,
 }
@@ -354,8 +280,8 @@ struct MemberDeviceResponse {
 struct MemberShareLinkResponse {
     id: String,
     item_id: String,
-    status: String,
-    access_mode: String,
+    status: ShareLinkStatus,
+    access_mode: ShareLinkAccessMode,
     access_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_access_count: Option<u32>,
@@ -518,8 +444,8 @@ enum TeamErrorResponses {
     Internal(ProblemDetails),
 }
 
-fn default_member_role() -> String {
-    "member".to_string()
+fn default_member_role() -> TeamRole {
+    TeamRole::Member
 }
 
 fn rotations(values: Vec<RotationVaultRequest>) -> Vec<team::RotationVaultInput> {
@@ -527,27 +453,7 @@ fn rotations(values: Vec<RotationVaultRequest>) -> Vec<team::RotationVaultInput>
         .into_iter()
         .map(|value| team::RotationVaultInput {
             vault_id: value.vault_id,
-            key_rotation: team::VaultKeyRotationInput {
-                member_keys: value
-                    .key_rotation
-                    .member_keys
-                    .into_iter()
-                    .map(|key| team::RotationMemberKeyInput {
-                        user_id: key.user_id,
-                        encrypted_vault_key: key.encrypted_vault_key,
-                    })
-                    .collect(),
-                re_encrypted_items: value
-                    .key_rotation
-                    .re_encrypted_items
-                    .into_iter()
-                    .map(|item| team::RotationReEncryptedItemInput {
-                        item_id: item.item_id,
-                        encrypted_data: item.encrypted_data,
-                        encryption_iv: item.encryption_iv,
-                    })
-                    .collect(),
-            },
+            key_rotation: value.key_rotation.into(),
         })
         .collect()
 }
@@ -641,7 +547,7 @@ async fn update_team(
         PatchField::Value(value) => Some(value),
         PatchField::Null => {
             return Err(ApiError::bad_request(
-                "FIELD_CANNOT_BE_CLEARED",
+                ErrorCode::FieldCannotBeCleared,
                 "/name cannot be null.",
             ))
         }

@@ -20,6 +20,7 @@ import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { fillItemIntoActiveTab } from "@/lib/autofill-active-tab";
 import { hostnameMatches } from "@/lib/hostname";
 import { lockVaultThroughWorker } from "@/lib/lock-vault";
+import { sendMessage } from "@/lib/messaging";
 import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -208,10 +209,8 @@ export function VaultPage() {
 	const { data: items = [], isLoading } = useQuery<DecryptedItemWithContext[]>({
 		queryKey: ["vault-items"],
 		queryFn: async () => {
-			const response = await chrome.runtime.sendMessage({
-				type: "GET_VAULT_ITEMS",
-			});
-			return response.items || [];
+			const response = await sendMessage({ type: "GET_VAULT_ITEMS" });
+			return response.success ? response.items : [];
 		},
 	});
 
@@ -227,9 +226,7 @@ export function VaultPage() {
 
 	const handleOpenDesktopApp = useCallback(async () => {
 		try {
-			const response = await chrome.runtime.sendMessage({
-				type: "OPEN_DESKTOP_APP",
-			});
+			const response = await sendMessage({ type: "OPEN_DESKTOP_APP" });
 			if (!response?.success) {
 				throw new Error(response?.error || "Failed to open desktop app");
 			}
@@ -250,7 +247,7 @@ export function VaultPage() {
 					currentWindow: true,
 				});
 				const tabUrl = tab?.url?.startsWith("http") ? tab.url : undefined;
-				const response = await chrome.runtime.sendMessage({
+				const response = await sendMessage({
 					type: "OPEN_DESKTOP_APP",
 					payload: { intent: "create_item", url: tabUrl },
 				});
@@ -284,7 +281,7 @@ export function VaultPage() {
 		async (item: DecryptedItemWithContext) => {
 			if (isDesktopMode) {
 				try {
-					const response = await chrome.runtime.sendMessage({
+					const response = await sendMessage({
 						type: "OPEN_DESKTOP_APP",
 						payload: {
 							intent: "view_item",

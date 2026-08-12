@@ -11,7 +11,6 @@
 import { AccountResolver } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { ApiVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import type {
@@ -123,7 +122,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 			core.vaultCoordinator as VaultRepositoryCoordinator,
 			accountClient
 				? {
-						apiClient: accountClient as unknown as ApiVaultClient,
+						apiClient: accountClient,
 						accounts,
 					}
 				: undefined,

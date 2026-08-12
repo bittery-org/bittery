@@ -32,6 +32,7 @@
 import type {
 	Attachment,
 	DeletedVaultItem,
+	ItemCategory,
 	ItemPayload,
 	SyncBootstrapItem,
 	VaultItem,
@@ -44,6 +45,7 @@ import type {
 	ItemSyncEncryptedPayload,
 	RawEncryptedItem,
 	RawEncryptedItemWithVault,
+	VaultSummary,
 } from "@bittery/types";
 import type { DecryptedItemData } from "./types";
 
@@ -52,7 +54,7 @@ import type { DecryptedItemData } from "./types";
 // ============================================================================
 
 /** Attachment metadata as any server payload carries it. */
-export type ServerItemAttachment = Attachment;
+type ServerItemAttachment = Attachment;
 
 /**
  * The wire shape shared by every server Item payload — `items.get`, `items.listInVault`,
@@ -117,8 +119,8 @@ export interface EncryptedItemPayload {
 	encryptedByUserId: string;
 }
 
-/** The vault sub-object a raw item carries. */
-export type ItemVaultSummary = RawEncryptedItemWithVault["vault"];
+/** The vault sub-object a raw item carries — the canonical {@link VaultSummary}. */
+export type ItemVaultSummary = VaultSummary;
 
 /** Shown when an item names a vault this device has no metadata for. */
 const UNKNOWN_VAULT_NAME = "Unknown Vault";
@@ -208,7 +210,7 @@ export function toCachedItemFromRepositoryItem(
 export interface NewCachedItemInput {
 	id: string;
 	vaultId: string;
-	category: string;
+	category: ItemCategory;
 	/** Written to both `createdAt` and `updatedAt`: a fresh record has no history. */
 	timestamp: string;
 	/**
@@ -303,7 +305,7 @@ export function toItemVaultSummary(
  * A cached record read back as a raw item. The one field the wire leaves optional is always
  * present, because the cache has already decided it.
  */
-export type RawItemFromCache = RawEncryptedItem & {
+type RawItemFromCache = RawEncryptedItem & {
 	deletedAt: string | null;
 };
 

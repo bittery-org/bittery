@@ -1,11 +1,10 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { VaultItemListRow } from "@bittery/ui";
+import { type DragItemData, VaultItemListRow } from "@bittery/ui";
 import { IconClock, IconPasskey } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-import type { DragItemData } from "../../providers/dnd-provider";
 import { useVaultDnd } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { Favicon } from "./favicon";

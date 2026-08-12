@@ -1,5 +1,10 @@
 /**
  * Background Message Router Types
+ *
+ * Handler-side projections of `contract.ts`. Nothing here restates a route's
+ * shape: `RouteDefinition<K>` reads the payload and response straight out of
+ * the contract, and `RouteRegistry` is a total map over its keys, so a route
+ * that exists in only one of the two places is a compile error.
  */
 
 import type {
@@ -7,12 +12,7 @@ import type {
 	handlePasskeyCreate,
 	handlePasskeyGet,
 } from "../passkey-handlers";
-import type { MessageResponse } from "../types";
-
-export type RuntimeMessage = {
-	type: string;
-	payload?: unknown;
-};
+import type { RouteKey, RoutePayload, RouteResponse } from "./contract";
 
 export interface PasskeyHandlers {
 	handlePasskeyCreate: typeof handlePasskeyCreate;
@@ -30,22 +30,19 @@ export interface RouteContext {
 	passkeyHandlers: PasskeyHandlers;
 }
 
-export function getPayload<TPayload>(message: RuntimeMessage): TPayload {
-	return message.payload as TPayload;
-}
-
-export interface RouteDefinition<P = unknown> {
+export interface RouteDefinition<K extends RouteKey> {
 	handle(
-		payload: P,
+		payload: RoutePayload<K>,
 		ctx: RouteContext,
-	): Promise<MessageResponse> | MessageResponse;
+	): Promise<RouteResponse<K>> | RouteResponse<K>;
 	/**
 	 * When truthy (or when the predicate returns true for the route's
 	 * response), `ensureSyncInitialized` runs after `handle` resolves.
 	 */
-	syncInitOnSuccess?: boolean | ((response: MessageResponse) => boolean);
+	syncInitOnSuccess?: boolean | ((response: RouteResponse<K>) => boolean);
 	/** Runs before `handle`, e.g. to disconnect/cleanup sync as a side effect. */
 	before?: (ctx: RouteContext) => void | Promise<void>;
 }
 
-export type RouteRegistry = Record<string, RouteDefinition<any>>;
+/** Total over `RouteKey`: a missing route and an unknown route both fail here. */
+export type RouteRegistry = { [K in RouteKey]: RouteDefinition<K> };

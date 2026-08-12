@@ -1,12 +1,9 @@
+import type { RouteResponse } from "@/background/router/contract";
+import { sendMessage } from "@/lib/messaging";
+
 export type LockDecision =
 	| { ok: true }
 	| { ok: false; code?: "desktop_owns_lock" };
-
-type LockResponse = {
-	success?: boolean;
-	code?: string;
-	error?: string;
-};
 
 /**
  * Locks through the service worker, the only context whose MUK cache actually
@@ -14,9 +11,9 @@ type LockResponse = {
  * sendMessage must read as "not locked", never as success.
  */
 export async function lockVaultThroughWorker(): Promise<LockDecision> {
-	let response: LockResponse | undefined;
+	let response: RouteResponse<"LOCK"> | undefined;
 	try {
-		response = await chrome.runtime.sendMessage({ type: "LOCK" });
+		response = await sendMessage({ type: "LOCK" });
 	} catch (error) {
 		console.error("[lock-vault] LOCK message failed:", error);
 		return { ok: false };

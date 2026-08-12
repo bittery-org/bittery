@@ -6,7 +6,7 @@ use axum::{
 
 use crate::error::{AppError, AppErrorCode};
 
-use super::dto::ProblemDetails;
+use super::{dto::ProblemDetails, error_code::ErrorCode};
 
 const RATE_LIMIT_RETRY_AFTER_SECONDS: u32 = 60;
 const TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS: u32 = 1;
@@ -43,21 +43,28 @@ impl ApiError {
     }
 
     #[cfg(test)]
-    pub(crate) fn code(&self) -> &str {
-        &self.problem.code
+    pub(crate) fn code(&self) -> ErrorCode {
+        self.problem.code
     }
-    pub(crate) fn bad_request(code: &str, detail: impl Into<String>) -> Self {
+
+    pub(crate) fn bad_request(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, code, "Bad request", detail, false)
     }
 
     pub(crate) fn invalid_request(status: StatusCode, detail: impl Into<String>) -> Self {
-        Self::new(status, "INVALID_REQUEST", "Invalid request", detail, false)
+        Self::new(
+            status,
+            ErrorCode::InvalidRequest,
+            "Invalid request",
+            detail,
+            false,
+        )
     }
 
     pub(crate) fn payload_too_large(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "PAYLOAD_TOO_LARGE",
+            ErrorCode::PayloadTooLarge,
             "Payload too large",
             detail,
             false,
@@ -67,7 +74,7 @@ impl ApiError {
     pub(crate) fn unsupported_media_type(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "UNSUPPORTED_MEDIA_TYPE",
+            ErrorCode::UnsupportedMediaType,
             "Unsupported media type",
             detail,
             false,
@@ -77,7 +84,7 @@ impl ApiError {
     pub(crate) fn precondition_required(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::PRECONDITION_REQUIRED,
-            "PRECONDITION_REQUIRED",
+            ErrorCode::PreconditionRequired,
             "Precondition required",
             detail,
             false,
@@ -87,14 +94,14 @@ impl ApiError {
     pub(crate) fn version_conflict(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::PRECONDITION_FAILED,
-            "VERSION_CONFLICT",
+            ErrorCode::VersionConflict,
             "Version conflict",
             detail,
             false,
         )
     }
 
-    pub(crate) fn unprocessable(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn unprocessable(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             code,
@@ -104,11 +111,11 @@ impl ApiError {
         )
     }
 
-    pub(crate) fn conflict(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn conflict(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, code, "Conflict", detail, false)
     }
 
-    pub(crate) fn service_unavailable(code: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn service_unavailable(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
             code,
@@ -124,7 +131,7 @@ impl ApiError {
     pub(crate) fn unauthorized(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
-            "UNAUTHORIZED",
+            ErrorCode::Unauthorized,
             "Authentication required",
             detail,
             false,
@@ -134,7 +141,7 @@ impl ApiError {
     pub(crate) fn api_route_not_found() -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
-            "API_ROUTE_NOT_FOUND",
+            ErrorCode::ApiRouteNotFound,
             "API route not found",
             "The requested API route does not exist.",
             false,
@@ -144,7 +151,7 @@ impl ApiError {
     pub(crate) fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
-            "METHOD_NOT_ALLOWED",
+            ErrorCode::MethodNotAllowed,
             "Method not allowed",
             "The requested method is not supported for this API route.",
             false,
@@ -153,7 +160,7 @@ impl ApiError {
 
     fn new(
         status: StatusCode,
-        code: &str,
+        code: ErrorCode,
         title: &str,
         detail: impl Into<String>,
         retryable: bool,
@@ -163,13 +170,10 @@ impl ApiError {
             status,
             retry_after: None,
             problem: Box::new(ProblemDetails {
-                problem_type: format!(
-                    "https://bittery.com/problems/{}",
-                    code.to_ascii_lowercase().replace('_', "-")
-                ),
+                problem_type: code.problem_type(),
                 title: title.to_string(),
                 status: status.as_u16(),
-                code: code.to_string(),
+                code,
                 detail: detail.into(),
                 instance: format!("urn:bittery:request:{request_id}"),
                 request_id,
@@ -192,7 +196,7 @@ impl From<AppError> for ApiError {
                 tracing::error!(error = %error, "API request failed internally");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "INTERNAL_ERROR",
+                    ErrorCode::InternalError,
                     "Internal server error",
                     "The server could not complete the request.".to_string(),
                     false,
@@ -200,49 +204,49 @@ impl From<AppError> for ApiError {
             }
             AppErrorCode::BadRequest => (
                 StatusCode::BAD_REQUEST,
-                "BAD_REQUEST",
+                ErrorCode::BadRequest,
                 "Bad request",
                 error.message,
                 false,
             ),
             AppErrorCode::NotFound => (
                 StatusCode::NOT_FOUND,
-                "NOT_FOUND",
+                ErrorCode::NotFound,
                 "Not found",
                 error.message,
                 false,
             ),
             AppErrorCode::Forbidden => (
                 StatusCode::FORBIDDEN,
-                "FORBIDDEN",
+                ErrorCode::Forbidden,
                 "Forbidden",
                 error.message,
                 false,
             ),
             AppErrorCode::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                "UNAUTHORIZED",
+                ErrorCode::Unauthorized,
                 "Authentication required",
                 error.message,
                 false,
             ),
             AppErrorCode::Conflict => (
                 StatusCode::CONFLICT,
-                "CONFLICT",
+                ErrorCode::Conflict,
                 "Conflict",
                 error.message,
                 false,
             ),
             AppErrorCode::TooManyRequests => (
                 StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMITED",
+                ErrorCode::RateLimited,
                 "Too many requests",
                 error.message,
                 true,
             ),
             AppErrorCode::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "PAYLOAD_TOO_LARGE",
+                ErrorCode::PayloadTooLarge,
                 "Payload too large",
                 error.message,
                 false,
@@ -287,7 +291,7 @@ mod tests {
     };
     use serde_json::Value;
 
-    use crate::error::AppError;
+    use crate::{error::AppError, http::api::error_code::ErrorCode};
 
     #[tokio::test]
     async fn internal_errors_are_redacted_as_problem_json() {
@@ -324,7 +328,9 @@ mod tests {
             super::RATE_LIMIT_RETRY_AFTER_SECONDS
         );
 
-        let unavailable = super::ApiError::service_unavailable("BUSY", "try again").into_response();
+        let unavailable =
+            super::ApiError::service_unavailable(ErrorCode::ServiceUnavailable, "try again")
+                .into_response();
         assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
             unavailable.headers()["retry-after"]

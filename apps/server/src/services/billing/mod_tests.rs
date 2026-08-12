@@ -9,6 +9,7 @@ use super::{
     is_stripe_api_configured, replace_stripe_mock_state, self_hosted_billing_status,
     stripe_mock_calls, web_app_url, StripeMockCall, StripeMockState, GB,
 };
+use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
@@ -351,14 +352,14 @@ fn self_hosted_status_matches_expected_snapshot() {
     let status = self_hosted_billing_status();
 
     assert!(!status.enabled);
-    assert_eq!(status.plan, "free");
-    assert_eq!(status.status, "none");
+    assert_eq!(status.plan, BillingPlan::Free);
+    assert_eq!(status.status, BillingStatus::None);
     assert!(!status.requires_payment);
 }
 
 #[test]
 fn free_cloud_plan_disables_paid_entitlements() {
-    let snapshot = get_billing_snapshot("cloud", "free", "none");
+    let snapshot = get_billing_snapshot("cloud", BillingPlan::Free, BillingStatus::None);
 
     assert!(!snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.share_links);
@@ -373,7 +374,7 @@ fn free_cloud_plan_disables_paid_entitlements() {
 
 #[test]
 fn inactive_paid_plan_keeps_only_billing_portal() {
-    let snapshot = get_billing_snapshot("cloud", "personal", "incomplete");
+    let snapshot = get_billing_snapshot("cloud", BillingPlan::Personal, BillingStatus::Incomplete);
 
     assert!(!snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.share_links);
@@ -386,7 +387,7 @@ fn inactive_paid_plan_keeps_only_billing_portal() {
 
 #[test]
 fn self_hosted_mode_enables_non_cloud_features() {
-    let snapshot = get_billing_snapshot("self-hosted", "team", "active");
+    let snapshot = get_billing_snapshot("self-hosted", BillingPlan::Team, BillingStatus::Active);
 
     assert!(snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.billing_portal);

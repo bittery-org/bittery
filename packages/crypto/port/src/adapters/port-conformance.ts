@@ -23,14 +23,14 @@
  * once per test, sometimes twice, and assumes no state carries over between them.
  */
 
-import { describe, expect, test } from "bun:test";
-import type { ItemData, KdfProfile } from "@bittery/types";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import type { CryptoPort } from "../crypto-port";
 import {
 	CRYPTO_PORT_ERROR_CODES,
 	CryptoPortError,
 	type CryptoPortErrorCode,
 } from "../errors";
+import type { ItemData, KdfProfile } from "../types";
 
 /**
  * Named so a port that grew a member without growing the suite fails to compile. The
@@ -75,6 +75,7 @@ export const CRYPTO_PORT_MEMBERS = [
 	"generatePasskeyCredentialId",
 	"buildPasskeyAttestationObject",
 	"signPasskeyAssertion",
+	"generateTotp",
 	"generateUuid",
 ] as const satisfies readonly (keyof CryptoPort)[];
 
@@ -124,6 +125,21 @@ function itemContext(itemId: string): ItemData["context"] {
 const UUID_V4 =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * RFC 6238 Appendix B, base32-encoded: the ASCII seeds "12345678901234567890" and its 32- and
+ * 64-byte extensions. Vectors rather than a smoke test, because an adapter that swapped
+ * `digits` for `period` — or handed `algorithm` to the wrong slot — still returns *a* code.
+ */
+const TOTP_SEED_SHA1 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+const TOTP_SEED_SHA256 =
+	"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA====";
+const TOTP_SEED_SHA512 =
+	"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA=";
+
+/** The RFC's first row: T = 59s, X = 30s, 8 digits. */
+const TOTP_T59_MS = 59_000;
+const TOTP_PERIOD = 30;
+
 function encodeBase64(bytes: Uint8Array): string {
 	let binary = "";
 	for (const byte of bytes) {
@@ -146,6 +162,22 @@ function isBase64(value: string): boolean {
 		return encodeBase64(decodeBase64(value)) === value;
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Runs `body` with the clock pinned. A TOTP code is a function of wall-clock time, so a known
+ * vector only means anything inside a known window.
+ */
+async function atUnixTime<T>(
+	milliseconds: number,
+	body: () => Promise<T>,
+): Promise<T> {
+	setSystemTime(new Date(milliseconds));
+	try {
+		return await body();
+	} finally {
+		setSystemTime();
 	}
 }
 
@@ -1229,7 +1261,6 @@ export function runCryptoPortConformance(
 			const challenge = {
 				salt: (await port.generateSrpRegistration(PASSWORD)).salt,
 				serverPublicKey: (await port.generateClientEphemeral()).publicKey,
-				kdfParams: PROFILE,
 			};
 
 			const session = await port.deriveClientSession(
@@ -1262,7 +1293,6 @@ export function runCryptoPortConformance(
 				{
 					salt: (await port.generateSrpRegistration(PASSWORD)).salt,
 					serverPublicKey: (await port.generateClientEphemeral()).publicKey,
-					kdfParams: PROFILE,
 				},
 				PASSWORD,
 			);
@@ -1369,6 +1399,108 @@ export function runCryptoPortConformance(
 					clientDataHash,
 					1,
 				),
+			);
+		});
+	});
+
+	// ==================================================================
+	// One-time codes
+	// ==================================================================
+
+	describe(`${name} — TOTP`, () => {
+		test("generateTotp matches the RFC 6238 vectors at T = 59s", async () => {
+			const port = await make();
+
+			const codes = await atUnixTime(TOTP_T59_MS, async () => [
+				(await port.generateTotp(TOTP_SEED_SHA1, "SHA1", 8, TOTP_PERIOD)).code,
+				(await port.generateTotp(TOTP_SEED_SHA256, "SHA256", 8, TOTP_PERIOD))
+					.code,
+				(await port.generateTotp(TOTP_SEED_SHA512, "SHA512", 8, TOTP_PERIOD))
+					.code,
+			]);
+
+			expect(codes).toEqual(["94287082", "46119246", "90693936"]);
+		});
+
+		test("generateTotp truncates one window to the requested digit count", async () => {
+			const port = await make();
+
+			const codes = await atUnixTime(TOTP_T59_MS, async () => [
+				(await port.generateTotp(TOTP_SEED_SHA1, "SHA1", 6, TOTP_PERIOD)).code,
+				(await port.generateTotp(TOTP_SEED_SHA1, "SHA1", 7, TOTP_PERIOD)).code,
+				(await port.generateTotp(TOTP_SEED_SHA1, "SHA1", 8, TOTP_PERIOD)).code,
+			]);
+
+			expect(codes).toEqual(["287082", "4287082", "94287082"]);
+		});
+
+		test("generateTotp reads the hash name case-insensitively", async () => {
+			const port = await make();
+
+			const code = await atUnixTime(
+				TOTP_T59_MS,
+				async () =>
+					(await port.generateTotp(TOTP_SEED_SHA256, "sha256", 8, TOTP_PERIOD))
+						.code,
+			);
+
+			expect(code).toBe("46119246");
+		});
+
+		test("generateTotp reports where the code sits in its window", async () => {
+			const port = await make();
+
+			const late = await atUnixTime(TOTP_T59_MS, () =>
+				port.generateTotp(TOTP_SEED_SHA1, "SHA1", 6, TOTP_PERIOD),
+			);
+			const fresh = await atUnixTime(60_000, () =>
+				port.generateTotp(TOTP_SEED_SHA1, "SHA1", 6, TOTP_PERIOD),
+			);
+
+			expect(late.period).toBe(TOTP_PERIOD);
+			expect(late.remainingSeconds).toBe(1);
+			expect(late.progress).toBeCloseTo((29 / 30) * 100, 5);
+			// A new window: full countdown, nothing elapsed, and a different code.
+			expect(fresh.remainingSeconds).toBe(TOTP_PERIOD);
+			expect(fresh.progress).toBe(0);
+			expect(fresh.code).not.toBe(late.code);
+		});
+
+		test("generateTotp is stable within one window and moves between them", async () => {
+			const port = await make();
+
+			const early = await atUnixTime(30_000, () =>
+				port.generateTotp(TOTP_SEED_SHA1, "SHA1", 8, TOTP_PERIOD),
+			);
+			const later = await atUnixTime(TOTP_T59_MS, () =>
+				port.generateTotp(TOTP_SEED_SHA1, "SHA1", 8, TOTP_PERIOD),
+			);
+			const next = await atUnixTime(60_000, () =>
+				port.generateTotp(TOTP_SEED_SHA1, "SHA1", 8, TOTP_PERIOD),
+			);
+
+			expect(early.code).toBe(later.code);
+			expect(next.code).not.toBe(later.code);
+		});
+
+		test("generateTotp rejects arguments the core will not accept", async () => {
+			const port = await make();
+
+			await expectPortError(
+				() => port.generateTotp(TOTP_SEED_SHA1, "SHA1", 5, TOTP_PERIOD),
+				"invalid-input",
+			);
+			await expectPortError(
+				() => port.generateTotp(TOTP_SEED_SHA1, "SHA1", 9, TOTP_PERIOD),
+				"invalid-input",
+			);
+			await expectPortError(
+				() => port.generateTotp(TOTP_SEED_SHA1, "SHA1", 6, 0),
+				"invalid-input",
+			);
+			await expectPortError(
+				() => port.generateTotp("ABC!DEF", "SHA1", 6, TOTP_PERIOD),
+				"invalid-input",
 			);
 		});
 	});

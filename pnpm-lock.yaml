@@ -568,6 +568,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@bittery/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
       '@bittery/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -728,6 +731,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@bittery/api-contract':
+        specifier: workspace:*
+        version: link:../api-contract
       '@bittery/crypto-port':
         specifier: workspace:*
         version: link:../crypto/port
@@ -770,9 +776,6 @@ importers:
 
   packages/crypto/port:
     dependencies:
-      '@bittery/types':
-        specifier: workspace:*
-        version: link:../../types
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -857,6 +860,9 @@ importers:
       '@bittery/api-contract':
         specifier: workspace:*
         version: link:../api-contract
+      '@bittery/crypto-port':
+        specifier: workspace:*
+        version: link:../crypto/port
       '@bittery/device':
         specifier: workspace:*
         version: link:../device
@@ -925,6 +931,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@bittery/api-contract':
+        specifier: workspace:*
+        version: link:../api-contract
       '@bittery/shared':
         specifier: workspace:*
         version: link:../shared

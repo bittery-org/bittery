@@ -18,7 +18,9 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isBackgroundEvent } from "../background/events";
 import { crypto } from "../lib/crypto";
+import { sendMessage } from "../lib/messaging";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
 import { itemCache, storage } from "../lib/storage";
 import {
@@ -29,7 +31,20 @@ import { createWorkerOwnedOutboundQueue } from "../lib/worker-owned-outbound-que
 import { useI18n } from "./i18n-provider";
 
 /**
- * Context for sync state
+ * Context for sync state.
+ *
+ * Deliberately NOT `SyncContextValue` from `@bittery/sync`, which web, desktop and mobile
+ * share. This provider does not run a sync engine — the background service worker does, and
+ * this is a view of it assembled from runtime messages. Three differences follow, and each
+ * would be a lie if it were typed the shared way:
+ *
+ * - `status` is the worker's {@link ConnectionStatus}, not a `SyncStatus`. The popup never
+ *   sees `lastSyncTime` or `pendingChanges`; those live in the worker.
+ * - There is no `reconnect`/`disconnect`. A popup closing must not tear down the worker's
+ *   connection, so it is not offered the handles.
+ * - `invalidator` and `outboundQueue` are the `@bittery/types` seam interfaces rather than
+ *   the concrete sync classes, because the implementations here are extension-local: one
+ *   invalidates a popup-scoped query client, the other forwards mutations to the worker.
  */
 interface SyncContextValue {
 	status: ConnectionStatus;
@@ -44,42 +59,8 @@ interface SyncContextValue {
 const SyncContext = createContext<SyncContextValue | null>(null);
 
 /**
- * Message types from background worker
- */
-interface SyncStatusMessage {
-	type: "SYNC_STATUS_CHANGED";
-	status: ConnectionStatus;
-}
-
-interface SyncFullRefreshMessage {
-	type: "SYNC_FULL_REFRESH_REQUIRED";
-}
-
-interface SyncCommandStatusMessage {
-	type: "SYNC_COMMAND_STATUS_CHANGED";
-	summary: SyncCommandSummary;
-}
-
-type BackgroundMessage =
-	| SyncStatusMessage
-	| SyncFullRefreshMessage
-	| SyncCommandStatusMessage;
-
-function isBackgroundMessage(message: unknown): message is BackgroundMessage {
-	if (!message || typeof message !== "object") {
-		return false;
-	}
-	const typed = message as Partial<BackgroundMessage>;
-	return (
-		typed.type === "SYNC_STATUS_CHANGED" ||
-		typed.type === "SYNC_FULL_REFRESH_REQUIRED" ||
-		typed.type === "SYNC_COMMAND_STATUS_CHANGED"
-	);
-}
-
-/**
  * Provider component for sync functionality (Extension)
- * Listens to background worker sync events via chrome.runtime.sendMessage
+ * Listens to background worker sync events via runtime messages
  */
 export function ExtensionSyncProvider({
 	children,
@@ -113,7 +94,7 @@ export function ExtensionSyncProvider({
 	const outboundQueue = useMemo(
 		() =>
 			createWorkerOwnedOutboundQueue({
-				sendMessage: (message) => chrome.runtime.sendMessage(message),
+				sendMessage,
 				applyProjection: (command) =>
 					vaultCoordinator.applyItemCommand(command),
 				discardProjection: (command) =>
@@ -127,26 +108,23 @@ export function ExtensionSyncProvider({
 		(async () => {
 			try {
 				// Request initial sync status
-				const statusResponse = await chrome.runtime.sendMessage({
-					type: "GET_SYNC_STATUS",
-				});
-				if (statusResponse?.status) {
-					setStatus(statusResponse.status as ConnectionStatus);
+				const statusResponse = await sendMessage({ type: "GET_SYNC_STATUS" });
+				if (statusResponse.success) {
+					setStatus(statusResponse.status);
 				}
 
 				// Request client ID
-				const clientIdResponse = await chrome.runtime.sendMessage({
+				const clientIdResponse = await sendMessage({
 					type: "GET_SYNC_CLIENT_ID",
 				});
-				if (clientIdResponse?.clientId) {
-					setClientId(clientIdResponse.clientId as string);
+				if (clientIdResponse.success && clientIdResponse.clientId) {
+					setClientId(clientIdResponse.clientId);
 				}
-				const commandResponse = await chrome.runtime.sendMessage({
+				const commandResponse = await sendMessage({
 					type: "GET_SYNC_COMMAND_SUMMARY",
 				});
-				if (commandResponse?.summary) {
-					commandSummaryRef.current =
-						commandResponse.summary as SyncCommandSummary;
+				if (commandResponse.success) {
+					commandSummaryRef.current = commandResponse.summary;
 					commandSummaryInitializedRef.current = true;
 				}
 				await outboundQueue.recoverStaged();
@@ -184,7 +162,7 @@ export function ExtensionSyncProvider({
 				);
 				return true;
 			}
-			if (!isBackgroundMessage(message)) {
+			if (!isBackgroundEvent(message)) {
 				return;
 			}
 

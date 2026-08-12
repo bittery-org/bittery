@@ -9,9 +9,8 @@ import {
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { ApiVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
-import type { OutboundQueueApiClient, SyncStorage } from "@bittery/sync";
+import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useToast } from "heroui-native";
@@ -177,7 +176,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				clientId,
 			);
 			if (!client) throw new Error(`No API client for account ${accountId}`);
-			return client as unknown as OutboundQueueApiClient;
+			return client;
 		},
 		[clientId],
 	);
@@ -233,7 +232,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				itemCache,
 				vaultCoordinator,
 				{
-					apiClient: apiClient as unknown as ApiVaultClient,
+					apiClient,
 					accounts,
 				},
 			);

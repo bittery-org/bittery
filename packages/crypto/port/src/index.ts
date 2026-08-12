@@ -14,3 +14,21 @@ export {
 	CryptoPortError,
 	isCryptoPortError,
 } from "./errors";
+export type {
+	EncryptedData,
+	EncryptionContext,
+	ItemData,
+	KdfAlgorithm,
+	KdfProfile,
+	KeyRotationResult,
+	MemberEncryptedKey,
+	MemberKeyData,
+	ReEncryptedItem,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+	TotpResult,
+	ValidationResult,
+} from "./types";

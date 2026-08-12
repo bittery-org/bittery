@@ -19,6 +19,8 @@ use std::sync::{LazyLock, Mutex};
 
 use keyring::Entry;
 
+use crate::tauri_api::{KeychainDeleteArgs, KeychainGetArgs, KeychainSetArgs};
+
 /// Service identifier for Bittery in the OS keychain
 const SERVICE: &str = "com.bittery.desktop";
 
@@ -86,8 +88,32 @@ fn save_vault(data: &HashMap<String, String>) -> Result<(), String> {
 }
 
 /// Store a value in the OS keychain (inside the single vault blob)
+///
+/// The three commands in this file are thin adapters: they name their arguments
+/// through `tauri_api`, so the generated TypeScript and the parameters Tauri
+/// actually binds cannot drift apart, and then hand off to the plain functions
+/// below, which is what the tests exercise.
 #[tauri::command]
-pub fn keychain_set(key: &str, value: &str) -> Result<(), String> {
+pub fn keychain_set(key: String, value: String) -> Result<(), String> {
+    let args = KeychainSetArgs { key, value };
+    set_value(&args.key, &args.value)
+}
+
+/// Retrieve a value from the OS keychain (from the single vault blob)
+#[tauri::command]
+pub fn keychain_get(key: String) -> Result<Option<String>, String> {
+    let args = KeychainGetArgs { key };
+    get_value(&args.key)
+}
+
+/// Delete a value from the OS keychain (from the single vault blob)
+#[tauri::command]
+pub fn keychain_delete(key: String) -> Result<bool, String> {
+    let args = KeychainDeleteArgs { key };
+    delete_value(&args.key)
+}
+
+pub(crate) fn set_value(key: &str, value: &str) -> Result<(), String> {
     let mut cache = VAULT_CACHE
         .lock()
         .map_err(|e| format!("Vault cache lock poisoned: {}", e))?;
@@ -108,15 +134,11 @@ pub fn keychain_set(key: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Retrieve a value from the OS keychain (from the single vault blob)
-#[tauri::command]
-pub fn keychain_get(key: &str) -> Result<Option<String>, String> {
+pub(crate) fn get_value(key: &str) -> Result<Option<String>, String> {
     Ok(load_vault()?.get(key).cloned())
 }
 
-/// Delete a value from the OS keychain (from the single vault blob)
-#[tauri::command]
-pub fn keychain_delete(key: &str) -> Result<bool, String> {
+pub(crate) fn delete_value(key: &str) -> Result<bool, String> {
     let mut cache = VAULT_CACHE
         .lock()
         .map_err(|e| format!("Vault cache lock poisoned: {}", e))?;
@@ -172,32 +194,32 @@ mod tests {
         let test_value = "test_secret_value_12345";
 
         // Clean up any existing entry
-        let _ = keychain_delete(test_key);
+        let _ = delete_value(test_key);
 
         // Reset cache so we re-read from keychain
         reset_cache();
 
         // Test that key doesn't exist initially
-        let result = keychain_get(test_key).unwrap();
+        let result = get_value(test_key).unwrap();
         assert!(result.is_none());
 
         // Store the value
-        keychain_set(test_key, test_value).unwrap();
+        set_value(test_key, test_value).unwrap();
 
         // Retrieve and verify
-        let result = keychain_get(test_key).unwrap();
+        let result = get_value(test_key).unwrap();
         assert_eq!(result, Some(test_value.to_string()));
 
         // Delete the entry
-        let deleted = keychain_delete(test_key).unwrap();
+        let deleted = delete_value(test_key).unwrap();
         assert!(deleted);
 
         // Verify it's gone
-        let result = keychain_get(test_key).unwrap();
+        let result = get_value(test_key).unwrap();
         assert!(result.is_none());
 
         // Delete again should return false
-        let deleted = keychain_delete(test_key).unwrap();
+        let deleted = delete_value(test_key).unwrap();
         assert!(!deleted);
     }
 
@@ -205,44 +227,44 @@ mod tests {
     fn test_multiple_keys_single_vault() {
         let _guard = setup();
 
-        let _ = keychain_delete("key_a");
-        let _ = keychain_delete("key_b");
+        let _ = delete_value("key_a");
+        let _ = delete_value("key_b");
         reset_cache();
 
-        keychain_set("key_a", "value_a").unwrap();
-        keychain_set("key_b", "value_b").unwrap();
+        set_value("key_a", "value_a").unwrap();
+        set_value("key_b", "value_b").unwrap();
 
-        assert_eq!(keychain_get("key_a").unwrap(), Some("value_a".to_string()));
-        assert_eq!(keychain_get("key_b").unwrap(), Some("value_b".to_string()));
+        assert_eq!(get_value("key_a").unwrap(), Some("value_a".to_string()));
+        assert_eq!(get_value("key_b").unwrap(), Some("value_b".to_string()));
 
         // Deleting one key should not affect the other
-        keychain_delete("key_a").unwrap();
-        assert!(keychain_get("key_a").unwrap().is_none());
-        assert_eq!(keychain_get("key_b").unwrap(), Some("value_b".to_string()));
+        delete_value("key_a").unwrap();
+        assert!(get_value("key_a").unwrap().is_none());
+        assert_eq!(get_value("key_b").unwrap(), Some("value_b".to_string()));
 
         // Cleanup
-        let _ = keychain_delete("key_b");
+        let _ = delete_value("key_b");
     }
 
     #[test]
     fn test_cache_survives_across_calls() {
         let _guard = setup();
 
-        let _ = keychain_delete("cache_test");
+        let _ = delete_value("cache_test");
         reset_cache();
 
-        keychain_set("cache_test", "cached_value").unwrap();
+        set_value("cache_test", "cached_value").unwrap();
 
         // Multiple reads should all return from cache
         for _ in 0..5 {
             assert_eq!(
-                keychain_get("cache_test").unwrap(),
+                get_value("cache_test").unwrap(),
                 Some("cached_value".to_string())
             );
         }
 
         // Cleanup
-        let _ = keychain_delete("cache_test");
+        let _ = delete_value("cache_test");
     }
 
     #[test]
@@ -253,7 +275,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let error = keychain_set("new_key", "new_value").unwrap_err();
+        let error = set_value("new_key", "new_value").unwrap_err();
 
         assert!(error.contains("deserialize"));
         assert_eq!(

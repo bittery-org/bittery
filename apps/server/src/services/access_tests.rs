@@ -4,6 +4,7 @@ use sqlx::{query, PgPool};
 use time::{Duration, OffsetDateTime};
 
 use super::*;
+use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::test_support::{
@@ -155,7 +156,7 @@ async fn member_access_reports_team_vaults_and_excludes_personal_ones() {
             let vault = &access.vaults[0];
             assert_eq!(vault.id, "team-vault");
             assert_eq!(vault.name, "Engineering");
-            assert_eq!(vault.role, "member");
+            assert_eq!(vault.role, VaultRole::Member);
             assert_eq!(vault.item_count, 2);
         })
         .await;

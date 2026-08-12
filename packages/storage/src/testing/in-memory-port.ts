@@ -81,6 +81,12 @@ export interface InMemoryPlatformPort extends PlatformPort {
 export interface InMemoryPlatformPortOptions {
 	sessionSurvivesRestart?: boolean;
 	tiers?: StorageTier[];
+	/**
+	 * The prefix a native host would have to prepend to reach a record key. Only the
+	 * golden-document tests set it: they reproduce a real desktop `store.json`, where the
+	 * published `itemCacheState` ref carries the adapter's `record:` namespace.
+	 */
+	recordKeyPrefix?: string;
 }
 
 function toRecord(map: Map<string, string>): Record<string, string> {
@@ -96,6 +102,7 @@ export function createInMemoryPlatformPort(
 ): InMemoryPlatformPort {
 	const sessionSurvivesRestart = opts?.sessionSurvivesRestart ?? false;
 	const tiers: readonly StorageTier[] = opts?.tiers ?? ["secret", "plain"];
+	const recordKeyPrefix = opts?.recordKeyPrefix ?? "";
 
 	// Kept consistent with `sessionSurvivesRestart` so the fake never describes a
 	// platform that does not exist. `platform` is data only; nothing branches on it.
@@ -161,7 +168,7 @@ export function createInMemoryPlatformPort(
 		secretBacking:
 			"in-memory test double — NO at-rest protection whatsoever, tests only",
 		// Nothing outside the test process reads the fake record port.
-		recordKeyPrefix: "",
+		recordKeyPrefix,
 		biometric,
 		calls,
 		biometricState,

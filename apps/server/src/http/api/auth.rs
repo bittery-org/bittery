@@ -8,6 +8,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
+    db::enums::{TeamRole, TeamType, VaultRole, VaultType},
     services::{
         auth::{self, KdfParamsInput},
         session::{RenameDeviceInput, SessionIdInput},
@@ -16,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    dto::{CursorPage, PageRequest},
+    dto::{CursorPage, PageRequest, SuccessResponse},
     error::ApiError,
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest, PublicRequest},
     pagination::{
@@ -151,7 +152,6 @@ request_dto!(RenameSessionRequest {
     device_name: String,
 });
 
-response_dto!(SuccessResponse { success: bool });
 response_dto!(RegistrationStatusResponse {
     mode: String,
     billing_enabled: bool,
@@ -236,22 +236,22 @@ response_dto!(AuthUserResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     team_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     team_avatar_url: Option<String>,
-    role: String,
+    role: TeamRole,
 });
 response_dto!(AuthVaultKeyResponse {
     vault_id: String,
     vault_name: String,
-    vault_type: String,
+    vault_type: VaultType,
     #[serde(skip_serializing_if = "Option::is_none")]
     vault_icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vault_image_url: Option<String>,
     #[schema(max_length = 65536)]
     encrypted_vault_key: String,
-    role: String,
+    role: VaultRole,
     #[serde(skip)]
     #[schema(ignore)]
     cursor_key: String,
@@ -274,10 +274,10 @@ response_dto!(MeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     team_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     team_avatar_url: Option<String>,
-    role: String,
+    role: TeamRole,
     #[serde(skip_serializing_if = "Option::is_none")]
     secret_key_hint: Option<String>,
     public_key: String,

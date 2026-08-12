@@ -14,8 +14,8 @@ use crate::{
     services::team_admin::authorize_team_admin,
 };
 
-const DEFAULT_LIMIT: u32 = 50;
-const MAX_LIMIT: u32 = 100;
+pub(crate) const DEFAULT_LIMIT: u32 = 50;
+pub(crate) const MAX_LIMIT: u32 = 100;
 const MAX_SCAN_ROWS: i64 = 512;
 
 const AUTH_ACTIONS: &[&str] = &[

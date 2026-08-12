@@ -18,6 +18,10 @@ import {
 } from "react";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { type AccountMetadata, itemCache, storage } from "@/lib/storage";
+import {
+	broadcastActiveAccountChanged,
+	broadcastLockEvent,
+} from "@/lib/tauri-commands";
 import { createDesktopAutolockService } from "@/services/autolock-service";
 
 interface AccountContextValue {
@@ -48,10 +52,7 @@ function createDesktopAccountManager(
 				return;
 			}
 			try {
-				const { invoke } = await import("@tauri-apps/api/core");
-				await invoke("broadcast_active_account_changed", {
-					accountId: active,
-				});
+				await broadcastActiveAccountChanged({ accountId: active });
 			} catch (error) {
 				console.error(
 					"[AccountContext] Failed to broadcast active account change:",
@@ -61,8 +62,7 @@ function createDesktopAccountManager(
 		},
 		onLockBroadcast: async (reason) => {
 			try {
-				const { invoke } = await import("@tauri-apps/api/core");
-				await invoke("broadcast_lock_event", { reason });
+				await broadcastLockEvent({ reason });
 			} catch (error) {
 				console.error(
 					"[AccountContext] Failed to broadcast lock event:",

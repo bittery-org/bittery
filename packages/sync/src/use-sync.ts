@@ -5,6 +5,7 @@ import { ItemSyncEngine, type OutboundQueueApiClient } from "./outbound-queue";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
+	type QueryInvalidator,
 } from "./query-invalidation";
 import {
 	SyncOrchestrator,
@@ -198,9 +199,34 @@ export interface UseSyncOptions {
 }
 
 /**
+ * What {@link useSync} returns, and therefore what a platform's sync React context carries.
+ *
+ * Declared here rather than once per app because web, desktop and mobile had three
+ * near-identical private copies of it, and a member added to the hook's return silently
+ * reached none of them. Desktop and mobile extend it with `isInitialized`, which is genuinely
+ * theirs: both resolve their sync sources asynchronously at boot and gate on the answer,
+ * whereas web's are available synchronously.
+ *
+ * The extension does NOT use this. Its provider does not own a connection — the background
+ * worker does — so it publishes the worker's {@link ConnectionStatus} instead of a
+ * {@link SyncStatus} and has no `reconnect`/`disconnect` to offer. See the note on its own
+ * declaration.
+ */
+export interface SyncContextValue {
+	status: SyncStatus;
+	clientId: string;
+	isConnected: boolean;
+	isOnline: boolean;
+	reconnect: () => Promise<void>;
+	disconnect: () => void;
+	invalidator: QueryInvalidator;
+	outboundQueue: ItemSyncEngine;
+}
+
+/**
  * React hook for real-time synchronization
  */
-export function useSync(options: UseSyncOptions) {
+export function useSync(options: UseSyncOptions): SyncContextValue {
 	const apiClient = useApiClient();
 
 	const {

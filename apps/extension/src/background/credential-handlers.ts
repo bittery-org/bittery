@@ -17,6 +17,12 @@ import {
 	createExtensionItem,
 	updateExtensionItem,
 } from "./extension-item-mutations";
+import type {
+	CheckExistingCredentialsResponse,
+	CredentialCapture,
+	SaveNewCredentialResponse,
+	UpdateExistingCredentialResponse,
+} from "./router/contract";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
@@ -25,7 +31,6 @@ import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 const CREDENTIAL_ERROR_MESSAGES: Partial<Record<CredentialErrorType, string>> =
@@ -52,7 +57,7 @@ export async function handleCheckExistingCredentials(payload: {
 	url: string;
 	username?: string;
 	password?: string;
-}): Promise<MessageResponse> {
+}): Promise<CheckExistingCredentialsResponse> {
 	updateActivity();
 
 	const { url, username, password } = payload;
@@ -113,12 +118,9 @@ export async function handleCheckExistingCredentials(payload: {
 /**
  * Handle SAVE_NEW_CREDENTIAL message - Save a new credential
  */
-export async function handleSaveNewCredential(payload: {
-	vaultId: string;
-	username: string;
-	password: string;
-	url: string;
-}): Promise<MessageResponse> {
+export async function handleSaveNewCredential(
+	payload: CredentialCapture,
+): Promise<SaveNewCredentialResponse> {
 	updateActivity();
 
 	const { vaultId, username, password, url } = payload;
@@ -191,13 +193,9 @@ export async function handleSaveNewCredential(payload: {
 /**
  * Handle UPDATE_EXISTING_CREDENTIAL message - Update an existing credential
  */
-export async function handleUpdateExistingCredential(payload: {
-	itemId: string;
-	vaultId: string;
-	username: string;
-	password: string;
-	url: string;
-}): Promise<MessageResponse> {
+export async function handleUpdateExistingCredential(
+	payload: CredentialCapture & { itemId: string },
+): Promise<UpdateExistingCredentialResponse> {
 	updateActivity();
 
 	const { itemId, vaultId, username, password, url } = payload;

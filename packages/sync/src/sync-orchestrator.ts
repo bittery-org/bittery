@@ -12,13 +12,15 @@ import type {
 	SyncStatus,
 } from "./types";
 
+/**
+ * Every API surface an orchestrator touches, as the union of what its three collaborators
+ * ask for. It used to intersect a hand-written `{ sync: { events } }` on top; that member is
+ * already in `CatchUpApiClient` (`Pick<AppApiClient, "sync">`), so restating it only created
+ * a second place for the SSE signature to drift from the contract.
+ */
 export type SyncApiClient = CatchUpApiClient &
 	DeltaSyncApiClient &
-	OutboundQueueApiClient & {
-		sync: {
-			events(signal?: AbortSignal): Promise<Response>;
-		};
-	};
+	OutboundQueueApiClient;
 
 export interface SyncOrchestratorOptions {
 	syncManager: Omit<

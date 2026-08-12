@@ -1,27 +1,16 @@
 {
+	"extends": "@bittery/config/tsconfig.base.json",
 	"include": ["**/*.ts", "**/*.tsx"],
 	"compilerOptions": {
+		/* Vite build target: the app ships to browsers, not to a bundler-free
+		   ESNext runtime, so pin below the base's ESNext. */
 		"target": "ES2022",
-		"jsx": "react-jsx",
-		"module": "ESNext",
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"jsx": "react-jsx",
 		// "bun" matches tsconfig.base.json: this package's tests run under
 		// `bun test` and `include` covers them, so `bun:test` must be typed.
 		"types": ["vite/client", "bun"],
-
-		/* Bundler mode */
-		"moduleResolution": "bundler",
-		"allowJs": true,
-		"allowImportingTsExtensions": true,
-		"verbatimModuleSyntax": true,
 		"noEmit": true,
-
-		/* Linting */
-		"skipLibCheck": true,
-		"strict": true,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"noFallthroughCasesInSwitch": true,
 		"noUncheckedSideEffectImports": true,
 		"baseUrl": ".",
 		"paths": {

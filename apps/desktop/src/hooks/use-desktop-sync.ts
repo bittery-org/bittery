@@ -13,14 +13,10 @@ import {
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { ApiVaultClient } from "@bittery/core/services/vault-service";
+import type { AppApiClient } from "@bittery/shared/api-client";
 import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
-import type {
-	OutboundQueueApiClient,
-	SyncSource,
-	SyncStorage,
-} from "@bittery/sync";
+import type { SyncSource, SyncStorage } from "@bittery/sync";
 import { buildDefaultSyncSourceId, useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
@@ -100,7 +96,7 @@ async function resolveDesktopSyncContexts(
 				accountId,
 				email,
 				serverUrl: url,
-				apiClient: apiClient as unknown as SyncSource["apiClient"],
+				apiClient: apiClient,
 			});
 		}
 	}
@@ -192,8 +188,17 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		return storage.getAuthToken(syncContexts[0]?.accountId ?? undefined);
 	}, [syncContexts]);
 
+	/**
+	 * Returns the whole account client, not `OutboundQueueApiClient`.
+	 *
+	 * `useSync` only needs `items`, but this hook has a second caller —
+	 * `onTravelModeEvent`, which needs `vaults.list()`. Declaring the narrow type here threw
+	 * that away and the travel-mode call site bought it back with an `as unknown as
+	 * ApiVaultClient`, so nothing checked that the value could actually serve a vault
+	 * request. Both consumers narrow this on their own.
+	 */
 	const getClientForAccount = useCallback(
-		async (accountId: string): Promise<OutboundQueueApiClient> => {
+		async (accountId: string): Promise<AppApiClient> => {
 			const [accountToken, accountServerUrl, account] = await Promise.all([
 				storage.getAuthToken(accountId),
 				storage.getServerUrl(accountId),
@@ -206,7 +211,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 					clientId,
 				);
 				if (client) {
-					return client as unknown as OutboundQueueApiClient;
+					return client;
 				}
 				return createAccountApiClient(
 					accountToken,
@@ -217,7 +222,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 						insecureTransportConfirmed:
 							account?.insecureTransportConfirmed === true,
 					},
-				) as unknown as OutboundQueueApiClient;
+				);
 			}
 
 			throw new Error(
@@ -368,7 +373,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				itemCache,
 				vaultCoordinator,
 				{
-					apiClient: apiClient as unknown as ApiVaultClient,
+					apiClient: apiClient,
 					accounts,
 				},
 			);

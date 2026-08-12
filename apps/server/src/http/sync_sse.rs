@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::{
-    http::api::error::ApiError,
+    http::api::{error::ApiError, error_code::ErrorCode},
     services::connection_registry::{resolve_connection_limit, ConnectionGuard},
     services::session::VerifiedSession,
     services::session_control::load_session_revocation,
@@ -39,7 +39,7 @@ pub(crate) async fn sync_events(
     };
     let Some(ref pool) = state.db_pool else {
         return ApiError::service_unavailable(
-            "SERVICE_UNAVAILABLE",
+            ErrorCode::ServiceUnavailable,
             "Sync is temporarily unavailable.",
         )
         .into_response();

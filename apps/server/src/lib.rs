@@ -23,8 +23,10 @@ pub(crate) use http::api::create_api_router;
 pub use http::api::dto::{
     ApiLimits, ApiMetadata, ApiVersionMetadata, CursorPage, DecimalString, DecimalStringError,
     PageCursor, PageRequest, PatchField, ProblemDetails, ProblemFieldError, RegistrationMetadata,
-    SyncCursor, API_MAJOR, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE,
-    ITEM_CIPHERTEXT_BYTES, MAX_PAGE_SIZE,
+    SyncCursor, API_MAJOR, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_AUDIT_EVENTS,
+    DEFAULT_PAGE_SIZE, ENCRYPTED_VAULT_KEY_BYTES, ITEM_CIPHERTEXT_BYTES, MAX_AUDIT_EVENTS,
+    MAX_AUDIT_SEARCH_BYTES, MAX_BATCH_ITEMS, MAX_CAPABILITIES, MAX_PAGE_SIZE, NAME_MAX_CHARS,
+    SUPPORTED_MAJORS,
 };
 pub use http::api::openapi_json;
 pub(crate) use http::api::response_headers as api_response_headers;

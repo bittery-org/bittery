@@ -15,6 +15,7 @@ import {
 	bytesToBase64Url,
 } from "../passkey/base64";
 import type {
+	PasskeyBackgroundResponse,
 	PasskeyCreateExistingItemOption,
 	PasskeyCreateHandlerPayload,
 	PasskeyCreateSaveDecision,
@@ -42,7 +43,6 @@ import {
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 const PASSKEY_TRANSPORTS: string[] = ["internal", "hybrid"];
@@ -63,11 +63,11 @@ export type MatchedPasskey = {
 	passkeyIndex: number;
 };
 
-export type PasskeyHandlerResponse = MessageResponse & {
-	fallbackToNative?: boolean;
-	result?: PasskeySerializedResult;
-	requiresUserInteraction?: PasskeyUserInteractionRequest;
-};
+/**
+ * The passkey sub-protocol already publishes this shape for the page bridge;
+ * the background answers with exactly it rather than a second copy.
+ */
+export type PasskeyHandlerResponse = PasskeyBackgroundResponse;
 
 type PasskeyEventName =
 	| "create_intercepted"

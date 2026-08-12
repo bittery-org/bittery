@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Deserialize};
 
 use crate::services::session::{RequestMetadata, VerifiedSession};
 
-use super::error::ApiError;
+use super::{error::ApiError, error_code::ErrorCode};
 
 #[derive(Debug)]
 pub(crate) struct ApiJson<T>(pub(crate) T);
@@ -31,7 +31,7 @@ where
             .await
             .map(|Query(value)| Self(value))
             .map_err(|error: QueryRejection| {
-                ApiError::bad_request("INVALID_QUERY", error.body_text())
+                ApiError::bad_request(ErrorCode::InvalidQuery, error.body_text())
             })
     }
 }

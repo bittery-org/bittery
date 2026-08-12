@@ -21,6 +21,19 @@ import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
+import type {
+	Acknowledgement,
+	AuthTokenResponse,
+	CanQuickUnlockResponse,
+	CheckAuthResponse,
+	LockResponse,
+	LoginPayload,
+	PasswordPayload,
+	PasswordUnlockAllResponse,
+	SessionDataResponse,
+	SessionStatusResponse,
+	UnlockResponse,
+} from "./router/contract";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import { restoreUnlockedSessions } from "./services/session-restore";
 import {
@@ -29,7 +42,6 @@ import {
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { vaultSession } from "./vault-session";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
@@ -37,13 +49,9 @@ const DEFAULT_SERVER_URL = "http://localhost:3000";
 /**
  * Handle LOGIN message - Full SRP authentication
  */
-export async function handleLogin(payload: {
-	email: string;
-	password: string;
-	secretKey: string;
-	serverUrl?: string;
-	insecureTransportConfirmed?: boolean;
-}): Promise<MessageResponse> {
+export async function handleLogin(
+	payload: LoginPayload,
+): Promise<Acknowledgement> {
 	const { email, password, secretKey } = payload;
 	const serverUrl = payload.serverUrl ?? DEFAULT_SERVER_URL;
 
@@ -89,9 +97,9 @@ export async function handleLogin(payload: {
 /**
  * Handle QUICK_UNLOCK message - Fast unlock using stored secret key
  */
-export async function handleQuickUnlock(payload: {
-	password: string;
-}): Promise<MessageResponse> {
+export async function handleQuickUnlock(
+	payload: PasswordPayload,
+): Promise<UnlockResponse> {
 	const { password } = payload;
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here
@@ -145,7 +153,7 @@ export async function handleQuickUnlock(payload: {
 /**
  * Handle CHECK_AUTH message - Check if extension is authenticated and unlocked
  */
-export async function handleCheckAuth(): Promise<MessageResponse> {
+export async function handleCheckAuth(): Promise<CheckAuthResponse> {
 	// Check if we have a valid session
 	const localAuthenticated = await storage.isAuthenticated();
 
@@ -234,7 +242,7 @@ async function ensureActiveAccountSet(): Promise<void> {
  * and survives a browser restart. The honest question is "can we re-derive?", and that is
  * what this asks.
  */
-export async function handleCanQuickUnlock(): Promise<MessageResponse> {
+export async function handleCanQuickUnlock(): Promise<CanQuickUnlockResponse> {
 	const activeAccount = await storage.getActiveAccount();
 	if (!activeAccount) {
 		return { success: true, canQuickUnlock: false };
@@ -251,7 +259,7 @@ export async function handleCanQuickUnlock(): Promise<MessageResponse> {
 /**
  * Handle GET_AUTH_TOKEN message - Get the auth token
  */
-export async function handleGetAuthToken(): Promise<MessageResponse> {
+export async function handleGetAuthToken(): Promise<AuthTokenResponse> {
 	const accountId = await storage.getActiveAccount();
 	if (!accountId) {
 		return { success: true, accountId: null, token: null, serverUrl: null };
@@ -266,7 +274,7 @@ export async function handleGetAuthToken(): Promise<MessageResponse> {
 /**
  * Handle GET_SESSION_DATA message - Get stored session data
  */
-export async function handleGetSessionData(): Promise<MessageResponse> {
+export async function handleGetSessionData(): Promise<SessionDataResponse> {
 	const activeAccount = await storage.getActiveAccount();
 	const userId = await storage.getActiveAccountUserId();
 	const sessionValid = await storage.isSessionValid();
@@ -285,7 +293,7 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 /**
  * Handle LOGOUT message - Sign out of the active account and lock
  */
-export async function handleLogout(): Promise<MessageResponse> {
+export async function handleLogout(): Promise<Acknowledgement> {
 	const accountId = await storage.getActiveAccount();
 	const outcome = accountId
 		? await invalidateAccountSession({ accountId }, lifecycleDeps)
@@ -311,7 +319,7 @@ export async function handleLogout(): Promise<MessageResponse> {
  * state and ownership reach the popup as one consistent value. Reading it also
  * re-evaluates the desktop and the auto-lock deadline (fail-closed by design).
  */
-export async function handleGetSessionStatus(): Promise<MessageResponse> {
+export async function handleGetSessionStatus(): Promise<SessionStatusResponse> {
 	return { success: true, ...vaultSession.getSnapshot() };
 }
 
@@ -321,7 +329,7 @@ export async function handleGetSessionStatus(): Promise<MessageResponse> {
  * Refusals travel as a machine-readable `code`, never as prose: the popup owns
  * the translated string (strict i18n).
  */
-export async function handleLock(): Promise<MessageResponse> {
+export async function handleLock(): Promise<LockResponse> {
 	await vaultSession.dispatch({
 		type: "LOCK_REQUESTED",
 		source: "popup",
@@ -339,9 +347,9 @@ export async function handleLock(): Promise<MessageResponse> {
 /**
  * Handle QUICK_UNLOCK_ALL message - Unlock all accounts with password
  */
-export async function handleQuickUnlockAll(payload: {
-	password: string;
-}): Promise<MessageResponse> {
+export async function handleQuickUnlockAll(
+	payload: PasswordPayload,
+): Promise<PasswordUnlockAllResponse> {
 	const { password } = payload;
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here

@@ -1,5 +1,5 @@
 import type { AppApiClient } from "@bittery/shared/api-client";
-import type { SyncCursor, SyncEvent } from "./types";
+import { type SyncCursor, type SyncEvent, toClientTimestamp } from "./types";
 
 export interface CatchUpPageResponse {
 	events: SyncEvent[];
@@ -44,13 +44,14 @@ export async function runCatchUp({
 			limit,
 		});
 		const page: CatchUpPageResponse = {
+			// The only wire→client conversion for an event, and the only place it happens.
+			// `type` and `entityType` need no cast: they are the generated unions on both
+			// sides now.
 			events: apiPage.events.map((event) => ({
 				...event,
-				type: event.type as SyncEvent["type"],
-				entityType: event.entityType as SyncEvent["entityType"],
 				vaultId: event.vaultId ?? null,
 				clientId: event.clientId ?? null,
-				timestamp: Number(event.timestamp),
+				timestamp: toClientTimestamp(event.timestamp),
 				metadata: event.metadata as SyncEvent["metadata"],
 			})),
 			hasMore: apiPage.hasMore,

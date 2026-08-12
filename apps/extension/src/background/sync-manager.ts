@@ -14,6 +14,7 @@ import {
 	runCatchUp,
 	type SyncCursor,
 } from "@bittery/sync";
+import { emitBackgroundEvent } from "./events";
 import { drainOutboundQueue } from "./outbound-drain";
 import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
@@ -55,16 +56,6 @@ export async function getClientId(): Promise<string> {
 	return getOrCreateSyncClientId();
 }
 
-type SyncRuntimeMessage =
-	| { type: "SYNC_STATUS_CHANGED"; status: ConnectionStatus }
-	| { type: "SYNC_FULL_REFRESH_REQUIRED" };
-
-function sendRuntimeMessage(message: SyncRuntimeMessage): void {
-	chrome.runtime.sendMessage(message).catch(() => {
-		// Popup might not be open, ignore.
-	});
-}
-
 /**
  * Update connection status and notify popup.
  */
@@ -74,7 +65,7 @@ function setStatus(status: ConnectionStatus, _reason: string): void {
 	}
 
 	connectionStatus = status;
-	sendRuntimeMessage({
+	void emitBackgroundEvent({
 		type: "SYNC_STATUS_CHANGED",
 		status,
 	});
@@ -148,7 +139,7 @@ async function catchUpMissedEvents(): Promise<void> {
 			},
 			onRequiresFullRefresh: async () => {
 				await syncCacheService.refreshItemCachesForKnownAccounts();
-				sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+				void emitBackgroundEvent({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 			},
 		});
 
@@ -158,7 +149,7 @@ async function catchUpMissedEvents(): Promise<void> {
 			result.cursor,
 		);
 		if (result.processedCount > 0) {
-			sendRuntimeMessage({
+			void emitBackgroundEvent({
 				type: "SYNC_FULL_REFRESH_REQUIRED",
 			});
 		}
@@ -294,7 +285,7 @@ export async function handleSyncSseFrame(frame: SseFrame): Promise<void> {
 
 	if (frame.event === "sync") {
 		await catchUpMissedEvents();
-		sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+		void emitBackgroundEvent({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 		return;
 	}
 

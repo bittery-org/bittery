@@ -1,6 +1,8 @@
 use sqlx::FromRow;
 use time::OffsetDateTime;
 
+use crate::db::enums::{VaultRole, VaultType};
+
 #[derive(Clone, Debug, FromRow)]
 pub struct DbTombstoneCandidate {
     pub id: String,
@@ -36,17 +38,17 @@ pub struct DbScopedAttachmentAccessRow {
     pub file_size: i32,
     pub uploaded_by: String,
     pub created_at: OffsetDateTime,
-    pub role: String,
+    pub role: VaultRole,
 }
 
 #[derive(Clone, Debug, FromRow)]
 pub struct DbVaultListRow {
     pub id: String,
     pub name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub icon: Option<String>,
     pub image_key: Option<String>,
-    pub role: String,
+    pub role: VaultRole,
     pub encrypted_vault_key: String,
     pub created_by_id: String,
     pub item_count: i64,
@@ -56,10 +58,10 @@ pub struct DbVaultListRow {
 pub struct DbVaultGetRow {
     pub id: String,
     pub name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub icon: Option<String>,
     pub image_key: Option<String>,
-    pub user_role: String,
+    pub user_role: VaultRole,
     pub item_count: i64,
     pub member_count: i64,
     pub created_at: OffsetDateTime,
@@ -71,24 +73,24 @@ pub struct DbManagedVaultRow {
     pub name: String,
     pub icon: Option<String>,
     pub image_key: Option<String>,
-    pub role: String,
+    pub role: VaultRole,
 }
 
 #[derive(Clone, Debug, FromRow)]
 pub struct DbVaultOwnerAccessRow {
     pub vault_id: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub team_id: Option<String>,
-    pub role: String,
+    pub role: VaultRole,
 }
 
 #[derive(Clone, Debug, FromRow)]
 pub struct DbVaultDeleteRow {
     pub id: String,
     pub name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub image_key: Option<String>,
-    pub role: String,
+    pub role: VaultRole,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -115,5 +117,14 @@ pub struct DbVaultLookupUserRow {
 
 #[derive(Clone, Debug, FromRow)]
 pub struct DbItemVaultAccessRow {
-    pub role: String,
+    pub role: VaultRole,
+}
+
+#[derive(Clone, Debug, FromRow)]
+pub struct DbVaultMemberRow {
+    pub user_id: String,
+    pub name: String,
+    pub email: String,
+    pub role: VaultRole,
+    pub joined_at: OffsetDateTime,
 }

@@ -10,19 +10,30 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     config::db_pool,
+    db::enums::{ItemCategory, VaultRole, VaultType},
     error::{AppError, AppErrorCode},
-    integrations::storage::PresignedUploadResult,
     services::vault,
-    shapes::{attachment_shape, item_shape, rotation_item_shape},
+    shapes::{
+        attachment_download_shape, attachment_shape, bulk_import_item_shape,
+        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
+        create_item_shape, create_vault_shape, item_shape, remove_vault_member_shape,
+        rotation_item_shape, rotation_member_key_shape, rotation_reencrypted_item_shape,
+        update_item_shape, update_vault_shape, vault_available_member_shape, vault_details_shape,
+        vault_key_rotation_shape, vault_list_entry_shape, vault_member_shape,
+        vault_rotation_data_shape, vault_rotation_member_shape, vault_rotation_summary_shape,
+        vault_stats_shape, vault_summary_shape,
+    },
     AppState, NotifySyncExt,
 };
 
 use super::{
     dto::{
-        CursorPage, DecimalString, PageCursor, PageRequest, PatchField, ProblemDetails,
-        BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE, ITEM_CIPHERTEXT_BYTES,
+        CursorPage, DecimalString, PageCursor, PageRequest, PatchField, PresignedUploadResponse,
+        ProblemDetails, SuccessResponse, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE,
+        ITEM_CIPHERTEXT_BYTES,
     },
     error::ApiError,
+    error_code::ErrorCode,
     extract::{
         ApiJson, ApiJsonBytes, ApiMergePatch, ApiMergePatchBytes, ApiQuery, AuthenticatedRequest,
     },
@@ -34,15 +45,14 @@ use super::{
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
-const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
+pub(crate) const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateVaultBody {
     #[schema(max_length = 200)]
     name: String,
-    #[schema(max_length = 16)]
-    vault_type: String,
+    vault_type: VaultType,
     #[schema(max_length = 65536)]
     encrypted_vault_key: String,
     icon: Option<String>,
@@ -66,8 +76,7 @@ struct UpdateVaultBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConvertVaultBody {
-    #[schema(max_length = 16)]
-    target_type: String,
+    target_type: VaultType,
     #[schema(max_length = 65536)]
     personal_encrypted_vault_key: Option<String>,
 }
@@ -82,7 +91,7 @@ struct ImageUploadBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateItemBody {
-    category: String,
+    category: ItemCategory,
     #[schema(max_length = 1048576)]
     encrypted_data: String,
     encryption_iv: String,
@@ -96,30 +105,14 @@ struct BulkImportBody {
     items: Vec<BulkImportItemInput>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BulkImportItemInput {
-    item_id: String,
-    category: String,
-    favorite: Option<bool>,
-    #[schema(max_length = 1048576)]
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-}
-
-impl From<BulkImportItemInput> for vault::BulkImportItemInput {
-    fn from(value: BulkImportItemInput) -> Self {
-        Self {
-            item_id: value.item_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-        }
-    }
-}
+bulk_import_item_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct BulkImportItemInput
+});
+bulk_import_item_shape!(shape_from {
+    BulkImportItemInput => vault::BulkImportItemInput
+});
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -256,8 +249,7 @@ struct UpdateAttachmentBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AddVaultMemberBody {
-    #[schema(max_length = 16)]
-    role: String,
+    role: VaultRole,
     #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 }
@@ -265,7 +257,7 @@ struct AddVaultMemberBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateVaultMemberRoleBody {
-    role: String,
+    role: VaultRole,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -274,217 +266,96 @@ struct RemoveVaultMemberBody {
     key_rotation: VaultKeyRotationInput,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RotationMemberKeyInput {
-    user_id: String,
-    #[schema(max_length = 65536)]
-    encrypted_vault_key: String,
-}
+rotation_member_key_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct RotationMemberKeyInput
+});
+rotation_member_key_shape!(shape_from {
+    RotationMemberKeyInput => vault::RotationMemberKeyInput
+});
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RotationReEncryptedItemInput {
-    item_id: String,
-    encrypted_data: String,
-    encryption_iv: String,
-}
+rotation_reencrypted_item_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct RotationReEncryptedItemInput
+});
+rotation_reencrypted_item_shape!(shape_from {
+    RotationReEncryptedItemInput => vault::RotationReEncryptedItemInput
+});
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct VaultKeyRotationInput {
-    #[schema(max_items = 100)]
-    member_keys: Vec<RotationMemberKeyInput>,
-    #[schema(max_items = 100)]
-    re_encrypted_items: Vec<RotationReEncryptedItemInput>,
-}
+vault_key_rotation_shape!(wire_struct {
+    #[derive(Debug, Deserialize, ToSchema)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct VaultKeyRotationInput
+}, member = RotationMemberKeyInput, item = RotationReEncryptedItemInput);
+vault_key_rotation_shape!(shape_from {
+    VaultKeyRotationInput => vault::VaultKeyRotationInput
+}, member = RotationMemberKeyInput, item = RotationReEncryptedItemInput);
 
-impl From<VaultKeyRotationInput> for vault::VaultKeyRotationInput {
-    fn from(value: VaultKeyRotationInput) -> Self {
-        Self {
-            member_keys: value
-                .member_keys
-                .into_iter()
-                .map(|key| vault::RotationMemberKeyInput {
-                    user_id: key.user_id,
-                    encrypted_vault_key: key.encrypted_vault_key,
-                })
-                .collect(),
-            re_encrypted_items: value
-                .re_encrypted_items
-                .into_iter()
-                .map(|item| vault::RotationReEncryptedItemInput {
-                    item_id: item.item_id,
-                    encrypted_data: item.encrypted_data,
-                    encryption_iv: item.encryption_iv,
-                })
-                .collect(),
-        }
-    }
-}
+create_vault_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct CreateVaultResponse
+});
+create_vault_shape!(shape_from { vault::CreateVaultResponse => CreateVaultResponse });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SuccessResponse {
-    success: bool,
-}
+update_vault_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct UpdateVaultResponse
+});
+update_vault_shape!(shape_from { vault::UpdateVaultResponse => UpdateVaultResponse });
 
-impl From<vault::SuccessResponse> for SuccessResponse {
-    fn from(value: vault::SuccessResponse) -> Self {
-        Self {
-            success: value.success,
-        }
-    }
-}
+convert_vault_type_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ConvertVaultTypeResponse
+});
+convert_vault_type_shape!(shape_from {
+    vault::ConvertVaultTypeResponse => ConvertVaultTypeResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateVaultResponse {
-    vault_id: String,
-}
+create_item_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct CreateItemResponse
+});
+create_item_shape!(shape_from { vault::CreateItemResponse => CreateItemResponse });
 
-impl From<vault::CreateVaultResponse> for CreateVaultResponse {
-    fn from(value: vault::CreateVaultResponse) -> Self {
-        Self {
-            vault_id: value.vault_id,
-        }
-    }
-}
+bulk_import_result_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BulkImportItemsResponse
+});
+bulk_import_result_shape!(shape_from {
+    vault::BulkImportItemsResponse => BulkImportItemsResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateVaultResponse {
-    id: String,
-    name: String,
-    icon: Option<String>,
-    image_url: Option<String>,
-}
+update_item_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct UpdateItemResponse
+});
+update_item_shape!(shape_from { vault::UpdateItemResponse => UpdateItemResponse });
 
-impl From<vault::UpdateVaultResponse> for UpdateVaultResponse {
-    fn from(value: vault::UpdateVaultResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            icon: value.icon,
-            image_url: value.image_url,
-        }
-    }
-}
+create_attachment_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct CreateAttachmentResponse
+});
+create_attachment_shape!(shape_from {
+    vault::CreateAttachmentResponse => CreateAttachmentResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ConvertVaultTypeResponse {
-    success: bool,
-    vault_id: String,
-    previous_type: String,
-    new_type: String,
-}
-
-impl From<vault::ConvertVaultTypeResponse> for ConvertVaultTypeResponse {
-    fn from(value: vault::ConvertVaultTypeResponse) -> Self {
-        Self {
-            success: value.success,
-            vault_id: value.vault_id,
-            previous_type: value.previous_type,
-            new_type: value.new_type,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateItemResponse {
-    item_id: String,
-    id: String,
-}
-
-impl From<vault::CreateItemResponse> for CreateItemResponse {
-    fn from(value: vault::CreateItemResponse) -> Self {
-        Self {
-            item_id: value.item_id,
-            id: value.id,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BulkImportItemsResponse {
-    success: bool,
-    imported_count: usize,
-    item_ids: Vec<String>,
-}
-
-impl From<vault::BulkImportItemsResponse> for BulkImportItemsResponse {
-    fn from(value: vault::BulkImportItemsResponse) -> Self {
-        Self {
-            success: value.success,
-            imported_count: value.imported_count,
-            item_ids: value.item_ids,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateItemResponse {
-    success: bool,
-    version: i32,
-}
-
-impl From<vault::UpdateItemResponse> for UpdateItemResponse {
-    fn from(value: vault::UpdateItemResponse) -> Self {
-        Self {
-            success: value.success,
-            version: value.version,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateAttachmentResponse {
-    attachment_id: String,
-}
-
-impl From<vault::CreateAttachmentResponse> for CreateAttachmentResponse {
-    fn from(value: vault::CreateAttachmentResponse) -> Self {
-        Self {
-            attachment_id: value.attachment_id,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultListEntryResponse {
-    id: String,
-    name: String,
-    vault_type: String,
-    icon: Option<String>,
-    image_url: Option<String>,
-    role: String,
-    #[schema(pattern = r"^(0|[1-9][0-9]*)$")]
-    item_count: String,
-    encrypted_vault_key: String,
-    created_by_id: String,
-}
-
-impl From<vault::VaultListEntryResponse> for VaultListEntryResponse {
-    fn from(value: vault::VaultListEntryResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            vault_type: value.vault_type,
-            icon: value.icon,
-            image_url: value.image_url,
-            role: value.role,
-            item_count: value.item_count,
-            encrypted_vault_key: value.encrypted_vault_key,
-            created_by_id: value.created_by_id,
-        }
-    }
-}
+vault_list_entry_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultListEntryResponse
+});
+vault_list_entry_shape!(shape_from {
+    vault::VaultListEntryResponse => VaultListEntryResponse
+});
 
 attachment_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -498,31 +369,12 @@ impl From<vault::VaultAttachmentResponse> for VaultAttachmentResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultSummaryResponse {
-    id: String,
-    name: String,
-    vault_type: String,
-    icon: Option<String>,
-    image_url: Option<String>,
-    encrypted_vault_key: String,
-    role: String,
-}
-
-impl From<vault::VaultSummaryResponse> for VaultSummaryResponse {
-    fn from(value: vault::VaultSummaryResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            vault_type: value.vault_type,
-            icon: value.icon,
-            image_url: value.image_url,
-            encrypted_vault_key: value.encrypted_vault_key,
-            role: value.role,
-        }
-    }
-}
+vault_summary_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultSummaryResponse
+});
+vault_summary_shape!(shape_from { vault::VaultSummaryResponse => VaultSummaryResponse });
 
 item_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -566,63 +418,30 @@ impl From<vault::DeletedVaultItemWithVaultResponse> for DeletedVaultItemWithVaul
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultMemberResponse {
-    user_id: String,
-    name: String,
-    email: String,
-    role: String,
-}
+vault_member_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultMemberResponse
+});
+vault_member_shape!(shape_from { vault::VaultMemberResponse => VaultMemberResponse });
 
-impl From<vault::VaultMemberResponse> for VaultMemberResponse {
-    fn from(value: vault::VaultMemberResponse) -> Self {
-        Self {
-            user_id: value.user_id,
-            name: value.name,
-            email: value.email,
-            role: value.role,
-        }
-    }
-}
+vault_available_member_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultAvailableMemberResponse
+});
+vault_available_member_shape!(shape_from {
+    vault::VaultAvailableMemberResponse => VaultAvailableMemberResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultAvailableMemberResponse {
-    user_id: String,
-    name: String,
-    email: String,
-    public_key: String,
-}
-
-impl From<vault::VaultAvailableMemberResponse> for VaultAvailableMemberResponse {
-    fn from(value: vault::VaultAvailableMemberResponse) -> Self {
-        Self {
-            user_id: value.user_id,
-            name: value.name,
-            email: value.email,
-            public_key: value.public_key,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultRotationMemberResponse {
-    user_id: String,
-    public_key: String,
-    role: String,
-}
-
-impl From<vault::VaultRotationMemberResponse> for VaultRotationMemberResponse {
-    fn from(value: vault::VaultRotationMemberResponse) -> Self {
-        Self {
-            user_id: value.user_id,
-            public_key: value.public_key,
-            role: value.role,
-        }
-    }
-}
+vault_rotation_member_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultRotationMemberResponse
+});
+vault_rotation_member_shape!(shape_from {
+    vault::VaultRotationMemberResponse => VaultRotationMemberResponse
+});
 
 rotation_item_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -636,151 +455,59 @@ impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultRotationDataResponse {
-    key_version: i32,
-    members: Vec<VaultRotationMemberResponse>,
-    items: Vec<VaultRotationItemResponse>,
-}
+vault_rotation_data_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultRotationDataResponse
+});
+vault_rotation_data_shape!(shape_from {
+    vault::VaultRotationDataResponse => VaultRotationDataResponse
+});
 
-impl From<vault::VaultRotationDataResponse> for VaultRotationDataResponse {
-    fn from(value: vault::VaultRotationDataResponse) -> Self {
-        Self {
-            key_version: value.key_version,
-            members: value.members.into_iter().map(Into::into).collect(),
-            items: value.items.into_iter().map(Into::into).collect(),
-        }
-    }
-}
+vault_rotation_summary_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultKeyRotationSummaryResponse
+});
+vault_rotation_summary_shape!(shape_from {
+    vault::VaultKeyRotationSummaryResponse => VaultKeyRotationSummaryResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultKeyRotationSummaryResponse {
-    id: String,
-    new_key_version: i32,
-    items_re_encrypted: usize,
-    members_updated: usize,
-}
+remove_vault_member_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct RemoveVaultMemberResponse
+});
+remove_vault_member_shape!(shape_from {
+    vault::RemoveVaultMemberResponse => RemoveVaultMemberResponse
+});
 
-impl From<vault::VaultKeyRotationSummaryResponse> for VaultKeyRotationSummaryResponse {
-    fn from(value: vault::VaultKeyRotationSummaryResponse) -> Self {
-        Self {
-            id: value.id,
-            new_key_version: value.new_key_version,
-            items_re_encrypted: value.items_re_encrypted,
-            members_updated: value.members_updated,
-        }
-    }
-}
+attachment_download_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct AttachmentDownloadResponse
+});
+attachment_download_shape!(shape_from {
+    vault::AttachmentDownloadResponse => AttachmentDownloadResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RemoveVaultMemberResponse {
-    success: bool,
-    key_rotation: VaultKeyRotationSummaryResponse,
-}
+vault_details_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultDetailsResponseDto
+}, count = DecimalString);
+vault_details_shape!(shape_from {
+    vault::VaultDetailsResponse => VaultDetailsResponseDto
+}, count = DecimalString);
 
-impl From<vault::RemoveVaultMemberResponse> for RemoveVaultMemberResponse {
-    fn from(value: vault::RemoveVaultMemberResponse) -> Self {
-        Self {
-            success: value.success,
-            key_rotation: value.key_rotation.into(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct AttachmentDownloadResponse {
-    download_url: String,
-    encrypted_name: String,
-    encrypted_content_type: String,
-    encryption_iv: String,
-    encrypted_content_type_iv: String,
-    encryption_algorithm: String,
-    file_size: i32,
-}
-
-impl From<vault::AttachmentDownloadResponse> for AttachmentDownloadResponse {
-    fn from(value: vault::AttachmentDownloadResponse) -> Self {
-        Self {
-            download_url: value.download_url,
-            encrypted_name: value.encrypted_name,
-            encrypted_content_type: value.encrypted_content_type,
-            encryption_iv: value.encryption_iv,
-            encrypted_content_type_iv: value.encrypted_content_type_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            file_size: value.file_size,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct PresignedUploadResponse {
-    key: String,
-    upload_url: String,
-    public_url: Option<String>,
-}
-
-impl From<PresignedUploadResult> for PresignedUploadResponse {
-    fn from(value: PresignedUploadResult) -> Self {
-        Self {
-            key: value.key,
-            upload_url: value.upload_url,
-            public_url: value.public_url,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultDetailsResponseDto {
-    id: String,
-    name: String,
-    vault_type: String,
-    icon: Option<String>,
-    image_url: Option<String>,
-    user_role: String,
-    item_count: DecimalString,
-    member_count: DecimalString,
-    created_at: String,
-}
-
-impl From<vault::VaultDetailsResponse> for VaultDetailsResponseDto {
-    fn from(value: vault::VaultDetailsResponse) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            vault_type: value.vault_type,
-            icon: value.icon,
-            image_url: value.image_url,
-            user_role: value.user_role,
-            item_count: value.item_count.into(),
-            member_count: value.member_count.into(),
-            created_at: value.created_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultStatsResponseDto {
-    team_count: i32,
-    vault_count: DecimalString,
-    item_count: DecimalString,
-}
-
-impl From<vault::VaultStatsResponse> for VaultStatsResponseDto {
-    fn from(value: vault::VaultStatsResponse) -> Self {
-        Self {
-            team_count: value.team_count,
-            vault_count: value.vault_count.into(),
-            item_count: value.item_count.into(),
-        }
-    }
-}
+vault_stats_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultStatsResponseDto
+}, count = DecimalString);
+vault_stats_shape!(shape_from {
+    vault::VaultStatsResponse => VaultStatsResponseDto
+}, count = DecimalString);
 
 item_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -825,7 +552,7 @@ fn optional_patch_value(
         PatchField::Missing => Ok(None),
         PatchField::Value(value) => Ok(Some(value)),
         PatchField::Null => Err(ApiError::bad_request(
-            "FIELD_CANNOT_BE_CLEARED",
+            ErrorCode::FieldCannotBeCleared,
             format!("{pointer} cannot be null."),
         )),
     }
@@ -846,10 +573,12 @@ fn required_item_version(headers: &HeaderMap) -> Result<i32, ApiError> {
             ApiError::precondition_required("If-Match is required for this item mutation.")
         })?
         .to_str()
-        .map_err(|_| ApiError::bad_request("INVALID_IF_MATCH", "If-Match is not valid UTF-8."))?;
+        .map_err(|_| {
+            ApiError::bad_request(ErrorCode::InvalidIfMatch, "If-Match is not valid UTF-8.")
+        })?;
     if value.starts_with("W/") || value.contains(',') || value == "*" {
         return Err(ApiError::bad_request(
-            "INVALID_IF_MATCH",
+            ErrorCode::InvalidIfMatch,
             "If-Match must contain exactly one strong item version ETag.",
         ));
     }
@@ -860,7 +589,7 @@ fn required_item_version(headers: &HeaderMap) -> Result<i32, ApiError> {
         .filter(|version| *version > 0)
         .ok_or_else(|| {
             ApiError::bad_request(
-                "INVALID_IF_MATCH",
+                ErrorCode::InvalidIfMatch,
                 "If-Match must be a quoted positive item version.",
             )
         })?;
@@ -879,8 +608,9 @@ fn versioned_json<T: Serialize>(value: T, version: i32) -> Result<Response, ApiE
     let mut response = Json(value).into_response();
     response.headers_mut().insert(
         ETAG,
-        HeaderValue::from_str(&format!("\"{version}\""))
-            .map_err(|_| ApiError::bad_request("INVALID_VERSION", "Item version is invalid."))?,
+        HeaderValue::from_str(&format!("\"{version}\"")).map_err(|_| {
+            ApiError::bad_request(ErrorCode::InvalidVersion, "Item version is invalid.")
+        })?,
     );
     Ok(response)
 }
@@ -1234,7 +964,7 @@ async fn list_all_items(
             ))
         }
         _ => Err(ApiError::bad_request(
-            "INVALID_ITEM_STATE",
+            ErrorCode::InvalidItemState,
             "state must be either active or trashed.",
         )),
     }
@@ -2003,12 +1733,11 @@ mod tests {
         response::IntoResponse,
     };
     use serde_json::json;
-    use utoipa::PartialSchema;
 
     use super::{
         check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
-        BulkImportBody, BulkImportItemInput, FavoriteBody, RemoveVaultMemberBody, UpdateVaultBody,
-        VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
+        BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, RemoveVaultMemberBody,
+        UpdateVaultBody, VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
     };
     use crate::{
         http::api::{
@@ -2023,7 +1752,7 @@ mod tests {
     fn item(ciphertext: String) -> BulkImportItemInput {
         BulkImportItemInput {
             item_id: "item_test".to_string(),
-            category: "Login".to_string(),
+            category: ItemCategory::Login,
             favorite: None,
             encrypted_data: ciphertext,
             encryption_iv: "iv".to_string(),
@@ -2103,12 +1832,15 @@ mod tests {
         .is_err());
     }
 
+    /// The two types now share one field list, so their schemas can no longer drift apart and the
+    /// schema half of this check is gone. Serialization is still worth pinning: the shape does not
+    /// fix `rename_all`, and only the transport side is published.
     #[test]
-    fn vault_item_wire_dto_preserves_service_serialization_and_schema() {
+    fn vault_item_wire_dto_preserves_service_serialization() {
         let service = crate::services::vault::VaultItemDetailsResponse {
             id: "item_test".to_string(),
             vault_id: "vault_test".to_string(),
-            category: "login".to_string(),
+            category: ItemCategory::Login,
             favorite: true,
             encrypted_data: "ciphertext".to_string(),
             encryption_iv: "iv".to_string(),
@@ -2139,11 +1871,6 @@ mod tests {
         let wire = VaultItemDetailsResponse::from(service);
 
         assert_eq!(serde_json::to_value(wire).unwrap(), expected_json);
-        assert_eq!(
-            serde_json::to_value(VaultItemDetailsResponse::schema()).unwrap(),
-            serde_json::to_value(crate::services::vault::VaultItemDetailsResponse::schema())
-                .unwrap()
-        );
     }
 
     #[test]
@@ -2186,7 +1913,7 @@ mod tests {
             items: vec![VaultItemWithVaultResponse {
                 id: "active-item".to_string(),
                 vault_id: "vault".to_string(),
-                category: "login".to_string(),
+                category: ItemCategory::Login,
                 favorite: false,
                 encrypted_data: "ciphertext".to_string(),
                 encryption_iv: "iv".to_string(),
@@ -2214,7 +1941,7 @@ mod tests {
             items: vec![DeletedVaultItemWithVaultResponse {
                 id: "trashed-item".to_string(),
                 vault_id: "vault".to_string(),
-                category: "login".to_string(),
+                category: ItemCategory::Login,
                 favorite: false,
                 encrypted_data: "ciphertext".to_string(),
                 encryption_iv: "iv".to_string(),

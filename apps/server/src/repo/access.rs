@@ -1,7 +1,10 @@
 use sqlx::{query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 
-use crate::error::AppError;
+use crate::{
+    db::enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole, VaultType},
+    error::AppError,
+};
 
 /// Newest-first caps. The console shows a member's footprint, not an archive.
 const MAX_SHARE_LINKS: i64 = 100;
@@ -11,8 +14,8 @@ const MAX_SESSIONS: i64 = 50;
 pub struct MemberVaultRow {
     pub id: String,
     pub name: String,
-    pub vault_type: String,
-    pub role: String,
+    pub vault_type: VaultType,
+    pub role: VaultRole,
     pub granted_at: OffsetDateTime,
     pub item_count: i64,
 }
@@ -34,8 +37,8 @@ pub struct MemberSessionRow {
 pub struct MemberShareLinkRow {
     pub id: String,
     pub item_id: String,
-    pub status: String,
-    pub access_mode: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareLinkAccessMode,
     pub access_count: i32,
     pub max_access_count: Option<i32>,
     pub expires_at: OffsetDateTime,

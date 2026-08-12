@@ -17,6 +17,7 @@ import {
 } from "@bittery/ui/icons";
 import jsQR from "jsqr";
 import { useCallback, useState } from "react";
+import { sendMessage } from "@/lib/messaging";
 import { useI18n } from "@/providers/i18n-provider";
 
 export type ScanStatus =
@@ -41,22 +42,42 @@ interface QRScannerProps {
 }
 
 /**
+ * Extracts a `.message` string from a caught value the same way an untyped
+ * `error.message` access would, but without assuming the value is an
+ * `Error` — canvas operations here can throw a `DOMException`, which has a
+ * `.message` but (unlike `Error`) doesn't satisfy `instanceof Error`.
+ */
+function getErrorMessage(error: unknown): string | undefined {
+	if (
+		typeof error === "object" &&
+		error !== null &&
+		"message" in error &&
+		typeof (error as { message?: unknown }).message === "string"
+	) {
+		return (error as { message: string }).message;
+	}
+	return undefined;
+}
+
+/**
  * Captures the visible area of the current tab and scans for QR codes
  */
 async function captureAndScanTab(): Promise<QRScanResult> {
+	const failure = (error?: string): QRScanResult => ({
+		status: "error",
+		error: error || "Failed to capture tab screenshot",
+	});
+
 	return new Promise((resolve) => {
 		// Request the background script to capture the tab
-		chrome.runtime.sendMessage(
-			{ type: "CAPTURE_TAB_SCREENSHOT" },
-			async (response) => {
-				if (!response?.success || !response.dataUrl) {
-					resolve({
-						status: "error",
-						error: response?.error || "Failed to capture tab screenshot",
-					});
+		void sendMessage({ type: "CAPTURE_TAB_SCREENSHOT" })
+			.then(async (response) => {
+				if (!response.success || !response.dataUrl) {
+					resolve(failure(response.success ? undefined : response.error));
 					return;
 				}
 
+				const { dataUrl } = response;
 				try {
 					// Load the image from the data URL
 					const img = new Image();
@@ -66,7 +87,7 @@ async function captureAndScanTab(): Promise<QRScanResult> {
 						img.onload = () => imgResolve();
 						img.onerror = () =>
 							imgReject(new Error("Failed to load captured image"));
-						img.src = response.dataUrl;
+						img.src = dataUrl;
 					});
 
 					// Create canvas to get image data
@@ -133,20 +154,22 @@ async function captureAndScanTab(): Promise<QRScanResult> {
 							data: parsed,
 							rawUri: rawData,
 						});
-					} catch (parseError: any) {
+					} catch (parseError) {
 						resolve({
 							status: "error",
-							error: `Invalid TOTP QR code: ${parseError.message}`,
+							error: `Invalid TOTP QR code: ${getErrorMessage(parseError)}`,
 						});
 					}
-				} catch (error: any) {
+				} catch (error) {
 					resolve({
 						status: "error",
-						error: `Failed to scan QR code: ${error.message}`,
+						error: `Failed to scan QR code: ${getErrorMessage(error)}`,
 					});
 				}
-			},
-		);
+			})
+			// A rejected sendMessage used to surface as an empty response; keep it
+			// reading as a failed capture rather than an unsettled promise.
+			.catch(() => resolve(failure()));
 	});
 }
 
@@ -177,9 +200,9 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					toast.error(result.error || m.ext_qr_error_scan_toast());
 				}
 			}
-		} catch (error: any) {
+		} catch (error) {
 			setStatus("error");
-			setErrorMessage(error.message || m.ext_qr_error_scan_toast());
+			setErrorMessage(getErrorMessage(error) || m.ext_qr_error_scan_toast());
 			toast.error(m.ext_qr_error_scan_toast());
 		}
 	}, [onScanComplete, m.ext_qr_error_scan_toast]);

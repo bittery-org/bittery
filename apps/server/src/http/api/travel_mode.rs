@@ -18,11 +18,12 @@ use crate::{
 use super::{
     dto::ProblemDetails,
     error::ApiError,
+    error_code::ErrorCode,
     extract::{ApiJson, AuthenticatedRequest},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
-const MAX_HIDDEN_VAULTS: usize = 100;
+use super::limits::MAX_BATCH_ITEMS as MAX_HIDDEN_VAULTS;
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -99,7 +100,7 @@ enum TravelModeErrorResponses {
 fn enforce_hidden_vault_limit(hidden_vault_ids: &[String]) -> Result<(), ApiError> {
     if hidden_vault_ids.len() > MAX_HIDDEN_VAULTS {
         return Err(ApiError::bad_request(
-            "TOO_MANY_HIDDEN_VAULTS",
+            ErrorCode::TooManyHiddenVaults,
             format!("At most {MAX_HIDDEN_VAULTS} hidden vaults are allowed."),
         ));
     }

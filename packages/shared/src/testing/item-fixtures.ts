@@ -10,6 +10,7 @@
  * uses — rather than quietly missing from a test fixture.
  */
 
+import type { ItemCategory } from "@bittery/api-contract";
 import type { CachedEncryptedItem } from "@bittery/types";
 import {
 	type CachedItemScope,
@@ -34,7 +35,7 @@ const DEFAULT_SCOPE: Required<CachedItemScope> = {
 interface NewItemOverrides {
 	id?: string;
 	vaultId?: string;
-	category?: string;
+	category?: ItemCategory;
 	createdAt?: string;
 	version?: number;
 	favorite?: boolean;

@@ -30,6 +30,31 @@ export interface ApiPage<T> {
 	hasMore: boolean;
 }
 
+/**
+ * The closed sets. Each is a Rust enum in `apps/server/src/db/enums.rs` that reaches
+ * OpenAPI as a string enum, so the client union is generated rather than typed twice —
+ * see ADR 0012. Nothing downstream may restate these; alias them instead.
+ */
+export type BillingPlan = Schema<"BillingPlan">;
+export type BillingStatus = Schema<"BillingStatus">;
+export type InvitationStatus = Schema<"InvitationStatus">;
+export type ItemCategory = Schema<"ItemCategory">;
+export type ShareLinkAccessMode = Schema<"ShareLinkAccessMode">;
+export type ShareLinkStatus = Schema<"ShareLinkStatus">;
+export type SyncEntityType = Schema<"SyncEntityType">;
+export type SyncEventType = Schema<"SyncEventType">;
+export type TeamRole = Schema<"TeamRole">;
+export type TeamType = Schema<"TeamType">;
+export type VaultRole = Schema<"VaultRole">;
+export type VaultType = Schema<"VaultType">;
+
+/**
+ * The server's stable, machine-readable error codes. `ApiProblem.code` stays `string`
+ * on purpose: the transport also mints codes of its own (`HTTP_ERROR`) for responses
+ * that never reached a Bittery handler, so a narrowed field there would be a lie.
+ */
+export type ErrorCode = Schema<"ErrorCode">;
+
 export type EmailCheckInput = Schema<"EmailCheckRequest">;
 export type EmailCheckResponse = Schema<"EmailCheckResponse">;
 export type RegistrationStatus = Schema<"RegistrationStatusResponse">;
@@ -183,7 +208,8 @@ export type BillingEntitlements = Omit<
 		sharedVaults?: NullableBigInt;
 	};
 };
-export type BillingStatus = Schema<"BillingStatusResponse">;
+/** The billing *panel* — the subscription's state, not the {@link BillingStatus} value. */
+export type BillingStatusSummary = Schema<"BillingStatusResponse">;
 export type AttachmentUsage = Omit<
 	Schema<"AttachmentUsageResponse">,
 	"committedStorageBytes" | "quotaBytes"
@@ -201,6 +227,7 @@ export type TravelMode = Schema<"TravelModeResponse">;
 export type HiddenVaultsInput = Schema<"HiddenVaultsRequest">;
 export type DisableTravelModeInput = Schema<"DisableTravelModeRequest">;
 export type AuditEvents = Schema<"AuditEventsResponse">;
+export type AuditEvent = Schema<"TeamEvent">;
 export interface AuditEventsRequest extends ApiPageRequest {
 	from?: string;
 	to?: string;

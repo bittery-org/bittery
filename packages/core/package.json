@@ -31,6 +31,7 @@
 		"./services/vault-repository-coordinator": "./src/services/vault-repository-coordinator.ts"
 	},
 	"dependencies": {
+		"@bittery/api-contract": "workspace:*",
 		"@bittery/crypto-port": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",

@@ -22,17 +22,23 @@ import { desktopSync } from "./desktop-sync";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
 import { sendNativeMessage } from "./native-messaging-client";
+import type {
+	Acknowledgement,
+	BiometricUnlockAllResponse,
+	BiometricUnlockFailure,
+	NativeBiometricStatusResponse,
+	OpenDesktopAppPayload,
+} from "./router/contract";
 import {
 	setDesktopModeSentinel,
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 
 /**
  * Check if native biometric unlock is available
  */
-export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
+export async function handleCheckNativeBiometric(): Promise<NativeBiometricStatusResponse> {
 	try {
 		const response = await sendNativeMessage({
 			type: "CHECK_BIOMETRIC_AVAILABLE",
@@ -43,10 +49,11 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 			available:
 				response.type === "BIOMETRIC_STATUS" ? response.available : false,
 			enabled: response.type === "BIOMETRIC_STATUS" ? response.enabled : false,
+			// `appRunning` has always been the only spelling on this wire; the
+			// `app_running` fallback that used to sit here read a field no desktop
+			// build has ever sent.
 			appRunning:
-				response.type === "BIOMETRIC_STATUS"
-					? (response.appRunning ?? response.app_running ?? false)
-					: false,
+				response.type === "BIOMETRIC_STATUS" ? response.appRunning : false,
 		};
 	} catch (error) {
 		console.error("[CHECK_NATIVE_BIOMETRIC] Error:", error);
@@ -83,7 +90,9 @@ async function decryptTransferredMasterUnlockKey(
 /**
  * Request biometric unlock from desktop app
  */
-export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
+export async function handleNativeBiometricUnlock(): Promise<
+	Acknowledgement & { message?: string }
+> {
 	try {
 		const activeAccount = await storage.getActiveAccount();
 		if (!activeAccount) {
@@ -162,12 +171,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 /**
  * Request desktop app to open
  */
-export async function handleOpenDesktopApp(payload?: {
-	intent?: "create_item" | "view_item";
-	url?: string;
-	itemId?: string;
-	vaultId?: string;
-}): Promise<MessageResponse> {
+export async function handleOpenDesktopApp(
+	payload?: OpenDesktopAppPayload,
+): Promise<Acknowledgement> {
 	try {
 		const response = await sendNativeMessage({
 			type: "OPEN_DESKTOP_APP",
@@ -205,7 +211,7 @@ export async function handleOpenDesktopApp(payload?: {
 export async function handleNativeBiometricUnlockAll(options?: {
 	forceLocalUnlock?: boolean;
 	preserveActiveAccount?: boolean;
-}): Promise<MessageResponse> {
+}): Promise<BiometricUnlockAllResponse> {
 	try {
 		const accounts = await storage.getAccountsList();
 
@@ -266,8 +272,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		const unlocked: string[] = [];
-		const failed: Array<{ accountId: string; email: string; error: string }> =
-			[];
+		const failed: BiometricUnlockFailure[] = [];
 
 		// Read before the loop below can tear a session down.
 		const previousActive = await storage.getActiveAccount();

@@ -14,7 +14,7 @@ import {
 	IconBriefcase,
 	IconUsers,
 } from "../icons";
-import { cn } from "../lib/utils";
+import { cn, getInitials } from "../lib/utils";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -89,15 +89,6 @@ interface VaultAvatarProps {
 	imageUrl?: string | null;
 	size?: "xs" | "sm" | "md" | "lg" | "xl";
 	className?: string;
-}
-
-function getInitials(name: string): string {
-	if (!name) return "??";
-	const parts = name.trim().split(/\s+/);
-	if (parts.length >= 2) {
-		return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-	}
-	return name.slice(0, 2).toUpperCase();
 }
 
 // Deterministic per-vault gradient stops (mid -> deep), 135deg. Keeps the

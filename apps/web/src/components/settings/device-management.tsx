@@ -1,3 +1,4 @@
+import type { Session } from "@bittery/api-contract";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import {
@@ -70,7 +71,7 @@ function getPlatformLabel(platform: string | null | undefined, m: Messages) {
 }
 
 function formatDeviceDisplayLocalized(
-	device: DeviceSession,
+	device: Session,
 	m: Messages,
 ): { title: string; subtitle: string } {
 	const title = device.deviceName ?? m.settings_devices_common_unknown_device();
@@ -92,12 +93,11 @@ function formatDeviceDisplayLocalized(
 }
 
 function formatLastActiveLocalized(
-	date: Date | string,
+	lastActive: Date,
 	locale: string,
 	m: Messages,
 ): string {
 	const now = new Date();
-	const lastActive = typeof date === "string" ? new Date(date) : date;
 	const diffMs = now.getTime() - lastActive.getTime();
 	const diffMins = Math.floor(diffMs / 60_000);
 	const diffHours = Math.floor(diffMs / 3_600_000);
@@ -130,25 +130,11 @@ function formatLastActiveLocalized(
 	}).format(lastActive);
 }
 
-interface DeviceSession {
-	id: string;
-	deviceName: string | null;
-	platform: string | null;
-	browserName: string | null;
-	browserVersion: string | null;
-	osName: string | null;
-	osVersion: string | null;
-	ipAddress: string | null;
-	lastActiveAt: Date | string;
-	createdAt: Date | string;
-	isCurrentSession: boolean;
-}
-
 function RenameDeviceDialog({
 	session,
 	onSuccess,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onSuccess: () => void;
 }) {
 	const { m } = useI18n();
@@ -237,7 +223,7 @@ function RevokeDeviceDialog({
 	session,
 	onSuccess,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onSuccess: () => void;
 }) {
 	const { m } = useI18n();
@@ -305,7 +291,7 @@ function DeviceCard({
 	session,
 	onUpdate,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onUpdate: () => void;
 }) {
 	const { m, locale } = useI18n();
@@ -408,9 +394,7 @@ export function DeviceManagement() {
 	const sortedDevices = [...devices].sort((a, b) => {
 		if (a.isCurrentSession) return -1;
 		if (b.isCurrentSession) return 1;
-		return (
-			new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime()
-		);
+		return b.lastActiveAt.getTime() - a.lastActiveAt.getTime();
 	});
 
 	return (
@@ -418,16 +402,7 @@ export function DeviceManagement() {
 			{sortedDevices.map((session) => (
 				<DeviceCard
 					key={session.id}
-					session={{
-						...session,
-						deviceName: session.deviceName ?? null,
-						platform: session.platform ?? null,
-						browserName: session.browserName ?? null,
-						browserVersion: session.browserVersion ?? null,
-						osName: session.osName ?? null,
-						osVersion: session.osVersion ?? null,
-						ipAddress: session.ipAddress ?? null,
-					}}
+					session={session}
 					onUpdate={handleUpdate}
 				/>
 			))}

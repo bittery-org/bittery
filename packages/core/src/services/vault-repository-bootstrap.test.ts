@@ -104,7 +104,7 @@ function createClient(): BootstrapItemsClient {
 							vault: {
 								id: "vault_1",
 								name: "Team Vault",
-								vaultType: "team",
+								vaultType: "team" as const,
 								icon: "lock",
 								imageUrl: null,
 							},
@@ -120,11 +120,11 @@ function createClient(): BootstrapItemsClient {
 					{
 						id: "vault_1",
 						name: "Team Vault",
-						vaultType: "team",
+						vaultType: "team" as const,
 						icon: "lock",
 						imageUrl: null,
 						encryptedVaultKey: "ZW5jcnlwdGVk",
-						role: "owner",
+						role: "owner" as const,
 					},
 				],
 			})),
@@ -432,7 +432,7 @@ describe("VaultRepository.hydrateFromServer", () => {
 				...visibleItem.vault,
 				id: "vault_hidden",
 				name: "Hidden Vault",
-				vaultType: "personal",
+				vaultType: "personal" as const,
 			},
 		};
 		client.sync.bootstrap = mock(async ({ cursor }) => ({
@@ -459,7 +459,7 @@ describe("VaultRepository.hydrateFromServer", () => {
 					...visibleVault,
 					id: "vault_hidden",
 					name: "Hidden Vault",
-					vaultType: "personal",
+					vaultType: "personal" as const,
 					encryptedVaultKey: "hidden-key",
 				},
 			],

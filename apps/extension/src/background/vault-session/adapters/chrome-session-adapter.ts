@@ -1,6 +1,6 @@
 /**
  * The only file in `vault-session/` allowed to touch `chrome.action`,
- * `chrome.alarms`, `setTimeout`/`setInterval` or `chrome.runtime.sendMessage`.
+ * `chrome.alarms`, `setTimeout`/`setInterval` or the push protocol.
  *
  * Behavior is ported verbatim from the old `session-manager` module globals,
  * including the dual timer + alarm arming (the alarm is what survives a service
@@ -8,6 +8,7 @@
  */
 
 import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "../../constants";
+import { emitBackgroundEvent } from "../../events";
 import type { ChromeSessionPort } from "../ports";
 
 const LOCKED_ACTION_ICON_PATH = "icons/lock-icon.png";
@@ -86,15 +87,11 @@ export function createChromeSessionAdapter(): ChromeSessionPort {
 			}
 		},
 
+		// The reducer's broadcast vocabulary is a subset of the push contract;
+		// this call is what makes a member it grows without a contract entry a
+		// compile error rather than a message nothing can receive.
 		broadcast(message): void {
-			if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
-				return;
-			}
-			try {
-				void chrome.runtime.sendMessage(message)?.catch?.(() => {});
-			} catch {
-				// Ignore if no listeners
-			}
+			void emitBackgroundEvent(message);
 		},
 	};
 }

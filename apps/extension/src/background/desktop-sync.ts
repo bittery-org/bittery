@@ -9,14 +9,58 @@ import {
 	getAccountSessionManager,
 	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
+import type { AccountMetadata } from "@bittery/storage";
 import { itemCache, storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
-import type { DesktopEventPayload, DesktopStatus } from "./desktop-protocol";
+import type {
+	DesktopAccountEntry,
+	DesktopEventOf,
+	DesktopEventPayload,
+	DesktopStatus,
+} from "./desktop-protocol";
+import { emitBackgroundEvent } from "./events";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,
 } from "./services/desktop-recovery";
 import { vaultSession, vaultSessionPorts } from "./vault-session";
+
+const DEFAULT_SERVER_URL = "http://localhost:3000";
+
+/**
+ * Project a desktop-published account onto the extension's own `AccountMetadata`.
+ *
+ * `DESKTOP_ACCOUNTS` publishes identity and display metadata and nothing else.
+ * It has never carried `serverUrl` — that is per-install, not per-account, and
+ * `AccountStore` deliberately keeps it out of the native-host view — and it has
+ * never carried `insecureTransportConfirmed`. Both are required here, so both
+ * are resolved on this side: the extension's own server URL, and no recorded
+ * consent for plain HTTP, which is the safe answer because consent given on the
+ * desktop is not consent given here.
+ *
+ * Until the protocol types were generated this function's predecessor read both
+ * fields straight off the response, where they were declared but never sent, and
+ * every desktop-synced account was written with `serverUrl: undefined`.
+ */
+export function desktopAccountToMetadata(
+	account: DesktopAccountEntry,
+	serverUrl: string,
+): AccountMetadata {
+	return {
+		accountId: account.accountId,
+		email: account.email,
+		userId: account.userId,
+		name: account.name,
+		serverUrl,
+		secretKeyHint: account.secretKeyHint,
+		teamName: account.teamName,
+		teamAvatarUrl: account.teamAvatarUrl,
+		addedAt: account.addedAt,
+		lastActiveAt: account.lastActiveAt,
+		biometricEnabled: account.biometricEnabled,
+		insecureTransportConfirmed: false,
+	};
+}
 
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
 const DESKTOP_MODE_RECOVERY_WINDOW_MS = 60000; // 1 minute window to recover desktop mode after restart
@@ -24,29 +68,14 @@ const DESKTOP_MODE_RECOVERY_WINDOW_MS = 60000; // 1 minute window to recover des
 // Storage keys for persistent state
 const STORAGE_KEY_DESKTOP_MODE = "desktop_mode_state";
 
-export interface LockEvent {
-	reason: string;
-	timestamp: number;
-}
-
-export interface UnlockEvent {
-	accounts: string[];
-	timestamp: number;
-}
-
-export interface DesktopCloseEvent {
-	timestamp: number;
-}
-
-export interface ActiveAccountChangedEvent {
-	accountId: string;
-	timestamp: number;
-}
-
-export interface ThemeChangedEvent {
-	theme: "light" | "dark" | "system";
-	timestamp: number;
-}
+// The desktop owns these shapes; ts-rs generates them and this side only names
+// them (ADR 0012). They were hand-copies until the protocol became generated.
+export type LockEvent = DesktopEventOf<"lock">;
+export type UnlockEvent = DesktopEventOf<"unlock">;
+export type DesktopCloseEvent = DesktopEventOf<"desktop_close">;
+export type ActiveAccountChangedEvent =
+	DesktopEventOf<"active_account_changed">;
+export type ThemeChangedEvent = DesktopEventOf<"theme_changed">;
 
 class DesktopSyncService {
 	private lastDesktopStatus: DesktopStatus | null = null;
@@ -159,6 +188,7 @@ class DesktopSyncService {
 
 			// Get current extension accounts
 			const currentAccounts = await storage.getAccountsList();
+			const serverUrl = (await storage.getServerUrl()) ?? DEFAULT_SERVER_URL;
 
 			// Add or update accounts from desktop
 			for (const desktopAccount of accountsData.accounts) {
@@ -168,21 +198,9 @@ class DesktopSyncService {
 				);
 
 				if (!existingAccount) {
-					await storage.addAccount({
-						accountId: desktopAccountId,
-						email: desktopAccount.email,
-						userId: desktopAccount.userId,
-						name: desktopAccount.name,
-						serverUrl: desktopAccount.serverUrl,
-						secretKeyHint: desktopAccount.secretKeyHint,
-						teamName: desktopAccount.teamName,
-						teamAvatarUrl: desktopAccount.teamAvatarUrl,
-						addedAt: desktopAccount.addedAt,
-						lastActiveAt: desktopAccount.lastActiveAt,
-						biometricEnabled: desktopAccount.biometricEnabled,
-						insecureTransportConfirmed:
-							desktopAccount.insecureTransportConfirmed,
-					});
+					await storage.addAccount(
+						desktopAccountToMetadata(desktopAccount, serverUrl),
+					);
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -303,14 +321,7 @@ class DesktopSyncService {
 			};
 		}
 
-		try {
-			chrome.runtime.sendMessage({
-				type: "THEME_CHANGED",
-				theme: event.theme,
-			});
-		} catch (_error) {
-			// Ignore if no listeners
-		}
+		void emitBackgroundEvent({ type: "THEME_CHANGED", theme: event.theme });
 	}
 
 	/**
@@ -395,14 +406,10 @@ class DesktopSyncService {
 			return;
 		}
 
-		try {
-			chrome.runtime.sendMessage({
-				type: "ACTIVE_ACCOUNT_CHANGED",
-				accountId: event.accountId,
-			});
-		} catch (_error) {
-			// Ignore if no listeners
-		}
+		void emitBackgroundEvent({
+			type: "ACTIVE_ACCOUNT_CHANGED",
+			accountId: event.accountId,
+		});
 	}
 
 	/**

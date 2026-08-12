@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow};
 
 use super::*;
+use crate::db::enums::{ShareLinkAccessMode, ShareLinkStatus};
 use crate::error::AppErrorCode;
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
@@ -44,7 +45,7 @@ const FIXTURE_SHARE_KEY_IV: &str = "fixture-share-key-iv";
 fn sample_create_share_input() -> CreateShareLinkInput {
     CreateShareLinkInput {
         item_id: "item_123".to_string(),
-        access_mode: "anyone".to_string(),
+        access_mode: ShareLinkAccessMode::Anyone,
         is_one_time_use: false,
         expires_in: "1day".to_string(),
         allowed_emails: None,
@@ -61,8 +62,8 @@ fn sample_share_link_row() -> DbShareLinkRow {
         id: "share_link_123".to_string(),
         item_id: "item_123".to_string(),
         created_by_id: "user_123".to_string(),
-        status: "active".to_string(),
-        access_mode: "anyone".to_string(),
+        status: ShareLinkStatus::Active,
+        access_mode: ShareLinkAccessMode::Anyone,
         is_one_time_use: false,
         access_count: 0,
         max_access_count: None,
@@ -147,7 +148,7 @@ fn validate_create_share_input_accepts_anyone_and_rejects_invalid_email_restrict
     assert!(validate_create_share_input(&sample_create_share_input()).is_ok());
 
     let mut missing_allowed_emails = sample_create_share_input();
-    missing_allowed_emails.access_mode = "email-restricted".to_string();
+    missing_allowed_emails.access_mode = ShareLinkAccessMode::EmailRestricted;
     let error = validate_create_share_input(&missing_allowed_emails)
         .expect_err("email-restricted shares should require allowed emails");
     assert_eq!(error.code, AppErrorCode::BadRequest);
@@ -157,7 +158,7 @@ fn validate_create_share_input_accepts_anyone_and_rejects_invalid_email_restrict
     );
 
     let mut invalid_email_input = sample_create_share_input();
-    invalid_email_input.access_mode = "email-restricted".to_string();
+    invalid_email_input.access_mode = ShareLinkAccessMode::EmailRestricted;
     invalid_email_input.allowed_emails = Some(vec!["not-an-email".to_string()]);
     let error = validate_create_share_input(&invalid_email_input)
         .expect_err("invalid email addresses should be rejected");
@@ -228,21 +229,27 @@ fn effective_share_link_status_reports_expired_and_exhausted_states() {
 
     let mut expired_link = sample_share_link_row();
     expired_link.expires_at = now - time::Duration::minutes(1);
-    assert_eq!(effective_share_link_status(&expired_link, now), "expired");
+    assert_eq!(
+        effective_share_link_status(&expired_link, now),
+        ShareLinkStatus::Expired
+    );
 
     let mut exhausted_link = sample_share_link_row();
     exhausted_link.max_access_count = Some(1);
     exhausted_link.access_count = 1;
     assert_eq!(
         effective_share_link_status(&exhausted_link, now),
-        "exhausted"
+        ShareLinkStatus::Exhausted
     );
 
     let revoked_link = DbShareLinkRow {
-        status: "revoked".to_string(),
+        status: ShareLinkStatus::Revoked,
         ..sample_share_link_row()
     };
-    assert_eq!(effective_share_link_status(&revoked_link, now), "revoked");
+    assert_eq!(
+        effective_share_link_status(&revoked_link, now),
+        ShareLinkStatus::Revoked
+    );
 }
 
 #[test]

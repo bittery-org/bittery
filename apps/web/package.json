@@ -18,6 +18,7 @@
 		"dev": "vite dev --port=3001"
 	},
 	"dependencies": {
+		"@bittery/api-contract": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/crypto-port": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*",

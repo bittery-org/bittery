@@ -7,11 +7,22 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::{config::db_pool, services::share, AppState};
+use crate::{
+    config::db_pool,
+    db::enums::ShareLinkAccessMode,
+    services::share,
+    shapes::{
+        allowed_email_shape, create_share_link_shape, email_verification_shape,
+        public_share_access_shape, public_share_info_shape, share_access_log_shape,
+        share_link_list_entry_shape, share_link_list_shape,
+    },
+    AppState,
+};
 
 use super::{
-    dto::{CursorPage, PageRequest, ProblemDetails},
+    dto::{CursorPage, PageRequest, ProblemDetails, SuccessResponse},
     error::ApiError,
+    error_code::ErrorCode,
     extract::{ApiJson, AuthenticatedRequest},
     idempotency,
     pagination::{
@@ -23,7 +34,7 @@ use super::{
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateShareLinkRequest {
-    access_mode: ShareAccessMode,
+    access_mode: ShareLinkAccessMode,
     #[serde(default)]
     is_one_time_use: bool,
     expires_in: ShareExpiration,
@@ -33,22 +44,6 @@ struct CreateShareLinkRequest {
     encryption_iv: String,
     encrypted_share_key: String,
     share_key_iv: String,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "kebab-case")]
-enum ShareAccessMode {
-    Anyone,
-    EmailRestricted,
-}
-
-impl ShareAccessMode {
-    fn as_wire_value(&self) -> &'static str {
-        match self {
-            Self::Anyone => "anyone",
-            Self::EmailRestricted => "email-restricted",
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -100,176 +95,77 @@ struct EmailAddress(String);
 #[schema(value_type = String, pattern = r"^[A-Za-z0-9_-]{32}$")]
 pub(crate) struct ShareToken(String);
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateShareLinkResponse {
-    id: String,
-    token: String,
-    expires_at: String,
-    base_share_url: String,
-}
+create_share_link_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct CreateShareLinkResponse
+});
+create_share_link_shape!(shape_from {
+    share::CreateShareLinkResponse => CreateShareLinkResponse
+});
 
-impl From<share::CreateShareLinkResponse> for CreateShareLinkResponse {
-    fn from(value: share::CreateShareLinkResponse) -> Self {
-        Self {
-            id: value.id,
-            token: value.token,
-            expires_at: value.expires_at,
-            base_share_url: value.base_share_url,
-        }
-    }
-}
+allowed_email_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct AllowedEmailResponse
+});
+allowed_email_shape!(shape_from {
+    share::ShareAllowedEmailSummary => AllowedEmailResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct AllowedEmailResponse {
-    email: String,
-    verified: bool,
-}
+share_link_list_entry_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ShareLinkListEntryResponse
+}, email = AllowedEmailResponse);
+share_link_list_entry_shape!(shape_from {
+    share::ShareLinkListEntry => ShareLinkListEntryResponse
+}, email = AllowedEmailResponse);
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ShareLinkListEntryResponse {
-    id: String,
-    status: String,
-    access_mode: String,
-    is_one_time_use: bool,
-    access_count: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_access_count: Option<i32>,
-    #[schema(max_items = 100)]
-    allowed_emails: Vec<AllowedEmailResponse>,
-    expires_at: String,
-    created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_accessed_at: Option<String>,
-}
+share_link_list_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ShareLinkListResponse
+}, link = ShareLinkListEntryResponse);
+share_link_list_shape!(shape_from {
+    share::ShareLinkListResponse => ShareLinkListResponse
+}, link = ShareLinkListEntryResponse);
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ShareLinkListResponse {
-    #[schema(max_items = 100)]
-    links: Vec<ShareLinkListEntryResponse>,
-    base_share_url: String,
-}
+share_access_log_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ShareAccessLogResponse
+});
+share_access_log_shape!(shape_from {
+    share::ShareAccessLogResponse => ShareAccessLogResponse
+});
 
-impl From<share::ShareLinkListResponse> for ShareLinkListResponse {
-    fn from(value: share::ShareLinkListResponse) -> Self {
-        Self {
-            links: value
-                .links
-                .into_iter()
-                .map(|link| ShareLinkListEntryResponse {
-                    id: link.id,
-                    status: link.status,
-                    access_mode: link.access_mode,
-                    is_one_time_use: link.is_one_time_use,
-                    access_count: link.access_count,
-                    max_access_count: link.max_access_count,
-                    allowed_emails: link
-                        .allowed_emails
-                        .into_iter()
-                        .map(|email| AllowedEmailResponse {
-                            email: email.email,
-                            verified: email.verified,
-                        })
-                        .collect(),
-                    expires_at: link.expires_at,
-                    created_at: link.created_at,
-                    last_accessed_at: link.last_accessed_at,
-                })
-                .collect(),
-            base_share_url: value.base_share_url,
-        }
-    }
-}
+public_share_info_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct PublicShareInfoResponse
+});
+public_share_info_shape!(shape_from {
+    share::PublicShareInfoResponse => PublicShareInfoResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-struct SuccessResponse {
-    success: bool,
-}
+public_share_access_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct PublicShareAccessResponse
+});
+public_share_access_shape!(shape_from {
+    share::PublicShareAccessResponse => PublicShareAccessResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ShareAccessLogResponse {
-    id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accessed_by_email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ip_address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_agent: Option<String>,
-    success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure_reason: Option<String>,
-    accessed_at: String,
-}
-
-impl From<share::ShareAccessLogResponse> for ShareAccessLogResponse {
-    fn from(value: share::ShareAccessLogResponse) -> Self {
-        Self {
-            id: value.id,
-            accessed_by_email: value.accessed_by_email,
-            ip_address: value.ip_address,
-            user_agent: value.user_agent,
-            success: value.success,
-            failure_reason: value.failure_reason,
-            accessed_at: value.accessed_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct PublicShareInfoResponse {
-    valid: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-    access_mode: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    is_one_time_use: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<String>,
-}
-
-impl From<share::PublicShareInfoResponse> for PublicShareInfoResponse {
-    fn from(value: share::PublicShareInfoResponse) -> Self {
-        Self {
-            valid: value.valid,
-            reason: value.reason,
-            access_mode: value.access_mode,
-            is_one_time_use: value.is_one_time_use,
-            expires_at: value.expires_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct PublicShareAccessResponse {
-    encrypted_item_data: String,
-    encryption_iv: String,
-    encrypted_share_key: String,
-    share_key_iv: String,
-}
-
-impl From<share::PublicShareAccessResponse> for PublicShareAccessResponse {
-    fn from(value: share::PublicShareAccessResponse) -> Self {
-        Self {
-            encrypted_item_data: value.encrypted_item_data,
-            encryption_iv: value.encryption_iv,
-            encrypted_share_key: value.encrypted_share_key,
-            share_key_iv: value.share_key_iv,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct EmailVerificationResponse {
-    success: bool,
-    message: String,
-}
+email_verification_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct EmailVerificationResponse
+});
+email_verification_shape!(shape_from {
+    share::RequestEmailVerificationResponse => EmailVerificationResponse
+});
 
 #[derive(IntoResponses)]
 #[allow(dead_code)]
@@ -322,7 +218,7 @@ enum ShareErrorResponses {
 fn validate_email_length(email: &str) -> Result<(), ApiError> {
     if email.len() > 320 {
         Err(ApiError::bad_request(
-            "INVALID_EMAIL",
+            ErrorCode::InvalidEmail,
             "Email addresses cannot exceed 320 bytes.",
         ))
     } else {
@@ -349,7 +245,7 @@ async fn create_share_link(
         &request.session.user_id,
         share::CreateShareLinkInput {
             item_id,
-            access_mode: body.access_mode.as_wire_value().to_string(),
+            access_mode: body.access_mode,
             is_one_time_use: body.is_one_time_use,
             expires_in: body.expires_in.as_wire_value().to_string(),
             allowed_emails: body
@@ -474,13 +370,7 @@ async fn request_email_verification(
         },
     )
     .await?;
-    Ok((
-        axum::http::StatusCode::ACCEPTED,
-        Json(EmailVerificationResponse {
-            success: response.success,
-            message: response.message,
-        }),
-    ))
+    Ok((axum::http::StatusCode::ACCEPTED, Json(response.into())))
 }
 
 #[utoipa::path(post, path = "/public/share-links/{token}/email-accesses", operation_id = "verifyShareEmailAndAccess", tag = "public-share-links", params(("token" = ShareToken, Path)), request_body = EmailAccessRequest, responses((status = 200, body = PublicShareAccessResponse), ShareErrorResponses))]

@@ -33,8 +33,9 @@ import type {
 	SRPClientSession,
 	SRPRegistration,
 	SRPServerChallenge,
+	TotpResult,
 	ValidationResult,
-} from "@bittery/types";
+} from "./types";
 
 declare const KEY_REF_BRAND: unique symbol;
 
@@ -82,7 +83,13 @@ export type DecryptManyResult =
 	| { id: string; ok: true; plaintext: string }
 	| { id: string; ok: false; error: string };
 
-/** Base64, because these are persisted and re-sent verbatim rather than fed to WebAuthn. */
+/**
+ * Base64, because these are persisted and re-sent verbatim rather than fed to WebAuthn.
+ *
+ * Deliberately narrower than the generated record, which also carries `publicKeySpki`: no
+ * caller above the seam has a use for the SPKI spelling, so the port drops it rather than
+ * inviting one. `./types.drift-guard` pins that to exactly one omitted field.
+ */
 export interface PasskeyKeypair {
 	privateKey: string;
 	publicKeyCose: string;
@@ -339,6 +346,30 @@ export interface CryptoPort {
 		clientDataHashBase64: string,
 		signCount: number,
 	): Promise<PasskeyAssertion>;
+
+	// ------------------------------------------------------------------
+	// One-time codes
+	// ------------------------------------------------------------------
+
+	/**
+	 * The TOTP code for the window the backend's clock is currently in (RFC 6238).
+	 *
+	 * `secret` is the base32 an `otpauth:` URI carries, case-insensitive and tolerant of
+	 * spaces and `=` padding. `algorithm` is a hash name — `SHA1`, `SHA256` or `SHA512` in any
+	 * case, anything else being SHA-1 as RFC 6238 defaults. `digits` is 6-8 and `period` is at
+	 * least one second; the core rejects the rest as `invalid-input`.
+	 *
+	 * `algorithm` stays a `string` rather than a union because which hashes a stored item may
+	 * name is item policy, and this seam carries primitives. Nothing here holds a `KeyRef`:
+	 * a TOTP secret belongs to decrypted item plaintext, so it arrives as the string the
+	 * caller already has.
+	 */
+	generateTotp(
+		secret: string,
+		algorithm: string,
+		digits: number,
+		period: number,
+	): Promise<TotpResult>;
 
 	// ------------------------------------------------------------------
 	// Identifiers

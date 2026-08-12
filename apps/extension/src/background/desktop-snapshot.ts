@@ -2,10 +2,13 @@
  * Desktop Snapshot Item Validation
  *
  * Desktop-mode item reads arrive over native messaging as an untyped JSON
- * blob (`desktop-protocol.ts`'s `DESKTOP_ITEMS_SNAPSHOT` response types each
- * item as `Record<string, unknown>`, and the Rust side mirrors that with
- * `Vec<serde_json::Value>` — see `apps/desktop/src-tauri/src/desktop_ipc.rs`
- * and `lib.rs`).
+ * blob. That is deliberate and it is stated once, in the generated protocol:
+ * `DESKTOP_ITEMS_SNAPSHOT.items` is `Array<Record<string, unknown>>` because
+ * the Rust side carries `Vec<serde_json::Value>` — see the comment on that
+ * variant in `apps/desktop/src-tauri/src/desktop_ipc.rs`. The payload is the
+ * account's decrypted item plaintext, a client-owned shape with no Rust
+ * definition, so the desktop app passes it through rather than declaring a
+ * second, Rust-flavoured version of it.
  *
  * The desktop app's IPC handler (`build_snapshot_item_payload` in
  * `apps/desktop/src-tauri/src/lib.rs`) decrypts each cached item and merges

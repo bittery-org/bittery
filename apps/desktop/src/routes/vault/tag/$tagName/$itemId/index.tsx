@@ -1,6 +1,6 @@
 import { useAvailableTags, useItems, useVaultInfo } from "@bittery/core/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { ItemDetailPage } from "../../../../../components/vault/item-detail-page";
 
 export const Route = createFileRoute("/vault/tag/$tagName/$itemId/")({
@@ -32,26 +32,10 @@ function TagItemComponent() {
 		[navigate],
 	);
 
-	const vaultInfo = useMemo(
-		() =>
-			currentVault
-				? {
-						name: currentVault.vaultName,
-						type: currentVault.vaultType,
-						icon: currentVault.vaultIcon,
-						imageUrl: currentVault.vaultImageUrl,
-						accountName: currentVault.accountName,
-						accountTeamName: currentVault.accountTeamName,
-						accountTeamAvatarUrl: currentVault.accountTeamAvatarUrl,
-					}
-				: undefined,
-		[currentVault],
-	);
-
 	return (
 		<ItemDetailPage
 			itemId={itemId}
-			vaultInfo={vaultInfo}
+			vaultInfo={currentVault}
 			availableTags={availableTags}
 			onTagClick={handleTagClick}
 		/>

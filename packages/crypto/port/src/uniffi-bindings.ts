@@ -1,5 +1,11 @@
 import type { CryptoPort, DecryptManyResult, KeyRef } from "./crypto-port";
 import type { CryptoPortErrorCode } from "./errors";
+import type {
+	EncryptionContext,
+	ItemData,
+	SRPClientSession,
+	TotpResult,
+} from "./types";
 
 export type CryptoUniffiBindings = Pick<
 	typeof import("@bittery/crypto-wasm"),
@@ -42,8 +48,13 @@ export class BackendFailure extends Error {
  * `CryptoError_Tags` from the generated bindings. Both the WASM and React Native generators
  * emit these same strings, and the table is duplicated here because this file must not import
  * either generated module at runtime — the React Native adapter shares it.
+ *
+ * A duplicated table can go stale, so the tag column is not `string`: `./types.drift-guard`
+ * checks {@link UniffiErrorTag} against the generated `CryptoError_Tags` and fails the build
+ * when a new Rust variant appears, rather than letting it fall through to the message
+ * sniffing below.
  */
-const UNIFFI_ERROR_CODES = new Map<string, CryptoPortErrorCode>([
+const UNIFFI_ERROR_TABLE = [
 	["Decryption", "decryption-failed"],
 	["KeyDestroyed", "key-destroyed"],
 	["KeyHandleUnavailable", "invalid-key-ref"],
@@ -62,7 +73,14 @@ const UNIFFI_ERROR_CODES = new Map<string, CryptoPortErrorCode>([
 	["Rsa", "backend-failure"],
 	["Srp", "backend-failure"],
 	["BackgroundTaskFailed", "backend-failure"],
-]);
+] as const satisfies readonly (readonly [string, CryptoPortErrorCode])[];
+
+/** Every `CryptoError` variant this file claims to translate. */
+export type UniffiErrorTag = (typeof UNIFFI_ERROR_TABLE)[number][0];
+
+const UNIFFI_ERROR_CODES: ReadonlyMap<string, CryptoPortErrorCode> = new Map(
+	UNIFFI_ERROR_TABLE,
+);
 
 /** Single-string variants arrive as a frozen tuple, struct variants as a record, unit as nothing. */
 function detail(inner: unknown): string {
@@ -170,26 +188,50 @@ function bytes(value: ArrayBuffer): Uint8Array {
 	return new Uint8Array(value);
 }
 
-type UniffiEncryptionContext = {
-	vaultId: string;
-	entityId: string;
+function totpResult(value: UniffiTotpResult): TotpResult {
+	return {
+		code: value.code,
+		remainingSeconds: Number(value.remainingSeconds),
+		period: Number(value.period),
+		progress: value.progress,
+	};
+}
+
+/**
+ * The FFI spelling of {@link EncryptionContext}. Stated as a difference from the canonical
+ * type, not as a second field list: the generated record widens `version` to `bigint` (the
+ * core takes a `u64`) and `entityType` to `string`, and everything else must stay in step.
+ * {@link encryptionContext} performs exactly that conversion.
+ */
+export type UniffiEncryptionContext = Omit<
+	EncryptionContext,
+	"entityType" | "version"
+> & {
 	entityType: string;
 	version: bigint;
-	userId: string;
 };
 
-type UniffiItemData = {
-	id: string;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
+/** {@link ItemData} carrying the widened context. */
+export type UniffiItemData = Omit<ItemData, "context"> & {
 	context: UniffiEncryptionContext;
+};
+
+/**
+ * The FFI spelling of {@link TotpResult}: the core counts both spans of seconds in `u64`.
+ * {@link totpResult} performs that conversion in the one direction it travels.
+ */
+export type UniffiTotpResult = Omit<
+	TotpResult,
+	"remainingSeconds" | "period"
+> & {
+	remainingSeconds: bigint;
+	period: bigint;
 };
 
 export function createCryptoUniffiBackend(
 	wasm: CryptoUniffiBindings,
 ): UniffiBackend {
-	const sessions = new Map<string, import("@bittery/types").SRPClientSession>();
+	const sessions = new Map<string, SRPClientSession>();
 
 	return {
 		initialize: () => wasm.initialize(),
@@ -364,6 +406,11 @@ export function createCryptoUniffiBackend(
 				authenticatorData: bytes(result.authenticatorData),
 				signatureDer: bytes(result.signatureDer),
 			};
+		},
+		async generateTotp(secret, algorithm, digits, period) {
+			return totpResult(
+				await wasm.generateTotp(secret, algorithm, digits, BigInt(period)),
+			);
 		},
 		generateUuid: () => wasm.generateUuid(),
 	};

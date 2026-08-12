@@ -12,13 +12,17 @@ use crate::{
     config::db_pool,
     http::sync_sse,
     services::sync,
-    shapes::{attachment_shape, item_shape},
+    shapes::{
+        attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
+        sync_changes_shape, sync_cursor_shape, sync_event_shape,
+    },
     AppState,
 };
 
 use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
     error::ApiError,
+    error_code::ErrorCode,
     extract::{ApiQuery, AuthenticatedRequest},
     pagination::{truncate_serialized, RESPONSE_PAGE_ITEMS_BYTES},
 };
@@ -103,18 +107,18 @@ where
                 "vaultIds" => vault_ids.push(value.into_owned()),
                 "limit" if limit.is_none() => {
                     limit = Some(value.parse::<u16>().map_err(|_| {
-                        ApiError::bad_request("INVALID_QUERY", "limit must be an integer")
+                        ApiError::bad_request(ErrorCode::InvalidQuery, "limit must be an integer")
                     })?);
                 }
                 "sinceId" | "limit" => {
                     return Err(ApiError::bad_request(
-                        "INVALID_QUERY",
+                        ErrorCode::InvalidQuery,
                         format!("{name} must not be repeated"),
                     ));
                 }
                 _ => {
                     return Err(ApiError::bad_request(
-                        "INVALID_QUERY",
+                        ErrorCode::InvalidQuery,
                         format!("unknown query field: {name}"),
                     ));
                 }
@@ -123,7 +127,7 @@ where
 
         if vault_ids.len() > 200 {
             return Err(ApiError::bad_request(
-                "INVALID_QUERY",
+                ErrorCode::InvalidQuery,
                 "vaultIds must contain at most 200 values",
             ));
         }
@@ -145,14 +149,17 @@ fn default_changes_limit() -> u16 {
 
 fn validate_page_limit(limit: u16) -> Result<(), ApiError> {
     if limit == 0 {
-        return Err(ApiError::bad_request("BAD_REQUEST", "Invalid params"));
+        return Err(ApiError::bad_request(
+            ErrorCode::BadRequest,
+            "Invalid params",
+        ));
     }
     if limit <= MAX_PAGE_SIZE {
         return Ok(());
     }
 
     Err(ApiError::bad_request(
-        "INVALID_PAGE_LIMIT",
+        ErrorCode::InvalidPageLimit,
         format!("limit must be between 1 and {MAX_PAGE_SIZE}"),
     ))
 }
@@ -167,31 +174,14 @@ impl From<ChangesQuery> for sync::GetEventsSinceInput {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BootstrapVaultSummary {
-    id: String,
-    name: String,
-    vault_type: String,
-    icon: Option<String>,
-    image_url: Option<String>,
-    encrypted_vault_key: String,
-    role: String,
-}
-
-impl From<sync::BootstrapVaultSummary> for BootstrapVaultSummary {
-    fn from(value: sync::BootstrapVaultSummary) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            vault_type: value.vault_type,
-            icon: value.icon,
-            image_url: value.image_url,
-            encrypted_vault_key: value.encrypted_vault_key,
-            role: value.role,
-        }
-    }
-}
+bootstrap_vault_summary_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapVaultSummary
+});
+bootstrap_vault_summary_shape!(shape_from {
+    sync::BootstrapVaultSummary => BootstrapVaultSummary
+});
 
 attachment_shape! {
     #[derive(Debug, Serialize, ToSchema)]
@@ -225,87 +215,41 @@ impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BootstrapItemsResponse {
-    items: Vec<BootstrapItemResponse>,
-    next_cursor: Option<String>,
-    sync_cursor: Option<SyncCursorResponse>,
-    has_more: bool,
-}
+bootstrap_items_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapItemsResponse
+});
+bootstrap_items_shape!(shape_from {
+    sync::BootstrapItemsResponse => BootstrapItemsResponse
+});
 
-impl From<sync::BootstrapItemsResponse> for BootstrapItemsResponse {
-    fn from(value: sync::BootstrapItemsResponse) -> Self {
-        Self {
-            items: value.items.into_iter().map(Into::into).collect(),
-            next_cursor: value.next_cursor,
-            sync_cursor: value
-                .sync_cursor
-                .map(|cursor| SyncCursorResponse { id: cursor.id }),
-            has_more: value.has_more,
-        }
-    }
-}
+sync_event_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct SyncEventResponse
+}, timestamp = DecimalString);
+sync_event_shape!(shape_from {
+    sync::SyncEventDto => SyncEventResponse
+}, timestamp = DecimalString);
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SyncEventResponse {
-    id: String,
-    #[serde(rename = "type")]
-    event_type: String,
-    entity_id: String,
-    entity_type: String,
-    vault_id: Option<String>,
-    version: i32,
-    client_id: Option<String>,
-    user_id: String,
-    metadata: Option<serde_json::Value>,
-    timestamp: DecimalString,
-}
+sync_cursor_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct SyncCursorResponse
+});
+sync_cursor_shape!(shape_from {
+    sync::SyncCursorResponse => SyncCursorResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SyncCursorResponse {
-    id: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SyncChangesResponse {
-    #[schema(max_items = 500)]
-    events: Vec<SyncEventResponse>,
-    cursor: Option<SyncCursorResponse>,
-    has_more: bool,
-    requires_full_refresh: bool,
-}
-
-impl From<sync::GetEventsSinceResponse> for SyncChangesResponse {
-    fn from(value: sync::GetEventsSinceResponse) -> Self {
-        Self {
-            events: value
-                .events
-                .into_iter()
-                .map(|event| SyncEventResponse {
-                    id: event.id,
-                    event_type: event.event_type,
-                    entity_id: event.entity_id,
-                    entity_type: event.entity_type,
-                    vault_id: event.vault_id,
-                    version: event.version,
-                    client_id: event.client_id,
-                    user_id: event.user_id,
-                    metadata: event.metadata,
-                    timestamp: event.timestamp.into(),
-                })
-                .collect(),
-            cursor: value
-                .cursor
-                .map(|cursor| SyncCursorResponse { id: cursor.id }),
-            has_more: value.has_more,
-            requires_full_refresh: value.requires_full_refresh,
-        }
-    }
-}
+sync_changes_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct SyncChangesResponse
+}, event = SyncEventResponse);
+sync_changes_shape!(shape_from {
+    sync::GetEventsSinceResponse => SyncChangesResponse
+}, event = SyncEventResponse);
 
 #[utoipa::path(
     get,
@@ -396,9 +340,11 @@ mod tests {
     use axum::{extract::FromRequestParts, http::Request};
     use serde_json::json;
 
+    use crate::db::enums::{ItemCategory, SyncEntityType, SyncEventType, VaultRole, VaultType};
+
     use super::{
         router, BootstrapApiQuery, BootstrapItemsResponse, BootstrapQuery, ChangesApiQuery,
-        ChangesQuery, SyncChangesResponse,
+        ChangesQuery, ErrorCode, SyncChangesResponse,
     };
     use crate::http::api::dto::MAX_PAGE_SIZE;
     use crate::services::sync::{
@@ -415,7 +361,7 @@ mod tests {
             items: vec![ServiceBootstrapItemResponse {
                 id: "item_test".to_string(),
                 vault_id: "vault_test".to_string(),
-                category: "login".to_string(),
+                category: ItemCategory::Login,
                 favorite: true,
                 encrypted_data: "ciphertext".to_string(),
                 encryption_iv: "item-iv".to_string(),
@@ -444,11 +390,11 @@ mod tests {
                 vault: Some(ServiceBootstrapVaultSummary {
                     id: "vault_test".to_string(),
                     name: "encrypted-vault-name".to_string(),
-                    vault_type: "personal".to_string(),
+                    vault_type: VaultType::Personal,
                     icon: None,
                     image_url: None,
                     encrypted_vault_key: "wrapped-key".to_string(),
-                    role: "owner".to_string(),
+                    role: VaultRole::Owner,
                 }),
             }],
             next_cursor: Some("item_test".to_string()),
@@ -490,9 +436,9 @@ mod tests {
         let response: SyncChangesResponse = GetEventsSinceResponse {
             events: vec![SyncEventDto {
                 id: "sync_event_test".to_string(),
-                event_type: "item_updated".to_string(),
+                event_type: SyncEventType::ItemUpdated,
                 entity_id: "item_test".to_string(),
-                entity_type: "item".to_string(),
+                entity_type: SyncEntityType::Item,
                 vault_id: Some("vault_test".to_string()),
                 version: 2,
                 client_id: None,
@@ -541,14 +487,14 @@ mod tests {
         let rejection = ChangesApiQuery::from_request_parts(&mut parts, &())
             .await
             .expect_err("unknown query fields should be rejected");
-        assert_eq!(rejection.code(), "INVALID_QUERY");
+        assert_eq!(rejection.code(), ErrorCode::InvalidQuery);
     }
 
     #[tokio::test]
     async fn sync_query_limits_match_the_published_page_bound() {
         for (limit, expected_code) in [
-            (0, "BAD_REQUEST"),
-            (MAX_PAGE_SIZE + 1, "INVALID_PAGE_LIMIT"),
+            (0, ErrorCode::BadRequest),
+            (MAX_PAGE_SIZE + 1, ErrorCode::InvalidPageLimit),
         ] {
             let (mut bootstrap_parts, _) = Request::builder()
                 .uri(format!("/sync/bootstrap?limit={limit}"))

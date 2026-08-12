@@ -23,6 +23,7 @@ import {
 	IconWand,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
+import { sendMessage } from "@/lib/messaging";
 import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "./favicon";
 import { QRScanner, type QRScanResult } from "./qr-scanner";
@@ -256,7 +257,7 @@ function LoginItemDetail({
 			setIsSaving(true);
 
 			try {
-				const response = await chrome.runtime.sendMessage({
+				const response = await sendMessage({
 					type: "UPDATE_ITEM_TOTP",
 					payload: {
 						itemId: item.id,
@@ -271,14 +272,14 @@ function LoginItemDetail({
 					},
 				});
 
-				if (response?.success) {
+				if (response.success) {
 					toast.success(m.ext_detail_totp_saved());
 					setShowQRScanner(false);
 					onItemUpdated?.();
 				} else {
-					toast.error(response?.error || m.ext_detail_totp_save_failed());
+					toast.error(response.error || m.ext_detail_totp_save_failed());
 				}
-			} catch (error: any) {
+			} catch (error) {
 				console.error("Error saving TOTP:", error);
 				toast.error(m.ext_detail_totp_save_failed());
 			} finally {

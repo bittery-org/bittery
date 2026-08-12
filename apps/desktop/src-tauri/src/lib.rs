@@ -3,45 +3,32 @@ mod ipc_security;
 mod keychain;
 mod native_host_crypto;
 mod native_messaging_installer;
+mod tauri_api;
 
 use base64::Engine;
 use desktop_ipc::{
     write_frame, AccountUnlockData, BiometricUnlockAllMaterial, BiometricUnlockMaterial,
-    DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+    DesktopAccountEntry, DesktopEnvelope, DesktopEvent, DesktopRequest, DesktopResponse,
+    DesktopTheme, OpenDesktopAppIntent, DESKTOP_PROTOCOL_VERSION,
 };
 #[cfg(windows)]
 use ipc_security::desktop_ipc_socket_path;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, Runtime};
+use tauri_api::{
+    BroadcastActiveAccountChangedArgs, BroadcastLockEventArgs, BroadcastUnlockEventArgs,
+    ExtensionBiometricStatus, ExtensionBiometricUnlockArgs, SetUiThemeArgs,
+};
 use tauri_plugin_store::Store;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 
-#[derive(Debug, Clone)]
-enum LockEvent {
-    Lock {
-        reason: String,
-        timestamp: i64,
-    },
-    Unlock {
-        accounts: Vec<String>,
-        timestamp: i64,
-    },
-    DesktopClose {
-        timestamp: i64,
-    },
-    ActiveAccountChanged {
-        account_id: String,
-        timestamp: i64,
-    },
-    ThemeChanged {
-        theme: String,
-        timestamp: i64,
-    },
-}
-
+/// Pushed events are broadcast in the shape they go out in. There used to be a
+/// second, private enum here that `lock_event_to_response` translated; the
+/// translation was the only thing keeping the two in step, so the wire type is
+/// carried end to end instead.
 struct DesktopIpcState {
-    lock_events: broadcast::Sender<LockEvent>,
+    lock_events: broadcast::Sender<DesktopEvent>,
 }
 
 impl Default for DesktopIpcState {
@@ -65,6 +52,13 @@ fn read_store_string<R: Runtime>(store: &Store<R>, key: &str) -> Option<String> 
     store
         .get(key)
         .and_then(|value| value.as_str().map(|s| s.to_string()))
+}
+
+/// The stored appearance preference, or `None` when it has never been synced.
+fn read_store_theme<R: Runtime>(store: &Store<R>) -> Option<DesktopTheme> {
+    store
+        .get(UI_THEME_KEY)
+        .and_then(|value| serde_json::from_value(value).ok())
 }
 
 // The published native-host view
@@ -297,7 +291,7 @@ where
 fn read_key_ref<R: Runtime>(store: &Store<R>, key_ref: &NativeKeyRef) -> Option<String> {
     read_key_ref_with(
         key_ref,
-        |key| match keychain::keychain_get(key) {
+        |key| match keychain::get_value(key) {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("[desktop-ipc] Keychain read failed for {}: {}", key, error);
@@ -463,49 +457,6 @@ fn biometric_signature(challenge: &str, bound_to: impl std::fmt::Display) -> Str
 
 fn is_clean_disconnect(error: &str) -> bool {
     error.contains("early eof") || error.contains("unexpected end of file")
-}
-
-fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
-    match event {
-        LockEvent::Lock { reason, timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::Lock,
-            payload: serde_json::json!({
-                "reason": reason,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::Unlock {
-            accounts,
-            timestamp,
-        } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::Unlock,
-            payload: serde_json::json!({
-                "accounts": accounts,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::DesktopClose { timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::DesktopClose,
-            payload: serde_json::json!({ "timestamp": timestamp }),
-        },
-        LockEvent::ActiveAccountChanged {
-            account_id,
-            timestamp,
-        } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::ActiveAccountChanged,
-            payload: serde_json::json!({
-                "accountId": account_id,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::ThemeChanged { theme, timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::ThemeChanged,
-            payload: serde_json::json!({
-                "theme": theme,
-                "timestamp": timestamp,
-            }),
-        },
-    }
 }
 
 /// Read the device key through the published ref.
@@ -861,25 +812,9 @@ async fn handle_desktop_ipc_message(
         },
         DesktopRequest::GetDesktopAccounts => match get_accounts_list_internal(app_handle).await {
             Ok(data) => DesktopResponse::DesktopAccounts {
-                accounts: data
-                    .get("accounts")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default(),
-                active_account: data
-                    .get("active_account")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                unlocked_accounts: data
-                    .get("unlocked_accounts")
-                    .and_then(|v| v.as_array())
-                    .map(|accounts| {
-                        accounts
-                            .iter()
-                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                accounts: data.accounts,
+                active_account: data.active_account,
+                unlocked_accounts: data.unlocked_accounts,
             },
             Err(error) => DesktopResponse::Error { message: error },
         },
@@ -943,14 +878,8 @@ async fn handle_desktop_ipc_message(
         DesktopRequest::CheckBiometricAvailable => {
             match check_biometric_status_internal(app_handle).await {
                 Ok(status) => DesktopResponse::BiometricStatus {
-                    available: status
-                        .get("available")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    enabled: status
-                        .get("enabled")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    available: status.available,
+                    enabled: status.enabled,
                     app_running: true,
                 },
                 Err(error) => DesktopResponse::Error { message: error },
@@ -1017,18 +946,18 @@ async fn handle_desktop_ipc_message(
             vault_id,
         } => match open_app_internal(app_handle) {
             Ok(()) => {
-                match intent.as_deref() {
-                    Some("create_item") => {
+                match intent {
+                    Some(OpenDesktopAppIntent::CreateItem) => {
                         let _ =
                             app_handle.emit("open-create-item", serde_json::json!({ "url": url }));
                     }
-                    Some("view_item") => {
+                    Some(OpenDesktopAppIntent::ViewItem) => {
                         let _ = app_handle.emit(
                             "open-item",
                             serde_json::json!({ "itemId": item_id, "vaultId": vault_id }),
                         );
                     }
-                    _ => {}
+                    None => {}
                 }
                 DesktopResponse::OpenDesktopAppResult {
                     success: true,
@@ -1055,7 +984,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (mut reader, mut writer) = tokio::io::split(stream);
-    let mut event_rx: Option<broadcast::Receiver<LockEvent>> = None;
+    let mut event_rx: Option<broadcast::Receiver<DesktopEvent>> = None;
 
     loop {
         if let Some(rx) = event_rx.as_mut() {
@@ -1099,7 +1028,7 @@ where
                         Ok(event) => {
                             let response = DesktopEnvelope::current(
                                 None,
-                                lock_event_to_response(event),
+                                DesktopResponse::DesktopEvent(event),
                             );
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
@@ -1366,7 +1295,7 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
 #[tauri::command]
 async fn check_extension_biometric_status(
     app_handle: tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+) -> Result<ExtensionBiometricStatus, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
@@ -1406,10 +1335,10 @@ async fn check_extension_biometric_status(
         None => false,
     };
 
-    Ok(serde_json::json!({
-        "available": status.is_available,
-        "enabled": has_session,
-    }))
+    Ok(ExtensionBiometricStatus {
+        available: status.is_available,
+        enabled: has_session,
+    })
 }
 
 /// Tauri command to perform biometric unlock
@@ -1422,6 +1351,16 @@ async fn extension_biometric_unlock(
 ) -> Result<BiometricUnlockMaterial, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
+
+    let ExtensionBiometricUnlockArgs {
+        challenge,
+        extension_id,
+        account_id,
+    } = ExtensionBiometricUnlockArgs {
+        challenge,
+        extension_id,
+        account_id,
+    };
 
     eprintln!(
         "[Biometric Unlock] Request from extension: {}",
@@ -1527,7 +1466,7 @@ async fn extension_biometric_unlock(
 /// Check biometric status
 async fn check_biometric_status_internal(
     app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+) -> Result<ExtensionBiometricStatus, String> {
     // Call the Tauri command
     check_extension_biometric_status(app_handle.clone()).await
 }
@@ -1689,7 +1628,7 @@ struct DesktopStatusView {
     unlocked_accounts: Vec<String>,
     timestamp: i64,
     autolock_timeout_ms: i64,
-    theme: Option<String>,
+    theme: Option<DesktopTheme>,
 }
 
 /// Get current lock status of all accounts
@@ -1705,7 +1644,10 @@ async fn get_lock_status_internal(
     // UI appearance preference (app-wide, mirrors the frontend's next-themes
     // value). Rust-owned, so it is not part of the published view. Absent until
     // the frontend syncs it via `set_ui_theme`.
-    let theme = read_store_string(&store, UI_THEME_KEY);
+    // An unrecognised stored value reads as "unknown" rather than being passed
+    // through: `set_ui_theme` is the only writer and it accepts the three
+    // members, so anything else is a corrupt store, not a newer preference.
+    let theme = read_store_theme(&store);
 
     // Without a usable view nothing is unlocked, which is the safe *and* honest
     // answer: the app has not initialised, so no MUK is in memory either. The
@@ -1756,37 +1698,21 @@ fn open_app_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Get account list (works even when locked)
-///
-/// One entry of the accounts response the browser extension consumes. It is a
-/// pure republication of the view's account entry: the extension stores the
-/// result as its own `AccountMetadata`, so every field it needs is published
-/// rather than defaulted or re-derived here.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AccountsListEntry<'a> {
-    account_id: &'a str,
-    email: &'a str,
-    user_id: &'a str,
-    name: &'a str,
-    secret_key_hint: &'a str,
-    /// Omitted entirely when the view omitted it, so "no team" never arrives at
-    /// the consumer as an empty string.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_name: Option<&'a str>,
-    /// Nullable rather than skipped: the consumer's field is `string | null`.
-    team_avatar_url: Option<&'a str>,
-    added_at: i64,
-    last_active_at: i64,
-    biometric_enabled: bool,
+/// The three fields of the `DESKTOP_ACCOUNTS` response, before they are wrapped
+/// in it. Named rather than a `serde_json::Value` so the wire type is the only
+/// place these field names exist.
+struct AccountsList {
+    accounts: Vec<DesktopAccountEntry>,
+    active_account: Option<String>,
+    unlocked_accounts: Vec<String>,
 }
 
+/// Get account list (works even when locked)
+///
 /// Every field here comes from the published view. Reaching into
 /// `bittery_accounts_list` directly would put a second copy of the key scheme
 /// back in this file.
-async fn get_accounts_list_internal(
-    app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+async fn get_accounts_list_internal(app_handle: &tauri::AppHandle) -> Result<AccountsList, String> {
     use tauri_plugin_store::StoreExt;
 
     let store = app_handle
@@ -1799,36 +1725,36 @@ async fn get_accounts_list_internal(
         Ok(view) => view,
         Err(problem) => {
             eprintln!("[desktop-ipc] Reporting no accounts: {}", problem.message());
-            return Ok(serde_json::json!({
-                "accounts": Vec::<serde_json::Value>::new(),
-                "active_account": serde_json::Value::Null,
-                "unlocked_accounts": Vec::<String>::new(),
-            }));
+            return Ok(AccountsList {
+                accounts: Vec::new(),
+                active_account: None,
+                unlocked_accounts: Vec::new(),
+            });
         }
     };
 
     let accounts = view
         .accounts
         .iter()
-        .map(|account| AccountsListEntry {
-            account_id: &account.account_id,
-            email: &account.email,
-            user_id: &account.user_id,
-            name: &account.name,
-            secret_key_hint: &account.secret_key_hint,
-            team_name: account.team_name.as_deref(),
-            team_avatar_url: account.team_avatar_url.as_deref(),
+        .map(|account| DesktopAccountEntry {
+            account_id: account.account_id.clone(),
+            email: account.email.clone(),
+            user_id: account.user_id.clone(),
+            name: account.name.clone(),
+            secret_key_hint: account.secret_key_hint.clone(),
+            team_name: account.team_name.clone(),
+            team_avatar_url: account.team_avatar_url.clone(),
             added_at: account.added_at,
             last_active_at: account.last_active_at,
             biometric_enabled: account.biometric_enabled,
         })
         .collect::<Vec<_>>();
 
-    Ok(serde_json::json!({
-        "accounts": accounts,
-        "active_account": view.active_account_id,
-        "unlocked_accounts": view.unlocked_account_ids,
-    }))
+    Ok(AccountsList {
+        accounts,
+        active_account: view.active_account_id,
+        unlocked_accounts: view.unlocked_account_ids,
+    })
 }
 
 /// Get vault keys for a specific stable account ID.
@@ -1862,16 +1788,18 @@ fn broadcast_lock_event(
     state: tauri::State<Arc<DesktopIpcState>>,
     reason: String,
 ) -> Result<(), String> {
+    let args = BroadcastLockEventArgs { reason };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Lock {
-        reason: reason.clone(),
+    let _ = state.lock_events.send(DesktopEvent::Lock {
+        reason: args.reason.clone(),
         timestamp,
-    };
+    });
 
-    let _ = state.lock_events.send(event);
-
-    eprintln!("[Lock Event] Broadcast lock event (reason: {})", reason);
+    eprintln!(
+        "[Lock Event] Broadcast lock event (reason: {})",
+        args.reason
+    );
     Ok(())
 }
 
@@ -1881,18 +1809,17 @@ fn broadcast_unlock_event(
     state: tauri::State<Arc<DesktopIpcState>>,
     accounts: Vec<String>,
 ) -> Result<(), String> {
+    let args = BroadcastUnlockEventArgs { accounts };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Unlock {
-        accounts: accounts.clone(),
+    let _ = state.lock_events.send(DesktopEvent::Unlock {
+        accounts: args.accounts.clone(),
         timestamp,
-    };
-
-    let _ = state.lock_events.send(event);
+    });
 
     eprintln!(
         "[Unlock Event] Broadcast unlock event (accounts: {:?})",
-        accounts
+        args.accounts
     );
     Ok(())
 }
@@ -1903,18 +1830,17 @@ fn broadcast_active_account_changed(
     state: tauri::State<Arc<DesktopIpcState>>,
     account_id: String,
 ) -> Result<(), String> {
+    let args = BroadcastActiveAccountChangedArgs { account_id };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::ActiveAccountChanged {
-        account_id: account_id.clone(),
+    let _ = state.lock_events.send(DesktopEvent::ActiveAccountChanged {
+        account_id: args.account_id.clone(),
         timestamp,
-    };
-
-    let _ = state.lock_events.send(event);
+    });
 
     eprintln!(
         "[Active Account Changed] Broadcast active account changed event (accountId: {})",
-        account_id
+        args.account_id
     );
     Ok(())
 }
@@ -1931,27 +1857,31 @@ fn set_ui_theme(
 ) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
 
-    // Only accept known values so the stored preference stays well-formed.
-    if !matches!(theme.as_str(), "light" | "dark" | "system") {
-        return Err(format!("Invalid theme value: {}", theme));
-    }
+    // Only accept known values so the stored preference stays well-formed. The
+    // parameter stays a `String` so an unknown value is this command's own error
+    // rather than an `invalid args` rejection from the bridge.
+    let theme: DesktopTheme = serde_json::from_value(serde_json::Value::String(theme.clone()))
+        .map_err(|_| format!("Invalid theme value: {}", theme))?;
+    let args = SetUiThemeArgs { theme };
 
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    store.set(UI_THEME_KEY, serde_json::Value::String(theme.clone()));
+    store.set(
+        UI_THEME_KEY,
+        serde_json::to_value(args.theme).map_err(|e| format!("Invalid theme value: {}", e))?,
+    );
     store
         .save()
         .map_err(|e| format!("Failed to persist theme: {}", e))?;
 
     let timestamp = now_timestamp_ms();
-    let event = LockEvent::ThemeChanged {
-        theme: theme.clone(),
+    let _ = state.lock_events.send(DesktopEvent::ThemeChanged {
+        theme: args.theme,
         timestamp,
-    };
-    let _ = state.lock_events.send(event);
+    });
 
-    eprintln!("[UI Theme] Set UI theme to {}", theme);
+    eprintln!("[UI Theme] Set UI theme to {:?}", args.theme);
     Ok(())
 }
 
@@ -2022,7 +1952,7 @@ pub fn run() {
 
                 if let Some(state) = window.app_handle().try_state::<Arc<DesktopIpcState>>() {
                     let timestamp = now_timestamp_ms();
-                    let event = LockEvent::DesktopClose { timestamp };
+                    let event = DesktopEvent::DesktopClose { timestamp };
                     let _ = state.lock_events.send(event);
                 } else {
                     eprintln!("[Window Event] Failed to get DesktopIpcState");
@@ -2038,9 +1968,9 @@ pub fn run() {
 mod tests {
     use super::{
         biometric_signature, build_snapshot_item_payload, decode_records, parse_native_view,
-        read_key_ref_with, records_under_prefix, CachedItemRecord, CachedVaultRecord,
-        NativeItemCacheState, NativeKeyStore, NativeViewProblem, ITEM_CACHE_NATIVE_VIEW_VERSION,
-        NATIVE_VIEW_VERSION,
+        read_key_ref_with, records_under_prefix, resolve_item_cache_view, CachedItemRecord,
+        CachedVaultRecord, NativeItemCacheState, NativeKeyStore, NativeViewProblem,
+        ITEM_CACHE_NATIVE_VIEW_VERSION, NATIVE_VIEW_VERSION,
     };
 
     #[test]
@@ -2702,5 +2632,96 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             locked_versions(&lock_fixture("2.11.3", "2.11.4", "0.55.1"), "tauri-runtime");
 
         assert_eq!(versions, vec!["2.11.3".to_string()]);
+    }
+
+    // ----------------------------------------------------------------------
+    // The golden documents
+    // ----------------------------------------------------------------------
+
+    /// The consumer half of the two documents that cross this seam as JSON with
+    /// no generator between them. `packages/storage/src/__fixtures__/README.md`
+    /// explains the arrangement; the producer half is
+    /// `native-host-view.golden.test.ts`, which asserts `AccountStore` writes
+    /// exactly these bytes.
+    ///
+    /// `include_str!` rather than a runtime read so the fixture is a build
+    /// input: moving or deleting it fails compilation instead of a test.
+    const NATIVE_VIEW_GOLDEN: &str =
+        include_str!("../../../../packages/storage/src/__fixtures__/native-host-view.v3.json");
+    const ITEM_CACHE_STATE_GOLDEN: &str =
+        include_str!("../../../../packages/storage/src/__fixtures__/item-cache-state.v2.json");
+
+    #[test]
+    fn golden_native_view_is_accepted_and_every_field_is_read() {
+        let view = parse_native_view(Some(NATIVE_VIEW_GOLDEN.to_string()))
+            .expect("the committed native-host view must parse");
+
+        assert_eq!(view.v, NATIVE_VIEW_VERSION);
+        assert_eq!(view.active_account_id.as_deref(), Some("account-1"));
+        assert_eq!(view.unlocked_account_ids, vec!["account-1".to_string()]);
+        assert_eq!(view.auto_lock_timeout_ms, 600_000);
+        assert_eq!(view.device_key.key, "bittery_device_key");
+        assert_eq!(view.device_key.store, NativeKeyStore::Secret);
+        assert_eq!(view.accounts.len(), 2);
+
+        // The account carrying every optional field.
+        let first = view
+            .account("account-1")
+            .expect("account-1 must be present");
+        assert_eq!(first.email, "person@example.com");
+        assert_eq!(first.user_id, "user-1");
+        assert_eq!(first.name, "Person");
+        assert_eq!(first.secret_key_hint, "AB-CD");
+        assert_eq!(first.team_name.as_deref(), Some("Acme"));
+        assert_eq!(
+            first.team_avatar_url.as_deref(),
+            Some("https://cdn.example.com/acme.png")
+        );
+        assert_eq!(first.added_at, 1_700_000_000_000);
+        assert_eq!(first.last_active_at, 1_700_000_002_000);
+        assert!(first.biometric_enabled);
+        assert_eq!(first.token.key, "bittery_account_account-1_jwt_token");
+        assert_eq!(first.token.store, NativeKeyStore::Secret);
+        assert_eq!(
+            first.session_data.key,
+            "bittery_account_account-1_session_data"
+        );
+        assert_eq!(first.session_data.store, NativeKeyStore::Secret);
+        assert_eq!(first.vault_keys.key, "bittery_account_account-1_vault_keys");
+        assert_eq!(first.vault_keys.store, NativeKeyStore::Secret);
+        assert_eq!(
+            first.encrypted_private_key.key,
+            "bittery_account_account-1_encrypted_private_key"
+        );
+        assert_eq!(first.encrypted_private_key.store, NativeKeyStore::Secret);
+        assert_eq!(first.item_cache_state.key, "record:account-1:meta:meta");
+        assert_eq!(first.item_cache_state.store, NativeKeyStore::Plain);
+        assert!(view.is_unlocked("account-1"));
+
+        // The account with no team and biometrics off: absent stays absent, and
+        // `teamAvatarUrl` arrives as an explicit null rather than being skipped.
+        let second = view
+            .account("account-2")
+            .expect("account-2 must be present");
+        assert_eq!(second.team_name, None);
+        assert_eq!(second.team_avatar_url, None);
+        assert!(!second.biometric_enabled);
+        assert!(!view.is_unlocked("account-2"));
+    }
+
+    #[test]
+    fn golden_item_cache_state_is_accepted_and_every_field_is_read() {
+        let state: NativeItemCacheState = serde_json::from_str(ITEM_CACHE_STATE_GOLDEN)
+            .expect("the committed item cache state must parse");
+
+        assert_eq!(state.v, 2);
+        assert_eq!(state.native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+
+        let view = resolve_item_cache_view(state, "account-1")
+            .expect("the committed item cache state must resolve");
+
+        assert_eq!(view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+        assert_eq!(view.items_key_prefix, "record:account-1:items:");
+        assert_eq!(view.vaults_key_prefix, "record:account-1:vaults:");
     }
 }

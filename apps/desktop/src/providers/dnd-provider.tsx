@@ -1,6 +1,11 @@
 import { useMoveItem } from "@bittery/core/hooks";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
-import { toast } from "@bittery/ui";
+import {
+	type DragItemData,
+	type DropVaultData,
+	ItemDragPreview,
+	toast,
+} from "@bittery/ui";
 import {
 	DndContext,
 	type DragEndEvent,
@@ -12,26 +17,8 @@ import {
 } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useState } from "react";
-import { ItemDragPreview } from "../components/vault/item-drag-preview";
+import { readCurrentAuthServerUrl } from "../lib/auth-server";
 import { useI18n } from "../providers/i18n-provider";
-
-/**
- * Data attached to draggable items
- */
-export interface DragItemData {
-	type: "vault-item";
-	item: DecryptedItem;
-	sourceVaultId: string;
-}
-
-/**
- * Data attached to droppable vault targets
- */
-export interface DropVaultData {
-	type: "vault";
-	vaultId: string;
-	role: string;
-}
 
 interface DndContextValue {
 	activeItem: DecryptedItem | null;
@@ -190,7 +177,12 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 			>
 				{children}
 				<DragOverlay>
-					{activeItem && <ItemDragPreview item={activeItem} />}
+					{activeItem && (
+						<ItemDragPreview
+							item={activeItem}
+							defaultServerUrl={readCurrentAuthServerUrl()}
+						/>
+					)}
 				</DragOverlay>
 			</DndContext>
 		</VaultDndContext.Provider>

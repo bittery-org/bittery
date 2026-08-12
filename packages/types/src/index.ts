@@ -1,15 +1,24 @@
 /**
- * Shared crypto types for Bittery
+ * Local-first application vocabulary: what a device caches, what it still owes a server,
+ * and the platform seams the shared hooks talk through.
  *
- * These types are used across all platforms (web, desktop, mobile, extension)
- * for consistent interfaces when working with crypto operations.
+ * Crypto-seam records — `EncryptedData`, `EncryptionContext`, `KdfProfile`, the SRP and
+ * rotation shapes — are NOT here. They are the TypeScript spelling of Rust `uniffi::Record`s
+ * and live in `@bittery/crypto-port`, next to the port that marshals them and the drift
+ * guard that pins them to the generated bindings.
  *
  * The Item shapes here are the one exception to "hand-written": they derive from the
  * generated API contract, so the server owns the field list and a new server field fails
  * to compile rather than going quietly missing. See {@link CachedEncryptedItem}.
  */
 
-import type { Attachment, ItemPayload } from "@bittery/api-contract";
+import type {
+	Attachment,
+	AuthVaultKey,
+	ItemCategory,
+	ItemPayload,
+	VaultType,
+} from "@bittery/api-contract";
 
 /**
  * The generated contract is emitted `--immutable`, but a cached record is a local working
@@ -17,175 +26,6 @@ import type { Attachment, ItemPayload } from "@bittery/api-contract";
  * homomorphic, so a field added to the contract still shows up here.
  */
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-
-// ============================================================================
-// Key Derivation Types
-// ============================================================================
-
-/**
- * Result from key derivation (PBKDF2 + HKDF)
- */
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
-
-// ============================================================================
-// Encryption Types
-// ============================================================================
-
-/**
- * Encrypted data with IV and algorithm
- */
-export interface EncryptedData {
-	/** Base64-encoded ciphertext */
-	ciphertext: string;
-	/** Base64-encoded initialization vector */
-	iv: string;
-	/** Encryption algorithm (always "AES-GCM-AAD-V1") */
-	algorithm: string;
-}
-
-/**
- * Encryption context bound to ciphertext integrity.
- *
- * This schema is deterministic across platforms and used to prevent
- * ciphertext swapping between entities.
- */
-export interface EncryptionContext {
-	vaultId: string;
-	entityId: string;
-	entityType:
-		| "item"
-		| "attachment_name"
-		| "attachment_content_type"
-		| "attachment_blob"
-		| "vault_key";
-	version: number;
-	userId: string;
-}
-
-/**
- * Login KDF profile provided by the server and pinned locally.
- */
-export type KdfAlgorithm = "pbkdf2-sha256";
-
-export interface KdfProfile {
-	schemaVersion: 1;
-	algorithm: KdfAlgorithm;
-	iterations: number;
-}
-
-// ============================================================================
-// RSA Types
-// ============================================================================
-
-/**
- * RSA key pair
- */
-export interface RsaKeyPair {
-	/** PEM-encoded public key (SPKI format) */
-	publicKey: string;
-	/** PEM-encoded private key (PKCS8 format) */
-	privateKey: string;
-}
-
-// ============================================================================
-// SRP-6a Types
-// ============================================================================
-
-/**
- * SRP registration data (salt + verifier)
- */
-export interface SRPRegistration {
-	salt: string;
-	verifier: string;
-}
-
-/**
- * SRP client ephemeral key pair
- */
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-/**
- * SRP server challenge (sent to client during login)
- */
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-	kdfParams: KdfProfile;
-}
-
-/**
- * SRP client session (key + proof)
- */
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
-
-// ============================================================================
-// Key Rotation Types
-// ============================================================================
-
-/**
- * Member key data for key rotation
- */
-export interface MemberKeyData {
-	userId: string;
-	publicKey: string;
-}
-
-/**
- * Item data for re-encryption during key rotation.
- *
- * `context` is the AAD the stored ciphertext is bound to. Rotation re-binds the replacement
- * to the same context, so an item that was bound stays bound and one written before AAD
- * binding existed stays unbound.
- */
-export interface ItemData {
-	id: string;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	context: EncryptionContext;
-}
-
-/**
- * Re-encrypted item result
- */
-export interface ReEncryptedItem {
-	itemId: string;
-	encryptedData: string;
-	encryptionIv: string;
-}
-
-/**
- * Member with encrypted vault key
- */
-export interface MemberEncryptedKey {
-	userId: string;
-	encryptedVaultKey: string;
-}
-
-/**
- * Key rotation result
- */
-export interface KeyRotationResult {
-	memberEncryptedKeys: MemberEncryptedKey[];
-	reEncryptedItems: ReEncryptedItem[];
-}
-
-/**
- * Validation result for rotation data
- */
-export interface ValidationResult {
-	valid: boolean;
-	errors: string[];
-}
 
 // ============================================================================
 // Item Cache Types
@@ -221,18 +61,48 @@ export type CachedEncryptedItem = Mutable<ItemPayload> &
 	};
 
 /**
- * Cached vault metadata for local-first storage
+ * The vault as anything downstream of the wire knows it: the display fields, with the
+ * server's `vaultType` under its local name `type` and its nullable strings already
+ * decided. The one definition — `@bittery/shared`'s `VaultSummary`, `@bittery/core`'s
+ * `VaultView`, the `vault` sub-object of a raw item and {@link CachedVaultMetadata} are
+ * all this, and were four hand-written copies of it before ADR 0012.
+ *
+ * `type` is the generated {@link VaultType}, so a new vault kind server-side fails to
+ * compile in the decoder rather than arriving as an unhandled string.
  */
-export interface CachedVaultMetadata {
+export interface VaultSummary {
 	id: string;
-	accountId?: string;
-	accountEmail?: string;
-	serverUrl?: string;
 	name: string;
-	type: string;
+	type: VaultType;
 	icon: string | null;
 	imageUrl: string | null;
 }
+
+/**
+ * Cached vault metadata for local-first storage: a {@link VaultSummary} plus the account
+ * it belongs to, which only a device holding several accounts has to say.
+ */
+export interface CachedVaultMetadata
+	extends VaultSummary,
+		CachedItemAccountScope {}
+
+/**
+ * A vault key as a device holds it: which vault, how to display it, the wrapped key, and
+ * the holder's role.
+ *
+ * **This is the one definition.** `@bittery/storage`'s `VaultKeyData`, `@bittery/sync`'s
+ * `SyncVaultKeyEntry` and `@bittery/shared/vault-mapping`'s `VaultKeyEntry` are all aliases
+ * of it. It lives here rather than in any of those because `packages/sync` deliberately does
+ * not depend on `packages/storage` (ADR 0012 names that constraint), and this leaf package
+ * is the one both already depend on.
+ *
+ * Derived from the generated `AuthVaultKeyResponse` rather than restated, for the same
+ * reason {@link CachedEncryptedItem} derives from `ItemResponseDto`: `vaultType` and `role`
+ * are closed sets owned by `apps/server/src/db/enums.rs`, and a field the server renames must
+ * fail to compile in the mappers instead of going quietly missing from every device's key
+ * store. Only `readonly` is dropped — a stored key entry is a local working copy.
+ */
+export type VaultKeyEntry = Mutable<AuthVaultKey>;
 
 /**
  * Metadata about the item cache state
@@ -297,7 +167,12 @@ export interface ItemSyncCommand {
 	targetAccountId?: string;
 	targetAccountEmail?: string;
 	targetItemId?: string;
-	category?: string;
+	/**
+	 * Only a `create` carries one, and it is the value the server will be asked to store —
+	 * so it is the generated {@link ItemCategory}, not a free string. `POST /items` rejects
+	 * anything else.
+	 */
+	category?: ItemCategory;
 	encryptedPayload?: ItemSyncEncryptedPayload;
 	favorite?: boolean;
 	baseVersion: number;
@@ -408,11 +283,5 @@ export type RawEncryptedItem = Omit<
  * Raw encrypted item with vault metadata.
  */
 export interface RawEncryptedItemWithVault extends RawEncryptedItem {
-	vault: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
+	vault: VaultSummary;
 }

@@ -1,12 +1,14 @@
-import type { VaultItemCounts } from "@bittery/core/hooks";
+import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
 import {
 	Button,
 	cn,
+	type DragItemData,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	type DropVaultData,
 	getTagColorFromName,
 	SidebarCount,
 	SidebarSection,
@@ -21,28 +23,30 @@ import {
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-	type DragItemData,
-	type DropVaultData,
-	useVaultDnd,
-} from "../../providers/dnd-provider";
+import { useVaultDnd } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
 
-interface VaultInfo {
-	vaultId: string;
-	vaultName: string;
-	vaultType: string;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	role: string;
-	accountEmail?: string;
-	accountName?: string;
-	accountTeamName?: string;
-}
+/**
+ * What one sidebar row renders, plus the account fields the sidebar groups rows by when
+ * more than one account is unlocked. Narrowed from the canonical `VaultKeyWithAccount`
+ * so the sidebar never asks for the wrapped key material.
+ */
+type SidebarVaultWithAccount = Pick<
+	VaultKeyWithAccount,
+	| "vaultId"
+	| "vaultName"
+	| "vaultType"
+	| "vaultIcon"
+	| "vaultImageUrl"
+	| "role"
+	| "accountEmail"
+	| "accountName"
+	| "accountTeamName"
+>;
 
 interface VaultSidebarProps {
-	vaults: VaultInfo[];
+	vaults: readonly SidebarVaultWithAccount[];
 	tags: string[];
 	/** Omitted while items load, so counts appear only once they are real. */
 	itemCounts?: VaultItemCounts;
@@ -58,7 +62,7 @@ interface VaultSidebarProps {
 }
 
 interface DroppableVaultEntryProps {
-	vault: VaultInfo;
+	vault: SidebarVaultWithAccount;
 	isActive: boolean;
 	count?: number;
 	onEditVault: (vault: {
@@ -246,7 +250,7 @@ export function VaultSidebar({
 		: null;
 
 	// Check if we're in multi-account mode (vaults have accountEmail)
-	const isMultiAccountMode = vaults.length > 0 && vaults[0].accountEmail;
+	const isMultiAccountMode = vaults[0]?.accountEmail;
 
 	// Group vaults by account if in multi-account mode
 	const vaultsByAccount = isMultiAccountMode
@@ -254,15 +258,19 @@ export function VaultSidebar({
 				(acc, vault) => {
 					const email = vault.accountEmail;
 					if (!email) return acc;
-					if (!acc[email]) {
-						acc[email] = {
-							accountEmail: email,
-							accountName: vault.accountName || email.split("@")[0],
-							accountTeamName: vault.accountTeamName,
-							vaults: [],
-						};
+					const group = acc[email];
+					if (group) {
+						group.vaults.push(vault);
+						return acc;
 					}
-					acc[email].vaults.push(vault);
+					acc[email] = {
+						accountEmail: email,
+						// `split` always yields a first part; `?? email` only satisfies
+						// noUncheckedIndexedAccess.
+						accountName: vault.accountName || (email.split("@")[0] ?? email),
+						accountTeamName: vault.accountTeamName,
+						vaults: [vault],
+					};
 					return acc;
 				},
 				{} as Record<
@@ -271,13 +279,13 @@ export function VaultSidebar({
 						accountEmail: string;
 						accountName: string;
 						accountTeamName?: string;
-						vaults: VaultInfo[];
+						vaults: SidebarVaultWithAccount[];
 					}
 				>,
 			)
 		: null;
 
-	const renderVaultEntry = (vault: VaultInfo) => (
+	const renderVaultEntry = (vault: SidebarVaultWithAccount) => (
 		<DroppableVaultEntry
 			key={vault.vaultId}
 			vault={vault}

@@ -1,14 +1,11 @@
 // The worker owns durability and account-scoped transport; popup projections
 // are leased so no command becomes drainable before its local view is ready.
 
-import {
-	ItemSyncEngine,
-	type OutboundQueueApiClient,
-	type SyncCommandSummary,
-} from "@bittery/sync";
+import { ItemSyncEngine, type SyncCommandSummary } from "@bittery/sync";
 import type { ItemSyncCommand } from "@bittery/types";
 import { ChromeSyncStorage } from "../lib/sync-storage";
 import { core } from "./core-instance";
+import { emitBackgroundEvent } from "./events";
 import { syncCacheService } from "./services/sync-cache-service";
 import { getOrCreateSyncClientId } from "./sync-client-id";
 
@@ -35,24 +32,20 @@ function getQueue(): Promise<ItemSyncEngine> {
 						command,
 						acknowledgement,
 					);
-					await chrome.runtime
-						.sendMessage({
-							type: "SYNC_ITEM_COMMAND_ACKNOWLEDGED",
-							command,
-							acknowledgement,
-						})
-						.catch(() => undefined);
+					await emitBackgroundEvent({
+						type: "SYNC_ITEM_COMMAND_ACKNOWLEDGED",
+						command,
+						acknowledgement,
+					});
 				},
 			},
 		);
 		await queue.restore();
 		queue.subscribe(() => {
-			chrome.runtime
-				.sendMessage({
-					type: "SYNC_COMMAND_STATUS_CHANGED",
-					summary: queue.getCommandSummary(),
-				})
-				.catch(() => undefined);
+			void emitBackgroundEvent({
+				type: "SYNC_COMMAND_STATUS_CHANGED",
+				summary: queue.getCommandSummary(),
+			});
 		});
 		return queue;
 	})();
@@ -128,7 +121,7 @@ async function runDrain(): Promise<void> {
 				`No authenticated API client for account queue drain (${accountId})`,
 			);
 		}
-		return client as unknown as OutboundQueueApiClient;
+		return client;
 	});
 	const retryAt = queue.getNextRetryAt();
 	if (retryAt === undefined) {
@@ -147,11 +140,7 @@ async function runDrain(): Promise<void> {
 
 	// The popup holds its own repository copy, including the temp ids just
 	// replaced above, so it has to re-read after a push.
-	chrome.runtime
-		.sendMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" })
-		.catch(() => {
-			// Popup closed.
-		});
+	void emitBackgroundEvent({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 }
 
 /**

@@ -24,7 +24,10 @@ use crate::{
         self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool,
         TrustProxyMode,
     },
-    db::models::*,
+    db::{
+        enums::{BillingPlan, BillingStatus, TeamRole, TeamType, VaultRole, VaultType},
+        models::*,
+    },
     error::AppError,
     integrations::storage,
     repo::common::{generate_resource_id, hash_token, insert_audit_event},
@@ -82,15 +85,15 @@ struct DbSignupInvitationRow {
     id: String,
     team_id: String,
     team_name: String,
-    team_type: String,
+    team_type: TeamType,
     team_image_key: Option<String>,
     email: String,
-    role: String,
+    role: TeamRole,
     invited_by_id: String,
     expires_at: OffsetDateTime,
     member_limit: Option<i32>,
-    billing_plan: String,
-    billing_status: String,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
     pending_vault_keys: Option<String>,
 }
 
@@ -98,11 +101,11 @@ struct DbSignupInvitationRow {
 struct DbAuthVaultKeyRow {
     vault_id: String,
     vault_name: String,
-    vault_type: String,
+    vault_type: VaultType,
     vault_icon: Option<String>,
     vault_image_key: Option<String>,
     encrypted_vault_key: String,
-    role: String,
+    role: VaultRole,
     created_at: OffsetDateTime,
 }
 
@@ -194,9 +197,9 @@ pub struct MeResponse {
     pub name: String,
     pub team_id: Option<String>,
     pub team_name: Option<String>,
-    pub team_type: Option<String>,
+    pub team_type: Option<TeamType>,
     pub team_avatar_url: Option<String>,
-    pub role: String,
+    pub role: TeamRole,
     pub secret_key_hint: Option<String>,
     pub public_key: String,
     pub encrypted_private_key: String,
@@ -317,9 +320,9 @@ pub struct AuthSessionUserResponse {
     pub encrypted_private_key: String,
     pub team_id: Option<String>,
     pub team_name: Option<String>,
-    pub team_type: Option<String>,
+    pub team_type: Option<TeamType>,
     pub team_avatar_url: Option<String>,
-    pub role: String,
+    pub role: TeamRole,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -327,11 +330,11 @@ pub struct AuthSessionUserResponse {
 pub struct AuthVaultKeyResponse {
     pub vault_id: String,
     pub vault_name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub vault_icon: Option<String>,
     pub vault_image_url: Option<String>,
     pub encrypted_vault_key: String,
-    pub role: String,
+    pub role: VaultRole,
     #[serde(skip)]
     pub created_at: OffsetDateTime,
 }
@@ -552,9 +555,9 @@ struct DbMeRow {
     name: String,
     team_id: Option<String>,
     team_name: Option<String>,
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
     team_image_key: Option<String>,
-    role: String,
+    role: TeamRole,
     secret_key_hint: Option<String>,
     public_key: String,
     encrypted_private_key: String,
@@ -568,7 +571,7 @@ struct DbAccountMutationUserRow {
     encrypted_master_key: Option<String>,
     team_id: Option<String>,
     team_owner_id: Option<String>,
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -783,12 +786,12 @@ pub(crate) async fn signup(
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
     let selected_plan = if self_hosted_mode || !cloud_billing_enabled() {
-        "free"
+        BillingPlan::Free
     } else {
         normalize_signup_plan(input.plan.as_deref())?
     };
     let team_type = if self_hosted_mode {
-        "organization"
+        TeamType::Organization
     } else {
         map_plan_to_team_type(selected_plan)
     };
@@ -802,10 +805,10 @@ pub(crate) async fn signup(
     } else {
         plan_member_limit(selected_plan)
     };
-    let billing_status = if selected_plan == "free" {
-        "none"
+    let billing_status = if selected_plan.is_paid() {
+        BillingStatus::Incomplete
     } else {
-        "incomplete"
+        BillingStatus::None
     };
     let user_id = input
         .user_id
@@ -891,9 +894,9 @@ pub(crate) async fn signup(
             encrypted_private_key: input.encrypted_private_key,
             team_id: Some(team_id),
             team_name: Some(team_name),
-            team_type: Some(team_type.to_string()),
+            team_type: Some(team_type),
             team_avatar_url: None,
-            role: "owner".to_string(),
+            role: TeamRole::Owner,
         },
         vault_keys,
     })
@@ -960,11 +963,7 @@ pub(crate) async fn signup_with_invitation(
         .vault_id
         .clone()
         .unwrap_or_else(|| generate_resource_id("vault"));
-    let vault_role = if invitation.role == "admin" {
-        "admin"
-    } else {
-        "member"
-    };
+    let vault_role = invitation.role.vault_role();
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start invited signup transaction");
@@ -991,7 +990,7 @@ pub(crate) async fn signup_with_invitation(
     .await?;
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
         .bind(&invitation.team_id)
-        .bind(&invitation.role)
+        .bind(invitation.role)
         .bind(&user_id)
         .execute(transaction.as_mut())
         .await
@@ -1037,7 +1036,7 @@ pub(crate) async fn signup_with_invitation(
         AppError::internal("Failed to commit invited signup")
     })?;
 
-    sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
+    sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
@@ -1717,7 +1716,7 @@ pub(crate) async fn delete_account(
         return Err(bad_request_handler_error("Email does not match"));
     }
     if user.team_owner_id.as_deref() == Some(session.user_id.as_str())
-        && user.team_type.as_deref() != Some("personal")
+        && user.team_type != Some(TeamType::Personal)
     {
         if let Some(team_id) = user.team_id.as_deref() {
             let remaining_members =
@@ -2287,8 +2286,8 @@ async fn get_pending_invitation_for_signup(
 
     if !team_management_enabled(
         bittery_mode() == "self-hosted",
-        &invitation.billing_plan,
-        &invitation.billing_status,
+        invitation.billing_plan,
+        invitation.billing_status,
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -2672,8 +2671,8 @@ async fn get_pending_signup_invitation(
 
     if !team_management_enabled(
         bittery_mode() == "self-hosted",
-        &invitation.billing_plan,
-        &invitation.billing_status,
+        invitation.billing_plan,
+        invitation.billing_status,
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -2742,10 +2741,10 @@ async fn insert_team(
     team_id: &str,
     team_name: &str,
     owner_id: &str,
-    team_type: &str,
+    team_type: TeamType,
     member_limit: Option<i32>,
-    billing_plan: &str,
-    billing_status: &str,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
 ) -> Result<(), AppError> {
     query(
         "INSERT INTO team (id, name, owner_id, type, member_limit, billing_plan, billing_status) VALUES ($1, $2, $3, $4::team_type, $5, $6::billing_plan, $7::billing_status)",
@@ -2888,37 +2887,37 @@ pub(crate) async fn load_auth_vault_keys_page(
     Ok(AuthVaultKeyPage { items, has_more })
 }
 
-fn normalize_signup_plan(plan: Option<&str>) -> Result<&'static str, AppError> {
-    match plan.map(|value| value.trim().to_ascii_lowercase()) {
-        None => Ok("personal"),
-        Some(value) if value == "free" => Ok("free"),
-        Some(value) if value == "personal" => Ok("personal"),
-        Some(value) if value == "family" => Ok("family"),
-        Some(value) if value == "team" => Ok("team"),
-        _ => Err(AppError::bad_request("Invalid plan")),
+/// Signup keeps accepting the plan as free text, trimmed and case-folded, so a client that
+/// sends `" Personal "` still works. The value is closed from here on.
+fn normalize_signup_plan(plan: Option<&str>) -> Result<BillingPlan, AppError> {
+    let Some(plan) = plan else {
+        return Ok(BillingPlan::Personal);
+    };
+    plan.trim()
+        .to_ascii_lowercase()
+        .parse()
+        .map_err(|_| AppError::bad_request("Invalid plan"))
+}
+
+fn map_plan_to_team_type(plan: BillingPlan) -> TeamType {
+    match plan {
+        BillingPlan::Family => TeamType::Family,
+        BillingPlan::Team => TeamType::Organization,
+        BillingPlan::Free | BillingPlan::Personal => TeamType::Personal,
     }
 }
 
-fn map_plan_to_team_type(plan: &str) -> &'static str {
+fn plan_member_limit(plan: BillingPlan) -> Option<i32> {
     match plan {
-        "family" => "family",
-        "team" => "organization",
-        _ => "personal",
-    }
-}
-
-fn plan_member_limit(plan: &str) -> Option<i32> {
-    match plan {
-        "free" | "personal" => Some(1),
-        "family" => Some(6),
-        "team" => None,
-        _ => Some(1),
+        BillingPlan::Free | BillingPlan::Personal => Some(1),
+        BillingPlan::Family => Some(6),
+        BillingPlan::Team => None,
     }
 }
 
 fn signup_team_name(
     self_hosted_mode: bool,
-    team_type: &str,
+    team_type: TeamType,
     organization_name: Option<&str>,
 ) -> String {
     let provided = organization_name
@@ -2930,7 +2929,7 @@ fn signup_team_name(
     if let Some(name) = provided {
         return name.to_string();
     }
-    if team_type == "family" {
+    if team_type == TeamType::Family {
         "My Family".to_string()
     } else {
         "My Team".to_string()
@@ -3090,7 +3089,7 @@ async fn assert_pending_vault_keys_authorized(
     })?;
     let authorized_vault_ids: std::collections::HashSet<String> = authorized_roles
         .into_iter()
-        .filter(|record| record.role == "owner" || record.role == "admin")
+        .filter(|record| record.role.can_manage())
         .map(|record| record.vault_id)
         .collect();
     if authorized_vault_ids.len() != vault_ids.len() {
@@ -3112,11 +3111,14 @@ async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {
     Ok(user_id.is_some())
 }
 
-fn team_management_enabled(is_self_hosted: bool, billing_plan: &str, billing_status: &str) -> bool {
-    if is_self_hosted {
-        return true;
-    }
-    matches!(billing_plan, "family" | "team") && matches!(billing_status, "active" | "trialing")
+fn team_management_enabled(
+    is_self_hosted: bool,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
+) -> bool {
+    is_self_hosted
+        || (matches!(billing_plan, BillingPlan::Family | BillingPlan::Team)
+            && billing_status.is_active())
 }
 
 fn emails_match(invitation_email: &str, normalized_email: &str) -> bool {

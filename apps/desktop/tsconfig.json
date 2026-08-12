@@ -1,25 +1,13 @@
 {
+	"extends": "@bittery/config/tsconfig.base.json",
 	"compilerOptions": {
-		"target": "ES2020",
+		/* Tauri's webview floor; keeps the emitted syntax below the base's ESNext. */
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"useDefineForClassFields": true,
-		"lib": ["ES2020", "DOM", "DOM.Iterable"],
-		"module": "ESNext",
-		"skipLibCheck": true,
-
-		/* Bundler mode */
-		"moduleResolution": "bundler",
-		"allowJs": true,
-		"allowImportingTsExtensions": true,
-		"resolveJsonModule": true,
-		"isolatedModules": true,
-		"noEmit": true,
 		"jsx": "react-jsx",
-
-		/* Linting */
-		"strict": true,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"noFallthroughCasesInSwitch": true,
+		"types": ["vite/client"],
+		"noEmit": true,
 
 		/* Path aliases */
 		"baseUrl": ".",

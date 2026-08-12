@@ -6,7 +6,6 @@ use sqlx::query_as;
 use sqlx::PgPool;
 use std::sync::LazyLock;
 use time::OffsetDateTime;
-use utoipa::ToSchema;
 
 use crate::{
     config::bittery_mode,
@@ -18,10 +17,13 @@ use crate::{
         fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
-    shapes::{attachment_shape, item_shape},
+    shapes::{
+        attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
+        sync_changes_shape, sync_cursor_shape, sync_event_shape,
+    },
 };
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetEventsSinceInput {
@@ -30,7 +32,7 @@ pub struct GetEventsSinceInput {
     pub limit: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BootstrapItemsInput {
@@ -40,59 +42,38 @@ pub struct BootstrapItemsInput {
     pub limit: Option<i32>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncEventDto {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub event_type: String,
-    pub entity_id: String,
-    pub entity_type: String,
-    pub vault_id: Option<String>,
-    pub version: i32,
-    pub client_id: Option<String>,
-    pub user_id: String,
-    pub metadata: Option<serde_json::Value>,
-    pub timestamp: i64,
-}
+sync_event_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct SyncEventDto
+}, timestamp = i64);
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncCursorResponse {
-    pub id: String,
-}
+sync_cursor_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct SyncCursorResponse
+});
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GetEventsSinceResponse {
-    pub events: Vec<SyncEventDto>,
-    pub cursor: Option<SyncCursorResponse>,
-    pub has_more: bool,
-    pub requires_full_refresh: bool,
-}
+sync_changes_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct GetEventsSinceResponse
+}, event = SyncEventDto);
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BootstrapVaultSummary {
-    pub id: String,
-    #[schema(max_length = 200)]
-    pub name: String,
-    pub vault_type: String,
-    pub icon: Option<String>,
-    pub image_url: Option<String>,
-    #[schema(max_length = 65536)]
-    pub encrypted_vault_key: String,
-    pub role: String,
-}
+bootstrap_vault_summary_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BootstrapVaultSummary
+});
 
 attachment_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct BootstrapAttachmentResponse {}
 }
 
 item_shape! {
-    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct BootstrapItemResponse {
         attachments: Vec<BootstrapAttachmentResponse>,
@@ -100,14 +81,11 @@ item_shape! {
     }
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BootstrapItemsResponse {
-    pub items: Vec<BootstrapItemResponse>,
-    pub next_cursor: Option<String>,
-    pub sync_cursor: Option<SyncCursorResponse>,
-    pub has_more: bool,
-}
+bootstrap_items_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BootstrapItemsResponse
+});
 
 pub(crate) const DEFAULT_EVENTS_LIMIT: i32 = 100;
 const DEFAULT_BOOTSTRAP_LIMIT: i32 = 500;
@@ -390,12 +368,7 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
         return Ok(false);
     };
 
-    Ok(resolve_attachment_entitlement(
-        mode,
-        actor.billing_plan.as_deref(),
-        actor.billing_status.as_deref(),
-    )
-    .enabled)
+    Ok(resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status).enabled)
 }
 
 async fn load_bootstrap_attachments(

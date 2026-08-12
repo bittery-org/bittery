@@ -1,16 +1,13 @@
-import type { UnifiedItem } from "@bittery/core/hooks";
-import type { DecryptedItem } from "@bittery/shared/types";
 import { memo, useCallback, useMemo } from "react";
 import { FlatList, RefreshControl } from "react-native";
 import { layout } from "@/components/ui";
+import type { Item } from "@/types/item";
 import {
 	buildItemSections,
 	type ItemSection,
 } from "@/utils/build-item-sections";
 import { ItemListItem } from "./item-list-item";
 import { ItemSectionHeader } from "./item-section-header";
-
-type Item = DecryptedItem | UnifiedItem;
 
 export interface ItemSectionsListProps {
 	favorites: Item[];

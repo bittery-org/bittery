@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { KeyRef } from "@bittery/crypto-port";
+import type { EncryptedData, KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
 } from "@bittery/crypto-port/testing";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
-import type { EncryptedData, KdfProfile } from "@bittery/types";
 import {
 	buildStoredItemEncryptionContext,
 	createVaultCrypto,

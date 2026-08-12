@@ -9,7 +9,10 @@ use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, PgPool};
 use time::OffsetDateTime;
 
-use crate::config;
+use crate::{
+    config,
+    db::enums::{BillingPlan, BillingStatus},
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -53,7 +56,7 @@ struct StripeWebhookData {
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct DbBillingTeamRow {
     id: String,
-    billing_plan: String,
+    billing_plan: BillingPlan,
 }
 
 pub(crate) fn is_self_hosted_mode() -> bool {
@@ -95,9 +98,11 @@ pub(crate) async fn process_stripe_webhook_event(
             apply_subscription_update(pool, &event.data.object, SubscriptionUpdateKind::Deleted)
                 .await?
         }
-        "invoice.paid" => apply_invoice_status(pool, &event.data.object, "active").await?,
+        "invoice.paid" => {
+            apply_invoice_status(pool, &event.data.object, BillingStatus::Active).await?
+        }
         "invoice.payment_failed" => {
-            apply_invoice_status(pool, &event.data.object, "past_due").await?
+            apply_invoice_status(pool, &event.data.object, BillingStatus::PastDue).await?
         }
         _ => {}
     }
@@ -201,7 +206,7 @@ async fn apply_subscription_update(
 
     let billing_plan = parse_plan_id(metadata_string(subscription, "plan").as_deref())
         .or_else(|| get_plan_by_stripe_price_id(stripe_price_id.as_deref()))
-        .unwrap_or_else(|| team.billing_plan.clone());
+        .unwrap_or(team.billing_plan);
     let clear_subscription = kind == SubscriptionUpdateKind::Deleted;
     let stripe_subscription_item_id = if clear_subscription {
         None
@@ -219,7 +224,7 @@ async fn apply_subscription_update(
             .and_then(Value::as_i64)
             .and_then(|timestamp| OffsetDateTime::from_unix_timestamp(timestamp).ok())
     };
-    let seats_purchased = if clear_subscription || billing_plan != "team" {
+    let seats_purchased = if clear_subscription || billing_plan != BillingPlan::Team {
         None
     } else {
         first_item
@@ -228,9 +233,9 @@ async fn apply_subscription_update(
             .and_then(|quantity| i32::try_from(quantity).ok())
     };
     let billing_status = if clear_subscription {
-        "canceled".to_string()
+        BillingStatus::Canceled
     } else {
-        map_stripe_status(subscription.get("status").and_then(Value::as_str)).to_string()
+        map_stripe_status(subscription.get("status").and_then(Value::as_str))
     };
 
     query(
@@ -264,7 +269,7 @@ async fn apply_subscription_update(
 async fn apply_invoice_status(
     pool: &PgPool,
     invoice: &Value,
-    billing_status: &str,
+    billing_status: BillingStatus,
 ) -> Result<(), StripeWebhookError> {
     let Some(team) = find_team_for_event(
         pool,
@@ -277,7 +282,7 @@ async fn apply_invoice_status(
         return Ok(());
     };
 
-    if team.billing_plan == "free" {
+    if !team.billing_plan.is_paid() {
         return Ok(());
     }
 
@@ -437,33 +442,32 @@ fn stripe_secret_key_is_configured() -> bool {
         .is_some()
 }
 
-fn parse_plan_id(value: Option<&str>) -> Option<String> {
-    match value {
-        Some("free" | "personal" | "family" | "team") => value.map(str::to_string),
-        _ => None,
-    }
+/// Stripe metadata is untrusted free text, so an unrecognized plan is dropped rather than stored.
+fn parse_plan_id(value: Option<&str>) -> Option<BillingPlan> {
+    value?.parse().ok()
 }
 
-fn map_stripe_status(status: Option<&str>) -> &'static str {
+/// Stripe's subscription statuses are a superset of ours; anything unmapped is `incomplete`.
+fn map_stripe_status(status: Option<&str>) -> BillingStatus {
     match status {
-        Some("active") => "active",
-        Some("trialing") => "trialing",
-        Some("past_due") => "past_due",
-        Some("canceled") => "canceled",
-        Some("unpaid") => "unpaid",
-        _ => "incomplete",
+        Some("active") => BillingStatus::Active,
+        Some("trialing") => BillingStatus::Trialing,
+        Some("past_due") => BillingStatus::PastDue,
+        Some("canceled") => BillingStatus::Canceled,
+        Some("unpaid") => BillingStatus::Unpaid,
+        _ => BillingStatus::Incomplete,
     }
 }
 
-fn get_plan_by_stripe_price_id(price_id: Option<&str>) -> Option<String> {
+fn get_plan_by_stripe_price_id(price_id: Option<&str>) -> Option<BillingPlan> {
     let price_id = price_id?;
     for (plan, env_name) in [
-        ("personal", "STRIPE_PRICE_PERSONAL_MONTHLY"),
-        ("family", "STRIPE_PRICE_FAMILY_MONTHLY"),
-        ("team", "STRIPE_PRICE_TEAM_SEAT_MONTHLY"),
+        (BillingPlan::Personal, "STRIPE_PRICE_PERSONAL_MONTHLY"),
+        (BillingPlan::Family, "STRIPE_PRICE_FAMILY_MONTHLY"),
+        (BillingPlan::Team, "STRIPE_PRICE_TEAM_SEAT_MONTHLY"),
     ] {
         if env::var(env_name).ok().as_deref().map(str::trim) == Some(price_id) {
-            return Some(plan.to_string());
+            return Some(plan);
         }
     }
     None

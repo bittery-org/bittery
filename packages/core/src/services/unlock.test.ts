@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { KdfProfile } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
 } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { InMemoryPlatformPort } from "@bittery/storage/testing";
-import type { KdfProfile } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,

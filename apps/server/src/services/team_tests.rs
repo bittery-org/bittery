@@ -5,6 +5,7 @@ use super::{
     validate_token, PendingVaultKeyEntry, RotationMemberKeyInput, RotationReEncryptedItemInput,
     RotationVaultInput, VaultKeyRotationInput, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
 };
+use crate::db::enums::{BillingPlan, BillingStatus, TeamRole};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::services::session_control::load_session_revocation;
@@ -435,14 +436,20 @@ fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
 #[test]
 fn assert_team_management_entitlement_respects_mode_and_billing() {
     with_bittery_mode(Some("self-hosted"), || {
-        assert!(assert_team_management_entitlement("free", "none").is_ok());
+        assert!(assert_team_management_entitlement(BillingPlan::Free, BillingStatus::None).is_ok());
     });
 
     with_bittery_mode(Some("cloud"), || {
-        assert!(assert_team_management_entitlement("team", "active").is_ok());
-        assert!(assert_team_management_entitlement("family", "trialing").is_ok());
+        assert!(
+            assert_team_management_entitlement(BillingPlan::Team, BillingStatus::Active).is_ok()
+        );
+        assert!(
+            assert_team_management_entitlement(BillingPlan::Family, BillingStatus::Trialing)
+                .is_ok()
+        );
 
-        let error = assert_team_management_entitlement("free", "none").unwrap_err();
+        let error =
+            assert_team_management_entitlement(BillingPlan::Free, BillingStatus::None).unwrap_err();
         assert_eq!(error.code, AppErrorCode::Forbidden);
         assert_eq!(error.message, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE);
     });
@@ -451,12 +458,12 @@ fn assert_team_management_entitlement_respects_mode_and_billing() {
 #[test]
 fn assert_optional_team_management_entitlement_requires_team_billing_fields() {
     let missing_plan =
-        assert_optional_team_management_entitlement(None, Some("active")).unwrap_err();
+        assert_optional_team_management_entitlement(None, Some(BillingStatus::Active)).unwrap_err();
     assert_eq!(missing_plan.code, AppErrorCode::NotFound);
     assert_eq!(missing_plan.message, "Team not found");
 
     let missing_status =
-        assert_optional_team_management_entitlement(Some("team"), None).unwrap_err();
+        assert_optional_team_management_entitlement(Some(BillingPlan::Team), None).unwrap_err();
     assert_eq!(missing_status.code, AppErrorCode::NotFound);
     assert_eq!(missing_status.message, "Team not found");
 }
@@ -699,10 +706,10 @@ fn ensure_exact_rotation_vault_set_rejects_missing_vaults() {
 
 #[test]
 fn ensure_team_admin_rejects_members() {
-    assert!(ensure_team_admin("owner").is_ok());
-    assert!(ensure_team_admin("admin").is_ok());
+    assert!(ensure_team_admin(TeamRole::Owner).is_ok());
+    assert!(ensure_team_admin(TeamRole::Admin).is_ok());
 
-    let error = ensure_team_admin("member").unwrap_err();
+    let error = ensure_team_admin(TeamRole::Member).unwrap_err();
     assert_eq!(error.code, AppErrorCode::Forbidden);
     assert_eq!(error.message, "Insufficient permissions");
 }

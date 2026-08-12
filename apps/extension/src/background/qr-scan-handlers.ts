@@ -5,18 +5,23 @@
 
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { updateExtensionItem } from "./extension-item-mutations";
+import type {
+	CaptureTabScreenshotResponse,
+	TotpUpdate,
+	TotpUpdateErrorType,
+	UpdateItemTotpResponse,
+} from "./router/contract";
 import { resolveAccountEmailForItemId } from "./services/account-resolution";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 /**
  * Handle CAPTURE_TAB_SCREENSHOT message - Capture screenshot of current tab
  */
-export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
+export async function handleCaptureTabScreenshot(): Promise<CaptureTabScreenshotResponse> {
 	updateActivity();
 
 	try {
@@ -74,24 +79,12 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 }
 
 /**
- * TOTP data structure for updating an item
- */
-interface TotpUpdateData {
-	totpSecret: string;
-	totpIssuer?: string;
-	totpAccountName?: string;
-	totpAlgorithm?: "SHA1" | "SHA256" | "SHA512";
-	totpDigits?: 6 | 7 | 8;
-	totpPeriod?: number;
-}
-
-/**
  * Handle UPDATE_ITEM_TOTP message - Add/update TOTP field on an existing item
  */
 export async function handleUpdateItemTotp(payload: {
 	itemId: string;
-	totp: TotpUpdateData;
-}): Promise<MessageResponse> {
+	totp: TotpUpdate;
+}): Promise<UpdateItemTotpResponse> {
 	updateActivity();
 
 	const { itemId, totp } = payload;
@@ -179,7 +172,7 @@ export async function handleUpdateItemTotp(payload: {
 
 		// Determine error type and message
 		let errorMessage = "Failed to update item with TOTP. Please try again.";
-		let errorType = "unknown";
+		let errorType: TotpUpdateErrorType = "unknown";
 
 		if (
 			errorMessageRaw.includes("network") ||

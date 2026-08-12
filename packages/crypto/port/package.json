@@ -42,8 +42,5 @@
 		"@bittery/crypto-react-native": {
 			"optional": true
 		}
-	},
-	"dependencies": {
-		"@bittery/types": "workspace:*"
 	}
 }

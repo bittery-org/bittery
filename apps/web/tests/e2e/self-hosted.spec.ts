@@ -188,7 +188,7 @@ test("the first account on a fresh server self-registers as the administrator", 
 		uiText("team_members_role_owner_self_hosted"),
 	);
 
-	// `/admin` is gated on the `team_management` entitlement and an owner-or-admin
+	// `/admin` is gated on the `teamManagement` entitlement and an owner-or-admin
 	// role (`beforeLoad` in `src/routes/_app/admin/index.tsx`); reaching it is the
 	// administrator's authority, not just their label.
 	await gotoRoute(

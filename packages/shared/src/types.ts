@@ -2,18 +2,15 @@
  * Shared type definitions for decrypted vault items
  */
 
+import type { ItemCategory } from "@bittery/api-contract";
 import type { Address, PhoneNumber } from "./identity";
 
 /**
- * Item categories for vault items
- * Matches the itemCategoryEnum in the database schema
+ * Item categories for vault items. A closed set owned by the `item_category` PostgreSQL
+ * enum and generated into the contract, re-exported here because this module is where
+ * the decrypted-item vocabulary lives (ADR 0012).
  */
-export type ItemCategory =
-	| "login"
-	| "secure-note"
-	| "credit-card"
-	| "identity"
-	| "totp";
+export type { ItemCategory };
 
 /**
  * TOTP algorithm options (RFC 6238)
@@ -166,7 +163,9 @@ export interface SharedItemPayload
 	category: ItemCategory;
 }
 
-export interface ItemAccountContext {
+/** The account an item was read from, as the UI shows it. Only reachable via
+ * {@link ItemContextMetadata}. */
+interface ItemAccountContext {
 	accountId?: string;
 	email?: string;
 	userId?: string;
@@ -252,10 +251,3 @@ export interface TotpDisplayData {
 	notes?: string;
 	tags?: string[];
 }
-
-export type ItemDetailDisplayData =
-	| LoginDisplayData
-	| SecureNoteDisplayData
-	| CreditCardDisplayData
-	| IdentityDisplayData
-	| TotpDisplayData;

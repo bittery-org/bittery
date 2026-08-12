@@ -10,7 +10,7 @@ use sqlx::PgPool;
 
 use crate::services::idempotency::{self, Claim, RequestScope, StoredResponse};
 
-use super::error::ApiError;
+use super::{error::ApiError, error_code::ErrorCode};
 
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
 const IDEMPOTENCY_REPLAYED: &str = "idempotency-replayed";
@@ -42,15 +42,15 @@ where
     match idempotency::claim(&pool, &scope, &fingerprint).await? {
         Claim::Replay(stored) => replay(stored),
         Claim::FingerprintMismatch => Err(ApiError::unprocessable(
-            "IDEMPOTENCY_KEY_REUSED",
+            ErrorCode::IdempotencyKeyReused,
             "The idempotency key was already used for a different request.",
         )),
         Claim::InProgress => Err(ApiError::service_unavailable(
-            "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+            ErrorCode::IdempotencyRequestInProgress,
             "A request with this idempotency key is still in progress.",
         )),
         Claim::Indeterminate => Err(ApiError::conflict(
-            "IDEMPOTENCY_OUTCOME_INDETERMINATE",
+            ErrorCode::IdempotencyOutcomeIndeterminate,
             "The previous request outcome is unknown and must be verified before operator recovery.",
         )),
         Claim::Execute => {
@@ -63,7 +63,7 @@ where
                 .map_err(|error| {
                     tracing::error!(error = %error, "Failed to buffer idempotent response");
                     ApiError::service_unavailable(
-                        "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+                        ErrorCode::IdempotencyResponseUnavailable,
                         "The request outcome could not be safely recorded.",
                     )
                 })?;
@@ -90,7 +90,7 @@ where
 pub(crate) fn reject_one_time_secret(headers: &HeaderMap) -> Result<(), ApiError> {
     if headers.contains_key(IDEMPOTENCY_KEY) {
         Err(ApiError::unprocessable(
-            "IDEMPOTENCY_NOT_ALLOWED",
+            ErrorCode::IdempotencyNotAllowed,
             "Idempotency keys are not accepted for operations that return one-time secrets.",
         ))
     } else {
@@ -104,7 +104,7 @@ fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
     };
     let value = value.to_str().map_err(|_| {
         ApiError::bad_request(
-            "INVALID_IDEMPOTENCY_KEY",
+            ErrorCode::InvalidIdempotencyKey,
             "The idempotency key must contain visible ASCII characters.",
         )
     })?;
@@ -114,7 +114,7 @@ fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
         || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
     {
         return Err(ApiError::bad_request(
-            "INVALID_IDEMPOTENCY_KEY",
+            ErrorCode::InvalidIdempotencyKey,
             "The idempotency key must be 1 to 255 visible ASCII characters.",
         ));
     }
@@ -134,7 +134,7 @@ fn request_fingerprint(body: &[u8], if_match: Option<&HeaderValue>) -> [u8; 32] 
 fn replay(stored: StoredResponse) -> Result<Response, ApiError> {
     let status = StatusCode::from_u16(stored.status).map_err(|_| {
         ApiError::service_unavailable(
-            "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+            ErrorCode::IdempotencyResponseUnavailable,
             "The stored request outcome is invalid.",
         )
     })?;
@@ -148,7 +148,7 @@ fn replay(stored: StoredResponse) -> Result<Response, ApiError> {
     response = response.header(IDEMPOTENCY_REPLAYED, "true");
     response.body(Body::from(stored.body)).map_err(|_| {
         ApiError::service_unavailable(
-            "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+            ErrorCode::IdempotencyResponseUnavailable,
             "The stored request outcome could not be reconstructed.",
         )
     })

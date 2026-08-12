@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
-import type { KeyRef } from "@bittery/crypto-port";
+import type { FinishLoginResponse } from "@bittery/api-contract";
+import type { KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
@@ -7,7 +8,6 @@ import {
 import type { AccountStore } from "@bittery/storage";
 import type { InMemoryPlatformPort } from "@bittery/storage/testing";
 import type { AccountMetadata } from "@bittery/storage/types";
-import type { KdfProfile } from "@bittery/types";
 import {
 	createTestAccountStore,
 	createTestItemCache,
@@ -39,6 +39,22 @@ const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
 const SERVER_PROOF = "server-proof";
 
 /**
+ * The `user` a real finish-login carries. `LoginUserResponse` has no team fields — the
+ * login endpoint does not send them — so a fixture that invented them would be testing a
+ * server that does not exist.
+ */
+function loginUser(id: string, email: string): FinishLoginResponse["user"] {
+	return {
+		id,
+		email,
+		name: email.split("@")[0] ?? "User",
+		secretKeyHint: "A3-A••••",
+		publicKey: "public-key",
+		encryptedPrivateKey: "encrypted-private-key",
+	};
+}
+
+/**
  * One port for every store these tests build, because a `KeyRef` only means anything to the
  * port that minted it.
  */
@@ -62,6 +78,7 @@ interface RecordedDerivation {
 function createRecordingCryptoPort(): {
 	crypto: InMemoryCryptoPort;
 	derivations: RecordedDerivation[];
+	srpChallengeFields: string[][];
 } {
 	const crypto = createInMemoryCryptoPort();
 	const derivations: RecordedDerivation[] = [];
@@ -69,6 +86,15 @@ function createRecordingCryptoPort(): {
 	crypto.deriveMasterKey = async (password, secretKey, email, profile) => {
 		derivations.push({ secretKey, email, profile });
 		return deriveMasterKey(password, secretKey, email, profile);
+	};
+	// The core's `SrpServerChallenge` is `{ salt, server_public_key }` and its FFI converter
+	// reads exactly those two. A field the ceremony adds here is not a weaker binding, it is
+	// no binding at all, and nothing below the seam would report it.
+	const srpChallengeFields: string[][] = [];
+	const deriveClientSession = crypto.deriveClientSession.bind(crypto);
+	crypto.deriveClientSession = async (secret, challenge, password) => {
+		srpChallengeFields.push(Object.keys(challenge).sort());
+		return deriveClientSession(secret, challenge, password);
 	};
 	// The fake auth client never sees the client session key, so it cannot compute a real
 	// server proof. This stands in for the server half of the handshake — still a literal
@@ -78,7 +104,7 @@ function createRecordingCryptoPort(): {
 			throw new Error("Server session proof did not verify.");
 		}
 	};
-	return { crypto, derivations };
+	return { crypto, derivations, srpChallengeFields };
 }
 
 function account(
@@ -138,8 +164,9 @@ function createAuthClient(
 			finishLogin: mock(async () => ({
 				data: {
 					token,
+					sessionId: "session-new",
 					serverProof: "server-proof",
-					user: { id: "user-new", email: "same@example.com" },
+					user: loginUser("user-new", "same@example.com"),
 					expiresAt: new Date(Date.now() + 60_000).toISOString(),
 					vaultKeys: { items: [], hasMore: false },
 				},
@@ -282,8 +309,9 @@ describe("account-routed authentication", () => {
 		handshakeClient.auth.finishLogin = mock(async () => ({
 			data: {
 				token: "ceremony-token",
+				sessionId: "ceremony-session",
 				serverProof: SERVER_PROOF,
-				user: { id: "new-user", email: "new@example.com" },
+				user: loginUser("new-user", "new@example.com"),
 				expiresAt: new Date(Date.now() + 60_000).toISOString(),
 				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
 			},
@@ -375,6 +403,46 @@ describe("account-routed authentication", () => {
 			),
 		).rejects.toThrow("downgraded");
 		expect(derivations).toHaveLength(0);
+	});
+
+	/**
+	 * Every ceremony that speaks SRP builds the server challenge itself, so the field list is
+	 * the only place the seam's contract is visible from up here. The KDF profile reaches the
+	 * crypto through the SRP password it produced, never through this record.
+	 */
+	it("hands the SRP seam only the fields the crypto core reads", async () => {
+		const { crypto, srpChallengeFields } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "https://acct.example")],
+			crypto,
+		);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storePinnedKdfProfile(kdfParams, "acct");
+		const apiClient = createAuthClient([]);
+
+		await performSRPLogin(
+			{
+				email: "same@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "https://acct.example",
+			},
+			{ crypto, storage, apiClient },
+		);
+		await deriveSrpLoginProof(
+			{ accountId: "acct", password: "password" },
+			{ crypto, storage, apiClient },
+		);
+		await performSRPUnlock(
+			{ accountId: "acct", password: "password" },
+			{ crypto, storage, apiClient },
+		);
+
+		expect(srpChallengeFields).toEqual([
+			["salt", "serverPublicKey"],
+			["salt", "serverPublicKey"],
+			["salt", "serverPublicKey"],
+		]);
 	});
 
 	it("rejects ambiguous full-login account matches before derivation", async () => {
@@ -475,8 +543,9 @@ describe("KDF agility on unlock", () => {
 		authClient.auth.finishLogin = mock(async () => ({
 			data: {
 				token: "reauth-token",
+				sessionId: "reauth-session",
 				serverProof: SERVER_PROOF,
-				user: { id: "user", email: "same@example.com" },
+				user: loginUser("user", "same@example.com"),
 				expiresAt: new Date(Date.now() + 60_000).toISOString(),
 				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
 			},

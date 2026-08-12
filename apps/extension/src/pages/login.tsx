@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import logoWordmark from "../assets/logo.png";
+import { sendMessage } from "../lib/messaging";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -108,10 +109,7 @@ export function LoginPage() {
 			insecureTransportConfirmed: boolean;
 		}) => {
 			// Send to background worker for crypto operations
-			const response = await chrome.runtime.sendMessage({
-				type: "LOGIN",
-				payload: values,
-			});
+			const response = await sendMessage({ type: "LOGIN", payload: values });
 
 			if (!response.success) {
 				throw new Error(response.error || m.ext_login_toast_failed());

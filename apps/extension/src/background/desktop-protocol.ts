@@ -1,7 +1,55 @@
-export const DESKTOP_PROTOCOL_VERSION = 1;
+/**
+ * The desktop↔extension protocol, as this side sees it.
+ *
+ * The request/response unions, the event payloads and the version pin are
+ * **generated** from `apps/desktop/src-tauri/src/desktop_ipc.rs` — the only
+ * definition of this wire format — and re-exported here under the names the
+ * background scripts have always used (ADR 0012). Regenerate with
+ * `pnpm -F desktop generate:bindings`.
+ *
+ * The import reaches into the desktop app because that is where ts-rs writes,
+ * and it is type-only, so nothing about the extension bundle changes. Only this
+ * file may reach across; everything else imports the protocol from here.
+ *
+ * What is still hand-written below is the extension's own vocabulary: the
+ * normalised status it hands to its UI, the "the desktop is unlocking" sentinel,
+ * and the mismatch error. None of those exist on the wire.
+ */
 
-export type DesktopTheme = "light" | "dark" | "system";
+import type {
+	DesktopEvent,
+	DesktopProtocolVersion,
+	DesktopTheme,
+	ProtocolEnvelope,
+} from "../../../desktop/src/generated/desktop-ipc";
 
+export type {
+	DesktopAccountEntry,
+	DesktopRequest,
+	DesktopResponse,
+	DesktopTheme,
+} from "../../../desktop/src/generated/desktop-ipc";
+
+/** Pinned on both ends; the annotation is what fails the build if Rust moves. */
+export const DESKTOP_PROTOCOL_VERSION: DesktopProtocolVersion = 1;
+
+/** A pushed event and its payload, correlated by the `event` tag. */
+export type DesktopEventPayload = DesktopEvent;
+
+/** The payload of one pushed desktop event, selected by its `event` tag. */
+export type DesktopEventOf<E extends DesktopEvent["event"]> = Extract<
+	DesktopEvent,
+	{ event: E }
+>["payload"];
+
+/** Every frame in either direction carries the version and an optional id. */
+export type DesktopEnvelope<T> = ProtocolEnvelope<T>;
+
+/**
+ * The desktop lock state as the extension keeps it: every field resolved, so a
+ * reader never has to invent a timestamp or a default. `DESKTOP_STATUS` on the
+ * wire leaves `theme` absent when the desktop app has not synced one yet.
+ */
 export interface DesktopStatus {
 	available: boolean;
 	locked: boolean;
@@ -36,153 +84,6 @@ export function isDesktopStatusUnlocked(
  * event.
  */
 export const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock" as const;
-
-export type DesktopRequest =
-	| { type: "PING" }
-	| { type: "GET_DESKTOP_STATUS" }
-	| { type: "GET_DESKTOP_ACCOUNTS" }
-	| { type: "GET_DESKTOP_AUTH_TOKEN"; accountId: string }
-	| { type: "GET_DESKTOP_VAULT_KEYS"; accountId: string }
-	| { type: "GET_DESKTOP_ITEMS_SNAPSHOT"; accountIds?: string[] }
-	| { type: "SUBSCRIBE_DESKTOP_EVENTS" }
-	| { type: "UNSUBSCRIBE_DESKTOP_EVENTS" }
-	| { type: "CHECK_BIOMETRIC_AVAILABLE" }
-	| {
-			type: "BIOMETRIC_UNLOCK_REQUEST";
-			challenge: string;
-			extension_id: string;
-			accountId?: string;
-	  }
-	| {
-			type: "BIOMETRIC_UNLOCK_ALL_REQUEST";
-			challenge: string;
-			extension_id: string;
-	  }
-	| { type: "TRIGGER_DESKTOP_UNLOCK" }
-	| {
-			type: "OPEN_DESKTOP_APP";
-			intent?: "create_item" | "view_item";
-			url?: string;
-			itemId?: string;
-			vaultId?: string;
-	  };
-
-export type DesktopEventPayload =
-	| { event: "lock"; payload: { reason: string; timestamp: number } }
-	| { event: "unlock"; payload: { accounts: string[]; timestamp: number } }
-	| { event: "desktop_close"; payload: { timestamp: number } }
-	| {
-			event: "active_account_changed";
-			payload: { accountId: string; timestamp: number };
-	  }
-	| {
-			event: "theme_changed";
-			payload: { theme: DesktopTheme; timestamp: number };
-	  };
-
-export type DesktopResponse =
-	| {
-			type: "PROTOCOL_MISMATCH";
-			expectedVersion: number;
-			receivedVersion?: number;
-	  }
-	| { type: "PONG"; version: string }
-	| {
-			type: "DESKTOP_STATUS";
-			available: boolean;
-			locked: boolean;
-			unlockedAccounts: string[];
-			timestamp: number;
-			autolockTimeoutMs: number;
-			theme?: DesktopTheme | null;
-	  }
-	| {
-			type: "DESKTOP_ACCOUNTS";
-			/**
-			 * Mirrors the desktop native view's published account entry, which is itself a
-			 * republication of `AccountMetadata`. Only the two fields that are optional in
-			 * `AccountMetadata` are optional here — the rest are always sent, so the
-			 * consumer never has to invent a timestamp or a default.
-			 */
-			accounts: Array<{
-				accountId: string;
-				email: string;
-				userId: string;
-				name: string;
-				serverUrl: string;
-				secretKeyHint: string;
-				teamName?: string;
-				teamAvatarUrl?: string | null;
-				addedAt: number;
-				lastActiveAt: number;
-				biometricEnabled: boolean;
-				insecureTransportConfirmed: boolean;
-			}>;
-			activeAccount?: string | null;
-			unlockedAccounts: string[];
-	  }
-	| {
-			type: "DESKTOP_AUTH_TOKEN";
-			accountId: string;
-			email: string;
-			authToken: string;
-			expiresAt?: number;
-			userId?: string;
-	  }
-	| {
-			type: "DESKTOP_VAULT_KEYS";
-			accountId: string;
-			email: string;
-			vaultKeys: string;
-	  }
-	| {
-			type: "DESKTOP_ITEMS_SNAPSHOT";
-			items: Array<Record<string, unknown>>;
-			generatedAt: number;
-	  }
-	| ({ type: "DESKTOP_EVENT" } & DesktopEventPayload)
-	| { type: "DESKTOP_EVENT_SUBSCRIPTION"; subscribed: boolean }
-	| {
-			type: "BIOMETRIC_STATUS";
-			available: boolean;
-			enabled: boolean;
-			appRunning?: boolean;
-			app_running?: boolean;
-	  }
-	| {
-			type: "BIOMETRIC_UNLOCK_SUCCESS";
-			accountId: string;
-			email: string;
-			encrypted_session: string;
-			device_key: string;
-			signature: string;
-			auth_token?: string;
-			vault_keys?: string;
-	  }
-	| { type: "BIOMETRIC_UNLOCK_FAILED"; error: string }
-	| {
-			type: "BIOMETRIC_UNLOCK_ALL_SUCCESS";
-			device_key: string;
-			signature: string;
-			accounts: Array<{
-				accountId: string;
-				email: string;
-				encrypted_session: string;
-				auth_token?: string;
-				vault_keys?: string;
-			}>;
-			unlocked: string[];
-			failed: string[];
-	  }
-	| { type: "BIOMETRIC_UNLOCK_ALL_FAILED"; error: string }
-	| { type: "OPEN_DESKTOP_APP_RESULT"; success: boolean; error?: string }
-	| { type: "TRIGGER_DESKTOP_UNLOCK_RESULT"; success: boolean; error?: string }
-	| { type: "ERROR"; message: string };
-
-export type DesktopEnvelope<T> = T & {
-	protocolVersion: number;
-	requestId?: string;
-};
 
 export class DesktopProtocolMismatchError extends Error {
 	readonly expectedVersion: number;

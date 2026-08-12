@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { KeyRef } from "@bittery/crypto-port";
+import type { KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
@@ -7,7 +7,6 @@ import {
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import type { VaultKeyEntry } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
-import type { KdfProfile } from "@bittery/types";
 import {
 	type AccountKeyStore,
 	type AccountRecoveryData,

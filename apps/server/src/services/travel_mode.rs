@@ -5,6 +5,7 @@ use time::OffsetDateTime;
 
 use crate::{
     config::format_timestamp,
+    db::enums::{SyncEntityType, SyncEventType},
     error::AppError,
     repo::{
         common::insert_user_sync_event,
@@ -67,9 +68,9 @@ async fn insert_travel_mode_sync_event<'e>(
 
     insert_user_sync_event(
         executor,
-        "travel_mode_updated",
+        SyncEventType::TravelModeUpdated,
         user_id,
-        "user",
+        SyncEntityType::User,
         user_id,
         1,
         client_id,

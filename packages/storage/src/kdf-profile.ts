@@ -1,5 +1,5 @@
+import type { KdfProfile } from "@bittery/crypto-port";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
-import type { KdfProfile } from "@bittery/types";
 
 /** Parse an account-scoped pin without trusting its persisted JSON shape. */
 export function parseStoredKdfProfile(stored: unknown): KdfProfile | null {

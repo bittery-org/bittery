@@ -2,20 +2,15 @@
  * Types for client-side storage adapters
  */
 
-import type { EncryptedData } from "@bittery/types";
+import type { EncryptedData } from "@bittery/crypto-port";
+import type { VaultKeyEntry } from "@bittery/types";
 
 /**
- * Vault key data stored locally
+ * Vault key data stored locally. The canonical declaration is `VaultKeyEntry` in
+ * `@bittery/types`, which derives it from the generated contract; this is the name storage
+ * has always called it and stays as an alias so no call site moves.
  */
-export interface VaultKeyData {
-	vaultId: string;
-	vaultName: string;
-	vaultType: "personal" | "team";
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	encryptedVaultKey: string;
-	role: "owner" | "admin" | "member" | "read-only";
-}
+export type VaultKeyData = VaultKeyEntry;
 
 /**
  * Cached travel mode configuration mirrored from the server.

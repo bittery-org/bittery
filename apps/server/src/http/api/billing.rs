@@ -8,7 +8,13 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     config::db_pool,
+    db::enums::BillingPlan,
     services::billing::{self, CheckoutPlanInput},
+    shapes::{
+        attachment_usage_shape, billing_entitlements_response_shape, billing_entitlements_shape,
+        billing_status_shape, checkout_session_shape, entitlement_limits_shape,
+        portal_session_shape, seat_invoice_line_shape, seat_invoice_preview_shape,
+    },
     AppState,
 };
 
@@ -33,234 +39,95 @@ enum CheckoutPlan {
     Team,
 }
 
-impl CheckoutPlan {
-    fn into_wire_value(self) -> String {
-        match self {
-            Self::Personal => "personal",
-            Self::Family => "family",
-            Self::Team => "team",
-        }
-        .to_string()
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BillingStatusResponse {
-    enabled: bool,
-    plan: String,
-    status: String,
-    is_active: bool,
-    requires_payment: bool,
-    is_stripe_configured: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stripe_customer_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stripe_subscription_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stripe_price_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    current_period_end: Option<String>,
-    cancel_at_period_end: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    seats_purchased: Option<i32>,
-}
-
-impl From<billing::BillingStatusResponse> for BillingStatusResponse {
-    fn from(value: billing::BillingStatusResponse) -> Self {
-        Self {
-            enabled: value.enabled,
-            plan: value.plan,
-            status: value.status,
-            is_active: value.is_active,
-            requires_payment: value.requires_payment,
-            is_stripe_configured: value.is_stripe_configured,
-            stripe_customer_id: value.stripe_customer_id,
-            stripe_subscription_id: value.stripe_subscription_id,
-            stripe_price_id: value.stripe_price_id,
-            current_period_end: value.current_period_end,
-            cancel_at_period_end: value.cancel_at_period_end,
-            seats_purchased: value.seats_purchased,
+impl From<CheckoutPlan> for BillingPlan {
+    fn from(value: CheckoutPlan) -> Self {
+        match value {
+            CheckoutPlan::Personal => Self::Personal,
+            CheckoutPlan::Family => Self::Family,
+            CheckoutPlan::Team => Self::Team,
         }
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BillingEntitlements {
-    sentinel: bool,
-    team_management: bool,
-    vault_sharing: bool,
-    share_links: bool,
-    billing_portal: bool,
-    attachments: bool,
-}
+billing_status_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BillingStatusResponse
+});
+billing_status_shape!(shape_from {
+    billing::BillingStatusResponse => BillingStatusResponse
+});
 
-impl From<billing::BillingEntitlements> for BillingEntitlements {
-    fn from(value: billing::BillingEntitlements) -> Self {
-        Self {
-            sentinel: value.sentinel,
-            team_management: value.team_management,
-            vault_sharing: value.vault_sharing,
-            share_links: value.share_links,
-            billing_portal: value.billing_portal,
-            attachments: value.attachments,
-        }
-    }
-}
+billing_entitlements_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BillingEntitlements
+});
+billing_entitlements_shape!(shape_from {
+    billing::BillingEntitlements => BillingEntitlements
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct EntitlementLimits {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    share_links: Option<DecimalString>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    shared_vaults: Option<DecimalString>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    attachment_max_file_size_bytes: Option<DecimalString>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    attachment_storage_bytes: Option<DecimalString>,
-}
+entitlement_limits_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct EntitlementLimits
+}, limit = DecimalString);
+entitlement_limits_shape!(shape_from {
+    billing::EntitlementLimits => EntitlementLimits
+}, limit = DecimalString);
 
-impl From<billing::EntitlementLimits> for EntitlementLimits {
-    fn from(value: billing::EntitlementLimits) -> Self {
-        Self {
-            share_links: value.share_links.map(Into::into),
-            shared_vaults: value.shared_vaults.map(Into::into),
-            attachment_max_file_size_bytes: value.attachment_max_file_size_bytes.map(Into::into),
-            attachment_storage_bytes: value.attachment_storage_bytes.map(Into::into),
-        }
-    }
-}
+billing_entitlements_response_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BillingEntitlementsResponse
+});
+billing_entitlements_response_shape!(shape_from {
+    billing::BillingEntitlementsResponse => BillingEntitlementsResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BillingEntitlementsResponse {
-    mode: String,
-    billing_enabled: bool,
-    plan: String,
-    status: String,
-    is_active: bool,
-    entitlements: BillingEntitlements,
-    limits: EntitlementLimits,
-}
+attachment_usage_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct AttachmentUsageResponse
+}, bytes = DecimalString);
+attachment_usage_shape!(shape_from {
+    billing::AttachmentUsageResponse => AttachmentUsageResponse
+}, bytes = DecimalString);
 
-impl From<billing::BillingEntitlementsResponse> for BillingEntitlementsResponse {
-    fn from(value: billing::BillingEntitlementsResponse) -> Self {
-        Self {
-            mode: value.mode,
-            billing_enabled: value.billing_enabled,
-            plan: value.plan,
-            status: value.status,
-            is_active: value.is_active,
-            entitlements: value.entitlements.into(),
-            limits: value.limits.into(),
-        }
-    }
-}
+checkout_session_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct CheckoutSessionResponse
+});
+checkout_session_shape!(shape_from {
+    billing::CheckoutSessionResponse => CheckoutSessionResponse
+});
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct AttachmentUsageResponse {
-    mode: String,
-    attachments_enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quota_bytes: Option<DecimalString>,
-    committed_storage_bytes: DecimalString,
-}
+portal_session_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    struct PortalSessionResponse
+});
+portal_session_shape!(shape_from {
+    billing::PortalSessionResponse => PortalSessionResponse
+});
 
-impl From<billing::AttachmentUsageResponse> for AttachmentUsageResponse {
-    fn from(value: billing::AttachmentUsageResponse) -> Self {
-        Self {
-            mode: value.mode,
-            attachments_enabled: value.attachments_enabled,
-            quota_bytes: value.quota_bytes.map(Into::into),
-            committed_storage_bytes: value.committed_storage_bytes.into(),
-        }
-    }
-}
+seat_invoice_line_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct TeamSeatInvoicePreviewLineResponse
+}, amount = DecimalString);
+seat_invoice_line_shape!(shape_from {
+    billing::TeamSeatInvoicePreviewLineResponse => TeamSeatInvoicePreviewLineResponse
+}, amount = DecimalString);
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CheckoutSessionResponse {
-    url: String,
-    session_id: String,
-}
-
-impl From<billing::CheckoutSessionResponse> for CheckoutSessionResponse {
-    fn from(value: billing::CheckoutSessionResponse) -> Self {
-        Self {
-            url: value.url,
-            session_id: value.session_id,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-struct PortalSessionResponse {
-    url: String,
-}
-
-impl From<billing::PortalSessionResponse> for PortalSessionResponse {
-    fn from(value: billing::PortalSessionResponse) -> Self {
-        Self { url: value.url }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct TeamSeatInvoicePreviewLineResponse {
-    id: String,
-    description: String,
-    amount_cents: DecimalString,
-    currency: String,
-    period_start: String,
-    period_end: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quantity: Option<DecimalString>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    unit_amount_cents: Option<DecimalString>,
-    is_proration: bool,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct TeamSeatInvoicePreviewResponse {
-    currency: String,
-    current_quantity: DecimalString,
-    next_quantity: DecimalString,
-    estimated_next_payment_cents: DecimalString,
-    total_line_items_cents: DecimalString,
-    #[schema(max_items = 500)]
-    lines: Vec<TeamSeatInvoicePreviewLineResponse>,
-}
-
-impl From<billing::TeamSeatInvoicePreviewResponse> for TeamSeatInvoicePreviewResponse {
-    fn from(value: billing::TeamSeatInvoicePreviewResponse) -> Self {
-        Self {
-            currency: value.currency,
-            current_quantity: value.current_quantity.into(),
-            next_quantity: value.next_quantity.into(),
-            estimated_next_payment_cents: value.estimated_next_payment_cents.into(),
-            total_line_items_cents: value.total_line_items_cents.into(),
-            lines: value
-                .lines
-                .into_iter()
-                .map(|line| TeamSeatInvoicePreviewLineResponse {
-                    id: line.id,
-                    description: line.description,
-                    amount_cents: line.amount_cents.into(),
-                    currency: line.currency,
-                    period_start: line.period_start,
-                    period_end: line.period_end,
-                    quantity: line.quantity.map(Into::into),
-                    unit_amount_cents: line.unit_amount_cents.map(Into::into),
-                    is_proration: line.is_proration,
-                })
-                .collect(),
-        }
-    }
-}
+seat_invoice_preview_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct TeamSeatInvoicePreviewResponse
+}, amount = DecimalString, line = TeamSeatInvoicePreviewLineResponse);
+seat_invoice_preview_shape!(shape_from {
+    billing::TeamSeatInvoicePreviewResponse => TeamSeatInvoicePreviewResponse
+}, amount = DecimalString, line = TeamSeatInvoicePreviewLineResponse);
 
 #[derive(IntoResponses)]
 #[allow(dead_code)]
@@ -344,7 +211,7 @@ async fn create_checkout_session(
             db_pool(&state)?,
             &request.session.user_id,
             CheckoutPlanInput {
-                plan: body.plan.map(CheckoutPlan::into_wire_value),
+                plan: body.plan.map(BillingPlan::from),
             },
         )
         .await?

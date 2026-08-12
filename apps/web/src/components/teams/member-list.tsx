@@ -1,3 +1,4 @@
+import type { TeamMember } from "@bittery/api-contract";
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
 import { useApiClient } from "@bittery/shared/api";
@@ -25,17 +26,9 @@ import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { TeamRotationError } from "./team-rotation-error";
 
-interface Member {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-	joinedAt: string | null;
-}
-
 interface MemberListProps {
 	teamId: string;
-	members: Member[];
+	members: readonly TeamMember[];
 	currentUserId?: string;
 	canManageMembers: boolean;
 	isSelfHostedMode?: boolean;
@@ -256,7 +249,7 @@ export function MemberList({
 			.toUpperCase()
 			.slice(0, 2);
 
-	const getRoleLabel = (role: Member["role"]) => {
+	const getRoleLabel = (role: TeamMember["role"]) => {
 		if (isSelfHostedMode && role === "owner") {
 			return m.team_members_role_owner_self_hosted();
 		}
@@ -270,7 +263,7 @@ export function MemberList({
 		}
 	};
 
-	const getRoleBadgeVariant = (role: Member["role"]) => {
+	const getRoleBadgeVariant = (role: TeamMember["role"]) => {
 		if (role === "owner") return "default" as const;
 		if (role === "admin") return "secondary" as const;
 		return "outline" as const;

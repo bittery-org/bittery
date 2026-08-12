@@ -1,6 +1,7 @@
 import { usePlatformCrypto } from "@bittery/core/hooks";
 import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
 import { createAccountKeys } from "@bittery/core/services/vault-crypto";
+import type { KdfProfile } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import {
@@ -11,7 +12,6 @@ import { apiQueryKeys } from "@bittery/shared/api-query";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import type { KdfProfile } from "@bittery/types";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -31,6 +31,15 @@ type SignupFormValues = {
 	plan: CloudPlanId;
 	organizationName: string;
 };
+
+/**
+ * Message to surface for a thrown value. The API client rejects with `ApiError`, the crypto
+ * seam and storage with plain `Error`s; anything else carries nothing worth showing, so the
+ * caller's fallback wins.
+ */
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : "";
+}
 
 type SignupMutationInput = {
 	userId?: string;
@@ -189,7 +198,7 @@ export function useSignupForm({
 				})
 			).data;
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Failed to send verification code");
 		},
 	});
@@ -207,7 +216,7 @@ export function useSignupForm({
 				})
 			).data;
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Failed to verify code");
 		},
 	});
@@ -274,7 +283,7 @@ export function useSignupForm({
 				)
 			).data;
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Failed to create account");
 		},
 	});
@@ -298,9 +307,9 @@ export function useSignupForm({
 					window.location.href = checkout.url;
 					return;
 				}
-			} catch (error: any) {
+			} catch (error) {
 				toast.error(
-					error?.message ||
+					errorMessage(error) ||
 						"Account created, but checkout could not be started. Open billing to continue.",
 				);
 				navigate({ to: "/billing" });
@@ -409,9 +418,9 @@ export function useSignupForm({
 			);
 
 			await goAfterSignup(value);
-		} catch (error: any) {
+		} catch (error) {
 			console.error("Signup error:", error);
-			toast.error(error.message || "Failed to create account");
+			toast.error(errorMessage(error) || "Failed to create account");
 		} finally {
 			setIsEncrypting(false);
 		}

@@ -3,12 +3,7 @@ import { m } from "@bittery/i18n/paraglide/messages";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import type { RegisteredRouter } from "@tanstack/react-router";
-
-type BackgroundPush = {
-	type: string;
-	reason?: string;
-	accounts?: string[];
-};
+import { isBackgroundEvent } from "../background/events";
 
 /**
  * Subscribed at module scope, not from an effect: pushes sent while the popup is
@@ -18,7 +13,11 @@ export function subscribeBackgroundPushes(
 	queryClient: QueryClient,
 	router: RegisteredRouter,
 ): void {
-	chrome.runtime.onMessage.addListener((message: BackgroundPush) => {
+	chrome.runtime.onMessage.addListener((message: unknown) => {
+		if (!isBackgroundEvent(message)) {
+			return;
+		}
+
 		switch (message.type) {
 			case "DESKTOP_LOCKED":
 			case "VAULT_LOCKED": {

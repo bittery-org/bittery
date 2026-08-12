@@ -15,6 +15,7 @@ use super::{
     parse_bearer_token, parse_pending_vault_keys, plan_member_limit, signup_team_name,
     validate_hex_string, validate_login_attempt_id, validate_resource_id, validate_token,
 };
+use crate::db::enums::{BillingPlan, TeamType};
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
@@ -1151,11 +1152,11 @@ fn header_helpers_trim_values_and_extract_bearer_tokens() {
 fn signup_helpers_normalize_plans_member_limits_and_names() {
     assert_eq!(
         normalize_signup_plan(None).expect("default plan should be valid"),
-        "personal"
+        BillingPlan::Personal
     );
     assert_eq!(
         normalize_signup_plan(Some(" Team ")).expect("team plan should be valid"),
-        "team",
+        BillingPlan::Team,
     );
     assert_eq!(
         normalize_signup_plan(Some("enterprise"))
@@ -1164,24 +1165,33 @@ fn signup_helpers_normalize_plans_member_limits_and_names() {
         "Invalid plan",
     );
 
-    assert_eq!(super::map_plan_to_team_type("family"), "family");
-    assert_eq!(super::map_plan_to_team_type("team"), "organization");
-    assert_eq!(super::map_plan_to_team_type("personal"), "personal");
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Family),
+        TeamType::Family
+    );
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Team),
+        TeamType::Organization
+    );
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Personal),
+        TeamType::Personal
+    );
 
-    assert_eq!(plan_member_limit("personal"), Some(1));
-    assert_eq!(plan_member_limit("family"), Some(6));
-    assert_eq!(plan_member_limit("team"), None);
+    assert_eq!(plan_member_limit(BillingPlan::Personal), Some(1));
+    assert_eq!(plan_member_limit(BillingPlan::Family), Some(6));
+    assert_eq!(plan_member_limit(BillingPlan::Team), None);
 
     assert_eq!(
-        signup_team_name(true, "organization", None),
+        signup_team_name(true, TeamType::Organization, None),
         "Bittery Instance"
     );
     assert_eq!(
-        signup_team_name(true, "organization", Some("  Example Org  ")),
+        signup_team_name(true, TeamType::Organization, Some("  Example Org  ")),
         "Example Org",
     );
-    assert_eq!(signup_team_name(false, "family", None), "My Family");
-    assert_eq!(signup_team_name(false, "personal", None), "My Team");
+    assert_eq!(signup_team_name(false, TeamType::Family, None), "My Family");
+    assert_eq!(signup_team_name(false, TeamType::Personal, None), "My Team");
 }
 
 #[test]

@@ -7,6 +7,7 @@ use time::{macros::datetime, OffsetDateTime};
 
 use super::*;
 use crate::config::bittery_mode;
+use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
@@ -282,15 +283,15 @@ fn mask_user_agent_handles_common_browsers_and_fallbacks() {
 fn team_management_enabled_respects_billing_state_and_mode() {
     // The console gate resolves entitlement on the team plan; these assertions pin
     // the billing states it accepts. The gate itself lives in `services::team_admin`.
-    let console_gate = |billing_status: Option<&str>| {
-        team_management_enabled(bittery_mode(), Some("team"), billing_status)
+    let console_gate = |billing_status: Option<BillingStatus>| {
+        team_management_enabled(bittery_mode(), Some(BillingPlan::Team), billing_status)
     };
 
     with_bittery_mode(None, || {
         assert!(!console_gate(None));
-        assert!(!console_gate(Some("past_due")));
-        assert!(console_gate(Some("active")));
-        assert!(console_gate(Some("trialing")));
+        assert!(!console_gate(Some(BillingStatus::PastDue)));
+        assert!(console_gate(Some(BillingStatus::Active)));
+        assert!(console_gate(Some(BillingStatus::Trialing)));
         assert_eq!(bittery_mode(), "cloud");
     });
 

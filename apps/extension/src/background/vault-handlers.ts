@@ -5,14 +5,18 @@
 
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { apiClient } from "./api-client";
+import type {
+	VaultItemResponse,
+	VaultItemsResponse,
+	WritableVaultsResponse,
+} from "./router/contract";
 import { updateActivity } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 /**
  * Handle GET_VAULT_ITEMS message - Get all vault items
  */
-export async function handleGetVaultItems(): Promise<MessageResponse> {
+export async function handleGetVaultItems(): Promise<VaultItemsResponse> {
 	updateActivity();
 
 	const items = await getDecryptedItemsForCurrentMode();
@@ -27,7 +31,7 @@ export async function handleGetVaultItems(): Promise<MessageResponse> {
  */
 export async function handleGetVaultItem(payload: {
 	itemId: string;
-}): Promise<MessageResponse> {
+}): Promise<VaultItemResponse> {
 	updateActivity();
 
 	const { itemId } = payload;
@@ -39,7 +43,7 @@ export async function handleGetVaultItem(payload: {
 /**
  * Handle GET_WRITABLE_VAULTS message - Get vaults the user can write to
  */
-export async function handleGetWritableVaults(): Promise<MessageResponse> {
+export async function handleGetWritableVaults(): Promise<WritableVaultsResponse> {
 	updateActivity();
 
 	try {

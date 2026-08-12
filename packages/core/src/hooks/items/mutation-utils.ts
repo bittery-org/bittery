@@ -1,4 +1,6 @@
+import type { ItemCategory } from "@bittery/api-contract";
 import { useApiClient } from "@bittery/shared/api";
+import type { EncryptedItemPayload } from "@bittery/shared/item-mapping";
 import {
 	stripToDecryptedData,
 	toEncryptedPayload,
@@ -38,7 +40,7 @@ interface BasePendingMutation {
 	targetAccountId?: string;
 	targetAccountEmail?: string;
 	targetItemId?: string;
-	category?: string;
+	category?: ItemCategory;
 	encryptedPayload?: {
 		encryptedData: string;
 		encryptionIv: string;
@@ -65,13 +67,8 @@ interface LocalItemMutationContextOptions {
 	includeDeleted?: boolean;
 }
 
-interface EncryptedPayloadLike {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
+/** The ciphertext triple as the crypto port returns it — one definition, in `@bittery/shared`. */
+type EncryptedPayloadLike = EncryptedItemPayload;
 
 export function createLocalId(prefix: string): string {
 	const random = globalThis?.crypto?.randomUUID?.();

@@ -39,6 +39,7 @@
 	},
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",
+		"@bittery/crypto-port": "workspace:*",
 		"@bittery/device": "workspace:*",
 		"@bittery/types": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",

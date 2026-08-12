@@ -1,18 +1,10 @@
-//! Canonical field lists for the shapes that repeat across the item surface.
+//! The item surface: shapes that repeat across a database row, several service response variants
+//! and several transport DTOs.
 //!
-//! An item, a rotation item and an attachment each appear many times: once as a database row,
-//! once per service response variant and once per transport DTO. [ADR 0011](../../../docs/adr/0011-axum-rest-openapi-replaces-qubit.md)
-//! requires transport DTOs to stay distinct from service and database models, so the *types*
-//! must stay separate — but the *field list* does not have to be retyped for each one.
-//!
-//! Each shape here is declared once, as a macro that emits the canonical fields plus whatever
-//! extra fields a variant adds. Adding an item column means editing `item_shape!` and the
-//! `From<DbBootstrapItemRow>` below; every variant follows.
-//!
-//! `#[serde(flatten)]` would express this more directly, but utoipa 5.5 renders a flattened
-//! field as `{"allOf": [{"$ref": ...}]}` instead of an inline object, which would rewrite every
-//! item schema in the committed `openapi.v1.json`. The macros keep the emitted schema
-//! byte-identical to a hand-written struct.
+//! These shapes predate the generic emitters in the parent module and keep their own form: a
+//! variant is the canonical fields *plus extras*, so each macro also emits `compose` (canonical
+//! payload + extras -> variant) and `decompose` (variant -> canonical payload + extras). That is
+//! what lets six variants of an item convert into one another without restating a field list.
 
 use crate::{
     config::format_timestamp,
@@ -34,7 +26,7 @@ macro_rules! item_shape {
         $vis struct $name {
             $vis id: String,
             $vis vault_id: String,
-            $vis category: String,
+            $vis category: $crate::db::enums::ItemCategory,
             $vis favorite: bool,
             $vis encrypted_data: String,
             $vis encryption_iv: String,

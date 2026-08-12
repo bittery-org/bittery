@@ -4,7 +4,13 @@
  * extensions, or any other runtime.
  */
 
-import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import type { FinishLoginResponse, LoginAttempt } from "@bittery/api-contract";
+import type {
+	CryptoPort,
+	EncryptedData,
+	KdfProfile,
+	KeyRef,
+} from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
 import type { AppApiClient } from "@bittery/shared/api-client";
 import {
@@ -23,7 +29,6 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { EncryptedData, KdfProfile } from "@bittery/types";
 import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountApiClient } from "./api-client";
 import {
@@ -195,7 +200,7 @@ export interface IAuthClient {
 		): Promise<ApiResponse<CheckEmailResult>>;
 		startLogin(
 			input: Parameters<AuthClientMethods["startLogin"]>[0],
-		): Promise<ApiResponse<StartLoginResponse>>;
+		): Promise<ApiResponse<LoginAttempt>>;
 		finishLogin(
 			attemptId: Parameters<AuthClientMethods["finishLogin"]>[0],
 			input: Parameters<AuthClientMethods["finishLogin"]>[1],
@@ -214,32 +219,18 @@ export interface CheckEmailResult {
 	secretKeyHint?: string | null;
 }
 
-/** Start login response (SRP challenge). */
-export interface StartLoginResponse {
-	attemptId: string;
-	salt: string;
-	serverPublicKey: string;
-	kdfParams: {
-		schemaVersion: number;
-		algorithm: string;
-		iterations: number;
-	};
-}
-
-/** Finish login response (session data). */
-export interface FinishLoginResponse {
-	token: string;
-	serverProof: string;
-	user: LoginUserData;
-	sessionId?: string;
-	expiresAt: string | Date;
-	vaultKeys: {
-		items: readonly ServerAuthVaultKeyEntry[];
-		nextCursor?: string | null;
-		hasMore: boolean;
-	};
-}
-
+/**
+ * The user as a *ceremony result* carries them, which is not what any one endpoint sends.
+ * A fresh login fills it from `FinishLoginResponse["user"]`, a local unlock from stored
+ * account metadata, and signup from `SignupResponse["user"]` — so `name`, `teamName` and
+ * `teamAvatarUrl` are optional because only some of those three sources have them.
+ *
+ * NOTE: the login endpoint is one of the sources that does not. `LoginUserResponse` carries
+ * no team fields, so `teamName`/`teamAvatarUrl` are always `undefined` after a fresh login
+ * or a re-auth unlock, and `storeLoginSession` writes them to account metadata as such.
+ * Populating them needs a `GET /auth/me` on the login path — a behaviour change, not a
+ * typing one, so it is left alone here.
+ */
 export interface LoginUserData {
 	id: string;
 	email: string;
@@ -357,7 +348,7 @@ async function validateDerivedUnlockKey(input: {
  */
 async function validateKdfProfileForAccount(
 	accountId: string | undefined,
-	serverProfile: StartLoginResponse["kdfParams"],
+	serverProfile: LoginAttempt["kdfParams"],
 	storage: AccountStore,
 ): Promise<KdfProfile> {
 	const pinnedProfile = accountId
@@ -436,7 +427,6 @@ export async function performSRPLogin(
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);
@@ -694,7 +684,6 @@ export async function deriveSrpLoginProof(
 		{
 			salt: startResult.salt,
 			serverPublicKey: startResult.serverPublicKey,
-			kdfParams: validatedProfile,
 		},
 		srpPassword,
 	);
@@ -807,7 +796,6 @@ export async function performSRPUnlock(
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);

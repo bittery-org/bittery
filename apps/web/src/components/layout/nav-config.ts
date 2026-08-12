@@ -77,7 +77,7 @@ export const appNavItems: readonly AppNavItem[] = [
 		icon: History,
 		label: "Admin",
 		requiresMode: "any",
-		requiresEntitlements: ["team_management"],
+		requiresEntitlements: ["teamManagement"],
 		requiresPlans: ["team"],
 		requiresRoles: ["owner", "admin"],
 	},

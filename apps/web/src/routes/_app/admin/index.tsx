@@ -1,3 +1,4 @@
+import type { AuditEvent, TeamMember } from "@bittery/api-contract";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
@@ -62,31 +63,8 @@ type ResultFilter = "all" | "success" | "failure";
 type AdminTab = "people" | "activity";
 type AdminMessageCatalog = ReturnType<typeof useI18n>["m"];
 
-interface TeamEvent {
-	id: string;
-	timestamp: string;
-	source: "audit_log" | "share_access_log";
-	action: string;
-	actionGroup: Exclude<ActionGroup, "all">;
-	actor: { userId: string | null; name: string | null; email: string | null };
-	entity: { type: string | null; id: string | null };
-	result: Exclude<ResultFilter, "all">;
-	network: {
-		maskedIp: string | null;
-		maskedUserAgent: string | null;
-		fullIp: string | null;
-		fullUserAgent: string | null;
-	};
-	metadata: unknown;
-}
-
-interface TeamMember {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-	joinedAt: string | null;
-}
+/** The server's audit-event shape, under the name this console has always used for it. */
+type TeamEvent = AuditEvent;
 
 interface Filters {
 	actionGroup: ActionGroup;
@@ -198,7 +176,10 @@ function getEventActionLabel(action: string, m: AdminMessageCatalog) {
 	return labels[action]?.() ?? humanizeIdentifier(action);
 }
 
-function getEntityTypeLabel(type: string | null, m: AdminMessageCatalog) {
+function getEntityTypeLabel(
+	type: TeamEvent["entity"]["type"],
+	m: AdminMessageCatalog,
+) {
 	if (!type) return m.admin_page_fallback_empty();
 	const labels: Record<string, (() => string) | undefined> = {
 		item: m.admin_page_event_entity_type_item,
@@ -228,7 +209,7 @@ export const Route = createFileRoute("/_app/admin/")({
 		);
 		const mode = normalizeDeploymentMode(access.mode);
 		const entitlements = normalizeEntitlements(access.entitlements);
-		if (!entitlements.team_management) {
+		if (!entitlements.teamManagement) {
 			throw redirect({ to: mode === "cloud" ? "/billing" : "/home" });
 		}
 		if (mode === "cloud" && access.plan !== "team") {
@@ -280,12 +261,10 @@ function TeamAdminConsolePage() {
 	});
 
 	const events = useMemo(
-		() =>
-			(eventsQuery.data?.pages.flatMap((page) => page.events) ??
-				[]) as TeamEvent[],
+		() => eventsQuery.data?.pages.flatMap((page) => page.events) ?? [],
 		[eventsQuery.data],
 	);
-	const members = (membersQuery.data ?? []) as TeamMember[];
+	const members = membersQuery.data ?? [];
 
 	return (
 		<div className="mx-auto flex w-full max-w-[1500px] flex-col gap-4 pb-10">
@@ -364,10 +343,10 @@ function TeamAdminConsolePage() {
 /* -------------------------------------------------------------------------- */
 
 interface PeopleTabProps {
-	events: TeamEvent[];
+	events: readonly TeamEvent[];
 	isLoadingMembers: boolean;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
 	teamId: string;
 	onSelectEvent: (event: TeamEvent) => void;
 }
@@ -882,13 +861,13 @@ function ActivityRow({
 /* -------------------------------------------------------------------------- */
 
 interface ActivityTabProps {
-	events: TeamEvent[];
+	events: readonly TeamEvent[];
 	filters: Filters;
 	hasNextPage: boolean;
 	isFetchingNextPage: boolean;
 	isLoading: boolean;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
 	onLoadMore: () => void;
 	onResetFilters: () => void;
 	onSelectEvent: (event: TeamEvent) => void;
@@ -1052,7 +1031,7 @@ function FilterBar({
 }: {
 	filters: Filters;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
 	onReset: () => void;
 	onUpdate: (next: Partial<Filters>) => void;
 }) {

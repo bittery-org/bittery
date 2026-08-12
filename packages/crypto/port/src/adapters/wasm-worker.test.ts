@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CryptoError } from "@bittery/crypto-wasm";
-import type { KdfProfile } from "@bittery/types";
 import { CryptoPortError } from "../errors";
+import type { KdfProfile } from "../types";
 import { runCryptoPortConformance } from "./port-conformance";
 import { createWasmWorkerCryptoPort } from "./wasm-worker";
 import {
