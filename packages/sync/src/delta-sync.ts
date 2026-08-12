@@ -165,7 +165,7 @@ export async function performDeltaSync(
 			break;
 		}
 		case "vault_access_revoked":
-			// entityId is the affected vault id
+			// The Vault ID lets the client evict data it can no longer read.
 			await removeVault(event.entityId);
 			break;
 		// vault_member_added, vault_member_removed:
