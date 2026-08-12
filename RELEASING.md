@@ -31,6 +31,8 @@ Before merging:
 
 The release pull request must keep its generated `release/vX.Y.Z` branch name and hidden release marker. The tagging workflow uses both to distinguish a prepared release from an ordinary pull request.
 
+The full Web E2E suite runs on release pull requests, scheduled verification, and explicit manual CI runs. Ordinary pull requests and pushes to `main` keep the faster static, unit, integration, and server checks without repeating Web E2E.
+
 Merging the release pull request is the publication decision. Do not merge it until the release should begin.
 
 ## What happens after merge

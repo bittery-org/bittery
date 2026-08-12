@@ -6,10 +6,8 @@ on:
   push:
     branches:
       - main
-  # Weekly dependency checks catch upstream breakage on unchanged code, while
-  # Web E2E also runs to detect browser-harness rot. This is still deliberately
-  # narrower than a full CI re-run. Monday, matching the weekly Dependabot
-  # cadence in .github/dependabot.yml.
+  # Weekly dependency checks catch upstream breakage, while Web E2E detects
+  # browser-harness rot without rerunning every CI job.
   schedule:
     - cron: "17 6 * * 1"
 
@@ -585,6 +583,10 @@ jobs:
   # another copy of the pinned ubrn build for no gain.
   web-e2e-run:
     name: web-e2e-run (${{ matrix.name }})
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v'))
     needs: crypto-bindings
     strategy:
       fail-fast: false
@@ -753,16 +755,16 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # Blob reports preserve traces, videos and screenshots from every shard and
-  # let Playwright render one report with the complete suite result. Keep this
-  # separate from the stable required check below so its implementation can
-  # change without changing the branch-protection context.
+  # Report aggregation stays separate so the required `web-e2e` check remains
+  # stable as the shard implementation changes.
   web-e2e-report:
     if: always() && needs.web-e2e-run.result != 'skipped' && needs.web-e2e-run.result != 'cancelled'
     needs: web-e2e-run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
         with:
@@ -803,8 +805,17 @@ jobs:
     steps:
       - name: Check Web E2E suite
         shell: bash
+        env:
+          E2E_REQUIRED: >-
+            ${{ github.event_name == 'schedule' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')) }}
         run: |
           set -euo pipefail
+          if [ "$E2E_REQUIRED" != "true" ]; then
+            echo "Web E2E is required only for releases, scheduled runs, and manual verification."
+            exit 0
+          fi
           run_result="${{ needs.web-e2e-run.result }}"
           report_result="${{ needs.web-e2e-report.result }}"
           if [ "$run_result" != "success" ] || [ "$report_result" != "success" ]; then

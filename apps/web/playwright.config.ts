@@ -48,12 +48,8 @@ if (!existsSync(paraglideEntry)) {
 // tests/e2e-launch.mjs builds this too, but Playwright starts both API
 // `webServer`s at once and the second would then block on cargo's target-dir
 // lock for the whole of the first build; here it happens once, before either.
-// CI has an explicit build step, so it sets E2E_SERVER_BINARIES_READY to keep
-// config-only commands such as `playwright test --list` free of compilation.
-// e2e-launch.mjs still runs Cargo itself, so the standalone launcher remains
-// safe if that signal is stale or used outside CI.
-// Every worker re-imports this module, and only the main process runs before
-// the servers boot - a worker's build would just be N racing fingerprint checks.
+// CI skips this after its explicit build; workers skip it to avoid racing Cargo
+// fingerprint checks when they re-import the config.
 if (
 	shouldBuildE2eServerBinaries({
 		E2E_SERVER_BINARIES_READY: process.env.E2E_SERVER_BINARIES_READY,
