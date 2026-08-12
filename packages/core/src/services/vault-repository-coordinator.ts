@@ -58,6 +58,10 @@ export class VaultRepositoryCoordinator {
 		string,
 		Promise<{ id: string } | null>
 	>();
+	private readonly queuedServerRefreshes = new Map<
+		string,
+		Promise<{ id: string } | null>
+	>();
 	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
 
@@ -234,11 +238,17 @@ export class VaultRepositoryCoordinator {
 	): Promise<{ id: string } | null> {
 		const existing = this.serverRefreshes.get(account.accountId);
 		if (existing) {
-			return afterInFlight
-				? existing
-						.catch(() => null)
-						.then(() => this.refreshAccountFromServer(account, true))
-				: existing;
+			if (!afterInFlight) return existing;
+			const queued = this.queuedServerRefreshes.get(account.accountId);
+			if (queued) return queued;
+			const followUp = existing
+				.catch(() => null)
+				.then(() => {
+					this.queuedServerRefreshes.delete(account.accountId);
+					return this.refreshAccountFromServer(account, true);
+				});
+			this.queuedServerRefreshes.set(account.accountId, followUp);
+			return followUp;
 		}
 
 		const refresh = this.getOrCreate(
@@ -276,7 +286,11 @@ export class VaultRepositoryCoordinator {
 				await this.ensureTravelModeVerified(account);
 				await repo.hydrate();
 				if (!repo.hasCacheSnapshot()) {
-					await this.refreshAccountFromServer(account);
+					try {
+						await this.refreshAccountFromServer(account);
+					} catch {
+						await this.refreshAccountFromServer(account);
+					}
 				}
 			} catch (error) {
 				console.error(
@@ -520,6 +534,7 @@ export class VaultRepositoryCoordinator {
 		this.hydratingAccountIds.clear();
 		this.accountHydrations.clear();
 		this.serverRefreshes.clear();
+		this.queuedServerRefreshes.clear();
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
 		this.apiClientByAccountId.clear();

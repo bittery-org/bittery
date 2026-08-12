@@ -35,6 +35,7 @@ use crate::{
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 const VAULT_PAGE_QUERY_BYTES: i64 = ITEM_PAGE_QUERY_BYTES;
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
+pub(crate) const ATTACHMENT_ENVELOPE_VERSION: i32 = 1;
 
 #[derive(Debug)]
 pub(crate) struct ByteBoundedPage<T> {
@@ -686,6 +687,11 @@ pub(crate) async fn create_vault_attachment(
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(access.role, "Access denied")?;
+    if input.envelope_version != ATTACHMENT_ENVELOPE_VERSION {
+        return Err(AppError::bad_request(
+            "Unsupported attachment envelope version",
+        ));
+    }
     let is_valid_key =
         storage::is_valid_attachment_upload_key(&input.storage_key, user_id, &input.item_id, None)
             .map_err(|error| {

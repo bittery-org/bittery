@@ -2372,10 +2372,12 @@ export interface components {
             readonly userId: string;
         };
         readonly RotationPlanSummary: {
+            /** Format: date-time */
             readonly absoluteExpiresAt: string;
             /** Format: int32 */
             readonly expectedKeyVersion: number;
             readonly id: string;
+            /** Format: date-time */
             readonly idleExpiresAt: string;
             readonly initiatorUserId: string;
             readonly state: components["schemas"]["VaultKeyRotationPlanState"];

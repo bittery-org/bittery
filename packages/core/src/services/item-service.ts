@@ -1007,7 +1007,7 @@ export class ItemService {
 					);
 
 				// Re-encrypt under the TARGET scope (target vault key + target AAD bound
-				// to the freshly-minted storage key).
+				// to the server-minted target Attachment id).
 				const targetScope = {
 					vaultId: params.targetVaultId,
 					attachmentId: upload.attachmentId,

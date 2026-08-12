@@ -8,6 +8,35 @@ import {
 	createWebRotationPlanClient,
 } from "@/lib/vault-key-rotation-adapter";
 
+interface LockStateSource {
+	getActiveAccount(): Promise<string | null>;
+	getUnlockedAccounts(): Promise<string[]>;
+	onUnlockStateChanged(listener: (accounts: string[]) => void): () => void;
+}
+
+export function subscribeToActiveAccountLock(
+	source: LockStateSource,
+	listener: () => void,
+): () => void {
+	const activeAccount = source.getActiveAccount();
+	let wasUnlocked = Promise.all([
+		activeAccount,
+		source.getUnlockedAccounts(),
+	]).then(
+		([accountId, unlocked]) =>
+			accountId !== null && unlocked.includes(accountId),
+	);
+	return source.onUnlockStateChanged((unlocked) => {
+		wasUnlocked = Promise.all([activeAccount, wasUnlocked]).then(
+			([accountId, previous]) => {
+				const current = accountId !== null && unlocked.includes(accountId);
+				if (previous && !current) listener();
+				return current;
+			},
+		);
+	});
+}
+
 export function useVaultKeyRotation() {
 	const api = useApiClient();
 	const crypto = usePlatformCrypto();
@@ -37,22 +66,7 @@ export function useVaultKeyRotation() {
 			},
 			getMasterUnlockKey: () => storage.getMasterUnlockKey(),
 			client: createWebRotationPlanClient(api, localState),
-			onLock: (listener) => {
-				let wasUnlocked = true;
-				void storage.getActiveAccount().then(async (accountId) => {
-					if (accountId)
-						wasUnlocked = (await storage.getUnlockedAccounts()).includes(
-							accountId,
-						);
-				});
-				return storage.onUnlockStateChanged((unlocked) => {
-					void storage.getActiveAccount().then((accountId) => {
-						const isUnlocked = !!accountId && unlocked.includes(accountId);
-						if (wasUnlocked && !isUnlocked) listener();
-						wasUnlocked = isUnlocked;
-					});
-				});
-			},
+			onLock: (listener) => subscribeToActiveAccountLock(storage, listener),
 		});
 	}, [api, core, crypto]);
 }

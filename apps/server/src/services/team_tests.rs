@@ -505,6 +505,26 @@ async fn team_protected_handlers_require_authentication() {
                 "/api/v1/public/team-invitations/A234567890123456789012345678901/decline",
                 None,
             ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/leave-rotation-plans",
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/leave-rotation-plans/finalize",
+                Some(json!({ "planIds": [] })),
+            ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/members/user_test/removal-rotation-plans",
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/members/user_test/removal-rotation-plans/finalize",
+                Some(json!({ "planIds": [] })),
+            ),
         ] {
             let response = app
                 .api_json(method, path, payload, unauthenticated_json_headers())

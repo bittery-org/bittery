@@ -444,6 +444,7 @@ export interface ApiClient {
 			input: RotationStageInput,
 			signal?: AbortSignal,
 		): Promise<ApiResult<unknown>>;
+		abandon(planId: string, signal?: AbortSignal): Promise<ApiResult<unknown>>;
 	};
 	readonly sync: {
 		bootstrap(
@@ -1290,6 +1291,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("PUT", "/api/v1/vault-key-rotation-plans/{planId}/staged/{kind}", {
 					params: { path: { planId, kind } },
 					body: input,
+					signal,
+				}),
+			abandon: (planId, signal) =>
+				call("DELETE", "/api/v1/vault-key-rotation-plans/{planId}", {
+					params: { path: { planId } },
 					signal,
 				}),
 		},

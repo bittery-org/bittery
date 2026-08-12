@@ -245,4 +245,20 @@ describe("performDeltaSync Item encryption context", () => {
 		expect(items[0]?.encryptionVersion).toBe(2);
 		expect(items[0]?.encryptedByUserId).toBe("member_1");
 	});
+
+	it("refreshes re-encrypted items after a Vault key rotation", async () => {
+		const api = client();
+		api.items.listInVault = async () => ({ data: [serverItem()] }) as never;
+		const { cache, items, vaultKeys } = recordingCache();
+
+		await performDeltaSync(
+			api,
+			cache,
+			event({ type: "vault_key_rotated", entityType: "vault_key" }),
+			"acc_1",
+		);
+
+		expect(vaultKeys).toHaveLength(1);
+		expect(items[0]?.encryptedData).toBe(serverItem().encryptedData);
+	});
 });

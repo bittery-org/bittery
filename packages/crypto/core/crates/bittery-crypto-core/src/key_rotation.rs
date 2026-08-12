@@ -226,16 +226,14 @@ pub fn rewrap_attachment_key(
 ) -> Result<EncryptedData, CryptoError> {
     let mut encoded_attachment_key =
         decrypt_with_aad(encrypted_attachment_key, old_vault_key, old_context)?;
-    let mut attachment_key = BASE64
-        .decode(encoded_attachment_key.as_bytes())
-        .map_err(|error| CryptoError::Base64Decode(error.to_string()))?;
-    encoded_attachment_key.zeroize();
+    let mut attachment_key = decode_attachment_key(&mut encoded_attachment_key)?;
 
     if attachment_key.len() != 32 {
+        let actual = attachment_key.len();
         attachment_key.zeroize();
         return Err(CryptoError::InvalidKeyLength {
             expected: 32,
-            actual: attachment_key.len(),
+            actual,
         });
     }
 
@@ -246,11 +244,26 @@ pub fn rewrap_attachment_key(
     result
 }
 
+fn decode_attachment_key(encoded_attachment_key: &mut String) -> Result<Vec<u8>, CryptoError> {
+    let decoded = BASE64
+        .decode(encoded_attachment_key.as_bytes())
+        .map_err(|error| CryptoError::Base64Decode(error.to_string()));
+    encoded_attachment_key.zeroize();
+    decoded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::encryption::decrypt;
     use crate::rsa::{generate_rsa_key_pair, rsa_decrypt};
+
+    #[test]
+    fn malformed_attachment_key_material_is_zeroized() {
+        let mut encoded = "not-base64!".to_owned();
+        assert!(decode_attachment_key(&mut encoded).is_err());
+        assert!(encoded.is_empty());
+    }
 
     #[test]
     fn test_generate_new_vault_key() {

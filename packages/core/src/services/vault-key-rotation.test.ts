@@ -129,6 +129,7 @@ describe("VaultKeyRotationCeremony", () => {
 			stage: async (_planId: string, output: unknown) => {
 				staged.push(output);
 			},
+			abandon: async () => {},
 			finalize: async () => ({ rotationId: "rotation-1" }),
 			refresh: async () => {},
 			markUnavailable: async () => {},
@@ -209,6 +210,7 @@ describe("VaultKeyRotationCeremony", () => {
 		const masterUnlockKey = await crypto.generateEncryptionKey();
 		let lock: (() => void) | undefined;
 		let openedVaultKey: KeyRef | undefined;
+		const abandoned: string[] = [];
 		const ceremony = createVaultKeyRotationCeremony({
 			crypto,
 			openVaultKey: async () => {
@@ -250,6 +252,9 @@ describe("VaultKeyRotationCeremony", () => {
 					};
 				},
 				stage: async () => lock?.(),
+				abandon: async (planId: string) => {
+					abandoned.push(planId);
+				},
 				finalize: async () => ({ rotationId: "never" }),
 				refresh: async () => {},
 				markUnavailable: async () => {},
@@ -266,6 +271,7 @@ describe("VaultKeyRotationCeremony", () => {
 		});
 		expect(openedVaultKey).toBeDefined();
 		expect(crypto.liveKeyCount).toBe(1);
+		expect(abandoned).toEqual(["plan-1"]);
 	});
 
 	test("a lock aborts an in-flight preparation request and retires owned refs", async () => {
@@ -302,6 +308,7 @@ describe("VaultKeyRotationCeremony", () => {
 					});
 				},
 				stage: async () => {},
+				abandon: async () => {},
 				finalize: async () => ({ rotationId: "never" }),
 				refresh: async () => {},
 				markUnavailable: async () => {},
@@ -345,6 +352,7 @@ describe("VaultKeyRotationCeremony", () => {
 				],
 				getPreparationPage: async () => ({ records: [], nextCursor: null }),
 				stage: async () => {},
+				abandon: async () => {},
 				finalize: async () => ({ rotationId: "rotation-1" }),
 				refresh: async () => {},
 				markUnavailable: async () => {},
@@ -375,6 +383,7 @@ describe("VaultKeyRotationCeremony", () => {
 				],
 				getPreparationPage: async () => ({ records: [], nextCursor: null }),
 				stage: async () => {},
+				abandon: async () => {},
 				finalize: async () => ({ rotationId: "rotation-1" }),
 				refresh: async () => {
 					throw new Error("offline");
@@ -413,6 +422,7 @@ describe("VaultKeyRotationCeremony", () => {
 				],
 				getPreparationPage: async () => ({ records: [], nextCursor: null }),
 				stage: async () => {},
+				abandon: async () => {},
 				finalize: async () => ({ rotationId: "rotation-1" }),
 				refresh: async (_vaultIds, signal) => {
 					lock?.();

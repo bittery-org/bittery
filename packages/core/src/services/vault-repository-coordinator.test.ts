@@ -129,12 +129,42 @@ describe("VaultRepositoryCoordinator", () => {
 		const first = coordinator.refreshFromServer([account]);
 		while (!releaseFirst) await Promise.resolve();
 		const second = coordinator.refreshFromServer([account]);
+		const third = coordinator.refreshFromServer([account]);
 		expect(bootstrapCalls).toBe(1);
 
 		releaseFirst();
-		await first;
-		await second;
+		await Promise.all([first, second, third]);
 		expect(bootstrapCalls).toBe(2);
+	});
+
+	it("retries one failed initial server hydration", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example.com",
+		);
+		let attempts = 0;
+		account.apiClient.vaults.list = mock(async () => {
+			attempts += 1;
+			if (attempts === 1) throw new Error("temporary network failure");
+			return { data: [] };
+		}) as never;
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+
+		await coordinator.hydrate([account]);
+
+		expect(attempts).toBe(2);
 	});
 
 	describe("M5 — findAccount resolution with shared email across servers", () => {

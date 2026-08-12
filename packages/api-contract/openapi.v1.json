@@ -17125,7 +17125,8 @@
         ],
         "properties": {
           "absoluteExpiresAt": {
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           },
           "expectedKeyVersion": {
             "type": "integer",
@@ -17135,7 +17136,8 @@
             "type": "string"
           },
           "idleExpiresAt": {
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           },
           "initiatorUserId": {
             "type": "string"

@@ -237,6 +237,13 @@ impl From<AppError> for ApiError {
                 error.message,
                 false,
             ),
+            AppErrorCode::RetryableConflict => (
+                StatusCode::CONFLICT,
+                ErrorCode::Conflict,
+                "Conflict",
+                error.message,
+                true,
+            ),
             AppErrorCode::TooManyRequests => (
                 StatusCode::TOO_MANY_REQUESTS,
                 ErrorCode::RateLimited,
@@ -377,5 +384,13 @@ mod tests {
 
         assert_eq!(minimum.seconds, 1);
         assert_eq!(maximum.seconds, super::MAX_RETRY_AFTER_SECONDS);
+    }
+
+    #[test]
+    fn transaction_conflicts_are_exposed_as_retryable() {
+        let error = super::ApiError::from(AppError::retryable_conflict("retry"));
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.problem.retryable);
+        assert_eq!(error.problem.code, ErrorCode::Conflict);
     }
 }

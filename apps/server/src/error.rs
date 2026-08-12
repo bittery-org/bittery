@@ -14,6 +14,8 @@ pub enum AppErrorCode {
     Unauthorized,
     #[serde(rename = "CONFLICT")]
     Conflict,
+    #[serde(rename = "CONFLICT")]
+    RetryableConflict,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
@@ -69,6 +71,13 @@ impl AppError {
     pub fn conflict(message: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::Conflict,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn retryable_conflict(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::RetryableConflict,
             message: message.into(),
         }
     }

@@ -1,4 +1,8 @@
-import { type ApiClient, ApiError } from "@bittery/api-contract";
+import {
+	type ApiClient,
+	ApiError,
+	isApiTransportError,
+} from "@bittery/api-contract";
 import type {
 	RotationIntent,
 	RotationPageOutput,
@@ -41,7 +45,12 @@ export async function executeWithIdempotentReplay<T>(
 	try {
 		return await request(idempotencyKey);
 	} catch (error) {
-		if (error instanceof ApiError && !error.retryable) throw error;
+		if (
+			!isApiTransportError(error) &&
+			!(error instanceof ApiError && error.retryable)
+		) {
+			throw error;
+		}
 		return request(idempotencyKey);
 	}
 }
@@ -107,6 +116,9 @@ export function createWebRotationPlanClient(
 				{ outputs: encodeRotationStageOutput(output as never) },
 				signal,
 			);
+		},
+		abandon: async (planId, signal) => {
+			await api.vaultKeyRotation.abandon(planId, signal);
 		},
 		async finalize({ intent, plans }, signal) {
 			const input = webIntent(intent);

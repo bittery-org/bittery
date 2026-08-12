@@ -112,6 +112,7 @@ export function VaultMemberList({
 						toast.error(m.vaults_member_list_error_vault_key_decrypt_failed());
 						break;
 					case "master_unlock_key_missing":
+					case "The account is locked.":
 						toast.error(m.vaults_member_list_error_master_unlock_key_missing());
 						break;
 					case "session_data_missing":

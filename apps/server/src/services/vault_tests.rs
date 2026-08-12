@@ -647,6 +647,16 @@ async fn vault_handlers_require_authentication() {
                 "/api/v1/vaults/vault_test/members/user_test",
                 Some(json!({})),
             ),
+            (
+                Method::POST,
+                "/api/v1/vaults/vault_test/members/user_test/removal-rotation-plans",
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/v1/vaults/vault_test/members/user_test/removal-rotation-plans/finalize",
+                Some(json!({ "planIds": [] })),
+            ),
         ];
 
         for (method, path, payload) in protected_calls {
@@ -2694,6 +2704,16 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				.await
 				.expect("pending attachment storage size should load");
 				assert_eq!(pending_storage_size, 102);
+
+				let invalid_envelope_version = app
+					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "attachmentId": "attachment_pending", "storageKey": "invalid-key", "encryptedAttachmentKey": "encrypted-attachment-key", "attachmentKeyIv": "attachment-key-iv", "attachmentKeyAlgorithm": "aes-gcm", "envelopeVersion": 0, "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())
+					.await;
+				invalid_envelope_version.assert_contract_status();
+				assert_handler_error(
+					&invalid_envelope_version.body,
+					"BAD_REQUEST",
+					"Unsupported attachment envelope version",
+				);
 
 				let create_attachment_response = app
 					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "attachmentId": "attachment_pending", "storageKey": "invalid-key", "encryptedAttachmentKey": "encrypted-attachment-key", "attachmentKeyIv": "attachment-key-iv", "attachmentKeyAlgorithm": "aes-gcm", "envelopeVersion": 1, "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())

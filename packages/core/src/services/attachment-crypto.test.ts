@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { KeyRef } from "@bittery/crypto-port";
 import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import {
+	ATTACHMENT_ENVELOPE_VERSION,
 	createAttachmentKeyEnvelope,
 	decryptAttachmentParts,
 	encryptAttachmentParts,
@@ -13,7 +14,7 @@ const scope = (attachmentId: string) => ({
 	vaultId: "vault_1",
 	attachmentId,
 	userId: "user_1",
-	envelopeVersion: 1,
+	envelopeVersion: ATTACHMENT_ENVELOPE_VERSION,
 });
 
 function vaultCryptoFor(crypto: ReturnType<typeof createInMemoryCryptoPort>) {
@@ -30,6 +31,32 @@ function vaultCryptoFor(crypto: ReturnType<typeof createInMemoryCryptoPort>) {
 }
 
 describe("attachment-key envelopes", () => {
+	test("rejects an unsupported envelope version even when the scope matches", async () => {
+		const crypto = createInMemoryCryptoPort();
+		const vaultCrypto = vaultCryptoFor(crypto);
+		const vaultKey = await crypto.importKey(new Uint8Array(32).fill(7));
+		const unsupportedVersion = ATTACHMENT_ENVELOPE_VERSION + 1;
+		const unsupportedScope = {
+			...scope("attachment_unsupported"),
+			envelopeVersion: unsupportedVersion,
+		};
+		const envelope = await createAttachmentKeyEnvelope(
+			vaultCrypto,
+			vaultKey,
+			unsupportedScope,
+		);
+
+		await expect(
+			unwrapAttachmentKey(
+				vaultCrypto,
+				vaultKey,
+				unsupportedScope,
+				envelope.encryptedAttachmentKey,
+			),
+		).rejects.toThrow("Attachment-key envelope version mismatch");
+		await vaultCrypto.destroyAttachmentKey(envelope.key);
+	});
+
 	test("a failed envelope creation retires its fresh Attachment key", async () => {
 		const crypto = createInMemoryCryptoPort();
 		const vaultCrypto = vaultCryptoFor(crypto);

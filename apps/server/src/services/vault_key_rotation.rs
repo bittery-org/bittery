@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
-use time::{Duration, OffsetDateTime};
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -42,7 +42,9 @@ pub(crate) struct RotationPlanSummary {
     pub initiator_user_id: String,
     pub expected_key_version: i32,
     pub state: VaultKeyRotationPlanState,
+    #[schema(format = DateTime)]
     pub idle_expires_at: String,
+    #[schema(format = DateTime)]
     pub absolute_expires_at: String,
 }
 
@@ -81,12 +83,17 @@ pub(crate) enum FinalizeError {
     Stale(VaultKeyRotationStaleReason),
     InvalidState,
     Incomplete,
+    RetryableConflict,
     Database(String),
 }
 
 impl From<sqlx::Error> for FinalizeError {
     fn from(value: sqlx::Error) -> Self {
-        Self::Database(value.to_string())
+        if crate::services::transaction::is_retryable_transaction_error(&value) {
+            Self::RetryableConflict
+        } else {
+            Self::Database(value.to_string())
+        }
     }
 }
 
@@ -107,6 +114,13 @@ pub(crate) struct LockedPlanPolicy {
     pub reason: String,
     pub authorization_context: String,
     pub excluded_user_id: Option<String>,
+}
+
+fn format_rotation_deadline(value: OffsetDateTime) -> Result<String, AppError> {
+    value.format(&Rfc3339).map_err(|error| {
+        tracing::error!(%error, "Failed to format rotation deadline");
+        AppError::internal("Vault key rotation operation failed")
+    })
 }
 
 /// Locks and exposes only the policy binding of an active plan. Policy callers use this before
@@ -156,6 +170,8 @@ pub(crate) async fn create_plan(
     let id = Uuid::new_v4().to_string();
     let idle_expires_at = now + IDLE_LIFETIME;
     let absolute_expires_at = now + ABSOLUTE_LIFETIME;
+    let idle_expires_at_wire = format_rotation_deadline(idle_expires_at)?;
+    let absolute_expires_at_wire = format_rotation_deadline(absolute_expires_at)?;
 
     query("INSERT INTO vault_key_rotation_plan (id, vault_id, initiator_user_id, reason, authorization_context, excluded_user_id, expected_key_version, idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, $4::key_rotation_reason, $5, $6, $7, $8, $9)")
         .bind(&id).bind(&input.vault_id).bind(&input.initiator_user_id).bind(input.reason)
@@ -177,8 +193,8 @@ pub(crate) async fn create_plan(
         initiator_user_id: input.initiator_user_id,
         expected_key_version,
         state: VaultKeyRotationPlanState::Preparing,
-        idle_expires_at: idle_expires_at.to_string(),
-        absolute_expires_at: absolute_expires_at.to_string(),
+        idle_expires_at: idle_expires_at_wire,
+        absolute_expires_at: absolute_expires_at_wire,
     })
 }
 
@@ -329,8 +345,9 @@ pub(crate) async fn finalize_locked_plan(
     let current_key_version: i32 =
         query_scalar("SELECT key_version FROM vault WHERE id = $1 FOR UPDATE")
             .bind(&plan.1)
-            .fetch_one(&mut **tx)
-            .await?;
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(FinalizeError::InvalidState)?;
     if current_key_version != plan.3 {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::VaultVersion).await?;
         return Err(FinalizeError::Stale(
@@ -351,13 +368,13 @@ pub(crate) async fn finalize_locked_plan(
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::MemberSet).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::MemberSet));
     }
-    let item_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault_key_rotation_plan_manifest m FULL JOIN item i ON i.id=m.entity_id AND i.vault_id=$2 WHERE (m.plan_id=$1 AND m.kind='item' AND (i.id IS NULL OR i.version<>m.expected_version)) OR (i.vault_id=$2 AND m.entity_id IS NULL))")
+    let item_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='item') m FULL JOIN item i ON i.id=m.entity_id AND i.vault_id=$2 WHERE i.id IS NULL OR m.entity_id IS NULL OR i.version<>m.expected_version)")
         .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
     if item_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::ItemState).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::ItemState));
     }
-    let attachment_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault_key_rotation_plan_manifest m FULL JOIN item_attachment a ON a.id=m.entity_id AND a.vault_id=$2 WHERE (m.plan_id=$1 AND m.kind='attachment' AND (a.id IS NULL OR a.envelope_version<>m.expected_version)) OR (a.vault_id=$2 AND m.entity_id IS NULL))")
+    let attachment_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='attachment') m FULL JOIN item_attachment a ON a.id=m.entity_id AND a.vault_id=$2 WHERE a.id IS NULL OR m.entity_id IS NULL OR a.envelope_version<>m.expected_version)")
         .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
     if attachment_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::AttachmentState).await?;
@@ -462,12 +479,158 @@ pub(crate) async fn cleanup_rotation_plans(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{
+        seed_item, seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    };
+
+    async fn seed_rotation_fixture(pool: &PgPool) {
+        seed_user(
+            pool,
+            "rotation_user",
+            "Rotation User",
+            "rotation@example.com",
+        )
+        .await;
+        seed_vault(
+            pool,
+            "rotation_vault",
+            "Rotation Vault",
+            "personal",
+            "rotation_user",
+            None,
+        )
+        .await;
+        seed_vault_key(
+            pool,
+            "rotation_key",
+            "rotation_vault",
+            "rotation_user",
+            "wrapped-key",
+            "owner",
+        )
+        .await;
+        seed_item(
+            pool,
+            "rotation_item",
+            "rotation_vault",
+            "login",
+            "ciphertext",
+            "iv",
+            "rotation_user",
+        )
+        .await;
+    }
+
+    async fn create_test_plan(pool: &PgPool) -> RotationPlanSummary {
+        create_plan(
+            pool,
+            CreateRotationPlanInput {
+                vault_id: "rotation_vault".to_owned(),
+                initiator_user_id: "rotation_user".to_owned(),
+                reason: KeyRotationReason::MemberRemoved,
+                authorization_context: "test".to_owned(),
+                excluded_user_id: None,
+            },
+        )
+        .await
+        .expect("rotation plan should be created")
+    }
+
+    async fn stage_test_plan(pool: &PgPool, plan_id: &str) {
+        stage_outputs(
+            pool,
+            plan_id,
+            "rotation_user",
+            VaultKeyRotationManifestKind::Member,
+            &[StagedOutput {
+                id: "rotation_user".to_owned(),
+                payload: r#"{"encryptedVaultKey":"rewrapped-key"}"#.to_owned(),
+            }],
+        )
+        .await
+        .expect("member output should stage");
+        stage_outputs(
+			pool,
+			plan_id,
+			"rotation_user",
+			VaultKeyRotationManifestKind::Item,
+			&[StagedOutput {
+				id: "rotation_item".to_owned(),
+				payload: r#"{"encryptedData":"rotated","encryptionIv":"new-iv","encryptionAlgorithm":"AES-GCM-AAD-V1"}"#.to_owned(),
+			}],
+		)
+		.await
+		.expect("item output should stage");
+    }
+
+    #[tokio::test]
+    async fn another_plans_manifest_cannot_hide_a_new_item() {
+        with_api_test_app("rotation_new_item_staleness", |app| async move {
+            seed_rotation_fixture(&app.pool).await;
+            let plan = create_test_plan(&app.pool).await;
+            seed_item(
+                &app.pool,
+                "new_rotation_item",
+                "rotation_vault",
+                "login",
+                "new-ciphertext",
+                "new-iv",
+                "rotation_user",
+            )
+            .await;
+            let _other_plan = create_test_plan(&app.pool).await;
+            stage_test_plan(&app.pool, &plan.id).await;
+            let mut tx = app.pool.begin().await.unwrap();
+
+            let result = finalize_locked_plan(&mut tx, &plan.id, "rotation_user").await;
+
+            assert!(matches!(
+                result,
+                Err(FinalizeError::Stale(VaultKeyRotationStaleReason::ItemState))
+            ));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn another_plans_manifest_cannot_hide_a_new_attachment() {
+        with_api_test_app("rotation_new_attachment_staleness", |app| async move {
+			seed_rotation_fixture(&app.pool).await;
+			let plan = create_test_plan(&app.pool).await;
+			query(
+				r#"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by) VALUES ('new_rotation_attachment', 'rotation_item', 'rotation_vault', 'attachments/new', 'wrapped-attachment-key', 'attachment-key-iv', 'AES-GCM-AAD-V1', 1, 'name', 'type', 'iv', 'type-iv', 'AES-GCM-AAD-V1', 1, 1, 'rotation_user')"#,
+			)
+			.execute(&app.pool)
+			.await
+			.expect("attachment should seed");
+			let _other_plan = create_test_plan(&app.pool).await;
+			stage_test_plan(&app.pool, &plan.id).await;
+			let mut tx = app.pool.begin().await.unwrap();
+
+			let result = finalize_locked_plan(&mut tx, &plan.id, "rotation_user").await;
+
+			assert!(matches!(
+				result,
+				Err(FinalizeError::Stale(
+					VaultKeyRotationStaleReason::AttachmentState
+				))
+			));
+		})
+		.await;
+    }
 
     #[test]
     fn public_bounds_are_hard_caps() {
         assert_eq!(MAX_PAGE_RECORDS, 100);
         assert_eq!(MAX_PAGE_BYTES, 512 * 1024);
         assert_eq!(MAX_CLEANUP_BATCH, 500);
+    }
+
+    #[test]
+    fn rotation_deadlines_use_rfc3339() {
+        let formatted = format_rotation_deadline(OffsetDateTime::UNIX_EPOCH)
+            .expect("the Unix epoch should format");
+        assert_eq!(formatted, "1970-01-01T00:00:00Z");
     }
 
     #[test]

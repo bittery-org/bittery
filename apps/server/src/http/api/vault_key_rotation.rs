@@ -92,9 +92,20 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
     limit: Option<usize>,
+}
+
+#[cfg(test)]
+mod page_query_tests {
+    use serde_json::json;
+
+    #[test]
+    fn unknown_preparation_query_fields_are_rejected() {
+        assert!(serde_json::from_value::<super::PageQuery>(json!({ "unknown": 1 })).is_err());
+    }
 }
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

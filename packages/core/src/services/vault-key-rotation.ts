@@ -89,6 +89,7 @@ export interface RotationPlanClient {
 		output: RotationPageOutput<Payload>,
 		signal: AbortSignal,
 	): Promise<void>;
+	abandon(planId: string, signal?: AbortSignal): Promise<void>;
 	finalize(
 		input: {
 			intent: RotationIntent;
@@ -162,6 +163,8 @@ export function createVaultKeyRotationCeremony(
 	return {
 		async rotate({ intent, currentUserId }) {
 			const controller = new AbortController();
+			let plans: readonly RotationPlan[] = [];
+			let didFinalize = false;
 			let ownedOldVaultKey: KeyRef | null = null;
 			let ownedNewVaultKey: KeyRef | null = null;
 			let cleanup = Promise.resolve();
@@ -204,7 +207,7 @@ export function createVaultKeyRotationCeremony(
 
 			try {
 				assertActive();
-				const plans = await deps.client.start(intent, controller.signal);
+				plans = await deps.client.start(intent, controller.signal);
 				assertActive();
 				const masterUnlockKey = await deps.getMasterUnlockKey();
 				assertActive();
@@ -373,6 +376,7 @@ export function createVaultKeyRotationCeremony(
 					{ intent, plans },
 					controller.signal,
 				);
+				didFinalize = true;
 				const vaultIds = plans.map((plan) => plan.vaultId);
 				try {
 					await deps.client.refresh(vaultIds, controller.signal);
@@ -389,6 +393,11 @@ export function createVaultKeyRotationCeremony(
 				}
 			} finally {
 				stopListening?.();
+				if (!didFinalize) {
+					await Promise.allSettled(
+						plans.map(({ planId }) => deps.client.abandon(planId)),
+					);
+				}
 				await retireOwnedRefs();
 			}
 		},

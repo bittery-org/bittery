@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError } from "@bittery/api-contract";
+import { ApiError, ApiTransportError } from "@bittery/api-contract";
 import type { VaultKeyData } from "@bittery/storage";
 import {
 	createRotationLocalState,
@@ -225,11 +225,27 @@ describe("Vault key rotation API adapter", () => {
 		const keys: string[] = [];
 		const result = await executeWithIdempotentReplay(async (key) => {
 			keys.push(key);
-			if (keys.length === 1) throw new Error("response lost");
+			if (keys.length === 1) throw new ApiTransportError(new TypeError("lost"));
 			return { rotationId: "rotation-1" };
 		}, "stable-key");
 		expect(keys).toEqual(["stable-key", "stable-key"]);
 		expect(result).toEqual({ rotationId: "rotation-1" });
+	});
+
+	test("does not replay cancellation or programming failures", async () => {
+		for (const error of [
+			new Error("cancelled"),
+			new TypeError("bad mapping"),
+		]) {
+			let attempts = 0;
+			await expect(
+				executeWithIdempotentReplay(async () => {
+					attempts += 1;
+					throw error;
+				}, "stable-key"),
+			).rejects.toBe(error);
+			expect(attempts).toBe(1);
+		}
 	});
 
 	test("replays a retryable server response with the same idempotency key", async () => {

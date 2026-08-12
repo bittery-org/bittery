@@ -15,6 +15,8 @@
 import type { EncryptedData, KeyRef } from "@bittery/crypto-port";
 import type { VaultCrypto } from "./vault-crypto";
 
+export const ATTACHMENT_ENVELOPE_VERSION = 1;
+
 /** Identifies the vault/account/attachment an encryption context is bound to. */
 export interface AttachmentCryptoScope {
 	vaultId: string;
@@ -66,7 +68,10 @@ export async function unwrapAttachmentKey(
 	scope: AttachmentCryptoScope,
 	envelope: AttachmentKeyEnvelope,
 ): Promise<KeyRef> {
-	if (envelope.envelopeVersion !== scope.envelopeVersion) {
+	if (
+		envelope.envelopeVersion !== ATTACHMENT_ENVELOPE_VERSION ||
+		envelope.envelopeVersion !== scope.envelopeVersion
+	) {
 		throw new Error("Attachment-key envelope version mismatch");
 	}
 	return vaultCrypto.unwrapAttachmentKey(

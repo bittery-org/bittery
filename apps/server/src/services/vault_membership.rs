@@ -139,14 +139,16 @@ pub(crate) async fn finalize_removal(
 }
 
 fn database(error: sqlx::Error) -> AppError {
-    tracing::error!(%error, "Vault membership database operation failed");
-    AppError::internal("Vault membership operation failed")
+    crate::services::transaction::database_error(error, "Vault membership operation failed")
 }
 fn finalize_error(error: FinalizeError) -> AppError {
     match error {
         FinalizeError::Stale(reason) => AppError::rotation_stale(reason),
         FinalizeError::Incomplete => AppError::conflict("Rotation plan is incomplete"),
         FinalizeError::InvalidState => AppError::conflict("Rotation plan is no longer active"),
+        FinalizeError::RetryableConflict => AppError::retryable_conflict(
+            "A concurrent update interrupted the removal. Retry the request.",
+        ),
         FinalizeError::Database(message) => {
             tracing::error!(%message, "Vault removal rotation failed");
             AppError::internal("Vault membership operation failed")

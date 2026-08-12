@@ -151,11 +151,24 @@ export async function performDeltaSync(
 		case "vault_deleted":
 			await removeVault(event.entityId);
 			break;
+		case "vault_key_rotated": {
+			const targetVaultId = event.vaultId ?? event.entityId;
+			const { data: items } = await apiClient.items.listInVault(targetVaultId);
+			for (const vaultItem of items) {
+				await upsertItem(
+					toCachedItem(vaultItem, {
+						accountEmail: itemAccountEmail,
+						serverUrl,
+					}),
+				);
+			}
+			break;
+		}
 		case "vault_access_revoked":
 			// entityId is the affected vault id
 			await removeVault(event.entityId);
 			break;
-		// vault_key_rotated, vault_member_added, vault_member_removed:
+		// vault_member_added, vault_member_removed:
 		// vault keys are already refreshed above.
 	}
 }

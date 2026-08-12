@@ -18,6 +18,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import { createStoredAccountApiClient } from "../services/api-client";
 import {
+	ATTACHMENT_ENVELOPE_VERSION,
 	attachmentBase64ToBytes,
 	attachmentBytesToBase64,
 	createAttachmentKeyEnvelope,
@@ -257,7 +258,7 @@ export function useItemAttachments(
 					vaultId,
 					attachmentId: upload.attachmentId,
 					userId,
-					envelopeVersion: 1,
+					envelopeVersion: ATTACHMENT_ENVELOPE_VERSION,
 				};
 				const attachment = await createAttachmentKeyEnvelope(
 					vaultCrypto,

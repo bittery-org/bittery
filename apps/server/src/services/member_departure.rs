@@ -314,14 +314,16 @@ pub(crate) async fn finalize_administrative(
 }
 
 fn database(error: sqlx::Error) -> AppError {
-    tracing::error!(%error, "Member departure database operation failed");
-    AppError::internal("Member departure operation failed")
+    crate::services::transaction::database_error(error, "Member departure operation failed")
 }
 fn finalize_error(error: FinalizeError) -> AppError {
     match error {
         FinalizeError::Stale(reason) => AppError::rotation_stale(reason),
         FinalizeError::Incomplete => AppError::conflict("Rotation plan is incomplete"),
         FinalizeError::InvalidState => AppError::conflict("Rotation plan is no longer active"),
+        FinalizeError::RetryableConflict => AppError::retryable_conflict(
+            "A concurrent update interrupted the departure. Retry the request.",
+        ),
         FinalizeError::Database(message) => {
             tracing::error!(%message, "Member departure rotation failed");
             AppError::internal("Member departure operation failed")
