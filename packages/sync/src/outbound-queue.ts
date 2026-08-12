@@ -2,6 +2,7 @@ import {
 	ApiError,
 	type AppApiClient,
 	isApiErrorStatus,
+	isApiTransportError,
 } from "@bittery/shared/api-client";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import type {
@@ -31,6 +32,12 @@ const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 type QueueDocument = Record<string, PendingMutation[]>;
 
 function isNetworkError(error: unknown): boolean {
+	// A request that never reached the server: retryable, and no longer identifiable
+	// by the engine's rejection message once the transport has normalized it.
+	if (isApiTransportError(error)) {
+		return true;
+	}
+
 	if (error instanceof ApiError) {
 		return error.status >= 500;
 	}

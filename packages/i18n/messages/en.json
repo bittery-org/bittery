@@ -995,6 +995,7 @@
 	"team_leave_dialog_action_leaving": "Leaving & rotating keys...",
 	"team_leave_dialog_toast_left": "You have left the team",
 	"team_leave_dialog_toast_leave_failed": "Failed to leave team",
+	"toast_api_unreachable": "The server could not be reached. Check your connection and try again.",
 	"toast_auth_server_invalid_url": "Please enter a valid server URL.",
 	"toast_auth_server_updated": "Server updated.",
 	"toast_auth_session_expired": "Session expired. Please sign in again.",

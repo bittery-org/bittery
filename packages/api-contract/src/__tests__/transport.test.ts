@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createApiTransport, requestOriginHeaders } from "../transport.ts";
+import {
+	ApiTransportError,
+	createApiTransport,
+	requestOriginHeaders,
+} from "../transport.ts";
 
 function streamResponse(): Response {
 	return new Response(
@@ -66,6 +70,71 @@ describe("request transport", () => {
 		expect(call?.request.headers.get("Authorization")).toBe(
 			"Bearer session-token",
 		);
+	});
+
+	// A request that never reached the server has no problem document to read, and
+	// `fetch` rejects with an engine-specific string - "Failed to fetch" in Chromium,
+	// "Load failed" in WebKit. Callers surface `error.message`, so the raw rejection
+	// would put browser internals in front of a user.
+	test("normalizes a rejected fetch into a transport error", async () => {
+		const transport = createApiTransport({
+			...transportOptions(),
+			insecureTransport: { operatorEnabled: true, accountConfirmed: true },
+			fetch: async () => {
+				throw new TypeError("Failed to fetch");
+			},
+		});
+
+		const failure = await transport
+			.request("GET", "/api/v1/vaults")
+			.catch((error: unknown) => error);
+
+		expect(failure).toBeInstanceOf(ApiTransportError);
+		expect((failure as ApiTransportError).message).not.toContain("fetch");
+		expect((failure as ApiTransportError).cause).toBeInstanceOf(TypeError);
+	});
+
+	// A caller's fetch refuses requests of its own accord - a denied insecure
+	// transport, an unusable server URL - and those are decisions, not failures.
+	// Reporting one as an unreachable server would hide why the request never left.
+	test("passes a refusal from the caller's own fetch through untouched", async () => {
+		class TransportPolicyError extends Error {}
+		const transport = createApiTransport({
+			...transportOptions(),
+			insecureTransport: { operatorEnabled: true, accountConfirmed: true },
+			fetch: async () => {
+				throw new TransportPolicyError("OPERATOR_DISABLED");
+			},
+		});
+
+		const failure = await transport
+			.request("GET", "/api/v1/vaults")
+			.catch((error: unknown) => error);
+
+		expect(failure).not.toBeInstanceOf(ApiTransportError);
+		expect((failure as Error).message).toBe("OPERATOR_DISABLED");
+	});
+
+	// A cancelled query and a broken connection are not the same event: the sync
+	// manager tells its own aborts apart by `name`, and wrapping one would turn a
+	// deliberate disconnect into a reconnect loop.
+	test("leaves a deliberate abort alone", async () => {
+		const controller = new AbortController();
+		const transport = createApiTransport({
+			...transportOptions(),
+			insecureTransport: { operatorEnabled: true, accountConfirmed: true },
+			fetch: async () => {
+				controller.abort();
+				throw new DOMException("The operation was aborted.", "AbortError");
+			},
+		});
+
+		const failure = await transport
+			.openSyncEvents(controller.signal)
+			.catch((error: unknown) => error);
+
+		expect(failure).not.toBeInstanceOf(ApiTransportError);
+		expect((failure as Error).name).toBe("AbortError");
 	});
 });
 

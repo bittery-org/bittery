@@ -254,7 +254,17 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 		await writer.getByTestId("delete-item-confirm-button").click();
 		await expect(itemRow(writer, deleteForeverTitle)).toHaveCount(0);
 
-		await writer.goto("/vaults/trash");
+		// Followed in-app rather than with `goto`: the row disappears optimistically,
+		// so a reload here tears the page down while the trash write is still being
+		// acknowledged, and the queue restored from storage resends a command the
+		// server has already applied. Its idempotency key makes that replay a no-op -
+		// at-least-once delivery working as intended - but it is not what this test is
+		// about, and CI is slow enough to lose that race every time.
+		await writer
+			.getByRole("link", { name: uiText("vaults_sidebar_link_trash") })
+			.first()
+			.click();
+		await writer.waitForURL("**/vaults/trash");
 		const deleteForever = writer.locator(
 			`[data-testid="trash-delete-forever-button"][data-item-id="${itemId}"]`,
 		);

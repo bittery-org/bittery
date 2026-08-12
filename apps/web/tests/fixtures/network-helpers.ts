@@ -58,19 +58,83 @@ export const NetworkConditions = {
 };
 
 /**
- * API error responses for testing error handling
+ * API error responses for testing error handling.
+ *
+ * The server answers every failure with an RFC 9457 problem document
+ * (`apps/server/src/http/api/error.rs`), and the client only reads one whose
+ * `status`, `title`, `code` and `type` are all present and agree with the response
+ * (`packages/api-contract/src/errors.ts`) - so an injected failure has to be shaped
+ * like one or it exercises the fallback instead of the real error path.
  */
+function problem(
+	status: number,
+	code: string,
+	title: string,
+	detail: string,
+): { status: number; body: ApiProblemBody } {
+	return {
+		status,
+		body: {
+			type: `https://bittery.com/problems/${code.toLowerCase().replaceAll("_", "-")}`,
+			title,
+			status,
+			code,
+			detail,
+		},
+	};
+}
+
+export interface ApiProblemBody {
+	type: string;
+	title: string;
+	status: number;
+	code: string;
+	detail: string;
+}
+
 export const ApiErrors = {
-	INTERNAL_SERVER_ERROR: {
-		status: 500,
-		body: { error: "Internal Server Error" },
-	},
-	UNAUTHORIZED: { status: 401, body: { error: "Unauthorized" } },
-	FORBIDDEN: { status: 403, body: { error: "Forbidden" } },
-	NOT_FOUND: { status: 404, body: { error: "Not Found" } },
-	RATE_LIMITED: { status: 429, body: { error: "Too Many Requests" } },
-	BAD_REQUEST: { status: 400, body: { error: "Bad Request" } },
-	SERVICE_UNAVAILABLE: { status: 503, body: { error: "Service Unavailable" } },
+	INTERNAL_SERVER_ERROR: problem(
+		500,
+		"INTERNAL_ERROR",
+		"Internal Server Error",
+		"Something went wrong on the server.",
+	),
+	UNAUTHORIZED: problem(
+		401,
+		"UNAUTHORIZED",
+		"Unauthorized",
+		"This request needs a valid session.",
+	),
+	FORBIDDEN: problem(
+		403,
+		"FORBIDDEN",
+		"Forbidden",
+		"This account may not perform that action.",
+	),
+	NOT_FOUND: problem(
+		404,
+		"NOT_FOUND",
+		"Not Found",
+		"There is nothing at that address.",
+	),
+	RATE_LIMITED: problem(
+		429,
+		"RATE_LIMITED",
+		"Too Many Requests",
+		"Too many requests were sent in a row.",
+	),
+	BAD_REQUEST: problem(
+		400,
+		"BAD_REQUEST",
+		"Bad Request",
+		"The request was not understood.",
+	),
+	SERVICE_UNAVAILABLE: problem(
+		503,
+		"SERVICE_UNAVAILABLE",
+		"Service Unavailable",
+		"The service is temporarily unavailable.",
+	),
 };
 
 /**
@@ -182,7 +246,7 @@ export class NetworkSimulator {
 			const errorResponse = ApiErrors[error];
 			await route.fulfill({
 				status: errorResponse.status,
-				contentType: "application/json",
+				contentType: "application/problem+json",
 				body: JSON.stringify(errorResponse.body),
 			});
 		});

@@ -65,6 +65,55 @@ export interface ApiTransportOptions {
 
 const LOCAL_REQUEST_ORIGIN_HEADER = "Bittery-Local-Request-Origin";
 
+/**
+ * A request that never reached the API: a name that does not resolve, a refused or
+ * reset connection, a socket that timed out.
+ *
+ * There is no response and so no problem document to read, and `fetch` rejects with
+ * an engine-specific string ("Failed to fetch" in Chromium, "Load failed" in WebKit)
+ * that must never reach a user. The original rejection is kept as `cause`.
+ */
+export class ApiTransportError extends Error {
+	// Declared rather than only assigned: the class adds no other member, so
+	// without a literal `name` it is structurally an `Error` and a type predicate
+	// cannot tell the two apart.
+	readonly name = "ApiTransportError";
+
+	constructor(cause: unknown) {
+		super("The server could not be reached.", { cause });
+	}
+}
+
+export function isApiTransportError(
+	error: unknown,
+): error is ApiTransportError {
+	return error instanceof ApiTransportError;
+}
+
+function errorName(error: unknown): string | undefined {
+	return typeof error === "object" &&
+		error !== null &&
+		typeof (error as { name?: unknown }).name === "string"
+		? (error as { name: string }).name
+		: undefined;
+}
+
+/**
+ * Whether a rejection is a failed request rather than a refusal to make one.
+ *
+ * `fetch` rejects with a `TypeError` when a request does not complete, and with
+ * nothing else - so anything a caller's own fetch raises on purpose (a denied
+ * transport policy, a cancelled stream) is left alone rather than dressed up as a
+ * network failure. The name is checked too because a `TypeError` from another
+ * realm fails `instanceof`.
+ */
+function isFailedRequest(error: unknown, signal: AbortSignal | null): boolean {
+	if (signal?.aborted === true || errorName(error) === "AbortError") {
+		return false;
+	}
+	return error instanceof TypeError || errorName(error) === "TypeError";
+}
+
 export function requestOriginHeaders(origin: ApiRequestOrigin): Headers {
 	return new Headers({
 		[LOCAL_REQUEST_ORIGIN_HEADER]: encodeURIComponent(JSON.stringify(origin)),
@@ -206,7 +255,12 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 			const policy = await options.authorizeInsecureTransport(baseUrl);
 			normalizeBaseUrl(baseUrl, policy);
 		}
-		return rawFetch(localRequest.request, localRequest.origin);
+		try {
+			return await rawFetch(localRequest.request, localRequest.origin);
+		} catch (error) {
+			if (!isFailedRequest(error, localRequest.request.signal)) throw error;
+			throw new ApiTransportError(error);
+		}
 	};
 	const client = createClient<paths>({
 		baseUrl,

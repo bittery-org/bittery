@@ -157,8 +157,10 @@ export type {
 	VerifySignupVerificationResponse,
 } from "./facade-types.ts";
 export {
+	ApiTransportError,
 	classifyHttpServerUrl,
 	type HttpServerUrlClassification,
+	isApiTransportError,
 } from "./transport.ts";
 export {
 	ApiValueValidationError,

@@ -8,6 +8,7 @@ import {
 	type TestUser,
 	test,
 } from "../fixtures/auth";
+import { uiText } from "../fixtures/messages";
 import {
 	ApiErrors,
 	createNetworkSimulator,
@@ -43,10 +44,6 @@ const API_ORIGIN = "http://localhost:3010";
 
 /** Every request the app makes to the API. */
 const API_URL_PATTERN = `${API_ORIGIN}/**`;
-
-function isApiDataRequest(url: string): boolean {
-	return new URL(url).pathname.startsWith("/api/v1/");
-}
 
 /** Signup, WASM key generation, the seed item and one SRP sign-in. */
 const SETUP_BUDGET_MS = 420000;
@@ -99,11 +96,16 @@ async function pinnedErrorToast(): Promise<Locator> {
 const RETRY_ACTION_LABEL = "retry";
 
 /**
- * What the user is actually shown when the transport fails, whatever the cause.
+ * What the user is shown when a request never reaches the API at all.
  *
- * The API facade normalizes transport failures into the same UI error surface.
+ * A rejected `fetch` carries nothing but the engine's own wording - "Failed to
+ * fetch" in Chromium, "Load failed" in WebKit - so the transport turns any
+ * response-less failure into an `ApiTransportError`
+ * (`packages/api-contract/src/transport.ts`) and the query cache renders this
+ * message for it. A failure the API *answered* is a different surface: it carries
+ * the problem document's `detail`, which is what the tests below assert.
  */
-const TRANSPORT_ERROR_MESSAGE = "malformed response from the API";
+const UNREACHABLE_MESSAGE = uiText("toast_api_unreachable");
 
 test.beforeAll(async ({ browser }) => {
 	test.setTimeout(SETUP_BUDGET_MS);
@@ -154,7 +156,7 @@ test("an unreachable API surfaces as an error toast with a retry action, and ret
 	// the expected outcome.
 	await gotoRoute(page, `/vaults/${vaultId}`, errorToast(page));
 	const toast = await pinnedErrorToast();
-	await expect(toast).toContainText(TRANSPORT_ERROR_MESSAGE);
+	await expect(toast).toContainText(UNREACHABLE_MESSAGE);
 
 	const retry = toast.getByRole("button", { name: RETRY_ACTION_LABEL });
 	await expect(retry).toBeVisible();
@@ -183,19 +185,24 @@ test("a slow API delays the route but never fails it", async () => {
 	await expect(errorToast(page)).toHaveCount(0);
 });
 
-/** More than TanStack Query's three retries, so the burst always outlives them. */
+/** One attempt more than TanStack Query's three retries, so a query runs out of them. */
 const DROPPED_REQUEST_BURST = 4;
 
 test("an intermittent drop is reported but does not cost the route its data, and the next navigation recovers", async () => {
 	test.setTimeout(SETUP_BUDGET_MS);
 
 	// `simulateIntermittentConnectivity` picks its victims with `Math.random`, so
-	// the drops are placed by hand instead: the first few API calls of this
-	// navigation fail, every later one is let through.
+	// the drops are placed by hand instead. They all land on one endpoint: a REST
+	// route fans out over several of them, and a burst spread across the fan-out
+	// costs each query a single attempt, which every one of them wins back on its
+	// first retry - nothing would ever be reported. The vault's member list is read
+	// by a component of the route rather than by its loader, so draining its retries
+	// leaves the item list to be served from the local cache.
+	const droppedEndpoint = `/api/v1/vaults/${vaultId}/members`;
 	let abortedRequests = 0;
 	await page.route(API_URL_PATTERN, async (route) => {
 		if (
-			isApiDataRequest(route.request().url()) &&
+			new URL(route.request().url()).pathname === droppedEndpoint &&
 			abortedRequests < DROPPED_REQUEST_BURST
 		) {
 			abortedRequests += 1;
@@ -218,7 +225,7 @@ test("an intermittent drop is reported but does not cost the route its data, and
 
 	// The drop is not swallowed either: the query cache reports it.
 	const toast = await pinnedErrorToast();
-	await expect(toast).toContainText(TRANSPORT_ERROR_MESSAGE);
+	await expect(toast).toContainText(UNREACHABLE_MESSAGE);
 
 	await simulator.clearInterceptions();
 	await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -230,7 +237,8 @@ for (const failure of [
 	{ name: "503", error: "SERVICE_UNAVAILABLE" },
 	{ name: "429", error: "RATE_LIMITED" },
 ] as const) {
-	const expectedStatus = ApiErrors[failure.error].status;
+	const { status: expectedStatus, body: expectedProblem } =
+		ApiErrors[failure.error];
 
 	test(`an API answering ${failure.name} reaches the client and surfaces as an error toast`, async () => {
 		test.setTimeout(SETUP_BUDGET_MS);
@@ -246,9 +254,10 @@ for (const failure of [
 		const toast = await pinnedErrorToast();
 		expect((await response).status()).toBe(expectedStatus);
 
-		// The status never reaches the copy: the client cannot tell a 500 from a
-		// 429, so both read as the same transport failure.
-		await expect(toast).toContainText(TRANSPORT_ERROR_MESSAGE);
+		// An answered failure is not a silent one: the client reads the problem
+		// document and the user is shown what the API said went wrong, so a 500 and
+		// a 429 no longer read alike.
+		await expect(toast).toContainText(expectedProblem.detail);
 		await expect(
 			toast.getByRole("button", { name: RETRY_ACTION_LABEL }),
 		).toBeVisible();
@@ -267,7 +276,7 @@ test("a request that never answers is not left hanging: it times out into the sa
 	const started = Date.now();
 	await gotoRoute(page, `/vaults/${vaultId}`, errorToast(page));
 	const toast = await pinnedErrorToast();
-	await expect(toast).toContainText(TRANSPORT_ERROR_MESSAGE);
+	await expect(toast).toContainText(UNREACHABLE_MESSAGE);
 
 	// The request really hung rather than failing fast, so the surface below is
 	// the timeout path and not an immediate rejection.

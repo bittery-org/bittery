@@ -1,6 +1,9 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { ApiProvider } from "@bittery/shared/api";
-import { isUnauthorizedApiError } from "@bittery/shared/api-client";
+import {
+	isApiTransportError,
+	isUnauthorizedApiError,
+} from "@bittery/shared/api-client";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
@@ -53,7 +56,13 @@ export const queryClient = new QueryClient({
 				handleUnauthorizedError();
 				return;
 			}
-			toast.error(error.message, {
+			// An answered request carries the API's own problem detail, which is
+			// written to be read. A request that never arrived carries nothing but
+			// the engine's rejection, so the app supplies the copy instead.
+			const message = isApiTransportError(error)
+				? m.toast_api_unreachable()
+				: error.message;
+			toast.error(message, {
 				action: {
 					label: "retry",
 					onClick: () => {
