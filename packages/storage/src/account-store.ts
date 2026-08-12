@@ -143,6 +143,7 @@ export interface NativeHostView {
 export interface AccountStoreOptions {
 	port: PlatformPort;
 	crypto: CryptoPort;
+	now?: () => number;
 }
 
 export interface AccountStore {
@@ -430,6 +431,7 @@ function toBiometricAuthResult(
 export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	const { port } = options;
 	const cryptoPort = options.crypto;
+	const now = options.now ?? Date.now;
 
 	/**
 	 * The in-memory master-unlock-key cache. **Never persisted on any platform** — that is
@@ -853,7 +855,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		if (!session || !token) {
 			return false;
 		}
-		return Date.now() < effectiveSessionExpiry(session);
+		return now() < effectiveSessionExpiry(session);
 	}
 
 	// ------------------------------------------------------------------
@@ -955,7 +957,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		if (lastAuth === null) {
 			return true;
 		}
-		return Date.now() - lastAuth > BIOMETRIC_GRACE_PERIOD_MS;
+		return now() - lastAuth > BIOMETRIC_GRACE_PERIOD_MS;
 	}
 
 	async function authenticateWithBiometric(
@@ -973,11 +975,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return false;
 			}
 
-			await writeAccount(
-				"last_biometric_auth",
-				resolved,
-				Date.now().toString(),
-			);
+			await writeAccount("last_biometric_auth", resolved, now().toString());
 			return true;
 		} catch (error) {
 			console.error("[account-store] biometric authentication failed:", error);
@@ -1010,7 +1008,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const lastEntry = session.lastMasterPasswordEntry ?? session.createdAt;
 		// Inclusive: the period has elapsed the moment it is reached, so a period of 0 demands
 		// re-entry on every unlock even when both reads land in the same millisecond.
-		return Date.now() - lastEntry >= periodMs;
+		return now() - lastEntry >= periodMs;
 	}
 
 	async function canBiometricUnlock(accountId?: string): Promise<boolean> {
@@ -1117,7 +1115,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				const accounts = await readAccountsList();
 				const metadata = findAccountById(accounts, accountId);
 				if (metadata) {
-					metadata.lastActiveAt = Date.now();
+					metadata.lastActiveAt = now();
 					await writeAccountsList(accounts);
 				}
 			}
@@ -1223,7 +1221,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		): Promise<void> {
 			const resolved = await requireAccountId(accountId);
 			const deviceKey = await getDeviceKey();
-			const now = Date.now();
+			const currentTime = now();
 
 			const encryptedMasterUnlockKey = await cryptoPort.wrapKey(muk, deviceKey);
 
@@ -1234,11 +1232,14 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				sessionId,
 				// Two expiries, one rule: the device-local lifetime and the server's opinion.
 				// `effectiveSessionExpiry` prefers the latter.
-				expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
-				serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
-				createdAt: now,
+				expiresAt: currentTime + DEFAULT_SESSION_EXPIRY_MS,
+				serverExpiresAt: resolveStoredSessionExpiryTimestamp(
+					expiresAt,
+					currentTime,
+				),
+				createdAt: currentTime,
 				biometricEnabled: await isBiometricEnabled(resolved),
-				lastMasterPasswordEntry: now,
+				lastMasterPasswordEntry: currentTime,
 			});
 		},
 
@@ -1321,7 +1322,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return false;
 			}
 			const session = await getStoredSessionData(accountId);
-			return session !== null && Date.now() < effectiveSessionExpiry(session);
+			return session !== null && now() < effectiveSessionExpiry(session);
 		},
 
 		/**
@@ -1551,7 +1552,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			}
 			await writeSessionData(resolved, {
 				...session,
-				lastMasterPasswordEntry: Date.now(),
+				lastMasterPasswordEntry: now(),
 			});
 		},
 
@@ -1587,11 +1588,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			if (!resolved) {
 				return;
 			}
-			await writeAccount(
-				"background_timestamp",
-				resolved,
-				Date.now().toString(),
-			);
+			await writeAccount("background_timestamp", resolved, now().toString());
 		},
 
 		async getBackgroundTimestamp(accountId?: string): Promise<number | null> {
@@ -1716,11 +1713,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 					return toBiometricAuthResult(result);
 				}
 
-				await writeAccount(
-					"last_biometric_auth",
-					resolved,
-					Date.now().toString(),
-				);
+				await writeAccount("last_biometric_auth", resolved, now().toString());
 				await deleteAccount("background_timestamp", resolved);
 				return { success: true };
 			} catch (error) {

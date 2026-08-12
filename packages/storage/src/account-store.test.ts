@@ -1,4 +1,4 @@
-import { describe, expect, it, setSystemTime } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
@@ -43,12 +43,17 @@ interface Harness {
 async function makeStore(opts?: {
 	sessionSurvivesRestart?: boolean;
 	crypto?: InMemoryCryptoPort;
+	now?: () => number;
 }): Promise<Harness> {
 	const port = createInMemoryPlatformPort({
 		sessionSurvivesRestart: opts?.sessionSurvivesRestart ?? false,
 	});
 	const crypto = opts?.crypto ?? createInMemoryCryptoPort();
-	const store = createAccountStore({ port, crypto });
+	const store = createAccountStore({
+		port,
+		crypto,
+		now: opts?.now ?? Date.now,
+	});
 	await store.initialize();
 	return {
 		port,
@@ -930,8 +935,8 @@ describe("AccountStore — biometric", () => {
 // ============================================================================
 
 describe("AccountStore — master password re-entry", () => {
-	async function reentryHarness() {
-		const harness = await makeStore({ sessionSurvivesRestart: true });
+	async function reentryHarness(now = Date.now) {
+		const harness = await makeStore({ sessionSurvivesRestart: true, now });
 		harness.port.biometricState.hasHardware = true;
 		harness.port.biometricState.isEnrolled = true;
 		harness.port.biometricState.authenticates = true;
@@ -980,22 +985,18 @@ describe("AccountStore — master password re-entry", () => {
 	});
 
 	it("is required at the exact moment the period is reached", async () => {
-		const { store } = await reentryHarness();
+		let currentTime = Date.now();
+		const { store } = await reentryHarness(() => currentTime);
 		await store.storeMasterPasswordReentryPeriodMs(60_000);
-		await tick();
 
-		// Pins the boundary rather than leaving it to how fast the suite runs: at exactly the
-		// period, re-entry is already due. A strict comparison here left a period of 0 unenforced
-		// whenever two clock reads landed in the same millisecond.
 		const session = await store.getStoredSessionData("a");
-		const lastEntry =
-			session?.lastMasterPasswordEntry ?? session?.createdAt ?? 0;
-		setSystemTime(new Date(lastEntry + 60_000));
-		try {
-			expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
-		} finally {
-			setSystemTime();
+		if (!session) {
+			throw new Error("Expected the re-entry harness to store a session");
 		}
+		currentTime =
+			(session.lastMasterPasswordEntry ?? session.createdAt) + 60_000;
+
+		expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
 	});
 
 	it("blocks the stored-MUK decrypt path when re-entry is due", async () => {
