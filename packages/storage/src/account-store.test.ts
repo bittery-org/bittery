@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, setSystemTime } from "bun:test";
 import type { KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
@@ -977,6 +977,25 @@ describe("AccountStore — master password re-entry", () => {
 		await tick();
 
 		expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
+	});
+
+	it("is required at the exact moment the period is reached", async () => {
+		const { store } = await reentryHarness();
+		await store.storeMasterPasswordReentryPeriodMs(60_000);
+		await tick();
+
+		// Pins the boundary rather than leaving it to how fast the suite runs: at exactly the
+		// period, re-entry is already due. A strict comparison here left a period of 0 unenforced
+		// whenever two clock reads landed in the same millisecond.
+		const session = await store.getStoredSessionData("a");
+		const lastEntry =
+			session?.lastMasterPasswordEntry ?? session?.createdAt ?? 0;
+		setSystemTime(new Date(lastEntry + 60_000));
+		try {
+			expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	it("blocks the stored-MUK decrypt path when re-entry is due", async () => {

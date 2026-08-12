@@ -1008,7 +1008,9 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return false;
 		}
 		const lastEntry = session.lastMasterPasswordEntry ?? session.createdAt;
-		return Date.now() - lastEntry > periodMs;
+		// Inclusive: the period has elapsed the moment it is reached, so a period of 0 demands
+		// re-entry on every unlock even when both reads land in the same millisecond.
+		return Date.now() - lastEntry >= periodMs;
 	}
 
 	async function canBiometricUnlock(accountId?: string): Promise<boolean> {
