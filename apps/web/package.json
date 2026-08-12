@@ -13,6 +13,7 @@
 		"test:e2e:self-hosted": "playwright test --project=self-hosted",
 		"test:e2e:smoke": "playwright test --project=cloud smoke.spec.ts",
 		"test:e2e:report": "playwright show-report",
+		"test:e2e:merge-reports": "playwright merge-reports --reporter=html",
 		"build": "vite build",
 		"serve": "vite preview",
 		"dev": "vite dev --port=3001"
