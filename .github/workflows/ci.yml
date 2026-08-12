@@ -163,7 +163,12 @@ jobs:
               regen_cmd="pnpm run build:crypto-wasm"
               ;;
             android|ios)
-              paths=(packages/crypto/react-native/src/generated packages/crypto/react-native/cpp/generated)
+              # Only the TypeScript bindings are asserted. ubrn runs the generated C++ through
+              # clang-format, whose line wrapping and reference placement differ by clang-format
+              # version, so cpp/generated cannot diff cleanly across machines. It is a compiled
+              # build input rather than a consumed contract; the TypeScript is what drifts
+              # semantically and what typecheck depends on.
+              paths=(packages/crypto/react-native/src/generated)
               regen_cmd="pnpm run build:crypto-${{ matrix.binding }}"
               ;;
           esac
