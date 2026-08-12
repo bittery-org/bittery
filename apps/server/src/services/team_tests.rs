@@ -764,7 +764,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             .await;
         list_response.assert_contract_status();
         assert_eq!(list_response.body["id"], json!(fixture.team_id.clone()));
-        assert_eq!(list_response.body["memberCount"], json!("4"));
+        assert_eq!(list_response.body["memberCount"], json!("2"));
 
         let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
         let no_team_list = app

@@ -153,30 +153,33 @@ describe("performDeltaSync Item encryption context", () => {
 		"item_updated",
 		"item_restored",
 		"item_moved",
-	] as const)("converges a %s event when the Item was permanently deleted before its fetch", async (type) => {
-		const api = client();
-		api.items.get = async () => {
-			throw new ApiError(
-				{
-					type: "about:blank",
-					title: "Not found",
-					status: 404,
-					code: "NOT_FOUND",
-				},
-				null,
+	] as const)(
+		"converges a %s event when the Item was permanently deleted before its fetch",
+		async (type) => {
+			const api = client();
+			api.items.get = async () => {
+				throw new ApiError(
+					{
+						type: "about:blank",
+						title: "Not found",
+						status: 404,
+						code: "NOT_FOUND",
+					},
+					null,
+				);
+			};
+			const { cache, removedItems } = recordingCache();
+
+			await performDeltaSync(
+				api,
+				cache,
+				event({ type, entityId: "item_1", entityType: "item" }),
+				"acc_1",
 			);
-		};
-		const { cache, removedItems } = recordingCache();
 
-		await performDeltaSync(
-			api,
-			cache,
-			event({ type, entityId: "item_1", entityType: "item" }),
-			"acc_1",
-		);
-
-		expect(removedItems).toEqual(["item_1"]);
-	});
+			expect(removedItems).toEqual(["item_1"]);
+		},
+	);
 
 	it("retains an Item event when fetching its trashed state fails transiently", async () => {
 		const api = client();

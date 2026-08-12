@@ -1914,7 +1914,7 @@ mod tests {
     fn router_registers_all_used_vault_operations_only() {
         let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
         let rendered = openapi.to_string();
-        assert_eq!(rendered.matches("operationId").count(), 33);
+        assert_eq!(rendered.matches("operationId").count(), 31);
         assert!(rendered.contains("listAllTrashedItems"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));

@@ -491,36 +491,37 @@ describe("VaultRepository.hydrateFromServer", () => {
 		).toEqual(["vault_1"]);
 	});
 
-	it.each([
-		0, 1,
-	])("keeps the previous cache when bootstrap fails at page boundary %i", async (failureAt) => {
-		const { repo, itemCache, crypto, vaultCrypto } = await setup();
-		await itemCache.setCachedItems(
-			[await cachedItem("previous", crypto, vaultCrypto)],
-			ACCOUNT_ID,
-		);
-		const client = createClient();
-		let request = 0;
-		client.sync.bootstrap = mock(async () => {
-			if (request++ === failureAt) {
-				throw new Error("network interrupted bootstrap");
-			}
-			return {
-				data: {
-					items: [],
-					hasMore: true,
-					nextCursor: "next-page",
-				},
-			};
-		});
+	it.each([0, 1])(
+		"keeps the previous cache when bootstrap fails at page boundary %i",
+		async (failureAt) => {
+			const { repo, itemCache, crypto, vaultCrypto } = await setup();
+			await itemCache.setCachedItems(
+				[await cachedItem("previous", crypto, vaultCrypto)],
+				ACCOUNT_ID,
+			);
+			const client = createClient();
+			let request = 0;
+			client.sync.bootstrap = mock(async () => {
+				if (request++ === failureAt) {
+					throw new Error("network interrupted bootstrap");
+				}
+				return {
+					data: {
+						items: [],
+						hasMore: true,
+						nextCursor: "next-page",
+					},
+				};
+			});
 
-		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
-			"network interrupted bootstrap",
-		);
-		expect(
-			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
-		).toEqual(["previous"]);
-	});
+			await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+				"network interrupted bootstrap",
+			);
+			expect(
+				(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+			).toEqual(["previous"]);
+		},
+	);
 
 	it("does not publish a partial generation when the promotion write fails", async () => {
 		const { repo, itemCache, recordPort, crypto, vaultCrypto } = await setup();

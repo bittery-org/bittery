@@ -7,15 +7,77 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::{
+    dto::ProblemDetails,
     error::ApiError,
     error_code::ErrorCode,
     extract::{ApiJson, AuthenticatedRequest},
     idempotency,
 };
+
+#[derive(IntoResponses)]
+#[allow(dead_code)]
+enum RotationErrorResponses {
+    #[response(
+        status = 400,
+        description = "Bad request",
+        content_type = "application/problem+json"
+    )]
+    BadRequest(ProblemDetails),
+    #[response(
+        status = 401,
+        description = "Authentication required",
+        content_type = "application/problem+json"
+    )]
+    Unauthorized(ProblemDetails),
+    #[response(
+        status = 403,
+        description = "Forbidden",
+        content_type = "application/problem+json"
+    )]
+    Forbidden(ProblemDetails),
+    #[response(
+        status = 404,
+        description = "Not found",
+        content_type = "application/problem+json"
+    )]
+    NotFound(ProblemDetails),
+    #[response(
+        status = 409,
+        description = "Rotation plan is stale or conflicts with current state",
+        content_type = "application/problem+json"
+    )]
+    Conflict(ProblemDetails),
+    #[response(
+        status = 413,
+        description = "Payload too large",
+        content_type = "application/problem+json"
+    )]
+    PayloadTooLarge(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Idempotency key was reused with a different request",
+        content_type = "application/problem+json"
+    )]
+    Unprocessable(ProblemDetails),
+    #[response(
+        status = 500,
+        description = "Internal error",
+        content_type = "application/problem+json"
+    )]
+    Internal(ProblemDetails),
+    #[response(status = 503, description = "An identical idempotent request is still pending", content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))]
+    ServiceUnavailable(ProblemDetails),
+}
 use crate::{
     config::db_pool,
     db::enums::VaultKeyRotationManifestKind,
@@ -89,7 +151,7 @@ fn kind(value: &str) -> Result<VaultKeyRotationManifestKind, ApiError> {
         .map_err(|_| ApiError::bad_request(ErrorCode::InvalidRequest, "Unknown preparation kind"))
 }
 
-#[utoipa::path(get, path="/vault-key-rotation-plans/{planId}/preparation/{kind}", operation_id="getVaultKeyRotationPreparationPage", tag="vault-key-rotation", params(("planId"=String, Path),("kind"=String, Path),("cursor"=Option<String>, Query),("limit"=Option<usize>, Query)), responses((status=200, body=PreparationPage)))]
+#[utoipa::path(get, path="/vault-key-rotation-plans/{planId}/preparation/{kind}", operation_id="getVaultKeyRotationPreparationPage", tag="vault-key-rotation", params(("planId"=String, Path),("kind"=String, Path),("cursor"=Option<String>, Query),("limit"=Option<usize>, Query)), responses((status=200, body=PreparationPage), RotationErrorResponses))]
 async fn page(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -109,7 +171,7 @@ async fn page(
     ))
 }
 
-#[utoipa::path(put, path="/vault-key-rotation-plans/{planId}/staged/{kind}", operation_id="stageVaultKeyRotationOutputs", tag="vault-key-rotation", params(("planId"=String,Path),("kind"=String,Path)), request_body=StageRequest, responses((status=204)))]
+#[utoipa::path(put, path="/vault-key-rotation-plans/{planId}/staged/{kind}", operation_id="stageVaultKeyRotationOutputs", tag="vault-key-rotation", params(("planId"=String,Path),("kind"=String,Path)), request_body=StageRequest, responses((status=204), RotationErrorResponses))]
 async fn stage(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -135,7 +197,7 @@ async fn stage(
     Ok(())
 }
 
-#[utoipa::path(delete, path="/vault-key-rotation-plans/{planId}", operation_id="abandonVaultKeyRotationPlan", tag="vault-key-rotation", params(("planId"=String,Path)), responses((status=204)))]
+#[utoipa::path(delete, path="/vault-key-rotation-plans/{planId}", operation_id="abandonVaultKeyRotationPlan", tag="vault-key-rotation", params(("planId"=String,Path)), responses((status=204), RotationErrorResponses))]
 async fn abandon(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -145,7 +207,7 @@ async fn abandon(
     Ok(())
 }
 
-#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans", operation_id="createVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans", operation_id="createVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn start_vault_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -170,7 +232,7 @@ async fn start_vault_member_removal(
     .await
 }
 
-#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn finalize_vault_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -212,7 +274,7 @@ async fn finalize_vault_member_removal(
     Ok(response)
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans", operation_id="createTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans", operation_id="createTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn start_team_leave(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -239,7 +301,7 @@ async fn start_team_leave(
     .await
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans", operation_id="createTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans", operation_id="createTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn start_team_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -317,7 +379,7 @@ async fn finalize_departure(
     Ok(response)
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans/finalize", operation_id="finalizeTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans/finalize", operation_id="finalizeTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn finalize_team_leave(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -329,7 +391,7 @@ async fn finalize_team_leave(
     finalize_departure(&state, &auth, &headers, team_id, target, body, false).await
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay")))))]
+#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
 async fn finalize_team_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,

@@ -540,9 +540,9 @@ pub async fn wrap_key(
         let material = key.copy_material()?;
         let wrapping_material = wrapping_key.copy_material()?;
         let mut encoded = BASE64.encode(material.as_slice());
-        let result = encrypt_inner(&encoded, &wrapping_material, context).map(Into::into);
+        let result = encrypt_inner(&encoded, &wrapping_material, context);
         encoded.zeroize();
-        result.map_err(Into::into)
+        result
     })
     .await
 }

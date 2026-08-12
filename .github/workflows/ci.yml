@@ -332,6 +332,7 @@ jobs:
         with:
           args: >-
             breaking --fail-on ERR
+            --err-ignore docs/openapi-breaking-changes.md
             .oasdiff/base.json packages/api-contract/openapi.v1.json
 
   js-types:

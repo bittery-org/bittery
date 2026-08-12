@@ -694,9 +694,9 @@ async fn vault_handlers_reject_malformed_request_input() {
                     ),
                 ),
                 (
-                    Method::DELETE,
+                    Method::POST,
                     format!(
-                        "/api/v1/vaults/{}/members/{}",
+                        "/api/v1/vaults/{}/members/{}/removal-rotation-plans/finalize",
                         fixture.main_vault_id, fixture.member_user_id
                     ),
                 ),
