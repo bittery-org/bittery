@@ -3,45 +3,32 @@ mod ipc_security;
 mod keychain;
 mod native_host_crypto;
 mod native_messaging_installer;
+mod tauri_api;
 
 use base64::Engine;
 use desktop_ipc::{
     write_frame, AccountUnlockData, BiometricUnlockAllMaterial, BiometricUnlockMaterial,
-    DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+    DesktopAccountEntry, DesktopEnvelope, DesktopEvent, DesktopRequest, DesktopResponse,
+    DesktopTheme, OpenDesktopAppIntent, DESKTOP_PROTOCOL_VERSION,
 };
 #[cfg(windows)]
 use ipc_security::desktop_ipc_socket_path;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, Runtime};
+use tauri_api::{
+    BroadcastActiveAccountChangedArgs, BroadcastLockEventArgs, BroadcastUnlockEventArgs,
+    ExtensionBiometricStatus, ExtensionBiometricUnlockArgs, SetUiThemeArgs,
+};
 use tauri_plugin_store::Store;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 
-#[derive(Debug, Clone)]
-enum LockEvent {
-    Lock {
-        reason: String,
-        timestamp: i64,
-    },
-    Unlock {
-        accounts: Vec<String>,
-        timestamp: i64,
-    },
-    DesktopClose {
-        timestamp: i64,
-    },
-    ActiveAccountChanged {
-        account_id: String,
-        timestamp: i64,
-    },
-    ThemeChanged {
-        theme: String,
-        timestamp: i64,
-    },
-}
-
+/// Pushed events are broadcast in the shape they go out in. There used to be a
+/// second, private enum here that `lock_event_to_response` translated; the
+/// translation was the only thing keeping the two in step, so the wire type is
+/// carried end to end instead.
 struct DesktopIpcState {
-    lock_events: broadcast::Sender<LockEvent>,
+    lock_events: broadcast::Sender<DesktopEvent>,
 }
 
 impl Default for DesktopIpcState {
@@ -51,7 +38,6 @@ impl Default for DesktopIpcState {
     }
 }
 
-const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
 /// Persisted UI appearance preference ("light" | "dark" | "system"). Kept in
 /// the Rust-side store so the native host can report it to the extension even
 /// before the desktop frontend window has loaded (next-themes only writes the
@@ -66,6 +52,13 @@ fn read_store_string<R: Runtime>(store: &Store<R>, key: &str) -> Option<String> 
     store
         .get(key)
         .and_then(|value| value.as_str().map(|s| s.to_string()))
+}
+
+/// The stored appearance preference, or `None` when it has never been synced.
+fn read_store_theme<R: Runtime>(store: &Store<R>) -> Option<DesktopTheme> {
+    store
+        .get(UI_THEME_KEY)
+        .and_then(|value| serde_json::from_value(value).ok())
 }
 
 // The published native-host view
@@ -85,7 +78,13 @@ const NATIVE_VIEW_KEY: &str = "bittery_native_view";
 /// other version is refused, never partially interpreted: the writer is free to
 /// change field meanings behind a bump, so guessing would be a correctness bug
 /// with security consequences (`biometricEnabled` is an authorisation input).
-const NATIVE_VIEW_VERSION: u64 = 2;
+const NATIVE_VIEW_VERSION: u64 = 3;
+
+/// The only cache-metadata projection this host consumes. `ItemCache` writes it in the
+/// same record as the active-generation pointer, so a prefix pair can never straddle two
+/// promoted generations.
+const ITEM_CACHE_NATIVE_VIEW_VERSION: u64 = 1;
+const ITEM_CACHE_STATE_VERSION: u64 = 2;
 
 /// Which store a published key lives in. This exists so Rust never re-derives
 /// the tier table: `Secret` is the OS keychain, `Plain` is `store.json`.
@@ -129,10 +128,44 @@ struct NativeAccountView {
     session_data: NativeKeyRef,
     vault_keys: NativeKeyRef,
     encrypted_private_key: NativeKeyRef,
-    /// Fully-resolved `store.json` key prefixes for this account's cached
-    /// records -- one record per key. Prefix-scan them; never concatenate.
+    /// The ItemCache metadata record containing the active generation's fully-resolved
+    /// item and vault prefixes. This host follows that record rather than naming a cache
+    /// collection itself.
+    item_cache_state: NativeKeyRef,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeItemCacheView {
+    v: u64,
     items_key_prefix: String,
     vaults_key_prefix: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeItemCacheState {
+    v: u64,
+    native_view: NativeItemCacheView,
+}
+
+fn resolve_item_cache_view(
+    state: NativeItemCacheState,
+    _account_id: &str,
+) -> Result<NativeItemCacheView, String> {
+    if state.v != ITEM_CACHE_STATE_VERSION {
+        return Err(format!("Unsupported item cache state version: {}", state.v));
+    }
+    let native_view = state.native_view;
+
+    if native_view.v != ITEM_CACHE_NATIVE_VIEW_VERSION {
+        return Err(format!(
+            "Unsupported item cache view version: {}",
+            native_view.v
+        ));
+    }
+
+    Ok(native_view)
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -158,6 +191,17 @@ impl NativeHostView {
             .iter()
             .any(|value| value == account_id)
     }
+}
+
+fn load_item_cache_view<R: Runtime>(
+    store: &Store<R>,
+    account: &NativeAccountView,
+) -> Result<NativeItemCacheView, String> {
+    let raw = read_key_ref(store, &account.item_cache_state).ok_or("No item cache state found")?;
+    let state: NativeItemCacheState = serde_json::from_str(&raw)
+        .map_err(|error| format!("Failed to parse item cache state: {}", error))?;
+
+    resolve_item_cache_view(state, &account.account_id)
 }
 
 /// Why the published view could not be used. Both variants mean the same thing
@@ -247,7 +291,7 @@ where
 fn read_key_ref<R: Runtime>(store: &Store<R>, key_ref: &NativeKeyRef) -> Option<String> {
     read_key_ref_with(
         key_ref,
-        |key| match keychain::keychain_get(key) {
+        |key| match keychain::get_value(key) {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("[desktop-ipc] Keychain read failed for {}: {}", key, error);
@@ -297,80 +341,6 @@ fn read_records<R: Runtime, T: serde::de::DeserializeOwned>(
     decode_records(records_under_prefix(store.entries(), prefix), kind)
 }
 
-fn normalize_item_version(version: Option<u64>) -> u64 {
-    match version {
-        Some(value) if value >= 1 => value,
-        _ => 1,
-    }
-}
-
-fn serialize_encryption_context(
-    vault_id: &str,
-    entity_id: &str,
-    entity_type: &str,
-    version: u64,
-    user_id: &str,
-) -> String {
-    format!(
-        "{}\0{}\0{}\0{}\0{}",
-        vault_id, entity_id, entity_type, version, user_id
-    )
-}
-
-fn unwrap_plaintext_with_context(
-    decrypted_data: String,
-    vault_id: &str,
-    entity_id: &str,
-    entity_type: &str,
-    version: u64,
-    user_id: &str,
-) -> Result<String, String> {
-    let parsed: serde_json::Value = serde_json::from_str(&decrypted_data)
-        .map_err(|_| "Missing encryption context envelope".to_string())?;
-
-    let marker = parsed
-        .get("marker")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-    let context = parsed
-        .get("context")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-    let payload = parsed
-        .get("payload")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-
-    if marker != CONTEXT_ENVELOPE_MARKER {
-        return Err("Invalid encryption context marker".to_string());
-    }
-
-    let expected = serialize_encryption_context(vault_id, entity_id, entity_type, version, user_id);
-    if context != expected {
-        return Err("Encryption context mismatch".to_string());
-    }
-
-    Ok(payload.to_string())
-}
-
-fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
-    let parsed: serde_json::Value = match serde_json::from_str(&decrypted_data) {
-        Ok(value) => value,
-        Err(_) => return decrypted_data,
-    };
-
-    let marker = parsed.get("marker").and_then(|value| value.as_str());
-    let payload = parsed.get("payload").and_then(|value| value.as_str());
-
-    if marker == Some(CONTEXT_ENVELOPE_MARKER) {
-        if let Some(payload_json) = payload {
-            return payload_json.to_string();
-        }
-    }
-
-    decrypted_data
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 struct CachedItemRecord {
     id: String,
@@ -384,9 +354,10 @@ struct CachedItemRecord {
     encryption_iv: String,
     #[serde(rename = "encryptionAlgorithm")]
     encryption_algorithm: String,
-    version: u64,
-    #[serde(rename = "lastModifiedBy")]
-    last_modified_by: Option<String>,
+    #[serde(rename = "encryptionVersion")]
+    encryption_version: u64,
+    #[serde(rename = "encryptedByUserId")]
+    encrypted_by_user_id: String,
     #[serde(rename = "createdAt")]
     created_at: String,
     #[serde(rename = "updatedAt")]
@@ -399,79 +370,25 @@ struct CachedItemRecord {
 struct CachedVaultRecord {
     id: String,
     name: String,
-    #[serde(rename = "type", default = "default_cached_vault_type")]
+    #[serde(rename = "type")]
     vault_type: String,
     icon: Option<String>,
     #[serde(rename = "imageUrl")]
     image_url: Option<String>,
 }
 
-fn default_cached_vault_type() -> String {
-    "personal".to_string()
-}
-
 fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Result<String, String> {
-    let user_id = item
-        .last_modified_by
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    if let Some(user_id) = user_id {
-        let stored_version = normalize_item_version(Some(item.version));
-        let mut last_error: Option<String> = None;
-
-        for version in (1..=stored_version).rev() {
-            match native_host_crypto::decrypt_with_context(
-                item.encrypted_data.clone(),
-                item.encryption_iv.clone(),
-                item.encryption_algorithm.clone(),
-                vault_key_base64.to_string(),
-                item.vault_id.clone(),
-                item.id.clone(),
-                "item".to_string(),
-                version,
-                user_id.to_string(),
-            ) {
-                Ok(decrypted_data) => {
-                    if version != stored_version {
-                        eprintln!(
-                            "[desktop-ipc] Recovered item {} with fallback encryption version {} (stored version {})",
-                            item.id, version, stored_version
-                        );
-                    }
-                    return Ok(normalize_decrypted_item_payload(decrypted_data));
-                }
-                Err(error) => {
-                    last_error = Some(format!("Decryption failed: {}", error));
-                }
-            }
-        }
-
-        let decrypted_data = native_host_crypto::decrypt(
-            item.encrypted_data.clone(),
-            item.encryption_iv.clone(),
-            item.encryption_algorithm.clone(),
-            vault_key_base64.to_string(),
-        )
-        .map_err(|e| last_error.unwrap_or_else(|| format!("Decryption failed: {}", e)))?;
-
-        let unwrapped = unwrap_plaintext_with_context(
-            decrypted_data,
-            &item.vault_id,
-            &item.id,
-            "item",
-            stored_version,
-            user_id,
-        )?;
-        return Ok(normalize_decrypted_item_payload(unwrapped));
-    }
-
-    native_host_crypto::decrypt(
+    native_host_crypto::decrypt_with_context(
         item.encrypted_data.clone(),
         item.encryption_iv.clone(),
         item.encryption_algorithm.clone(),
         vault_key_base64.to_string(),
+        item.vault_id.clone(),
+        item.id.clone(),
+        "item".to_string(),
+        item.encryption_version,
+        item.encrypted_by_user_id.clone(),
     )
-    .map(normalize_decrypted_item_payload)
     .map_err(|e| format!("Decryption failed: {}", e))
 }
 
@@ -540,49 +457,6 @@ fn biometric_signature(challenge: &str, bound_to: impl std::fmt::Display) -> Str
 
 fn is_clean_disconnect(error: &str) -> bool {
     error.contains("early eof") || error.contains("unexpected end of file")
-}
-
-fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
-    match event {
-        LockEvent::Lock { reason, timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::Lock,
-            payload: serde_json::json!({
-                "reason": reason,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::Unlock {
-            accounts,
-            timestamp,
-        } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::Unlock,
-            payload: serde_json::json!({
-                "accounts": accounts,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::DesktopClose { timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::DesktopClose,
-            payload: serde_json::json!({ "timestamp": timestamp }),
-        },
-        LockEvent::ActiveAccountChanged {
-            account_id,
-            timestamp,
-        } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::ActiveAccountChanged,
-            payload: serde_json::json!({
-                "accountId": account_id,
-                "timestamp": timestamp,
-            }),
-        },
-        LockEvent::ThemeChanged { theme, timestamp } => DesktopResponse::DesktopEvent {
-            event: DesktopEventKind::ThemeChanged,
-            payload: serde_json::json!({
-                "theme": theme,
-                "timestamp": timestamp,
-            }),
-        },
-    }
 }
 
 /// Read the device key through the published ref.
@@ -840,12 +714,14 @@ async fn get_items_snapshot_internal(
 
         let decrypted_vault_keys = load_decrypted_vault_keys(&store, &view, account)?;
 
-        // Cached items and vaults are one `store.json` record per key under the
-        // prefixes the view publishes. Scan them; concatenate nothing.
+        // ItemCache publishes this pointer in the same metadata write that promotes a
+        // generation, so a native read sees either the old complete generation or the new
+        // one, never a reconstructed key scheme.
+        let cache_view = load_item_cache_view(&store, account)?;
         let cached_items: Vec<CachedItemRecord> =
-            read_records(&store, &account.items_key_prefix, "item");
+            read_records(&store, &cache_view.items_key_prefix, "item");
         let cached_vaults: Vec<CachedVaultRecord> =
-            read_records(&store, &account.vaults_key_prefix, "vault");
+            read_records(&store, &cache_view.vaults_key_prefix, "vault");
         let vault_map = cached_vaults
             .into_iter()
             .map(|vault| (vault.id.clone(), vault))
@@ -936,25 +812,9 @@ async fn handle_desktop_ipc_message(
         },
         DesktopRequest::GetDesktopAccounts => match get_accounts_list_internal(app_handle).await {
             Ok(data) => DesktopResponse::DesktopAccounts {
-                accounts: data
-                    .get("accounts")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default(),
-                active_account: data
-                    .get("active_account")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                unlocked_accounts: data
-                    .get("unlocked_accounts")
-                    .and_then(|v| v.as_array())
-                    .map(|accounts| {
-                        accounts
-                            .iter()
-                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                accounts: data.accounts,
+                active_account: data.active_account,
+                unlocked_accounts: data.unlocked_accounts,
             },
             Err(error) => DesktopResponse::Error { message: error },
         },
@@ -1018,14 +878,8 @@ async fn handle_desktop_ipc_message(
         DesktopRequest::CheckBiometricAvailable => {
             match check_biometric_status_internal(app_handle).await {
                 Ok(status) => DesktopResponse::BiometricStatus {
-                    available: status
-                        .get("available")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    enabled: status
-                        .get("enabled")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    available: status.available,
+                    enabled: status.enabled,
                     app_running: true,
                 },
                 Err(error) => DesktopResponse::Error { message: error },
@@ -1092,18 +946,18 @@ async fn handle_desktop_ipc_message(
             vault_id,
         } => match open_app_internal(app_handle) {
             Ok(()) => {
-                match intent.as_deref() {
-                    Some("create_item") => {
+                match intent {
+                    Some(OpenDesktopAppIntent::CreateItem) => {
                         let _ =
                             app_handle.emit("open-create-item", serde_json::json!({ "url": url }));
                     }
-                    Some("view_item") => {
+                    Some(OpenDesktopAppIntent::ViewItem) => {
                         let _ = app_handle.emit(
                             "open-item",
                             serde_json::json!({ "itemId": item_id, "vaultId": vault_id }),
                         );
                     }
-                    _ => {}
+                    None => {}
                 }
                 DesktopResponse::OpenDesktopAppResult {
                     success: true,
@@ -1130,7 +984,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (mut reader, mut writer) = tokio::io::split(stream);
-    let mut event_rx: Option<broadcast::Receiver<LockEvent>> = None;
+    let mut event_rx: Option<broadcast::Receiver<DesktopEvent>> = None;
 
     loop {
         if let Some(rx) = event_rx.as_mut() {
@@ -1141,7 +995,7 @@ where
                         eprintln!(
                             "[desktop-ipc] Protocol mismatch expected={} received={}",
                             DESKTOP_PROTOCOL_VERSION,
-                            message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
+                            message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "missing".to_string()),
                         );
                         let response = DesktopEnvelope::current(
                             message.request_id,
@@ -1174,7 +1028,7 @@ where
                         Ok(event) => {
                             let response = DesktopEnvelope::current(
                                 None,
-                                lock_event_to_response(event),
+                                DesktopResponse::DesktopEvent(event),
                             );
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
@@ -1194,7 +1048,7 @@ where
                     message
                         .protocol_version
                         .map(|version| version.to_string())
-                        .unwrap_or_else(|| "legacy".to_string()),
+                        .unwrap_or_else(|| "missing".to_string()),
                 );
                 let response = DesktopEnvelope::current(
                     message.request_id,
@@ -1441,7 +1295,7 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
 #[tauri::command]
 async fn check_extension_biometric_status(
     app_handle: tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+) -> Result<ExtensionBiometricStatus, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
@@ -1481,10 +1335,10 @@ async fn check_extension_biometric_status(
         None => false,
     };
 
-    Ok(serde_json::json!({
-        "available": status.is_available,
-        "enabled": has_session,
-    }))
+    Ok(ExtensionBiometricStatus {
+        available: status.is_available,
+        enabled: has_session,
+    })
 }
 
 /// Tauri command to perform biometric unlock
@@ -1497,6 +1351,16 @@ async fn extension_biometric_unlock(
 ) -> Result<BiometricUnlockMaterial, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
+
+    let ExtensionBiometricUnlockArgs {
+        challenge,
+        extension_id,
+        account_id,
+    } = ExtensionBiometricUnlockArgs {
+        challenge,
+        extension_id,
+        account_id,
+    };
 
     eprintln!(
         "[Biometric Unlock] Request from extension: {}",
@@ -1602,7 +1466,7 @@ async fn extension_biometric_unlock(
 /// Check biometric status
 async fn check_biometric_status_internal(
     app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+) -> Result<ExtensionBiometricStatus, String> {
     // Call the Tauri command
     check_extension_biometric_status(app_handle.clone()).await
 }
@@ -1764,7 +1628,7 @@ struct DesktopStatusView {
     unlocked_accounts: Vec<String>,
     timestamp: i64,
     autolock_timeout_ms: i64,
-    theme: Option<String>,
+    theme: Option<DesktopTheme>,
 }
 
 /// Get current lock status of all accounts
@@ -1780,7 +1644,10 @@ async fn get_lock_status_internal(
     // UI appearance preference (app-wide, mirrors the frontend's next-themes
     // value). Rust-owned, so it is not part of the published view. Absent until
     // the frontend syncs it via `set_ui_theme`.
-    let theme = read_store_string(&store, UI_THEME_KEY);
+    // An unrecognised stored value reads as "unknown" rather than being passed
+    // through: `set_ui_theme` is the only writer and it accepts the three
+    // members, so anything else is a corrupt store, not a newer preference.
+    let theme = read_store_theme(&store);
 
     // Without a usable view nothing is unlocked, which is the safe *and* honest
     // answer: the app has not initialised, so no MUK is in memory either. The
@@ -1831,37 +1698,21 @@ fn open_app_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Get account list (works even when locked)
-///
-/// One entry of the accounts response the browser extension consumes. It is a
-/// pure republication of the view's account entry: the extension stores the
-/// result as its own `AccountMetadata`, so every field it needs is published
-/// rather than defaulted or re-derived here.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AccountsListEntry<'a> {
-    account_id: &'a str,
-    email: &'a str,
-    user_id: &'a str,
-    name: &'a str,
-    secret_key_hint: &'a str,
-    /// Omitted entirely when the view omitted it, so "no team" never arrives at
-    /// the consumer as an empty string.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_name: Option<&'a str>,
-    /// Nullable rather than skipped: the consumer's field is `string | null`.
-    team_avatar_url: Option<&'a str>,
-    added_at: i64,
-    last_active_at: i64,
-    biometric_enabled: bool,
+/// The three fields of the `DESKTOP_ACCOUNTS` response, before they are wrapped
+/// in it. Named rather than a `serde_json::Value` so the wire type is the only
+/// place these field names exist.
+struct AccountsList {
+    accounts: Vec<DesktopAccountEntry>,
+    active_account: Option<String>,
+    unlocked_accounts: Vec<String>,
 }
 
+/// Get account list (works even when locked)
+///
 /// Every field here comes from the published view. Reaching into
 /// `bittery_accounts_list` directly would put a second copy of the key scheme
 /// back in this file.
-async fn get_accounts_list_internal(
-    app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+async fn get_accounts_list_internal(app_handle: &tauri::AppHandle) -> Result<AccountsList, String> {
     use tauri_plugin_store::StoreExt;
 
     let store = app_handle
@@ -1874,36 +1725,36 @@ async fn get_accounts_list_internal(
         Ok(view) => view,
         Err(problem) => {
             eprintln!("[desktop-ipc] Reporting no accounts: {}", problem.message());
-            return Ok(serde_json::json!({
-                "accounts": Vec::<serde_json::Value>::new(),
-                "active_account": serde_json::Value::Null,
-                "unlocked_accounts": Vec::<String>::new(),
-            }));
+            return Ok(AccountsList {
+                accounts: Vec::new(),
+                active_account: None,
+                unlocked_accounts: Vec::new(),
+            });
         }
     };
 
     let accounts = view
         .accounts
         .iter()
-        .map(|account| AccountsListEntry {
-            account_id: &account.account_id,
-            email: &account.email,
-            user_id: &account.user_id,
-            name: &account.name,
-            secret_key_hint: &account.secret_key_hint,
-            team_name: account.team_name.as_deref(),
-            team_avatar_url: account.team_avatar_url.as_deref(),
+        .map(|account| DesktopAccountEntry {
+            account_id: account.account_id.clone(),
+            email: account.email.clone(),
+            user_id: account.user_id.clone(),
+            name: account.name.clone(),
+            secret_key_hint: account.secret_key_hint.clone(),
+            team_name: account.team_name.clone(),
+            team_avatar_url: account.team_avatar_url.clone(),
             added_at: account.added_at,
             last_active_at: account.last_active_at,
             biometric_enabled: account.biometric_enabled,
         })
         .collect::<Vec<_>>();
 
-    Ok(serde_json::json!({
-        "accounts": accounts,
-        "active_account": view.active_account_id,
-        "unlocked_accounts": view.unlocked_account_ids,
-    }))
+    Ok(AccountsList {
+        accounts,
+        active_account: view.active_account_id,
+        unlocked_accounts: view.unlocked_account_ids,
+    })
 }
 
 /// Get vault keys for a specific stable account ID.
@@ -1937,16 +1788,18 @@ fn broadcast_lock_event(
     state: tauri::State<Arc<DesktopIpcState>>,
     reason: String,
 ) -> Result<(), String> {
+    let args = BroadcastLockEventArgs { reason };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Lock {
-        reason: reason.clone(),
+    let _ = state.lock_events.send(DesktopEvent::Lock {
+        reason: args.reason.clone(),
         timestamp,
-    };
+    });
 
-    let _ = state.lock_events.send(event);
-
-    eprintln!("[Lock Event] Broadcast lock event (reason: {})", reason);
+    eprintln!(
+        "[Lock Event] Broadcast lock event (reason: {})",
+        args.reason
+    );
     Ok(())
 }
 
@@ -1956,18 +1809,17 @@ fn broadcast_unlock_event(
     state: tauri::State<Arc<DesktopIpcState>>,
     accounts: Vec<String>,
 ) -> Result<(), String> {
+    let args = BroadcastUnlockEventArgs { accounts };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Unlock {
-        accounts: accounts.clone(),
+    let _ = state.lock_events.send(DesktopEvent::Unlock {
+        accounts: args.accounts.clone(),
         timestamp,
-    };
-
-    let _ = state.lock_events.send(event);
+    });
 
     eprintln!(
         "[Unlock Event] Broadcast unlock event (accounts: {:?})",
-        accounts
+        args.accounts
     );
     Ok(())
 }
@@ -1978,18 +1830,17 @@ fn broadcast_active_account_changed(
     state: tauri::State<Arc<DesktopIpcState>>,
     account_id: String,
 ) -> Result<(), String> {
+    let args = BroadcastActiveAccountChangedArgs { account_id };
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::ActiveAccountChanged {
-        account_id: account_id.clone(),
+    let _ = state.lock_events.send(DesktopEvent::ActiveAccountChanged {
+        account_id: args.account_id.clone(),
         timestamp,
-    };
-
-    let _ = state.lock_events.send(event);
+    });
 
     eprintln!(
         "[Active Account Changed] Broadcast active account changed event (accountId: {})",
-        account_id
+        args.account_id
     );
     Ok(())
 }
@@ -2006,27 +1857,31 @@ fn set_ui_theme(
 ) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
 
-    // Only accept known values so the stored preference stays well-formed.
-    if !matches!(theme.as_str(), "light" | "dark" | "system") {
-        return Err(format!("Invalid theme value: {}", theme));
-    }
+    // Only accept known values so the stored preference stays well-formed. The
+    // parameter stays a `String` so an unknown value is this command's own error
+    // rather than an `invalid args` rejection from the bridge.
+    let theme: DesktopTheme = serde_json::from_value(serde_json::Value::String(theme.clone()))
+        .map_err(|_| format!("Invalid theme value: {}", theme))?;
+    let args = SetUiThemeArgs { theme };
 
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    store.set(UI_THEME_KEY, serde_json::Value::String(theme.clone()));
+    store.set(
+        UI_THEME_KEY,
+        serde_json::to_value(args.theme).map_err(|e| format!("Invalid theme value: {}", e))?,
+    );
     store
         .save()
         .map_err(|e| format!("Failed to persist theme: {}", e))?;
 
     let timestamp = now_timestamp_ms();
-    let event = LockEvent::ThemeChanged {
-        theme: theme.clone(),
+    let _ = state.lock_events.send(DesktopEvent::ThemeChanged {
+        theme: args.theme,
         timestamp,
-    };
-    let _ = state.lock_events.send(event);
+    });
 
-    eprintln!("[UI Theme] Set UI theme to {}", theme);
+    eprintln!("[UI Theme] Set UI theme to {:?}", args.theme);
     Ok(())
 }
 
@@ -2097,7 +1952,7 @@ pub fn run() {
 
                 if let Some(state) = window.app_handle().try_state::<Arc<DesktopIpcState>>() {
                     let timestamp = now_timestamp_ms();
-                    let event = LockEvent::DesktopClose { timestamp };
+                    let event = DesktopEvent::DesktopClose { timestamp };
                     let _ = state.lock_events.send(event);
                 } else {
                     eprintln!("[Window Event] Failed to get DesktopIpcState");
@@ -2113,9 +1968,9 @@ pub fn run() {
 mod tests {
     use super::{
         biometric_signature, build_snapshot_item_payload, decode_records, parse_native_view,
-        read_key_ref_with, records_under_prefix, serialize_encryption_context,
-        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord, NativeKeyStore,
-        NativeViewProblem, CONTEXT_ENVELOPE_MARKER, NATIVE_VIEW_VERSION,
+        read_key_ref_with, records_under_prefix, resolve_item_cache_view, CachedItemRecord,
+        CachedVaultRecord, NativeItemCacheState, NativeKeyStore, NativeViewProblem,
+        ITEM_CACHE_NATIVE_VIEW_VERSION, NATIVE_VIEW_VERSION,
     };
 
     #[test]
@@ -2139,7 +1994,7 @@ mod tests {
 
     /// A document shaped exactly like the one `account-store.ts` writes: two
     /// accounts, secret-tier refs for the four per-account secrets and for the
-    /// device key, and fully-resolved `record:` prefixes.
+    /// device key, plus the ItemCache state record each native read resolves.
     fn native_view_document(version: u64) -> String {
         serde_json::json!({
             "v": version,
@@ -2163,8 +2018,7 @@ mod tests {
                     "sessionData": { "key": "bittery_account_acct-a_session_data", "store": "secret" },
                     "vaultKeys": { "key": "bittery_account_acct-a_vault_keys", "store": "secret" },
                     "encryptedPrivateKey": { "key": "bittery_account_acct-a_encrypted_private_key", "store": "secret" },
-                    "itemsKeyPrefix": "record:acct-a:items:",
-                    "vaultsKeyPrefix": "record:acct-a:vaults:"
+                    "itemCacheState": { "key": "record:acct-a:meta:meta", "store": "plain" }
                 },
                 // No team fields at all: the optional half must survive being absent.
                 {
@@ -2180,8 +2034,7 @@ mod tests {
                     "sessionData": { "key": "bittery_account_acct-b_session_data", "store": "secret" },
                     "vaultKeys": { "key": "bittery_account_acct-b_vault_keys", "store": "secret" },
                     "encryptedPrivateKey": { "key": "bittery_account_acct-b_encrypted_private_key", "store": "secret" },
-                    "itemsKeyPrefix": "record:acct-b:items:",
-                    "vaultsKeyPrefix": "record:acct-b:vaults:"
+                    "itemCacheState": { "key": "record:acct-b:meta:meta", "store": "plain" }
                 }
             ]
         })
@@ -2220,8 +2073,8 @@ mod tests {
         assert!(alice.biometric_enabled);
         assert_eq!(alice.token.key, "bittery_account_acct-a_jwt_token");
         assert_eq!(alice.session_data.store, NativeKeyStore::Secret);
-        assert_eq!(alice.items_key_prefix, "record:acct-a:items:");
-        assert_eq!(alice.vaults_key_prefix, "record:acct-a:vaults:");
+        assert_eq!(alice.item_cache_state.key, "record:acct-a:meta:meta");
+        assert_eq!(alice.item_cache_state.store, NativeKeyStore::Plain);
 
         // A published `false` is honoured; nothing here defaults it to `true`.
         let bob = view.account("acct-b").expect("acct-b must be published");
@@ -2231,6 +2084,33 @@ mod tests {
         assert_eq!(bob.team_avatar_url, None);
 
         assert!(view.account("acct-missing").is_none());
+    }
+
+    #[test]
+    fn parse_item_cache_view_reads_only_the_promoted_prefix_pair() {
+        let state: NativeItemCacheState = serde_json::from_str(
+            r#"{
+                "v": 2,
+                "activeGeneration": "ignored-by-rust",
+                "nativeView": {
+                    "v": 1,
+                    "itemsKeyPrefix": "record:item-cache-stage:acct-a:gen:items:",
+                    "vaultsKeyPrefix": "record:item-cache-stage:acct-a:gen:vaults:"
+                }
+            }"#,
+        )
+        .expect("the ItemCache native projection must parse");
+
+        let native_view = state.native_view;
+        assert_eq!(native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+        assert_eq!(
+            native_view.items_key_prefix,
+            "record:item-cache-stage:acct-a:gen:items:"
+        );
+        assert_eq!(
+            native_view.vaults_key_prefix,
+            "record:item-cache-stage:acct-a:gen:vaults:"
+        );
     }
 
     #[test]
@@ -2351,38 +2231,6 @@ mod tests {
     }
 
     #[test]
-    fn unwrap_plaintext_with_context_accepts_matching_envelope() {
-        let decrypted = serde_json::json!({
-            "marker": CONTEXT_ENVELOPE_MARKER,
-            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
-            "payload": "{\"title\":\"Example\"}",
-        })
-        .to_string();
-
-        let unwrapped =
-            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 2, "user-1")
-                .expect("expected envelope to unwrap");
-
-        assert_eq!(unwrapped, "{\"title\":\"Example\"}");
-    }
-
-    #[test]
-    fn unwrap_plaintext_with_context_rejects_mismatched_context() {
-        let decrypted = serde_json::json!({
-            "marker": CONTEXT_ENVELOPE_MARKER,
-            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
-            "payload": "{\"title\":\"Example\"}",
-        })
-        .to_string();
-
-        let error =
-            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 3, "user-1")
-                .expect_err("expected context mismatch");
-
-        assert_eq!(error, "Encryption context mismatch");
-    }
-
-    #[test]
     fn build_snapshot_item_payload_returns_none_for_invalid_json() {
         let item = CachedItemRecord {
             id: "item-1".to_string(),
@@ -2392,8 +2240,8 @@ mod tests {
             encrypted_data: "ciphertext".to_string(),
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
-            version: 1,
-            last_modified_by: Some("user-1".to_string()),
+            encryption_version: 1,
+            encrypted_by_user_id: "user-1".to_string(),
             created_at: "2026-03-12T00:00:00.000Z".to_string(),
             updated_at: "2026-03-12T00:00:00.000Z".to_string(),
             deleted_at: None,
@@ -2429,8 +2277,8 @@ mod tests {
             encrypted_data: "ciphertext".to_string(),
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
-            version: 1,
-            last_modified_by: Some("user-1".to_string()),
+            encryption_version: 1,
+            encrypted_by_user_id: "user-1".to_string(),
             created_at: "2026-03-12T00:00:00.000Z".to_string(),
             updated_at: "2026-03-12T01:00:00.000Z".to_string(),
             deleted_at: None,
@@ -2474,15 +2322,6 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice@example.com")
         );
-    }
-
-    #[test]
-    fn cached_vault_record_defaults_legacy_entries_to_personal_type() {
-        let vault: CachedVaultRecord =
-            serde_json::from_str(r#"{"id":"vault-1","name":"Main","icon":null,"imageUrl":null}"#)
-                .expect("legacy cached vault should deserialize");
-
-        assert_eq!(vault.vault_type, "personal");
     }
 
     // ----------------------------------------------------------------------
@@ -2793,5 +2632,96 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             locked_versions(&lock_fixture("2.11.3", "2.11.4", "0.55.1"), "tauri-runtime");
 
         assert_eq!(versions, vec!["2.11.3".to_string()]);
+    }
+
+    // ----------------------------------------------------------------------
+    // The golden documents
+    // ----------------------------------------------------------------------
+
+    /// The consumer half of the two documents that cross this seam as JSON with
+    /// no generator between them. `packages/storage/src/__fixtures__/README.md`
+    /// explains the arrangement; the producer half is
+    /// `native-host-view.golden.test.ts`, which asserts `AccountStore` writes
+    /// exactly these bytes.
+    ///
+    /// `include_str!` rather than a runtime read so the fixture is a build
+    /// input: moving or deleting it fails compilation instead of a test.
+    const NATIVE_VIEW_GOLDEN: &str =
+        include_str!("../../../../packages/storage/src/__fixtures__/native-host-view.v3.json");
+    const ITEM_CACHE_STATE_GOLDEN: &str =
+        include_str!("../../../../packages/storage/src/__fixtures__/item-cache-state.v2.json");
+
+    #[test]
+    fn golden_native_view_is_accepted_and_every_field_is_read() {
+        let view = parse_native_view(Some(NATIVE_VIEW_GOLDEN.to_string()))
+            .expect("the committed native-host view must parse");
+
+        assert_eq!(view.v, NATIVE_VIEW_VERSION);
+        assert_eq!(view.active_account_id.as_deref(), Some("account-1"));
+        assert_eq!(view.unlocked_account_ids, vec!["account-1".to_string()]);
+        assert_eq!(view.auto_lock_timeout_ms, 600_000);
+        assert_eq!(view.device_key.key, "bittery_device_key");
+        assert_eq!(view.device_key.store, NativeKeyStore::Secret);
+        assert_eq!(view.accounts.len(), 2);
+
+        // The account carrying every optional field.
+        let first = view
+            .account("account-1")
+            .expect("account-1 must be present");
+        assert_eq!(first.email, "person@example.com");
+        assert_eq!(first.user_id, "user-1");
+        assert_eq!(first.name, "Person");
+        assert_eq!(first.secret_key_hint, "AB-CD");
+        assert_eq!(first.team_name.as_deref(), Some("Acme"));
+        assert_eq!(
+            first.team_avatar_url.as_deref(),
+            Some("https://cdn.example.com/acme.png")
+        );
+        assert_eq!(first.added_at, 1_700_000_000_000);
+        assert_eq!(first.last_active_at, 1_700_000_002_000);
+        assert!(first.biometric_enabled);
+        assert_eq!(first.token.key, "bittery_account_account-1_jwt_token");
+        assert_eq!(first.token.store, NativeKeyStore::Secret);
+        assert_eq!(
+            first.session_data.key,
+            "bittery_account_account-1_session_data"
+        );
+        assert_eq!(first.session_data.store, NativeKeyStore::Secret);
+        assert_eq!(first.vault_keys.key, "bittery_account_account-1_vault_keys");
+        assert_eq!(first.vault_keys.store, NativeKeyStore::Secret);
+        assert_eq!(
+            first.encrypted_private_key.key,
+            "bittery_account_account-1_encrypted_private_key"
+        );
+        assert_eq!(first.encrypted_private_key.store, NativeKeyStore::Secret);
+        assert_eq!(first.item_cache_state.key, "record:account-1:meta:meta");
+        assert_eq!(first.item_cache_state.store, NativeKeyStore::Plain);
+        assert!(view.is_unlocked("account-1"));
+
+        // The account with no team and biometrics off: absent stays absent, and
+        // `teamAvatarUrl` arrives as an explicit null rather than being skipped.
+        let second = view
+            .account("account-2")
+            .expect("account-2 must be present");
+        assert_eq!(second.team_name, None);
+        assert_eq!(second.team_avatar_url, None);
+        assert!(!second.biometric_enabled);
+        assert!(!view.is_unlocked("account-2"));
+    }
+
+    #[test]
+    fn golden_item_cache_state_is_accepted_and_every_field_is_read() {
+        let state: NativeItemCacheState = serde_json::from_str(ITEM_CACHE_STATE_GOLDEN)
+            .expect("the committed item cache state must parse");
+
+        assert_eq!(state.v, 2);
+        assert_eq!(state.native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+
+        let view = resolve_item_cache_view(state, "account-1")
+            .expect("the committed item cache state must resolve");
+
+        assert_eq!(view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+        assert_eq!(view.items_key_prefix, "record:account-1:items:");
+        assert_eq!(view.vaults_key_prefix, "record:account-1:vaults:");
     }
 }

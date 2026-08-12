@@ -17,7 +17,6 @@ import expo.modules.credentialprovider.service.AutofillDatasetBuilder
 import expo.modules.credentialprovider.service.BitteryAutofillService
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
-import expo.modules.credentialprovider.storage.CredentialStorageManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,7 +33,6 @@ class AutofillAuthActivity : FragmentActivity() {
 
     private lateinit var mukEscrowManager: MukEscrowManager
     private lateinit var database: CredentialDatabase
-    private lateinit var storageManager: CredentialStorageManager
     private lateinit var datasetBuilder: AutofillDatasetBuilder
 
     private var usernameId: AutofillId? = null
@@ -49,8 +47,7 @@ class AutofillAuthActivity : FragmentActivity() {
 
         mukEscrowManager = MukEscrowManager(applicationContext)
         database = CredentialDatabase.getInstance(applicationContext)
-        storageManager = CredentialStorageManager(applicationContext)
-        datasetBuilder = AutofillDatasetBuilder(applicationContext, database, storageManager)
+		datasetBuilder = AutofillDatasetBuilder(applicationContext, database)
 
         usernameId = getParcelableExtraCompat(BitteryAutofillService.EXTRA_AUTOFILL_USERNAME_ID, AutofillId::class.java)
         passwordId = getParcelableExtraCompat(BitteryAutofillService.EXTRA_AUTOFILL_PASSWORD_ID, AutofillId::class.java)

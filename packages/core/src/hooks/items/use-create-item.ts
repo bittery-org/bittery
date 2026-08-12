@@ -57,22 +57,7 @@ export function useCreateItem() {
 				input.data,
 				{ itemId: localItemId, version: 1 },
 			);
-			const now = new Date().toISOString();
-
-			await repo.upsertLocal(
-				{
-					id: localItemId,
-					vaultId: input.vaultId,
-					category: input.category,
-					favorite: false,
-					createdAt: now,
-					updatedAt: now,
-					...input.data,
-				},
-				encryptedData,
-			);
-
-			enqueueItemMutation(
+			await enqueueItemMutation(
 				queue,
 				{
 					accountId,

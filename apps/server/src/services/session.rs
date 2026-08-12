@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use std::sync::LazyLock;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
-use ts_rs::TS;
 
 use crate::{db, error::AppError, repo::common::hash_token};
 
@@ -106,7 +105,7 @@ pub struct SeededSession {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefreshSessionResponse {
     pub token: String,
@@ -114,7 +113,7 @@ pub struct RefreshSessionResponse {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSessionResponse {
     pub id: String,
@@ -130,13 +129,13 @@ pub struct DeviceSessionResponse {
     pub is_current_session: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionIdInput {
     pub session_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameDeviceInput {
     pub session_id: String,

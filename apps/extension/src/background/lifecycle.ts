@@ -9,32 +9,12 @@
  * or run work at module scope beyond building the object.
  */
 
-import type {
-	CredentialMirror,
-	LifecycleDeps,
-} from "@bittery/core/services/account-lifecycle";
-import { clearAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import type { LifecycleDeps } from "@bittery/core/services/account-lifecycle";
+import { NO_CREDENTIAL_MIRROR } from "@bittery/core/services/account-lifecycle";
 import { itemCache, storage } from "../lib/storage";
-
-/**
- * The extension keeps no MUK mirror outside `AccountStore`, but the shared RPC
- * client cache holds live clients bound to the bearer token — dropping the token
- * without dropping the client leaves a cached client still sending a revoked
- * credential.
- */
-const rpcClientCacheMirror: CredentialMirror = {
-	async purge(refs) {
-		for (const ref of refs) {
-			if (!ref.authToken) {
-				continue;
-			}
-			clearAccountRpcClient(ref.authToken, ref.serverUrl);
-		}
-	},
-};
 
 export const lifecycleDeps: LifecycleDeps = {
 	storage,
 	itemCache,
-	credentialMirror: rpcClientCacheMirror,
+	credentialMirror: NO_CREDENTIAL_MIRROR,
 };

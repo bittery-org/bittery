@@ -4,11 +4,9 @@ export type {
 	DecryptRequest,
 	DerivedKeyRefs,
 	KeyRef,
-	LegacyKeyEnvelope,
 	PasskeyAssertion,
 	PasskeyAttestation,
 	PasskeyKeypair,
-	UnwrapKeyOptions,
 } from "./crypto-port";
 export type { CryptoPortErrorCode } from "./errors";
 export {
@@ -16,3 +14,21 @@ export {
 	CryptoPortError,
 	isCryptoPortError,
 } from "./errors";
+export type {
+	EncryptedData,
+	EncryptionContext,
+	ItemData,
+	KdfAlgorithm,
+	KdfProfile,
+	KeyRotationResult,
+	MemberEncryptedKey,
+	MemberKeyData,
+	ReEncryptedItem,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+	TotpResult,
+	ValidationResult,
+} from "./types";

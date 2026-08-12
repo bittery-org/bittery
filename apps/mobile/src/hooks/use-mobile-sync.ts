@@ -1,16 +1,19 @@
 import {
 	AccountResolver,
-	createStoredAccountRpcClient,
+	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
+import {
+	createInitialSyncBootstrap,
+	createStagedFullRefresh,
+} from "@bittery/core/services/staged-full-refresh";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { RpcVaultClient } from "@bittery/core/services/vault-service";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
+import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { fetch as expoFetch } from "expo/fetch";
+import { useToast } from "heroui-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
@@ -18,6 +21,7 @@ import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
 } from "../lib/sync-client-id";
+import { useI18n } from "../providers/i18n-provider";
 import { itemCache, storage } from "../services/storage";
 
 /**
@@ -103,6 +107,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
  * Mobile-specific sync hook that integrates with React Native storage
  */
 export function useMobileSync(queryClient: QueryClient, enabled = true) {
+	const { m } = useI18n();
+	const { toast } = useToast();
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
 	const [syncAccountId, setSyncAccountId] = useState<string | null>(null);
@@ -164,25 +170,16 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	}, [syncAccountId]);
 	const getClientForAccount = useCallback(
 		async (accountId: string) => {
-			const client = await createStoredAccountRpcClient(
+			const client = await createStoredAccountApiClient(
 				storage,
 				accountId,
 				clientId,
 			);
-			if (!client) throw new Error(`No RPC client for account ${accountId}`);
-			return client as unknown as OutboundQueueClient;
+			if (!client) throw new Error(`No API client for account ${accountId}`);
+			return client;
 		},
 		[clientId],
 	);
-	const resolveLegacyAccountId = useCallback(async (email: string) => {
-		const matches = (await storage.getAccountsList()).filter(
-			(account) => account.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (matches.length !== 1)
-			throw new Error(`Ambiguous legacy account queue for ${email}`);
-		return matches[0]?.accountId;
-	}, []);
-
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
 		() =>
@@ -195,21 +192,37 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		[],
 	);
 
+	const refreshFromServer = useMemo(
+		() => createStagedFullRefresh(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+	const initializeFromServer = useMemo(
+		() => createInitialSyncBootstrap(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+
 	const onTravelModeEvent = useCallback(
 		async (event: { type: string; metadata?: Record<string, unknown> }) => {
 			if (!syncAccountId || event.type !== "travel_mode_updated") {
 				return;
 			}
-			const [token, accountServerUrl] = await Promise.all([
+			const [token, accountServerUrl, account] = await Promise.all([
 				storage.getAuthToken(syncAccountId),
 				storage.getServerUrl(syncAccountId),
+				storage.getAccountMetadata(syncAccountId),
 			]);
 			if (!token) {
 				return;
 			}
-			const rpcClient = createAccountRpcClient(
+			const apiClient = createAccountApiClient(
 				token,
 				accountServerUrl || serverUrl || "http://localhost:3000",
+				undefined,
+				undefined,
+				{
+					insecureTransportConfirmed:
+						account?.insecureTransportConfirmed === true,
+				},
 			);
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
@@ -219,13 +232,21 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				itemCache,
 				vaultCoordinator,
 				{
-					rpcClient: rpcClient as unknown as RpcVaultClient,
+					apiClient,
 					accounts,
 				},
 			);
 		},
 		[serverUrl, syncAccountId, vaultCoordinator],
 	);
+	const onTerminalCommandFailure = useCallback(() => {
+		toast.show({
+			variant: "danger",
+			label: m.sync_command_terminal_error(),
+			description: m.sync_command_terminal_error_description(),
+			placement: "bottom",
+		});
+	}, [m, toast]);
 
 	const syncState = useSync({
 		serverUrl,
@@ -240,9 +261,10 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAccountId: syncAccountId,
 		itemCacheServerUrl: syncAccountId ? serverUrl : null,
 		getClientForAccount,
-		resolveLegacyAccountId,
-		fetch: expoFetch,
+		refreshFromServer,
+		initializeFromServer,
 		onEventProcessed: onTravelModeEvent,
+		onTerminalCommandFailure,
 	});
 
 	return {

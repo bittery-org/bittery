@@ -42,6 +42,7 @@ export * from "./components/vault/item-categories";
 export * from "./components/vault/item-detail";
 export { default as ItemDetail } from "./components/vault/item-detail";
 export * from "./components/vault/item-detail/item-attachments";
+export * from "./components/vault/item-drag-preview";
 export * from "./components/vault/item-form";
 export * from "./components/vault/item-list-controls";
 export * from "./components/vault/item-list-row";

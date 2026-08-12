@@ -4,6 +4,7 @@ import {
 	type ParsedDeviceSetupPayload,
 	parseDeviceSetupParams,
 } from "@bittery/shared";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -51,8 +52,8 @@ import {
 } from "@/components/ui";
 import { defaultServerUrl } from "@/constants/server-url";
 import { useAccount } from "@/contexts/account-context";
+import { useServerUrl } from "@/lib/api";
 import { useBiometricType } from "@/lib/biometric-type";
-import { useServerUrl } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/services/credential-provider-master-unlock-key";
@@ -142,6 +143,8 @@ export default function LoginScreen() {
 	const [isScannerOpen, setIsScannerOpen] = useState(false);
 	const [isServerExpanded, setIsServerExpanded] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
 	// Null means "wherever the setup payload puts us", so a scan lands on the
 	// password step without an effect copying the step into state.
@@ -176,6 +179,13 @@ export default function LoginScreen() {
 	const email = emailEdit ?? prefill?.email ?? "";
 	const serverUrl = serverUrlEdit ?? prefill?.serverUrl ?? defaultServerUrl;
 	const secretKey = secretKeyEdit ?? prefill?.secretKey ?? "";
+	const normalizedServerUrl = normalizeServerUrl(serverUrl, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
+	const requiresInsecureTransportConfirmation = normalizedServerUrl
+		? isRemoteHttpServer(normalizedServerUrl)
+		: false;
 	// A payload that carried a Secret Key leaves only the master password to enter.
 	const isSetupComplete = Boolean(prefill?.secretKey);
 	const step: Step =
@@ -232,7 +242,7 @@ export default function LoginScreen() {
 			return;
 		}
 
-		if (!normalizeServerUrl(serverUrl)) {
+		if (!normalizedServerUrl) {
 			setFormError(m.login_alert_invalid_url_message());
 			setIsServerExpanded(true);
 			return;
@@ -253,9 +263,12 @@ export default function LoginScreen() {
 			return;
 		}
 
-		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
 			setFormError(m.login_alert_invalid_url_message());
+			return;
+		}
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			setFormError(m.auth_insecure_http_confirmation_required());
 			return;
 		}
 
@@ -270,6 +283,7 @@ export default function LoginScreen() {
 			password,
 			secretKey,
 			serverUrl: normalizedServerUrl,
+			insecureTransportConfirmed,
 			enableBiometric: enableBiometric && biometricAvailable,
 		});
 	};
@@ -281,6 +295,7 @@ export default function LoginScreen() {
 		setServerUrlEdit(null);
 		setSecretKeyEdit(null);
 		setPassword("");
+		setInsecureTransportConfirmed(false);
 		setFormError(null);
 		setStepOverride(null);
 	};
@@ -409,6 +424,23 @@ export default function LoginScreen() {
 													})}
 												</Description>
 											</View>
+										</View>
+										<ControlField.Indicator />
+									</ControlField>
+								</View>
+							) : null}
+
+							{requiresInsecureTransportConfirmation ? (
+								<View className="rounded-2xl border border-warning/30 bg-warning/5 p-3.5">
+									<ControlField
+										isSelected={insecureTransportConfirmed}
+										onSelectedChange={setInsecureTransportConfirmed}
+									>
+										<View className="flex-1">
+											<Label>{m.auth_insecure_http_confirmation_label()}</Label>
+											<Description>
+												{m.auth_insecure_http_confirmation_description()}
+											</Description>
 										</View>
 										<ControlField.Indicator />
 									</ControlField>

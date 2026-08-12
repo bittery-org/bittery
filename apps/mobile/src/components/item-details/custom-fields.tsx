@@ -1,14 +1,8 @@
+import type { CustomField } from "@bittery/shared/types";
 import { useI18n } from "@/providers/i18n-provider";
 import { DetailSection } from "./detail-section";
 import { FieldGroup } from "./field-row";
 import type { FieldDefinition } from "./types";
-
-interface CustomField {
-	id: string;
-	label: string;
-	value: string;
-	type: string;
-}
 
 interface CustomFieldsProps {
 	fields?: CustomField[];

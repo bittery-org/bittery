@@ -16,7 +16,7 @@ import {
 	IconTimer,
 	IconUser,
 } from "@/components/ui";
-import { useServerUrl } from "@/lib/rpc";
+import { useServerUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const StyledImage = withUniwind(Image);

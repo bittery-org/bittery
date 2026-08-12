@@ -15,6 +15,7 @@ import {
 	bytesToBase64Url,
 } from "../passkey/base64";
 import type {
+	PasskeyBackgroundResponse,
 	PasskeyCreateExistingItemOption,
 	PasskeyCreateHandlerPayload,
 	PasskeyCreateSaveDecision,
@@ -26,24 +27,22 @@ import type {
 	SerializedCredentialDescriptor,
 	SerializedGetResult,
 } from "../passkey/types";
-import { core } from "./core-instance";
+import { apiClient } from "./api-client";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { getDesktopStatus, isDesktopUnlockedNow } from "./desktop-status";
-import { rpcClient } from "./rpc-client";
+import {
+	createExtensionItem,
+	updateExtensionItem,
+} from "./extension-item-mutations";
 import {
 	resolveAccountEmailForVault,
 	resolveEmailFromAccountId,
 } from "./services/account-resolution";
 import {
-	onLocalItemCreated,
-	onLocalItemUpdated,
-} from "./services/local-item-cache-service";
-import {
 	isUnlocked,
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 const PASSKEY_TRANSPORTS: string[] = ["internal", "hybrid"];
@@ -64,11 +63,11 @@ export type MatchedPasskey = {
 	passkeyIndex: number;
 };
 
-export type PasskeyHandlerResponse = MessageResponse & {
-	fallbackToNative?: boolean;
-	result?: PasskeySerializedResult;
-	requiresUserInteraction?: PasskeyUserInteractionRequest;
-};
+/**
+ * The passkey sub-protocol already publishes this shape for the page bridge;
+ * the background answers with exactly it rather than a second copy.
+ */
+export type PasskeyHandlerResponse = PasskeyBackgroundResponse;
 
 type PasskeyEventName =
 	| "create_intercepted"
@@ -322,10 +321,14 @@ function readVaultAccountEmail(vault: unknown): string | undefined {
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
-	const vaults = await rpcClient.vault.list.query();
+	const { data: vaults } = await apiClient.vaults.list();
 	return vaults
 		.map((vault) => {
-			const decodedVault = toVaultKeyEntry(vault);
+			const decodedVault = toVaultKeyEntry({
+				...vault,
+				icon: vault.icon ?? null,
+				imageUrl: vault.imageUrl ?? null,
+			});
 			return {
 				id: decodedVault.vaultId,
 				name: decodedVault.vaultName,
@@ -541,23 +544,13 @@ async function attachPasskeyToExistingItem(input: {
 	const existingData = toDecryptedData(input.item);
 	const nextPasskeys = [...(existingData.passkeys ?? []), input.passkey];
 
-	const updateResult = await core.items.updateItem(
-		{
-			itemId: input.item.id,
-			vaultId: input.item.vaultId,
-			data: {
-				...existingData,
-				passkeys: nextPasskeys,
-			},
-			accountEmail,
-		},
-		rpcClient as Parameters<typeof core.items.updateItem>[1],
-	);
-
-	await onLocalItemUpdated({
+	await updateExtensionItem({
 		itemId: input.item.id,
-		encryptedData: updateResult._encryptedData,
-		accountEmail: updateResult._accountEmail,
+		data: {
+			...existingData,
+			passkeys: nextPasskeys,
+		},
+		accountEmail,
 	});
 }
 
@@ -579,27 +572,16 @@ async function createItemWithPasskey(input: {
 		throw new Error("No vault keys available for writable vault");
 	}
 
-	const createResult = await core.items.createItem(
-		{
-			vaultId: input.targetVault.id,
-			category: "login",
-			data: {
-				title: input.rpId,
-				url: `https://${input.rpId}`,
-				username: input.username,
-				passkeys: [input.passkey],
-			},
-			accountEmail,
-		},
-		rpcClient as Parameters<typeof core.items.createItem>[1],
-	);
-
-	await onLocalItemCreated({
-		itemId: createResult.itemId,
+	await createExtensionItem({
 		vaultId: input.targetVault.id,
 		category: "login",
-		encryptedData: createResult._encryptedData,
-		accountEmail: createResult._accountEmail,
+		data: {
+			title: input.rpId,
+			url: `https://${input.rpId}`,
+			username: input.username,
+			passkeys: [input.passkey],
+		},
+		accountEmail,
 	});
 }
 
@@ -738,23 +720,13 @@ async function updateStoredPasskey(input: {
 	}
 	nextPasskeys[input.match.passkeyIndex] = input.update(current);
 
-	const updateResult = await core.items.updateItem(
-		{
-			itemId: input.match.item.id,
-			vaultId: input.match.item.vaultId,
-			data: {
-				...data,
-				passkeys: nextPasskeys,
-			},
-			accountEmail,
-		},
-		rpcClient as Parameters<typeof core.items.updateItem>[1],
-	);
-
-	await onLocalItemUpdated({
+	await updateExtensionItem({
 		itemId: input.match.item.id,
-		encryptedData: updateResult._encryptedData,
-		accountEmail: updateResult._accountEmail,
+		data: {
+			...data,
+			passkeys: nextPasskeys,
+		},
+		accountEmail,
 	});
 }
 

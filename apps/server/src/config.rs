@@ -13,10 +13,7 @@ pub(crate) fn bittery_mode() -> &'static str {
     match std::env::var("BITTERY_MODE") {
         Ok(value) => {
             let normalized = value.trim().to_ascii_lowercase();
-            if normalized == SELF_HOSTED_MODE
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
+            if normalized == SELF_HOSTED_MODE {
                 SELF_HOSTED_MODE
             } else {
                 CLOUD_MODE
@@ -76,6 +73,10 @@ pub(crate) fn cloud_public_signup_enabled() -> bool {
 
 pub(crate) fn cloud_billing_enabled() -> bool {
     env_flag("BITTERY_CLOUD_BILLING_ENABLED", true)
+}
+
+pub(crate) fn insecure_http_enabled() -> bool {
+    env_flag("BITTERY_ALLOW_INSECURE_HTTP", false)
 }
 
 pub(crate) fn format_timestamp(value: OffsetDateTime) -> String {

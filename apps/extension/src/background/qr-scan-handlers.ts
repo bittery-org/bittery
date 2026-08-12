@@ -3,24 +3,25 @@
  * Handles tab screenshot capture and TOTP field updates
  */
 
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
-import { crypto } from "../lib/crypto";
-import { storage } from "../lib/storage";
-import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { rpcClient } from "./rpc-client";
-import { resolveAccountEmailForVault } from "./services/account-resolution";
-import { onLocalItemUpdated } from "./services/local-item-cache-service";
+import { updateExtensionItem } from "./extension-item-mutations";
+import type {
+	CaptureTabScreenshotResponse,
+	TotpUpdate,
+	TotpUpdateErrorType,
+	UpdateItemTotpResponse,
+} from "./router/contract";
+import { resolveAccountEmailForItemId } from "./services/account-resolution";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
+import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 /**
  * Handle CAPTURE_TAB_SCREENSHOT message - Capture screenshot of current tab
  */
-export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
+export async function handleCaptureTabScreenshot(): Promise<CaptureTabScreenshotResponse> {
 	updateActivity();
 
 	try {
@@ -78,24 +79,12 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 }
 
 /**
- * TOTP data structure for updating an item
- */
-interface TotpUpdateData {
-	totpSecret: string;
-	totpIssuer?: string;
-	totpAccountName?: string;
-	totpAlgorithm?: "SHA1" | "SHA256" | "SHA512";
-	totpDigits?: 6 | 7 | 8;
-	totpPeriod?: number;
-}
-
-/**
  * Handle UPDATE_ITEM_TOTP message - Add/update TOTP field on an existing item
  */
 export async function handleUpdateItemTotp(payload: {
 	itemId: string;
-	totp: TotpUpdateData;
-}): Promise<MessageResponse> {
+	totp: TotpUpdate;
+}): Promise<UpdateItemTotpResponse> {
 	updateActivity();
 
 	const { itemId, totp } = payload;
@@ -119,8 +108,9 @@ export async function handleUpdateItemTotp(payload: {
 	}
 
 	try {
-		// Get the existing item
-		const item = await rpcClient.vault.getItem.query({ itemId });
+		const item = (await getDecryptedItemsForCurrentMode()).find(
+			(candidate) => candidate?.id === itemId,
+		);
 
 		if (!item) {
 			return {
@@ -139,7 +129,7 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		const accountEmail = await resolveAccountEmailForVault(item.vaultId);
+		const accountEmail = await resolveAccountEmailForItemId(itemId);
 		if (!accountEmail) {
 			return {
 				success: false,
@@ -158,81 +148,23 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		// Get vault key for the item's vault. `AccountStore` is keyed by accountId, so the
-		// email has to be resolved first.
-		const accountId = await resolveAccountScopeId(storage, accountEmail);
-		const vaultKey = await core.vaultCrypto.getVaultKey({
-			vaultId: item.vaultId,
-			accountId,
-		});
-		if (!vaultKey) {
-			return {
-				success: false,
-				error: "Vault key not found for this item.",
-				errorType: "vault_key",
-			};
-		}
-
-		try {
-			const session = await storage.getStoredSessionData(accountId);
-			if (!session) {
-				throw new Error("Session data not available. Please re-authenticate.");
-			}
-			const scope = {
-				vaultId: item.vaultId,
-				itemId: item.id,
-				version: item.version ?? 1,
-				userId: session.userId,
-			};
-			const decrypted = await core.vaultCrypto.decryptItem(
-				{
-					algorithm: item.encryptionAlgorithm,
-					iv: item.encryptionIv,
-					ciphertext: item.encryptedData,
-				},
-				vaultKey,
-				scope,
-			);
-
-			const existingData = JSON.parse(decrypted);
-			const updatedData = {
-				...existingData,
+		await updateExtensionItem({
+			itemId,
+			accountEmail,
+			data: {
 				totpSecret: totp.totpSecret,
-				totpIssuer: totp.totpIssuer || existingData.totpIssuer,
-				totpAccountName: totp.totpAccountName || existingData.totpAccountName,
-				totpAlgorithm:
-					totp.totpAlgorithm || existingData.totpAlgorithm || "SHA1",
-				totpDigits: totp.totpDigits || existingData.totpDigits || 6,
-				totpPeriod: totp.totpPeriod || existingData.totpPeriod || 30,
-			};
-			const encryptedData = await core.vaultCrypto.encryptItem(
-				JSON.stringify(updatedData),
-				vaultKey,
-				scope,
-			);
+				totpIssuer: totp.totpIssuer || item.totpIssuer,
+				totpAccountName: totp.totpAccountName || item.totpAccountName,
+				totpAlgorithm: totp.totpAlgorithm || item.totpAlgorithm || "SHA1",
+				totpDigits: totp.totpDigits || item.totpDigits || 6,
+				totpPeriod: totp.totpPeriod || item.totpPeriod || 30,
+			},
+		});
 
-			await rpcClient.vault.updateItem.mutate({
-				itemId,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
-				expectedVersion: null,
-				clientId: null,
-			});
-
-			await onLocalItemUpdated({
-				itemId,
-				encryptedData,
-				accountEmail,
-			});
-
-			return {
-				success: true,
-				message: "TOTP added successfully",
-			};
-		} finally {
-			await crypto.destroyKey(vaultKey);
-		}
+		return {
+			success: true,
+			message: "TOTP added successfully",
+		};
 	} catch (error) {
 		console.error("Error updating item TOTP:", error);
 		const errorMessageRaw =
@@ -240,7 +172,7 @@ export async function handleUpdateItemTotp(payload: {
 
 		// Determine error type and message
 		let errorMessage = "Failed to update item with TOTP. Please try again.";
-		let errorType = "unknown";
+		let errorType: TotpUpdateErrorType = "unknown";
 
 		if (
 			errorMessageRaw.includes("network") ||

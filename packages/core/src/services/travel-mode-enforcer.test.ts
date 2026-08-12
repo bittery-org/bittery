@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { cachedItem } from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
+import type { CachedVaultMetadata } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
@@ -49,7 +50,7 @@ async function createLayers(
 	}
 
 	await cache.setCachedItems(
-		[{ id: "i1", vaultId: "v1" } as CachedEncryptedItem],
+		[cachedItem({ id: "i1", vaultId: "v1" })],
 		ACCOUNT_ID,
 	);
 	await cache.setCachedVaults(
@@ -138,20 +139,20 @@ describe("TravelModeEnforcer", () => {
 			travelModeCache: { enabled: false, hiddenVaultIds: [] },
 		});
 		const enforcer = new TravelModeEnforcer({ storage, itemCache });
-		const rpcClient = {
+		const apiClient = {
 			travelMode: {
-				getTravelMode: {
-					query: mock(async () => ({
+				get: mock(async () => ({
+					data: {
 						enabled: true,
 						hiddenVaultIds: ["v1"],
 						enabledAt: "2026-01-01T00:00:00.000Z",
 						updatedAt: "2026-01-01T00:00:00.000Z",
-					})),
-				},
+					},
+				})),
 			},
 		} as never;
 
-		const config = await enforcer.verifyForUnlock(ACCOUNT_ID, rpcClient);
+		const config = await enforcer.verifyForUnlock(ACCOUNT_ID, apiClient);
 
 		expect(config.enabled).toBe(true);
 		expect(config.hiddenVaultIds).toEqual(["v1"]);

@@ -19,13 +19,14 @@ services:
         condition: service_healthy
 
   server:
-    image: ghcr.io/bittery-org/bittery-server:latest
+    image: ghcr.io/bittery-org/bittery-server:${BITTERY_RELEASE:?BITTERY_RELEASE must pin an exact release}
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - CORS_ORIGIN=https://${DOMAIN}
       - BITTERY_MODE=${BITTERY_MODE:-self-hosted}
+      - BITTERY_ALLOW_INSECURE_HTTP=${BITTERY_ALLOW_INSECURE_HTTP:-false}
       - TRUST_PROXY_MODE=${TRUST_PROXY_MODE:-none}
       - BITTERY_STORAGE_ENDPOINT=${BITTERY_STORAGE_ENDPOINT:-}
       - BITTERY_STORAGE_BUCKET=${BITTERY_STORAGE_BUCKET:-}
@@ -63,7 +64,7 @@ services:
       retries: 3
 
   web:
-    image: ghcr.io/bittery-org/bittery-web:latest
+    image: ghcr.io/bittery-org/bittery-web:${BITTERY_RELEASE:?BITTERY_RELEASE must pin an exact release}
     restart: unless-stopped
     healthcheck:
       # 127.0.0.1, not `localhost`: the web image's busybox wget only tries the

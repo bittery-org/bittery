@@ -16,10 +16,19 @@ All configuration is done through environment variables on the **server** servic
 | `DATABASE_URL` | PostgreSQL connection string. When using built-in Postgres: `postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery` |
 | `JWT_SECRET` | Secret key for signing authentication tokens. Generate with `openssl rand -hex 32` |
 | `DOMAIN` | Your domain name (used by Caddy for TLS) |
+| `BITTERY_RELEASE` | Exact release tag used by both the server and web images |
 
 <Callout type="danger">
 Never reuse `JWT_SECRET` across instances or commit it to version control. Rotating this secret will invalidate all active sessions.
 </Callout>
+
+## Transport security
+
+Public server and object-storage URLs must use HTTPS. Loopback HTTP remains available for local
+development. A non-loopback HTTP deployment requires both an operator-enabled insecure transport
+capability and confirmation on each affected client account; a global client preference is not
+sufficient. This exception should only be used on a network whose confidentiality and integrity
+are managed outside Bittery.
 
 ## Server settings
 
@@ -28,6 +37,7 @@ Never reuse `JWT_SECRET` across instances or commit it to version control. Rotat
 | `BITTERY_MODE` | `self-hosted` | Operating mode. Use `self-hosted` for self-hosted deployments |
 | `BITTERY_CLOUD_PUBLIC_SIGNUP` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to make signup invite-only |
 | `BITTERY_CLOUD_BILLING_ENABLED` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to disable Stripe billing |
+| `BITTERY_ALLOW_INSECURE_HTTP` | `false` | Advertise operator permission for non-loopback HTTP. Each client account must still confirm before sending credentials |
 | `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
 | `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded`. See the warning under [Rate limiting](#rate-limiting) |
 | `PORT` | `3000` | Port the API server listens on |

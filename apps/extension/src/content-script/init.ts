@@ -7,7 +7,6 @@ import {
 import { setupAjaxDetection } from "./capture";
 import {
 	detectPasswordFields,
-	detectPasswordFieldsLegacy,
 	setupDynamicDetectionObserver,
 	setupShadowRootWatcher,
 } from "./detection";
@@ -52,7 +51,6 @@ export function initContentScript() {
 
 	const runInitialDetection = () => {
 		detectPasswordFields();
-		detectPasswordFieldsLegacy();
 		restorePendingSavePrompt();
 		setupShadowRootWatcher();
 	};

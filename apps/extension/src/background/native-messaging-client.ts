@@ -176,7 +176,9 @@ export class NativeMessagingClient {
 
 	private handleProtocolMismatch(
 		receivedVersion: number | undefined,
-		expectedVersion = DESKTOP_PROTOCOL_VERSION,
+		// Annotated, not inferred: the pinned version is a literal type now, and
+		// the peer is entitled to name any version in a mismatch report.
+		expectedVersion: number = DESKTOP_PROTOCOL_VERSION,
 	): void {
 		const error = new DesktopProtocolMismatchError(
 			expectedVersion,

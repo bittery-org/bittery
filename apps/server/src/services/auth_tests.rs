@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
-        HeaderMap, HeaderValue, Request, StatusCode,
+        HeaderMap, HeaderValue, Method, Request,
     },
 };
 use bittery_crypto_core::srp6a::SrpClient;
@@ -15,10 +15,11 @@ use super::{
     parse_bearer_token, parse_pending_vault_keys, plan_member_limit, signup_team_name,
     validate_hex_string, validate_login_attempt_id, validate_resource_id, validate_token,
 };
+use crate::db::enums::{BillingPlan, TeamType};
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,
+    seed_vault_key, with_api_test_app, with_raw_test_db, ApiTestApp,
 };
 use crate::{repo::common::hash_token, services::session::now_utc};
 use time::{Duration, OffsetDateTime};
@@ -63,7 +64,6 @@ struct AuthAccountFixture {
 }
 
 struct AuthInvitationFixture {
-    team_id: String,
     team_vault_id: String,
     invitation_token: String,
     invited_email: String,
@@ -77,7 +77,7 @@ struct LoginEphemeralFixture {
 #[tokio::test]
 async fn auth_public_signup_login_and_logout_flow() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_public_signup_login_and_logout_flow",
             |app| async move {
                 let email = "MixedCase.Auth@example.com";
@@ -85,85 +85,56 @@ async fn auth_public_signup_login_and_logout_flow() {
                 let crypto = build_auth_crypto_fixture("public-signup", "signup-password-123");
 
                 let registration = app
-                    .rpc_call(
-                        "auth.registrationStatus",
-                        json!([]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::GET, "/api/meta", None, unauthenticated_json_headers())
                     .await;
-                assert_eq!(registration.status, StatusCode::OK);
-                assert_eq!(registration.body["result"]["Ok"]["mode"], json!("cloud"));
+                registration.assert_contract_status();
+                assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
                 assert_eq!(
-                    registration.body["result"]["Ok"]["allowPublicSignup"],
+                    registration.body["registration"]["allowPublicSignup"],
                     json!(true)
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    registration.body["registration"]["requiresEmailVerification"],
                     json!(true)
                 );
 
                 let unknown_email = app
-                    .rpc_call(
-                        "auth.checkEmail",
-                        json!([{ "email": email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/email-checks", Some(json!({ "email": email })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(unknown_email.status, StatusCode::OK);
-                assert_eq!(unknown_email.body["result"]["Ok"]["exists"], json!(true));
+                unknown_email.assert_contract_status();
+                assert_eq!(unknown_email.body["exists"], json!(true));
                 assert_eq!(
-                    unknown_email.body["result"]["Ok"]["secretKeyHint"],
+                    unknown_email.body["secretKeyHint"],
                     json!(deterministic_fake_hint(&normalized_email)),
                 );
 
                 let request_verification = app
-                    .rpc_call(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": email, "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(request_verification.status, StatusCode::OK);
-                assert_eq!(
-                    request_verification.body["result"]["Ok"]["success"],
-                    json!(true)
-                );
+                request_verification.assert_contract_status();
+                assert_eq!(request_verification.body["success"], json!(true));
 
                 let code = latest_signup_verification_code(email, None);
 
                 let wrong_code = app
-                    .rpc_call(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(wrong_code.status, StatusCode::OK);
-                assert_eq!(wrong_code.body["result"]["Ok"]["success"], json!(false));
-                assert_eq!(
-                    wrong_code.body["result"]["Ok"]["signupVerificationToken"],
-                    json!(null)
-                );
+                wrong_code.assert_contract_status();
+                assert_eq!(wrong_code.body["success"], json!(false));
+                assert_eq!(wrong_code.body["signupVerificationToken"], json!(null));
 
                 let verify = app
-                    .rpc_call(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": code, "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(verify.status, StatusCode::OK);
-                assert_eq!(verify.body["result"]["Ok"]["success"], json!(true));
-                let signup_verification_token = verify.body["result"]["Ok"]
-                    ["signupVerificationToken"]
+                verify.assert_contract_status();
+                assert_eq!(verify.body["success"], json!(true));
+                let signup_verification_token = verify.body["signupVerificationToken"]
                     .as_str()
                     .expect("signup verification token should be returned")
                     .to_string();
 
                 let signup = app
-                    .rpc_call(
-                        "auth.signup",
-                        json!([{
+                    .api_json(Method::POST, "/api/v1/auth/signups", Some(json!({
                             "email": email,
                             "signupVerificationToken": signup_verification_token,
                             "name": "Auth Public User",
@@ -178,57 +149,37 @@ async fn auth_public_signup_login_and_logout_flow() {
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
-                        unauthenticated_json_headers(),
-                    )
+                        })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(signup.status, StatusCode::OK);
-                assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["email"],
-                    json!(normalized_email)
-                );
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["teamType"],
-                    json!("personal")
-                );
-                let signup_token = signup.body["result"]["Ok"]["token"]
+                signup.assert_contract_status();
+                assert_eq!(signup.body["success"], json!(true));
+                assert_eq!(signup.body["user"]["email"], json!(normalized_email));
+                assert_eq!(signup.body["user"]["teamType"], json!("personal"));
+                let signup_token = signup.body["token"]
                     .as_str()
                     .expect("signup token should exist")
                     .to_string();
 
                 let me = app
-                    .rpc_call(
-                        "auth.me",
-                        json!([]),
-                        authenticated_json_headers(&signup_token),
-                    )
+                    .api_json(Method::GET, "/api/v1/users/me", None, authenticated_json_headers(&signup_token))
                     .await;
-                assert_eq!(me.status, StatusCode::OK);
-                assert_eq!(me.body["result"]["Ok"]["email"], json!(normalized_email));
-                assert_eq!(me.body["result"]["Ok"]["hasRecoveryKey"], json!(true));
+                me.assert_contract_status();
+                assert_eq!(me.body["email"], json!(normalized_email));
+                assert_eq!(me.body["hasRecoveryKey"], json!(true));
 
                 let existing_email = app
-                    .rpc_call(
-                        "auth.checkEmail",
-                        json!([{ "email": normalized_email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/email-checks", Some(json!({ "email": normalized_email })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(existing_email.status, StatusCode::OK);
+                existing_email.assert_contract_status();
                 assert_eq!(
-                    existing_email.body["result"]["Ok"]["secretKeyHint"],
+                    existing_email.body["secretKeyHint"],
                     json!(crypto.secret_key_hint),
                 );
 
                 let malformed_start = app
-                    .rpc_call(
-                        "auth.startLogin",
-                        json!([{ "email": normalized_email, "clientPublicKey": "not-hex" }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": normalized_email, "clientPublicKey": "not-hex" })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(malformed_start.status, StatusCode::OK);
+                malformed_start.assert_contract_status();
                 assert_handler_error(
                     &malformed_start.body,
                     "BAD_REQUEST",
@@ -237,14 +188,10 @@ async fn auth_public_signup_login_and_logout_flow() {
 
                 let ephemeral = build_login_ephemeral_fixture();
                 let start_login = app
-					.rpc_call(
-						"auth.startLogin",
-						json!([{ "email": normalized_email, "clientPublicKey": ephemeral.public_key }]),
-						unauthenticated_json_headers(),
-					)
+					.api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": normalized_email, "clientPublicKey": ephemeral.public_key })), unauthenticated_json_headers())
 					.await;
-                assert_eq!(start_login.status, StatusCode::OK);
-                let start_ok = &start_login.body["result"]["Ok"];
+                start_login.assert_contract_status();
+                let start_ok = &start_login.body;
                 let start_salt = start_ok["salt"].as_str().expect("salt should be returned");
                 let server_public_key = start_ok["serverPublicKey"]
                     .as_str()
@@ -256,65 +203,33 @@ async fn auth_public_signup_login_and_logout_flow() {
                     &crypto.auth_password,
                     TEST_SRP_ITERATIONS,
                 );
+                let attempt_id = start_ok["attemptId"]
+                    .as_str()
+                    .expect("login attempt ID should be returned");
 
                 let finish_login = app
-                    .rpc_call(
-                        "auth.finishLogin",
-                        json!([{
-                            "attemptId": start_ok["attemptId"],
+                    .api_json(Method::POST, &format!("/api/v1/auth/login-attempts/{attempt_id}/finish"), Some(json!({
+
                             "clientPublicKey": ephemeral.public_key,
                             "clientProof": client_proof,
-                        }]),
-                        unauthenticated_json_headers(),
-                    )
+                        })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(finish_login.status, StatusCode::OK);
-                assert_eq!(
-                    finish_login.body["result"]["Ok"]["user"]["email"],
-                    json!(normalized_email)
-                );
-                let login_token = finish_login.body["result"]["Ok"]["token"]
+                finish_login.assert_contract_status();
+                assert_eq!(finish_login.body["user"]["email"], json!(normalized_email));
+                let login_token = finish_login.body["token"]
                     .as_str()
                     .expect("login token should exist")
                     .to_string();
 
                 let refreshed = app
-                    .rpc_call(
-                        "auth.refreshSession",
-                        json!([]),
-                        authenticated_json_headers(&login_token),
-                    )
+                    .api_json(Method::POST, "/api/v1/sessions/current/refresh", None, authenticated_json_headers(&login_token))
                     .await;
-                assert_eq!(refreshed.status, StatusCode::OK);
-                let refreshed_token = refreshed.body["result"]["Ok"]["token"]
+                refreshed.assert_contract_status();
+                let refreshed_token = refreshed.body["token"]
                     .as_str()
                     .expect("refresh token should exist")
                     .to_string();
                 assert_ne!(refreshed_token, login_token);
-
-                let logout = app
-                    .rpc_call(
-                        "auth.logout",
-                        json!([]),
-                        authenticated_json_headers(&refreshed_token),
-                    )
-                    .await;
-                assert_eq!(logout.status, StatusCode::OK);
-                assert_eq!(logout.body["result"]["Ok"]["success"], json!(true));
-
-                let me_after_logout = app
-                    .rpc_call(
-                        "auth.me",
-                        json!([]),
-                        authenticated_json_headers(&refreshed_token),
-                    )
-                    .await;
-                assert_eq!(me_after_logout.status, StatusCode::OK);
-                assert_rpc_error(
-                    &me_after_logout.body,
-                    "UNAUTHORIZED",
-                    "Authentication required",
-                );
             },
         )
         .await;
@@ -326,22 +241,23 @@ async fn auth_public_signup_login_and_logout_flow() {
 async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
     with_auth_test_env_async(Some("cloud"), async {
         unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_rpc_test_app("auth_cloud_public_signup_disabled", |app| async move {
+        with_api_test_app("auth_cloud_public_signup_disabled", |app| async move {
             let registration = app
-                .rpc_call(
-                    "auth.registrationStatus",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/meta",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(registration.status, StatusCode::OK);
-            assert_eq!(registration.body["result"]["Ok"]["mode"], json!("cloud"));
+            registration.assert_contract_status();
+            assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
             assert_eq!(
-                registration.body["result"]["Ok"]["allowPublicSignup"],
+                registration.body["registration"]["allowPublicSignup"],
                 json!(false)
             );
             assert_eq!(
-                registration.body["result"]["Ok"]["reason"],
+                registration.body["registration"]["reason"],
                 json!("cloud_beta_invite_only")
             );
 
@@ -350,9 +266,10 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
             let signup_verification_token =
                 issue_signup_verification_token(&app, email, None).await;
             let signup = app
-                .rpc_call(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "Beta Disabled User",
@@ -367,11 +284,11 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
+            signup.assert_contract_status();
             assert_handler_error(
                 &signup.body,
                 "FORBIDDEN",
@@ -387,7 +304,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
 async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() {
     with_auth_test_env_async(Some("cloud"), async {
         unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_rpc_test_app("auth_invitation_signup_public_disabled", |app| async move {
+        with_api_test_app("auth_invitation_signup_public_disabled", |app| async move {
             let fixture = build_auth_invitation_fixture(&app.pool, "beta_disabled").await;
             let crypto = build_auth_crypto_fixture("beta-invite", "invite-success-pass");
             let signup_verification_token = issue_signup_verification_token(
@@ -398,10 +315,11 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
             .await;
 
             let signup = app
-                .rpc_call(
-                    "auth.signupWithInvitation",
-                    json!([{
-                        "token": fixture.invitation_token,
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
+                        "invitationToken": fixture.invitation_token,
                         "email": fixture.invited_email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "Invited Beta User",
@@ -414,16 +332,11 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            assert_eq!(
-                signup.body["result"]["Ok"]["user"]["teamId"],
-                json!(fixture.team_id)
-            );
+            signup.assert_contract_status();
         })
         .await;
     })
@@ -432,32 +345,29 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
 
 #[tokio::test]
 async fn auth_protected_handlers_require_authentication() {
-    with_rpc_test_app("auth_protected_handlers_require_authentication", |app| async move {
+    with_api_test_app("auth_protected_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
-				("auth.me", json!([])),
-				("auth.updateEmail", json!([{ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.changePassword", json!([{ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.regenerateSecretKey", json!([{ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.storeRecoveryKey", json!([{ "encryptedMasterKey": "master", "recoveryKeyHint": "hint" }])),
-				("auth.deleteAccount", json!([{ "confirmEmail": "user@example.com" }])),
-				("auth.listDevices", json!([])),
-				("auth.revokeDevice", json!([{ "sessionId": "session_target_01" }])),
-				("auth.renameDevice", json!([{ "sessionId": "session_target_01", "deviceName": "Laptop" }])),
-				("auth.heartbeat", json!([])),
-				("auth.logout", json!([])),
-				("auth.logoutAll", json!([])),
-				("auth.refreshSession", json!([])),
+				(Method::GET, "/api/v1/users/me", None),
+				(Method::POST, "/api/v1/users/me/email-changes", Some(json!({ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::POST, "/api/v1/users/me/password-changes", Some(json!({ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::POST, "/api/v1/users/me/secret-key-rotations", Some(json!({ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::PUT, "/api/v1/users/me/recovery-key", Some(json!({ "encryptedMasterKey": "master", "recoveryKeyHint": "hint" }))),
+				(Method::DELETE, "/api/v1/users/me", Some(json!({ "confirmEmail": "user@example.com" }))),
+				(Method::GET, "/api/v1/sessions", None),
+				(Method::DELETE, "/api/v1/sessions/session_target_01", None),
+				(Method::PATCH, "/api/v1/sessions/session_target_01", Some(json!({ "deviceName": "Laptop" }))),
+				(Method::POST, "/api/v1/sessions/current/refresh", None),
 			];
 
-			for (method, params) in protected_calls {
+			for (method, path, payload) in protected_calls {
 				let response = app
-					.rpc_call(method, params, unauthenticated_json_headers())
+					.api_json(method, path, payload, unauthenticated_json_headers())
 					.await;
-				assert_eq!(response.status, StatusCode::OK, "unexpected status for {method}");
-				assert_rpc_error(
+				response.assert_contract_status();
+				assert_transport_error(
 					&response.body,
 					"UNAUTHORIZED",
-					"Authentication required",
+					"A valid bearer session is required.",
 				);
 			}
 		})
@@ -467,7 +377,7 @@ async fn auth_protected_handlers_require_authentication() {
 #[tokio::test]
 async fn auth_self_hosted_registration_requires_bootstrap_invite() {
     with_auth_test_env_async(Some("self-hosted"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_self_hosted_registration_requires_bootstrap_invite",
             |app| async move {
                 seed_user(
@@ -479,38 +389,40 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                 .await;
 
                 let registration = app
-                    .rpc_call(
-                        "auth.registrationStatus",
-                        json!([]),
+                    .api_json(
+                        Method::GET,
+                        "/api/meta",
+                        None,
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(registration.status, StatusCode::OK);
+                registration.assert_contract_status();
                 assert_eq!(
-                    registration.body["result"]["Ok"]["mode"],
+                    registration.body["registration"]["mode"],
                     json!("self-hosted")
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["allowPublicSignup"],
+                    registration.body["registration"]["allowPublicSignup"],
                     json!(false)
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["reason"],
+                    registration.body["registration"]["reason"],
                     json!("invite_only_after_bootstrap")
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    registration.body["registration"]["requiresEmailVerification"],
                     json!(false)
                 );
 
                 let verification = app
-                    .rpc_call(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": "new-user@example.com", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": "new-user@example.com", "invitationToken": null })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(verification.status, StatusCode::OK);
+                verification.assert_contract_status();
                 assert_handler_error(
                     &verification.body,
                     "FORBIDDEN",
@@ -535,46 +447,46 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
     unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") };
     unsafe { std::env::set_var("NODE_ENV", "production") };
 
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_self_hosted_bootstrap_signup_skips_email_verification",
         |app| async move {
             let email = "admin@example.com";
             let crypto = build_auth_crypto_fixture("self-hosted-admin", "bootstrap-password");
 
             let registration = app
-                .rpc_call(
-                    "auth.registrationStatus",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/meta",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(registration.status, StatusCode::OK);
+            registration.assert_contract_status();
             assert_eq!(
-                registration.body["result"]["Ok"]["requiresEmailVerification"],
+                registration.body["registration"]["requiresEmailVerification"],
                 json!(false)
             );
             assert_eq!(
-                registration.body["result"]["Ok"]["allowPublicSignup"],
+                registration.body["registration"]["allowPublicSignup"],
                 json!(true)
             );
 
             let request_verification = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signup-verifications",
+                    Some(json!({ "email": email, "invitationToken": null })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(request_verification.status, StatusCode::OK);
-            assert_eq!(
-                request_verification.body["result"]["Ok"]["success"],
-                json!(true)
-            );
+            request_verification.assert_contract_status();
+            assert_eq!(request_verification.body["success"], json!(true));
 
             let signup = app
-                .rpc_call(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": "",
                         "name": "Self-Hosted Admin",
@@ -589,16 +501,13 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            assert_eq!(
-                signup.body["result"]["Ok"]["user"]["email"],
-                json!(normalize_email(email))
-            );
+            signup.assert_contract_status();
+            assert_eq!(signup.body["success"], json!(true));
+            assert_eq!(signup.body["user"]["email"], json!(normalize_email(email)));
         },
     )
     .await;
@@ -621,7 +530,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
 #[tokio::test]
 async fn auth_invited_signup_handles_missing_and_valid_invitations() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_invited_signup_handles_missing_and_valid_invitations",
             |app| async move {
                 let fixture = build_auth_invitation_fixture(&app.pool, "signup").await;
@@ -629,10 +538,11 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                     build_auth_crypto_fixture("invitation-missing", "invite-missing-pass");
 
                 let missing = app
-                    .rpc_call(
-                        "auth.signupWithInvitation",
-                        json!([{
-                            "token": build_valid_token("missing_invite"),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "invitationToken": build_valid_token("missing_invite"),
                             "email": fixture.invited_email,
                             "signupVerificationToken": "invalid-token",
                             "name": "Invited User",
@@ -645,11 +555,11 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "recoveryKeyHint": missing_crypto.recovery_key_hint,
                             "encryptedVaultKey": missing_crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(missing.status, StatusCode::OK);
+                missing.assert_contract_status();
                 assert_handler_error(
                     &missing.body,
                     "NOT_FOUND",
@@ -665,10 +575,11 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                 let crypto = build_auth_crypto_fixture("invitation-success", "invite-success-pass");
 
                 let signup = app
-                    .rpc_call(
-                        "auth.signupWithInvitation",
-                        json!([{
-                            "token": fixture.invitation_token,
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "invitationToken": fixture.invitation_token,
                             "email": fixture.invited_email,
                             "signupVerificationToken": signup_verification_token,
                             "name": "Invited User",
@@ -681,18 +592,12 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(signup.status, StatusCode::OK);
-                assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["teamId"],
-                    json!(fixture.team_id)
-                );
-                assert_eq!(signup.body["result"]["Ok"]["user"]["role"], json!("member"));
-                assert!(signup.body["result"]["Ok"]["vaultKeys"]
+                signup.assert_contract_status();
+                assert!(signup.body["vaultKeys"]["items"]
                     .as_array()
                     .expect("vault keys should be an array")
                     .iter()
@@ -707,70 +612,72 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
 #[tokio::test]
 async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_recovery_flow_verifies_codes_returns_data_and_resets_password",
             |app| async move {
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "recovery").await;
                 let existing_session = app.issue_session(&fixture.user_id).await;
 
                 let request_recovery = app
-                    .rpc_call(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(request_recovery.status, StatusCode::OK);
-                assert_eq!(
-                    request_recovery.body["result"]["Ok"]["success"],
-                    json!(true)
-                );
+                request_recovery.assert_contract_status();
+                assert_eq!(request_recovery.body["success"], json!(true));
 
                 let code = latest_recovery_code(&fixture.email);
 
                 let wrong_code = app
-                    .rpc_call(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": "000000" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": "000000" })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(wrong_code.status, StatusCode::OK);
-                assert_eq!(wrong_code.body["result"]["Ok"]["success"], json!(false));
+                wrong_code.assert_contract_status();
+                assert_eq!(wrong_code.body["success"], json!(false));
 
                 let verified = app
-                    .rpc_call(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": code })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(verified.status, StatusCode::OK);
-                assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
-                let recovery_token = verified.body["result"]["Ok"]["recoveryToken"]
+                verified.assert_contract_status();
+                assert_eq!(verified.body["success"], json!(true));
+                let recovery_token = verified.body["recoveryToken"]
                     .as_str()
                     .expect("recovery token should exist")
                     .to_string();
 
                 let replayed_code = app
-                    .rpc_call(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": code })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(replayed_code.status, StatusCode::OK);
-                assert_eq!(replayed_code.body["result"]["Ok"]["success"], json!(false));
-                assert!(replayed_code.body["result"]["Ok"]["recoveryToken"].is_null());
+                replayed_code.assert_contract_status();
+                assert_eq!(replayed_code.body["success"], json!(false));
+                assert!(replayed_code.body["recoveryToken"].is_null());
 
                 let invalid_recovery = app
-                    .rpc_call(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": "invalid-token" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": "invalid-token" })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(invalid_recovery.status, StatusCode::OK);
+                invalid_recovery.assert_contract_status();
                 assert_handler_error(
                     &invalid_recovery.body,
                     "UNAUTHORIZED",
@@ -778,29 +685,54 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 );
 
                 let recovery_data = app
-                    .rpc_call(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token.clone() }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": recovery_token.clone() })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(recovery_data.status, StatusCode::OK);
-                assert_eq!(
-                    recovery_data.body["result"]["Ok"]["userId"],
-                    json!(fixture.user_id)
-                );
-                assert!(recovery_data.body["result"]["Ok"]["vaultKeys"]
+                recovery_data.assert_contract_status();
+                assert_eq!(recovery_data.body["userId"], json!(fixture.user_id));
+                assert!(recovery_data.body["vaultKeys"]
                     .as_array()
                     .expect("vault keys should be an array")
                     .iter()
                     .any(|entry| entry["vaultId"] == json!(fixture.vault_id)));
 
                 let next_crypto = build_auth_crypto_fixture("recovery-reset", "reset-password-123");
+                let rejected_reset = app
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/reset-password",
+                        Some(json!({
+                            "recoveryToken": verified.body["recoveryToken"],
+                            "srpSalt": next_crypto.srp_salt,
+                            "srpVerifier": next_crypto.srp_verifier,
+                            "encryptedPrivateKey": next_crypto.encrypted_private_key,
+                            "encryptedMasterKey": next_crypto.encrypted_master_key,
+                            "recoveryKeyHint": next_crypto.recovery_key_hint,
+                            "secretKeyHint": next_crypto.secret_key_hint,
+                            "encryptedVaultKeys": [{
+                                "vaultId": fixture.vault_id,
+                                "encryptedVaultKey": "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1)
+                            }],
+                            "kdfParams": floor_kdf_params_json(),
+                        })),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &rejected_reset.body,
+                    "BAD_REQUEST",
+                    "Invalid encrypted vault key",
+                );
                 let reset = app
-                    .rpc_call(
-                        "auth.resetPassword",
-                        json!([{
-                            "recoveryToken": verified.body["result"]["Ok"]["recoveryToken"],
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/reset-password",
+                        Some(json!({
+                            "recoveryToken": verified.body["recoveryToken"],
                             "srpSalt": next_crypto.srp_salt,
                             "srpVerifier": next_crypto.srp_verifier,
                             "encryptedPrivateKey": next_crypto.encrypted_private_key,
@@ -812,17 +744,18 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                                 "encryptedVaultKey": "rotated-recovery-vault-key"
                             }],
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(reset.status, StatusCode::OK);
-                assert_eq!(reset.body["result"]["Ok"]["userId"], json!(fixture.user_id));
+                reset.assert_contract_status();
+                assert_eq!(reset.body["userId"], json!(fixture.user_id));
 
                 let reused_recovery = app
-                    .rpc_call(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": recovery_token })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -855,7 +788,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
 
 #[tokio::test]
 async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_account_mutations_update_credentials_and_revoke_sessions",
         |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "mutations").await;
@@ -871,9 +804,10 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let update_crypto = build_auth_crypto_fixture("update-email", "update-email-pass");
 
             let conflict = app
-                .rpc_call(
-                    "auth.updateEmail",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/email-changes",
+                    Some(json!({
                         "newEmail": "conflict@example.com",
                         "srpSalt": update_crypto.srp_salt,
                         "srpVerifier": update_crypto.srp_verifier,
@@ -883,17 +817,18 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "updated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
-            assert_eq!(conflict.status, StatusCode::OK);
+            conflict.assert_contract_status();
             assert_handler_error(&conflict.body, "BAD_REQUEST", "Email already in use");
 
             let update_email = app
-                .rpc_call(
-                    "auth.updateEmail",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/email-changes",
+                    Some(json!({
                         "newEmail": "updated-auth@example.com",
                         "srpSalt": update_crypto.srp_salt,
                         "srpVerifier": update_crypto.srp_verifier,
@@ -903,12 +838,12 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "updated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
-            assert_eq!(update_email.status, StatusCode::OK);
-            assert_eq!(update_email.body["result"]["Ok"]["success"], json!(true));
+            update_email.assert_contract_status();
+            assert_eq!(update_email.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -927,10 +862,32 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let change_session = app.issue_session(&fixture.user_id).await;
             let change_crypto =
                 build_auth_crypto_fixture("change-password", "change-password-pass");
+            let oversized_key =
+                "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+            let rejected_password_rotation = app
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/password-changes",
+                    Some(json!({
+                        "srpSalt": change_crypto.srp_salt,
+                        "srpVerifier": change_crypto.srp_verifier,
+                        "encryptedPrivateKey": change_crypto.encrypted_private_key,
+                        "encryptedVaultKeys": [{ "vaultId": fixture.vault_id, "encryptedVaultKey": oversized_key }],
+                        "kdfParams": floor_kdf_params_json(),
+                    })),
+                    authenticated_json_headers(&change_session.token),
+                )
+                .await;
+            assert_handler_error(
+                &rejected_password_rotation.body,
+                "BAD_REQUEST",
+                "Invalid encrypted vault key",
+            );
             let change_password = app
-                .rpc_call(
-                    "auth.changePassword",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/password-changes",
+                    Some(json!({
                         "srpSalt": change_crypto.srp_salt,
                         "srpVerifier": change_crypto.srp_verifier,
                         "encryptedPrivateKey": change_crypto.encrypted_private_key,
@@ -939,12 +896,12 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "password-rotated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&change_session.token),
                 )
                 .await;
-            assert_eq!(change_password.status, StatusCode::OK);
-            assert_eq!(change_password.body["result"]["Ok"]["success"], json!(true));
+            change_password.assert_contract_status();
+            assert_eq!(change_password.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -956,10 +913,31 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let other_session = app.issue_session(&fixture.user_id).await;
             let regenerate_crypto =
                 build_auth_crypto_fixture("regen-secret-key", "regen-secret-pass");
+            let rejected_secret_rotation = app
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/secret-key-rotations",
+                    Some(json!({
+                        "secretKeyHint": regenerate_crypto.secret_key_hint,
+                        "srpSalt": regenerate_crypto.srp_salt,
+                        "srpVerifier": regenerate_crypto.srp_verifier,
+                        "encryptedPrivateKey": regenerate_crypto.encrypted_private_key,
+                        "encryptedVaultKeys": [{ "vaultId": fixture.vault_id, "encryptedVaultKey": oversized_key }],
+                        "kdfParams": floor_kdf_params_json(),
+                    })),
+                    authenticated_json_headers(&current_session.token),
+                )
+                .await;
+            assert_handler_error(
+                &rejected_secret_rotation.body,
+                "BAD_REQUEST",
+                "Invalid encrypted vault key",
+            );
             let regenerate = app
-                .rpc_call(
-                    "auth.regenerateSecretKey",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/secret-key-rotations",
+                    Some(json!({
                         "secretKeyHint": regenerate_crypto.secret_key_hint,
                         "srpSalt": regenerate_crypto.srp_salt,
                         "srpVerifier": regenerate_crypto.srp_verifier,
@@ -969,12 +947,12 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "secret-key-rotated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(regenerate.status, StatusCode::OK);
-            assert_eq!(regenerate.body["result"]["Ok"]["success"], json!(true));
+            regenerate.assert_contract_status();
+            assert_eq!(regenerate.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -990,17 +968,18 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
 
             let recovery_session = app.issue_session(&fixture.user_id).await;
             let store_recovery = app
-                .rpc_call(
-                    "auth.storeRecoveryKey",
-                    json!([{
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/users/me/recovery-key",
+                    Some(json!({
                         "encryptedMasterKey": "stored-master-key",
                         "recoveryKeyHint": "stored-hint"
-                    }]),
+                    })),
                     authenticated_json_headers(&recovery_session.token),
                 )
                 .await;
-            assert_eq!(store_recovery.status, StatusCode::OK);
-            assert_eq!(store_recovery.body["result"]["Ok"]["success"], json!(true));
+            store_recovery.assert_contract_status();
+            assert_eq!(store_recovery.body["success"], json!(true));
 
             let stored_hint = query_scalar::<_, Option<String>>(
                 "SELECT recovery_key_hint FROM \"user\" WHERE id = $1",
@@ -1017,7 +996,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
 
 #[tokio::test]
 async fn auth_session_management_and_account_deletion_flow() {
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_session_management_and_account_deletion_flow",
         |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "sessions").await;
@@ -1025,29 +1004,33 @@ async fn auth_session_management_and_account_deletion_flow() {
             let other_session = app.issue_session(&fixture.user_id).await;
 
             let devices = app
-                .rpc_call(
-                    "auth.listDevices",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sessions",
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(devices.status, StatusCode::OK);
+            devices.assert_contract_status();
             assert_eq!(
-                devices.body["result"]["Ok"]
-                    .as_array()
+                devices
+                    .body
+                    .get("items")
+                    .and_then(|value| value.as_array())
                     .expect("devices should be an array")
                     .len(),
                 2,
             );
 
             let invalid_rename = app
-                .rpc_call(
-                    "auth.renameDevice",
-                    json!([{ "sessionId": other_session.session_id, "deviceName": "   " }]),
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    Some(json!({  "deviceName": "   " })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(invalid_rename.status, StatusCode::OK);
+            invalid_rename.assert_contract_status();
             assert_handler_error(
                 &invalid_rename.body,
                 "BAD_REQUEST",
@@ -1055,50 +1038,25 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let rename = app
-                .rpc_call(
-                    "auth.renameDevice",
-                    json!([{ "sessionId": other_session.session_id, "deviceName": "Work Laptop" }]),
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    Some(json!({  "deviceName": "Work Laptop" })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(rename.status, StatusCode::OK);
-            assert_eq!(rename.body["result"]["Ok"]["success"], json!(true));
-
-            let before_heartbeat = query_scalar::<_, OffsetDateTime>(
-                "SELECT last_active_at FROM session WHERE id = $1",
-            )
-            .bind(&current_session.session_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("current session last_active_at should load");
-
-            let heartbeat = app
-                .rpc_call(
-                    "auth.heartbeat",
-                    json!([]),
-                    authenticated_json_headers(&current_session.token),
-                )
-                .await;
-            assert_eq!(heartbeat.status, StatusCode::OK);
-            assert_eq!(heartbeat.body["result"]["Ok"]["success"], json!(true));
-
-            let after_heartbeat = query_scalar::<_, OffsetDateTime>(
-                "SELECT last_active_at FROM session WHERE id = $1",
-            )
-            .bind(&current_session.session_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("updated last_active_at should load");
-            assert!(after_heartbeat >= before_heartbeat);
+            rename.assert_contract_status();
+            assert_eq!(rename.body["success"], json!(true));
 
             let current_revoke = app
-                .rpc_call(
-                    "auth.revokeDevice",
-                    json!([{ "sessionId": current_session.session_id }]),
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/sessions/{}", current_session.session_id),
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(current_revoke.status, StatusCode::OK);
+            current_revoke.assert_contract_status();
             assert_handler_error(
                 &current_revoke.body,
                 "BAD_REQUEST",
@@ -1106,14 +1064,15 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let revoke = app
-                .rpc_call(
-                    "auth.revokeDevice",
-                    json!([{ "sessionId": other_session.session_id }]),
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(revoke.status, StatusCode::OK);
-            assert_eq!(revoke.body["result"]["Ok"]["success"], json!(true));
+            revoke.assert_contract_status();
+            assert_eq!(revoke.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -1121,49 +1080,28 @@ async fn auth_session_management_and_account_deletion_flow() {
                 .await
                 .is_none());
 
-            let extra_session = app.issue_session(&fixture.user_id).await;
-            let logout_all = app
-                .rpc_call(
-                    "auth.logoutAll",
-                    json!([]),
-                    authenticated_json_headers(&current_session.token),
-                )
-                .await;
-            assert_eq!(logout_all.status, StatusCode::OK);
-            assert_eq!(logout_all.body["result"]["Ok"]["success"], json!(true));
-            assert!(app
-                .state
-                .sessions
-                .verify_token(&current_session.token)
-                .await
-                .is_none());
-            assert!(app
-                .state
-                .sessions
-                .verify_token(&extra_session.token)
-                .await
-                .is_none());
-
             let delete_session = app.issue_session(&fixture.user_id).await;
             let wrong_confirm = app
-                .rpc_call(
-                    "auth.deleteAccount",
-                    json!([{ "confirmEmail": "wrong@example.com" }]),
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "wrong@example.com" })),
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
-            assert_eq!(wrong_confirm.status, StatusCode::OK);
+            wrong_confirm.assert_contract_status();
             assert_handler_error(&wrong_confirm.body, "BAD_REQUEST", "Email does not match");
 
             let delete_account = app
-                .rpc_call(
-                    "auth.deleteAccount",
-                    json!([{ "confirmEmail": fixture.email }]),
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": fixture.email })),
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
-            assert_eq!(delete_account.status, StatusCode::OK);
-            assert_eq!(delete_account.body["result"]["Ok"]["success"], json!(true));
+            delete_account.assert_contract_status();
+            assert_eq!(delete_account.body["success"], json!(true));
 
             let remaining_users =
                 query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM \"user\" WHERE id = $1")
@@ -1181,12 +1119,12 @@ async fn auth_session_management_and_account_deletion_flow() {
 fn header_helpers_trim_values_and_extract_bearer_tokens() {
     let request = Request::builder()
         .header(AUTHORIZATION, "  bearer session-token  ")
-        .header("x-client-id", "  browser-1  ")
+        .header("bittery-client-id", "  browser-1  ")
         .body(Body::empty())
         .expect("request should build");
 
     assert_eq!(
-        header_value(&request, "x-client-id").as_deref(),
+        header_value(&request, "bittery-client-id").as_deref(),
         Some("browser-1")
     );
     assert_eq!(
@@ -1202,23 +1140,23 @@ fn header_helpers_trim_values_and_extract_bearer_tokens() {
 
     let invalid_header = Request::builder()
         .header(
-            "x-client-id",
+            "bittery-client-id",
             HeaderValue::from_bytes(&[0xff]).expect("header value should build"),
         )
         .body(Body::empty())
         .expect("request should build");
-    assert_eq!(header_value(&invalid_header, "x-client-id"), None);
+    assert_eq!(header_value(&invalid_header, "bittery-client-id"), None);
 }
 
 #[test]
 fn signup_helpers_normalize_plans_member_limits_and_names() {
     assert_eq!(
         normalize_signup_plan(None).expect("default plan should be valid"),
-        "personal"
+        BillingPlan::Personal
     );
     assert_eq!(
         normalize_signup_plan(Some(" Team ")).expect("team plan should be valid"),
-        "team",
+        BillingPlan::Team,
     );
     assert_eq!(
         normalize_signup_plan(Some("enterprise"))
@@ -1227,24 +1165,33 @@ fn signup_helpers_normalize_plans_member_limits_and_names() {
         "Invalid plan",
     );
 
-    assert_eq!(super::map_plan_to_team_type("family"), "family");
-    assert_eq!(super::map_plan_to_team_type("team"), "organization");
-    assert_eq!(super::map_plan_to_team_type("personal"), "personal");
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Family),
+        TeamType::Family
+    );
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Team),
+        TeamType::Organization
+    );
+    assert_eq!(
+        super::map_plan_to_team_type(BillingPlan::Personal),
+        TeamType::Personal
+    );
 
-    assert_eq!(plan_member_limit("personal"), Some(1));
-    assert_eq!(plan_member_limit("family"), Some(6));
-    assert_eq!(plan_member_limit("team"), None);
+    assert_eq!(plan_member_limit(BillingPlan::Personal), Some(1));
+    assert_eq!(plan_member_limit(BillingPlan::Family), Some(6));
+    assert_eq!(plan_member_limit(BillingPlan::Team), None);
 
     assert_eq!(
-        signup_team_name(true, "organization", None),
+        signup_team_name(true, TeamType::Organization, None),
         "Bittery Instance"
     );
     assert_eq!(
-        signup_team_name(true, "organization", Some("  Example Org  ")),
+        signup_team_name(true, TeamType::Organization, Some("  Example Org  ")),
         "Example Org",
     );
-    assert_eq!(signup_team_name(false, "family", None), "My Family");
-    assert_eq!(signup_team_name(false, "personal", None), "My Team");
+    assert_eq!(signup_team_name(false, TeamType::Family, None), "My Family");
+    assert_eq!(signup_team_name(false, TeamType::Personal, None), "My Team");
 }
 
 #[test]
@@ -1319,6 +1266,117 @@ fn pending_vault_key_parser_rejects_invalid_entries_and_duplicates() {
 				.message,
 			"Duplicate vault IDs are not allowed in pendingVaultKeys",
 		);
+}
+
+#[test]
+fn every_auth_vault_key_input_rejects_oversized_values() {
+    let oversized = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+    let entries = vec![super::EncryptedVaultKeyInput {
+        vault_id: "vault_auth_limit".to_string(),
+        encrypted_vault_key: oversized.clone(),
+    }];
+    assert!(super::validate_encrypted_vault_keys(&entries).is_err());
+    let pending = serde_json::to_string(&vec![json!({
+        "vaultId": "vault_auth_limit",
+        "encryptedVaultKey": oversized,
+    })])
+    .expect("pending keys should serialize");
+    assert!(parse_pending_vault_keys(Some(&pending)).is_err());
+}
+
+#[tokio::test]
+async fn auth_vault_key_pages_are_bounded_continuous_and_principal_bound() {
+    with_api_test_app("auth_vault_key_page_budget", |app| async move {
+        let user_id = "user_auth_key_page";
+        let other_user_id = "user_auth_key_other";
+        seed_user(&app.pool, user_id, "Key Page", "key-page@example.com").await;
+        seed_user(
+            &app.pool,
+            other_user_id,
+            "Other",
+            "other-key-page@example.com",
+        )
+        .await;
+        let large_key = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+        let expected_ids: Vec<String> = (0..70)
+            .map(|index| format!("vault_auth_key_page_{index:03}"))
+            .collect();
+        for (index, vault_id) in expected_ids.iter().enumerate() {
+            seed_vault(&app.pool, vault_id, "n", "personal", user_id, None).await;
+            seed_vault_key(
+                &app.pool,
+                &format!("key_auth_page_{index:03}"),
+                vault_id,
+                user_id,
+                &large_key,
+                "owner",
+            )
+            .await;
+        }
+        query("UPDATE vault SET created_at = $1 WHERE id = ANY($2)")
+            .bind(OffsetDateTime::UNIX_EPOCH)
+            .bind(&expected_ids)
+            .execute(&app.pool)
+            .await
+            .expect("vault timestamps should align");
+        let session = app.issue_session(user_id).await;
+        let other_session = app.issue_session(other_user_id).await;
+        let mut cursor = None;
+        let mut first_cursor = None;
+        let mut seen_ids = Vec::new();
+        for _ in 0..4 {
+            let query = cursor.as_deref().map_or_else(
+                || "limit=500".to_string(),
+                |cursor| format!("limit=500&cursor={cursor}"),
+            );
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/users/me/vault-keys?{query}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES);
+            seen_ids.extend(
+                response.body["items"]
+                    .as_array()
+                    .expect("vault key page should contain items")
+                    .iter()
+                    .filter_map(|item| item["vaultId"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            let next = response.body["nextCursor"]
+                .as_str()
+                .expect("continued vault key page should have a cursor")
+                .to_string();
+            first_cursor.get_or_insert_with(|| next.clone());
+            cursor = Some(next);
+        }
+        for vault_id in expected_ids {
+            assert_eq!(seen_ids.iter().filter(|seen| **seen == vault_id).count(), 1);
+        }
+        let cursor = first_cursor.expect("large keys should require continuation");
+        for (token, candidate) in [
+            (&other_session.token, cursor.clone()),
+            (&session.token, format!("{cursor}x")),
+        ] {
+            let rejected = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/users/me/vault-keys?limit=500&cursor={candidate}"),
+                    None,
+                    authenticated_json_headers(token),
+                )
+                .await;
+            assert_eq!(rejected.status, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(rejected.body["code"], json!("INVALID_CURSOR"));
+        }
+    })
+    .await;
 }
 
 #[test]
@@ -1447,21 +1505,25 @@ where
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
-fn assert_rpc_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 fn build_valid_token(label: &str) -> String {
@@ -1498,31 +1560,33 @@ fn latest_recovery_code(email: &str) -> String {
 }
 
 async fn issue_signup_verification_token(
-    app: &RpcTestApp,
+    app: &ApiTestApp,
     email: &str,
     invitation_token: Option<&str>,
 ) -> String {
     let request = app
-        .rpc_call(
-            "auth.requestSignupVerification",
-            json!([{ "email": email, "invitationToken": invitation_token }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/signup-verifications",
+            Some(json!({ "email": email, "invitationToken": invitation_token })),
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(request.status, StatusCode::OK);
-    assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+    request.assert_contract_status();
+    assert_eq!(request.body["success"], json!(true));
 
     let code = latest_signup_verification_code(email, invitation_token);
     let verified = app
-        .rpc_call(
-            "auth.verifySignupVerification",
-            json!([{ "email": email, "code": code, "invitationToken": invitation_token }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/signup-verifications/verify",
+            Some(json!({ "email": email, "code": code, "invitationToken": invitation_token })),
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(verified.status, StatusCode::OK);
-    assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
-    verified.body["result"]["Ok"]["signupVerificationToken"]
+    verified.assert_contract_status();
+    assert_eq!(verified.body["success"], json!(true));
+    verified.body["signupVerificationToken"]
         .as_str()
         .expect("signup verification token should exist")
         .to_string()
@@ -1670,7 +1734,6 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
     .await;
 
     AuthInvitationFixture {
-        team_id,
         team_vault_id,
         invitation_token,
         invited_email,
@@ -1681,7 +1744,7 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
 // Rate limiting
 // ---------------------------------------------------------------------------
 
-const RATE_LIMITED_CODE: &str = "TOO_MANY_REQUESTS";
+const RATE_LIMITED_CODE: &str = "RATE_LIMITED";
 
 /// Sets (and restores on drop) `RATE_LIMIT_*` env vars. Must be constructed while
 /// the env lock is held (e.g. inside `with_auth_test_env_async`).
@@ -1719,7 +1782,7 @@ fn object_keys(value: &serde_json::Value) -> Vec<String> {
 #[tokio::test]
 async fn verify_recovery_code_locks_out_after_repeated_failures() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_recovery_verify_lockout",
             |app| async move {
                 let _env = rate_limit_env(&[
@@ -1729,34 +1792,22 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery").await;
 
                 let request = app
-                    .rpc_call(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications", Some(json!({ "email": fixture.email })), unauthenticated_json_headers())
                     .await;
-                assert_eq!(request.status, StatusCode::OK);
+                request.assert_contract_status();
                 let code = latest_recovery_code(&fixture.email);
 
                 // Two wrong attempts stay below the threshold.
                 for _ in 0..2 {
                     let wrong = app
-                        .rpc_call(
-                            "auth.verifyRecoveryCode",
-                            json!([{ "email": fixture.email, "code": "000000" }]),
-                            unauthenticated_json_headers(),
-                        )
+                        .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": "000000" })), unauthenticated_json_headers())
                         .await;
-                    assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+                    assert_eq!(wrong.body["success"], json!(false));
                 }
 
                 // Third wrong attempt trips the lockout.
                 let tripped = app
-                    .rpc_call(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": "000000" }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": "000000" })), unauthenticated_json_headers())
                     .await;
                 assert_handler_error(
                     &tripped.body,
@@ -1766,11 +1817,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 
                 // The correct code must still fail while locked.
                 let correct = app
-                    .rpc_call(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": code })), unauthenticated_json_headers())
                     .await;
                 assert_handler_error(
                     &correct.body,
@@ -1819,17 +1866,13 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 #[tokio::test]
 async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_verification_code_hashed", |app| async move {
+        with_api_test_app("signup_verification_code_hashed", |app| async move {
             let email = "signup-code-hashed@example.com";
 
             let request = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let code = latest_signup_verification_code(email, None);
             let stored = query_scalar::<_, String>(
@@ -1846,31 +1889,19 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 
             // Replaying the stored column as if it were the code must fail.
             let replayed = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": stored, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": stored, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(replayed.body["success"], json!(false));
 
             let wrong = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(wrong.body["success"], json!(false));
 
             let verified = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -1881,17 +1912,13 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 #[tokio::test]
 async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("recovery_verification_code_hashed", |app| async move {
+        with_api_test_app("recovery_verification_code_hashed", |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "codehash").await;
 
             let request = app
-                .rpc_call(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications", Some(json!({ "email": fixture.email })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let code = latest_recovery_code(&fixture.email);
             let stored = query_scalar::<_, String>(
@@ -1906,22 +1933,14 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(stored, hash_token(&code));
 
             let replayed = app
-                .rpc_call(
-                    "auth.verifyRecoveryCode",
-                    json!([{ "email": fixture.email, "code": stored }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": stored })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(replayed.body["success"], json!(false));
 
             let verified = app
-                .rpc_call(
-                    "auth.verifyRecoveryCode",
-                    json!([{ "email": fixture.email, "code": code }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": code })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -1933,20 +1952,16 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
 #[tokio::test]
 async fn signup_verification_invitation_token_is_stored_hashed() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_verification_invite_hashed", |app| async move {
+        with_api_test_app("signup_verification_invite_hashed", |app| async move {
             let fixture = build_auth_invitation_fixture(&app.pool, "invite_hashed").await;
 
             let request = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({
                         "email": fixture.invited_email,
                         "invitationToken": fixture.invitation_token
-                    }]),
-                    unauthenticated_json_headers(),
-                )
+                    })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let stored = query_scalar::<_, Option<String>>(
                 "SELECT invitation_token_hash FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
@@ -1964,17 +1979,13 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
             let code =
                 latest_signup_verification_code(&fixture.invited_email, Some(&fixture.invitation_token));
             let verified = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({
                         "email": fixture.invited_email,
                         "code": code,
                         "invitationToken": fixture.invitation_token
-                    }]),
-                    unauthenticated_json_headers(),
-                )
+                    })), unauthenticated_json_headers())
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -1988,7 +1999,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
 #[tokio::test]
 async fn verify_signup_verification_locks_out_across_code_re_request() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_lockout", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_lockout", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "3"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
@@ -1999,44 +2010,28 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
             let ip = "198.51.100.20";
 
             let request = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             // Two wrong guesses against the first code stay below the threshold.
             for _ in 0..2 {
                 let wrong = app
-                    .rpc_call(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                        headers_with_ip(ip),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), headers_with_ip(ip))
                     .await;
-                assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(wrong.body["success"], json!(false));
             }
 
             // Requesting a fresh code resets `signup_verification.attempts` to 0.
             let re_request = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
-            assert_eq!(re_request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(re_request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             // The lifetime counter is unaffected, so the very next wrong guess trips it.
             let tripped = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_handler_error(
                 &tripped.body,
@@ -2046,11 +2041,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 
             // The correct code must still fail while locked.
             let correct = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_handler_error(
                 &correct.body,
@@ -2086,7 +2077,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 #[tokio::test]
 async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_no_pending", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_no_pending", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
@@ -2097,13 +2088,14 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 
             for _ in 0..4 {
                 let attempt = app
-                    .rpc_call(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications/verify",
+                        Some(json!({ "email": email, "code": "000000", "invitationToken": null })),
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(attempt.body["success"], json!(false));
             }
 
             // A genuine code issued afterwards still works.
@@ -2120,7 +2112,7 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 #[tokio::test]
 async fn verify_signup_verification_rejects_malformed_codes_without_consuming_attempts() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_malformed", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_malformed", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "50"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
@@ -2130,24 +2122,16 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
             let ip = "198.51.100.22";
 
             let request = app
-                .rpc_call(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
                 let attempt = app
-                    .rpc_call(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": malformed, "invitationToken": null }]),
-                        headers_with_ip(ip),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": malformed, "invitationToken": null })), headers_with_ip(ip))
                     .await;
-                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(attempt.body["success"], json!(false));
             }
 
             let attempts = query_scalar::<_, i32>(
@@ -2161,13 +2145,9 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 
             // The real code is still redeemable.
             let verified = app
-                .rpc_call(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), headers_with_ip(ip))
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -2178,7 +2158,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 #[tokio::test]
 async fn request_signup_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_signup_verify_req_ip_rotation",
             |app| async move {
                 let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
@@ -2186,19 +2166,21 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 
                 for ip in ["203.0.113.31", "203.0.113.32"] {
                     let response = app
-                        .rpc_call(
-                            "auth.requestSignupVerification",
-                            json!([{ "email": email, "invitationToken": null }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signup-verifications",
+                            Some(json!({ "email": email, "invitationToken": null })),
                             headers_with_ip(ip),
                         )
                         .await;
-                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                    assert_eq!(response.body["success"], json!(true));
                 }
 
                 let blocked = app
-                    .rpc_call(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": email, "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": email, "invitationToken": null })),
                         headers_with_ip("203.0.113.33"),
                     )
                     .await;
@@ -2218,7 +2200,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_signup_verify_req_email_rotation",
             |app| async move {
                 let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
@@ -2226,19 +2208,21 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 
                 for email in ["sv-rot-a@example.com", "sv-rot-b@example.com"] {
                     let response = app
-                        .rpc_call(
-                            "auth.requestSignupVerification",
-                            json!([{ "email": email, "invitationToken": null }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signup-verifications",
+                            Some(json!({ "email": email, "invitationToken": null })),
                             headers_with_ip(ip),
                         )
                         .await;
-                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                    assert_eq!(response.body["success"], json!(true));
                 }
 
                 let blocked = app
-                    .rpc_call(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": "sv-rot-c@example.com", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": "sv-rot-c@example.com", "invitationToken": null })),
                         headers_with_ip(ip),
                     )
                     .await;
@@ -2257,7 +2241,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_ip() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_ip", |app| async move {
+        with_api_test_app("rate_limit_start_login_ip", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "3"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "50"),
@@ -2267,19 +2251,21 @@ async fn start_login_is_rate_limited_per_ip() {
 
             for _ in 0..3 {
                 let response = app
-                    .rpc_call(
-                        "auth.startLogin",
-                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/login-attempts",
+                        Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                         headers_with_ip("203.0.113.10"),
                     )
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
 
             let blocked = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.10"),
                 )
                 .await;
@@ -2291,13 +2277,14 @@ async fn start_login_is_rate_limited_per_ip() {
 
             // A different IP is unaffected.
             let other_ip = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.99"),
                 )
                 .await;
-            assert!(other_ip.body["result"]["Ok"].is_object());
+            assert!(other_ip.body.is_object());
         })
         .await;
     })
@@ -2310,7 +2297,7 @@ async fn start_login_is_rate_limited_per_ip() {
 #[tokio::test]
 async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
+        with_api_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
             let _env = RateLimitEnvGuard::set(&[
                 ("TRUST_PROXY_MODE", "none"),
                 ("RATE_LIMIT_LOGIN_IP", "3"),
@@ -2321,20 +2308,22 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
             for index in 0..3 {
                 let response = app
-                    .rpc_call(
-                        "auth.startLogin",
-                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/login-attempts",
+                        Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                         headers_with_ip(&format!("203.0.113.{index}")),
                     )
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
 
             // A fourth forged address does not escape the per-IP window.
             let blocked = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.250"),
                 )
                 .await;
@@ -2352,7 +2341,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_email", |app| async move {
+        with_api_test_app("rate_limit_start_login_email", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "50"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "3"),
@@ -2364,20 +2353,12 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
             // across different IPs.
             for index in 0..3 {
                 let response = app
-                    .rpc_call(
-                        "auth.startLogin",
-                        json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
-                        headers_with_ip(&format!("198.51.100.{index}")),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": unregistered, "clientPublicKey": ephemeral.public_key })), headers_with_ip(&format!("198.51.100.{index}")))
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
             let blocked = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.200"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": unregistered, "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.200"))
                 .await;
             assert_handler_error(
                 &blocked.body,
@@ -2397,22 +2378,14 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 .await
                 .expect("registered account SRP fixture should update");
             let registered = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": fixture.email, "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.240"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": fixture.email, "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.240"))
                 .await;
             let fresh_missing = app
-                .rpc_call(
-                    "auth.startLogin",
-                    json!([{ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.241"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.241"))
                 .await;
             assert_eq!(
-                object_keys(&registered.body["result"]["Ok"]),
-                object_keys(&fresh_missing.body["result"]["Ok"]),
+                object_keys(&registered.body),
+                object_keys(&fresh_missing.body),
             );
         })
         .await;
@@ -2423,7 +2396,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
 #[tokio::test]
 async fn signup_is_rate_limited_per_ip_and_per_email() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup", |app| async move {
+        with_api_test_app("rate_limit_signup", |app| async move {
             let crypto = build_auth_crypto_fixture("rl-signup", "signup-password-123");
 
             // Per-IP: same IP, varying emails.
@@ -2434,26 +2407,31 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 ]);
                 for index in 0..2 {
                     let response = app
-                        .rpc_call(
-                            "auth.signup",
-                            signup_params(&crypto, &format!("rl-signup-ip-{index}@example.com")),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signups",
+                            Some(json!(signup_params(
+                                &crypto,
+                                &format!("rl-signup-ip-{index}@example.com")
+                            ))),
                             headers_with_ip("192.0.2.10"),
                         )
                         .await;
                     // Rejected for a non-rate-limit reason (missing verification), but counted.
-                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .rpc_call(
-                        "auth.signup",
-                        signup_params(&crypto, "rl-signup-ip-blocked@example.com"),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!(signup_params(
+                            &crypto,
+                            "rl-signup-ip-blocked@example.com"
+                        ))),
                         headers_with_ip("192.0.2.10"),
                     )
                     .await;
-                assert_eq!(
-                    blocked.body["result"]["Err"]["code"],
-                    json!(RATE_LIMITED_CODE)
-                );
+                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
             }
 
             // Per-email: same email, varying IPs.
@@ -2465,25 +2443,24 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 let email = "rl-signup-email@example.com";
                 for index in 0..2 {
                     let response = app
-                        .rpc_call(
-                            "auth.signup",
-                            signup_params(&crypto, email),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signups",
+                            Some(json!(signup_params(&crypto, email))),
                             headers_with_ip(&format!("192.0.2.{}", 100 + index)),
                         )
                         .await;
-                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .rpc_call(
-                        "auth.signup",
-                        signup_params(&crypto, email),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!(signup_params(&crypto, email))),
                         headers_with_ip("192.0.2.200"),
                     )
                     .await;
-                assert_eq!(
-                    blocked.body["result"]["Err"]["code"],
-                    json!(RATE_LIMITED_CODE)
-                );
+                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
             }
         })
         .await;
@@ -2494,25 +2471,27 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 #[tokio::test]
 async fn request_recovery_verification_is_rate_limited() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_request", |app| async move {
+        with_api_test_app("rate_limit_recovery_request", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
 
             for _ in 0..2 {
                 let response = app
-                    .rpc_call(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         headers_with_ip("192.0.2.55"),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             let blocked = app
-                .rpc_call(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": fixture.email })),
                     headers_with_ip("192.0.2.55"),
                 )
                 .await;
@@ -2532,26 +2511,28 @@ async fn request_recovery_verification_is_rate_limited() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
+        with_api_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
 
             for ip in ["198.51.100.1", "198.51.100.2"] {
                 let response = app
-                    .rpc_call(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             // A third, previously unseen IP still hits the per-email counter.
             let blocked = app
-                .rpc_call(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": fixture.email })),
                     headers_with_ip("198.51.100.3"),
                 )
                 .await;
@@ -2571,7 +2552,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
+        with_api_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
             let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
@@ -2579,20 +2560,22 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 
             for email in [&first.email, &second.email] {
                 let response = app
-                    .rpc_call(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": email })),
                         headers_with_ip("203.0.113.9"),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             // A third, previously unseen email still hits the per-IP counter.
             let blocked = app
-                .rpc_call(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": third.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": third.email })),
                     headers_with_ip("203.0.113.9"),
                 )
                 .await;
@@ -2608,7 +2591,7 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 }
 
 fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
-    json!([{
+    json!({
         "email": email,
         "signupVerificationToken": "invalid-token",
         "name": "Rate Limit Signup",
@@ -2623,7 +2606,7 @@ fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
         "recoveryKeyHint": crypto.recovery_key_hint,
         "encryptedVaultKey": crypto.encrypted_vault_key,
         "kdfParams": floor_kdf_params_json(),
-    }])
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2656,17 +2639,18 @@ async fn insert_kdf_login_user(
     .expect("kdf login user should seed");
 }
 
-async fn start_login_ok(app: &RpcTestApp, email: &str) -> serde_json::Value {
+async fn start_login_ok(app: &ApiTestApp, email: &str) -> serde_json::Value {
     let ephemeral = build_login_ephemeral_fixture();
     let response = app
-        .rpc_call(
-            "auth.startLogin",
-            json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/login-attempts",
+            Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(response.status, StatusCode::OK);
-    response.body["result"]["Ok"].clone()
+    response.assert_contract_status();
+    response.body.clone()
 }
 
 async fn stored_kdf_row(pool: &PgPool, user_id: &str) -> (String, i32, i32) {
@@ -2681,7 +2665,7 @@ async fn stored_kdf_row(pool: &PgPool, user_id: &str) -> (String, i32, i32) {
 
 #[tokio::test]
 async fn start_login_known_and_unknown_emails_return_identical_kdf_profiles() {
-    with_rpc_test_app("start_login_indistinguishable_kdf", |app| async move {
+    with_api_test_app("start_login_indistinguishable_kdf", |app| async move {
         let known = build_auth_crypto_fixture("kdf-known", "pw-known");
         insert_kdf_login_user(
             &app.pool,
@@ -2701,7 +2685,7 @@ async fn start_login_known_and_unknown_emails_return_identical_kdf_profiles() {
 
 #[tokio::test]
 async fn start_login_unknown_email_returns_stable_default_kdf_params() {
-    with_rpc_test_app("start_login_unknown_kdf", |app| async move {
+    with_api_test_app("start_login_unknown_kdf", |app| async move {
         let first = start_login_ok(&app, "ghost-kdf@example.com").await;
         let second = start_login_ok(&app, "ghost-kdf@example.com").await;
 
@@ -2721,19 +2705,170 @@ async fn start_login_unknown_email_returns_stable_default_kdf_params() {
     .await;
 }
 
+// ---------------------------------------------------------------------------
+// Login response team badge
+// ---------------------------------------------------------------------------
+
+const TEST_CDN_URL: &str = "https://cdn.example.invalid/assets";
+
+async fn with_storage_cdn_env_async<T, F>(future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let _guard = crate::test_support::acquire_env_lock_async().await;
+    let previous = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
+    unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", TEST_CDN_URL) };
+
+    let result = future.await;
+
+    match previous {
+        Some(value) => unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", value) },
+        None => unsafe { std::env::remove_var("BITTERY_STORAGE_CDN_URL") },
+    }
+    result
+}
+
+async fn set_team_image_key(pool: &PgPool, team_id: &str, image_key: &str) {
+    query("UPDATE team SET image_key = $1 WHERE id = $2")
+        .bind(image_key)
+        .bind(team_id)
+        .execute(pool)
+        .await
+        .expect("team image key should update");
+}
+
+/// Runs the whole SRP ceremony and returns the finish-login body.
+async fn finish_login_ok(
+    app: &ApiTestApp,
+    email: &str,
+    crypto: &AuthCryptoFixture,
+) -> serde_json::Value {
+    let ephemeral = build_login_ephemeral_fixture();
+    let start = app
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/login-attempts",
+            Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
+            unauthenticated_json_headers(),
+        )
+        .await;
+    start.assert_contract_status();
+    let client_proof = derive_login_proof(
+        &ephemeral,
+        start.body["salt"]
+            .as_str()
+            .expect("salt should be returned"),
+        start.body["serverPublicKey"]
+            .as_str()
+            .expect("server public key should be returned"),
+        &crypto.auth_password,
+        TEST_SRP_ITERATIONS,
+    );
+    let attempt_id = start.body["attemptId"]
+        .as_str()
+        .expect("login attempt ID should be returned");
+
+    let finish = app
+        .api_json(
+            Method::POST,
+            &format!("/api/v1/auth/login-attempts/{attempt_id}/finish"),
+            Some(json!({
+                "clientPublicKey": ephemeral.public_key,
+                "clientProof": client_proof,
+            })),
+            unauthenticated_json_headers(),
+        )
+        .await;
+    finish.assert_contract_status();
+    finish.body.clone()
+}
+
+/// The login response is the only source the client has for the team badge it writes into
+/// account metadata: a local unlock reads that metadata back, so a field login omits stays
+/// blank until something else refills it. A personal team on the free plan proves the badge
+/// is a property of *having a team*, which every user does, and never of paying for one.
+#[tokio::test]
+async fn finish_login_returns_the_team_badge_a_solo_account_shows() {
+    with_storage_cdn_env_async(async {
+        with_api_test_app("finish_login_team_badge", |app| async move {
+            let crypto = build_auth_crypto_fixture("login-badge", "login-badge-password");
+            insert_kdf_login_user(
+                &app.pool,
+                "login_badge_user",
+                "login-badge@example.com",
+                &crypto,
+                CURRENT_KDF_ITERATIONS as i32,
+            )
+            .await;
+            seed_team(
+                &app.pool,
+                "login_badge_team",
+                "Solo Team",
+                "login_badge_user",
+                "personal",
+                "free",
+                "none",
+            )
+            .await;
+            set_team_image_key(
+                &app.pool,
+                "login_badge_team",
+                "teams/login_badge_team/avatar.png",
+            )
+            .await;
+            assign_user_to_team(&app.pool, "login_badge_user", "login_badge_team", "owner").await;
+
+            let body = finish_login_ok(&app, "login-badge@example.com", &crypto).await;
+
+            assert_eq!(body["user"]["teamName"], json!("Solo Team"));
+            assert_eq!(
+                body["user"]["teamAvatarUrl"],
+                json!(format!("{TEST_CDN_URL}/teams/login_badge_team/avatar.png"))
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// A user with no team row must not turn the badge into a fabricated one; the fields are
+/// simply absent, which is what `skip_serializing_if` promises the contract.
+#[tokio::test]
+async fn finish_login_omits_the_team_badge_when_there_is_no_team() {
+    with_api_test_app("finish_login_no_team_badge", |app| async move {
+        let crypto = build_auth_crypto_fixture("login-teamless", "login-teamless-password");
+        insert_kdf_login_user(
+            &app.pool,
+            "login_teamless_user",
+            "login-teamless@example.com",
+            &crypto,
+            CURRENT_KDF_ITERATIONS as i32,
+        )
+        .await;
+
+        let body = finish_login_ok(&app, "login-teamless@example.com", &crypto).await;
+
+        assert_eq!(body["user"]["email"], json!("login-teamless@example.com"));
+        assert_eq!(body["user"]["teamName"], json!(null));
+        assert_eq!(body["user"]["teamAvatarUrl"], json!(null));
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn signup_persists_only_the_exact_current_kdf_profile() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_kdf_round_trip", |app| async move {
+        with_api_test_app("signup_kdf_round_trip", |app| async move {
             let email = "kdf-signup@example.com";
             let crypto = build_auth_crypto_fixture("kdf-signup", "kdf-signup-pass");
             let signup_verification_token =
                 issue_signup_verification_token(&app, email, None).await;
 
             let signup = app
-                .rpc_call(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "KDF Signup User",
@@ -2748,13 +2883,13 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                         "kdfParams": kdf_params_json(CURRENT_KDF_ITERATIONS),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            let user_id = signup.body["result"]["Ok"]["userId"]
+            signup.assert_contract_status();
+            assert_eq!(signup.body["success"], json!(true));
+            let user_id = signup.body["userId"]
                 .as_str()
                 .expect("signup should return a user id")
                 .to_string();
@@ -2773,9 +2908,10 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
 
             // Below-floor submission is rejected before the account is created.
             let below_floor = app
-                .rpc_call(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": "kdf-weak@example.com",
                         "signupVerificationToken": "unused",
                         "name": "Weak KDF User",
@@ -2790,11 +2926,11 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                         "kdfParams": kdf_params_json(310_000),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(below_floor.status, StatusCode::OK);
+            below_floor.assert_contract_status();
             assert_handler_error(&below_floor.body, "BAD_REQUEST", "Invalid KDF parameters");
         })
         .await;
@@ -2804,7 +2940,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
 
 #[tokio::test]
 async fn change_password_rewrites_kdf_params_alongside_verifier() {
-    with_rpc_test_app("change_password_kdf", |app| async move {
+    with_api_test_app("change_password_kdf", |app| async move {
         let original = build_auth_crypto_fixture("kdf-change-orig", "orig-pass");
         insert_kdf_login_user(
             &app.pool,
@@ -2818,20 +2954,21 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
 
         let next = build_auth_crypto_fixture("kdf-change-next", "next-pass");
         let change = app
-            .rpc_call(
-                "auth.changePassword",
-                json!([{
+            .api_json(
+                Method::POST,
+                "/api/v1/users/me/password-changes",
+                Some(json!({
                     "srpSalt": next.srp_salt,
                     "srpVerifier": next.srp_verifier,
                     "encryptedPrivateKey": next.encrypted_private_key,
                     "encryptedVaultKeys": [],
                     "kdfParams": kdf_params_json(600_000),
-                }]),
+                })),
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(change.status, StatusCode::OK);
-        assert_eq!(change.body["result"]["Ok"]["success"], json!(true));
+        change.assert_contract_status();
+        assert_eq!(change.body["success"], json!(true));
 
         // Params written in the same transaction as the new verifier.
         let (algorithm, iterations, schema_version) =
@@ -2849,7 +2986,7 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
 
 #[tokio::test]
 async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
-    with_rpc_test_app("verifier_mutation_kdf_policy", |app| async move {
+    with_api_test_app("verifier_mutation_kdf_policy", |app| async move {
         seed_user(
             &app.pool,
             "kdf_policy_user",
@@ -2877,7 +3014,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
         for profile in invalid_profiles {
             let mutations = [
                 (
-                    "auth.updateEmail",
+                    "/api/v1/users/me/email-changes",
                     json!({
                         "newEmail": "kdf-policy-new@example.com",
                         "srpSalt": "aa",
@@ -2888,7 +3025,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                     }),
                 ),
                 (
-                    "auth.changePassword",
+                    "/api/v1/users/me/password-changes",
                     json!({
                         "srpSalt": "aa",
                         "srpVerifier": "bb",
@@ -2898,7 +3035,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                     }),
                 ),
                 (
-                    "auth.regenerateSecretKey",
+                    "/api/v1/users/me/secret-key-rotations",
                     json!({
                         "secretKeyHint": "SK1-TEST",
                         "srpSalt": "aa",
@@ -2910,11 +3047,12 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                 ),
             ];
 
-            for (method, payload) in mutations {
+            for (path, payload) in mutations {
                 let response = app
-                    .rpc_call(
-                        method,
-                        json!([payload]),
+                    .api_json(
+                        Method::POST,
+                        path,
+                        Some(payload),
                         authenticated_json_headers(&session.token),
                     )
                     .await;
@@ -2927,7 +3065,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
 
 #[tokio::test]
 async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failure() {
-    with_rpc_test_app("change_password_kdf_rollback", |app| async move {
+    with_api_test_app("change_password_kdf_rollback", |app| async move {
         let original = build_auth_crypto_fixture("kdf-rollback-orig", "orig-pass");
         insert_kdf_login_user(
             &app.pool,
@@ -2978,9 +3116,7 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
         let session = app.issue_session("kdf_rollback_user").await;
         let next = build_auth_crypto_fixture("kdf-rollback-next", "next-pass");
         let response = app
-            .rpc_call(
-                "auth.changePassword",
-                json!([{
+            .api_json(Method::POST, "/api/v1/users/me/password-changes", Some(json!({
                     "srpSalt": next.srp_salt,
                     "srpVerifier": next.srp_verifier,
                     "encryptedPrivateKey": next.encrypted_private_key,
@@ -2989,11 +3125,13 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
                         "encryptedVaultKey": "replacement-vault-key",
                     }],
                     "kdfParams": floor_kdf_params_json(),
-                }]),
-                authenticated_json_headers(&session.token),
-            )
+                })), authenticated_json_headers(&session.token))
             .await;
-        assert_handler_error(&response.body, "INTERNAL_SERVER_ERROR", "Failed to update vault keys");
+        assert_handler_error(
+            &response.body,
+            "INTERNAL_ERROR",
+            "The server could not complete the request.",
+        );
 
         let after = sqlx::query_as::<_, (String, String, String, String, i32, i32)>(
             "SELECT srp_salt, srp_verifier, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1",

@@ -78,6 +78,7 @@ export function accountMetadata(
 		lastActiveAt: 1,
 		biometricEnabled: false,
 		...overrides,
+		insecureTransportConfirmed: overrides.insecureTransportConfirmed ?? false,
 	};
 }
 

@@ -1,6 +1,5 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import {
 	AccountSwitcher,
 	Avatar,
@@ -12,8 +11,9 @@ import {
 import { IconChevronDown } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { lockVaultThroughWorker } from "@/lib/lock-vault";
+import { sendMessage } from "@/lib/messaging";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
@@ -28,7 +28,6 @@ export function ExtensionAccountSwitcher() {
 		accounts,
 		activeAccount: activeSelection,
 		unlockedAccountIds,
-		refresh,
 		switchAccount,
 	} = useAccountSwitcher();
 	const navigate = useNavigate();
@@ -44,14 +43,10 @@ export function ExtensionAccountSwitcher() {
 	const desktopStatus = useQuery({
 		queryKey: ["desktop-sync-status"],
 		queryFn: async () => {
-			try {
-				const response = await chrome.runtime.sendMessage({
-					type: "CHECK_DESKTOP_STATUS",
-				});
-				return response;
-			} catch {
-				return null;
-			}
+			const response = await sendMessage({
+				type: "CHECK_DESKTOP_STATUS",
+			}).catch(() => null);
+			return response?.success ? response : null;
 		},
 		refetchInterval: 5000, // Poll every 5 seconds
 		staleTime: 2000,
@@ -66,10 +61,9 @@ export function ExtensionAccountSwitcher() {
 	const localUnlockedAccountIds = unlockedAccountIds;
 
 	// Merge local unlocked IDs with desktop unlocked accounts
-	const desktopUnlockedAccountIds =
-		desktopStatus.data?.success && desktopStatus.data?.available
-			? (desktopStatus.data?.unlockedAccounts ?? [])
-			: [];
+	const desktopUnlockedAccountIds = desktopStatus.data?.available
+		? (desktopStatus.data.unlockedAccounts ?? [])
+		: [];
 
 	// Combine and deduplicate
 	const unlockedAccountIdsList = Array.from(
@@ -77,47 +71,6 @@ export function ExtensionAccountSwitcher() {
 	);
 
 	const activeAccountId = activeSelection ?? null;
-	// Update team names for accounts that don't have them
-	useEffect(() => {
-		const updateMissingTeamNames = async () => {
-			for (const account of accountsData) {
-				// Skip if account already has team name
-				if (account.teamName) continue;
-
-				try {
-					// Get auth token for this account
-					const authToken = await storage.getAuthToken(account.accountId);
-					if (!authToken) continue;
-
-					const serverUrl =
-						(await storage.getServerUrl(account.accountId)) ||
-						"http://localhost:3000";
-					const client = createAccountRpcClient(authToken, serverUrl);
-
-					const userData = await client.auth.me.query();
-
-					// Update account with team name and avatar
-					await storage.addAccount({
-						...account,
-						teamName: userData.teamName ?? undefined,
-						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
-					});
-
-					// Refresh accounts list
-					await refresh();
-				} catch (error) {
-					console.error(
-						`[account-switcher] Failed to fetch team name for ${account.email}:`,
-						error,
-					);
-				}
-			}
-		};
-
-		if (accountsData.length > 0) {
-			updateMissingTeamNames();
-		}
-	}, [accountsData, refresh]);
 
 	const handleSwitchAccount = async (accountId: string) => {
 		if (accountId === activeAccountId) return;
@@ -129,14 +82,12 @@ export function ExtensionAccountSwitcher() {
 			await switchAccount.mutateAsync(accountId);
 
 			// Check if desktop is available and has this account unlocked
-			const desktopStatus = await chrome.runtime.sendMessage({
-				type: "CHECK_DESKTOP_STATUS",
-			});
+			const desktopStatus = await sendMessage({ type: "CHECK_DESKTOP_STATUS" });
 
 			const isUnlockedInDesktop =
-				desktopStatus?.success &&
-				desktopStatus?.available &&
-				desktopStatus?.unlockedAccounts?.includes(accountId);
+				desktopStatus.success &&
+				desktopStatus.available &&
+				desktopStatus.unlockedAccounts?.includes(accountId);
 
 			// Check local session validity
 			const sessionValid = await storage.isSessionValid(accountId);

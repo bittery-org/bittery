@@ -8,26 +8,29 @@ import {
 	hostnameMatches,
 	parseHostname,
 } from "../lib/hostname";
-import { core } from "./core-instance";
 import {
 	type CredentialErrorType,
 	classifyCredentialError,
 } from "./credential-error";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { rpcClient } from "./rpc-client";
+import {
+	createExtensionItem,
+	updateExtensionItem,
+} from "./extension-item-mutations";
+import type {
+	CheckExistingCredentialsResponse,
+	CredentialCapture,
+	SaveNewCredentialResponse,
+	UpdateExistingCredentialResponse,
+} from "./router/contract";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
 } from "./services/account-resolution";
 import {
-	onLocalItemCreated,
-	onLocalItemUpdated,
-} from "./services/local-item-cache-service";
-import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 const CREDENTIAL_ERROR_MESSAGES: Partial<Record<CredentialErrorType, string>> =
@@ -54,7 +57,7 @@ export async function handleCheckExistingCredentials(payload: {
 	url: string;
 	username?: string;
 	password?: string;
-}): Promise<MessageResponse> {
+}): Promise<CheckExistingCredentialsResponse> {
 	updateActivity();
 
 	const { url, username, password } = payload;
@@ -115,12 +118,9 @@ export async function handleCheckExistingCredentials(payload: {
 /**
  * Handle SAVE_NEW_CREDENTIAL message - Save a new credential
  */
-export async function handleSaveNewCredential(payload: {
-	vaultId: string;
-	username: string;
-	password: string;
-	url: string;
-}): Promise<MessageResponse> {
+export async function handleSaveNewCredential(
+	payload: CredentialCapture,
+): Promise<SaveNewCredentialResponse> {
 	updateActivity();
 
 	const { vaultId, username, password, url } = payload;
@@ -162,26 +162,15 @@ export async function handleSaveNewCredential(payload: {
 		}
 		const hostname = extractHostname(url);
 
-		const result = await core.items.createItem(
-			{
-				vaultId,
-				category: "login",
-				data: {
-					title: hostname,
-					url,
-					username,
-					password,
-				},
-				accountEmail,
-			},
-			rpcClient as Parameters<typeof core.items.createItem>[1],
-		);
-
-		await onLocalItemCreated({
-			itemId: result.itemId,
+		const result = await createExtensionItem({
 			vaultId,
 			category: "login",
-			encryptedData: result._encryptedData,
+			data: {
+				title: hostname,
+				url,
+				username,
+				password,
+			},
 			accountEmail,
 		});
 
@@ -204,13 +193,9 @@ export async function handleSaveNewCredential(payload: {
 /**
  * Handle UPDATE_EXISTING_CREDENTIAL message - Update an existing credential
  */
-export async function handleUpdateExistingCredential(payload: {
-	itemId: string;
-	vaultId: string;
-	username: string;
-	password: string;
-	url: string;
-}): Promise<MessageResponse> {
+export async function handleUpdateExistingCredential(
+	payload: CredentialCapture & { itemId: string },
+): Promise<UpdateExistingCredentialResponse> {
 	updateActivity();
 
 	const { itemId, vaultId, username, password, url } = payload;
@@ -251,26 +236,15 @@ export async function handleUpdateExistingCredential(payload: {
 			};
 		}
 		const hostname = extractHostname(url);
-
-		const result = await core.items.updateItem(
-			{
-				itemId,
-				vaultId,
-				data: {
-					title: hostname,
-					url,
-					username,
-					password,
-				},
-				accountEmail,
-			},
-			rpcClient as Parameters<typeof core.items.updateItem>[1],
-		);
-
-		await onLocalItemUpdated({
+		await updateExtensionItem({
 			itemId,
-			encryptedData: result._encryptedData,
-			accountEmail: result._accountEmail,
+			data: {
+				title: hostname,
+				url,
+				username,
+				password,
+			},
+			accountEmail,
 		});
 
 		return { success: true };

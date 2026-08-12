@@ -320,9 +320,7 @@ extern "C" {
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_unwrap_key(
         RustBuffer data, 
         /*handle*/ uint64_t wrapping_key, 
-        RustBuffer context, 
-        RustBuffer legacy_marker, 
-        RustBuffer legacy_context
+        RustBuffer context
     );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_validate_recovery_key(
         RustBuffer recovery_key
@@ -2472,7 +2470,7 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
     props["ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key"),
-        5,
+        3,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_bittery_crypto_api_fn_func_unwrap_key(rt, thisVal, args, count);
         }
@@ -3828,7 +3826,7 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_sign_pa
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_unwrap_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_func_unwrap_key(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[2]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[3]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[4])
+        auto value = uniffi_bittery_crypto_api_fn_func_unwrap_key(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[2])
         );
 
         

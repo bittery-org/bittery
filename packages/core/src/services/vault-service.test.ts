@@ -23,16 +23,16 @@ describe("VaultService.createVault", () => {
 			vaultCrypto,
 			accounts: {
 				getClientForAccount: async () => ({
-					vault: {
-						create: {
-							mutate: async (input: {
-								vaultId: string;
+					vaults: {
+						create: async (
+							vaultId: string,
+							input: {
 								encryptedVaultKey: string;
-							}) => {
-								createdVaultId = input.vaultId;
-								encryptedVaultKey = input.encryptedVaultKey;
-								return { vaultId: input.vaultId };
 							},
+						) => {
+							createdVaultId = vaultId;
+							encryptedVaultKey = input.encryptedVaultKey;
+							return { data: { vaultId } };
 						},
 					},
 				}),

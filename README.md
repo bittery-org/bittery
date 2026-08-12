@@ -114,9 +114,10 @@ TRUST_PROXY_MODE=none
 BITTERY_MODE=cloud
 BITTERY_CLOUD_PUBLIC_SIGNUP=true
 BITTERY_CLOUD_BILLING_ENABLED=true
+BITTERY_ALLOW_INSECURE_HTTP=false
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [self-hosting docs](https://bittery.com/docs/self-hosting/overview) for the full list including optional storage, Redis, and rate limiting settings.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [self-hosting docs](https://bittery.com/docs/self-hosting/overview) for the full list including optional storage, production Redis, and rate limiting settings.
 
 </details>
 

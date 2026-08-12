@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
-import type { KeyRef } from "@bittery/crypto-port";
+import type { FinishLoginResponse } from "@bittery/api-contract";
+import type { KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
@@ -7,7 +8,6 @@ import {
 import type { AccountStore } from "@bittery/storage";
 import type { InMemoryPlatformPort } from "@bittery/storage/testing";
 import type { AccountMetadata } from "@bittery/storage/types";
-import type { KdfProfile } from "@bittery/types";
 import {
 	createTestAccountStore,
 	createTestItemCache,
@@ -26,7 +26,7 @@ import {
 	type UnlockResult,
 } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { TravelModeApiClient } from "./travel-mode-service";
 
 const kdfParams: KdfProfile = {
 	schemaVersion: 1,
@@ -37,6 +37,26 @@ const kdfParams: KdfProfile = {
 const MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
 const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
 const SERVER_PROOF = "server-proof";
+
+const TEAM_NAME = "Solo Team";
+const TEAM_AVATAR_URL = "https://cdn.example/teams/solo/avatar.png";
+
+/**
+ * The `user` a real finish-login carries. Every user has a team, so the badge is always
+ * part of it — a fixture without one would be testing a server that does not exist.
+ */
+function loginUser(id: string, email: string): FinishLoginResponse["user"] {
+	return {
+		id,
+		email,
+		name: email.split("@")[0] ?? "User",
+		secretKeyHint: "A3-A••••",
+		publicKey: "public-key",
+		encryptedPrivateKey: "encrypted-private-key",
+		teamName: TEAM_NAME,
+		teamAvatarUrl: TEAM_AVATAR_URL,
+	};
+}
 
 /**
  * One port for every store these tests build, because a `KeyRef` only means anything to the
@@ -62,6 +82,7 @@ interface RecordedDerivation {
 function createRecordingCryptoPort(): {
 	crypto: InMemoryCryptoPort;
 	derivations: RecordedDerivation[];
+	srpChallengeFields: string[][];
 } {
 	const crypto = createInMemoryCryptoPort();
 	const derivations: RecordedDerivation[] = [];
@@ -69,6 +90,15 @@ function createRecordingCryptoPort(): {
 	crypto.deriveMasterKey = async (password, secretKey, email, profile) => {
 		derivations.push({ secretKey, email, profile });
 		return deriveMasterKey(password, secretKey, email, profile);
+	};
+	// The core's `SrpServerChallenge` is `{ salt, server_public_key }` and its FFI converter
+	// reads exactly those two. A field the ceremony adds here is not a weaker binding, it is
+	// no binding at all, and nothing below the seam would report it.
+	const srpChallengeFields: string[][] = [];
+	const deriveClientSession = crypto.deriveClientSession.bind(crypto);
+	crypto.deriveClientSession = async (secret, challenge, password) => {
+		srpChallengeFields.push(Object.keys(challenge).sort());
+		return deriveClientSession(secret, challenge, password);
 	};
 	// The fake auth client never sees the client session key, so it cannot compute a real
 	// server proof. This stands in for the server half of the handshake — still a literal
@@ -78,7 +108,7 @@ function createRecordingCryptoPort(): {
 			throw new Error("Server session proof did not verify.");
 		}
 	};
-	return { crypto, derivations };
+	return { crypto, derivations, srpChallengeFields };
 }
 
 function account(
@@ -96,6 +126,7 @@ function account(
 		addedAt: 1,
 		lastActiveAt: 1,
 		biometricEnabled: false,
+		insecureTransportConfirmed: false,
 	};
 }
 
@@ -120,36 +151,34 @@ function createAuthClient(
 ): IAuthClient {
 	return {
 		auth: {
-			checkEmail: { query: mock(async () => ({ exists: true })) },
-			startLogin: {
-				mutate: mock(async ({ email }) => {
-					startedEmails.push(email);
-					return {
+			checkEmail: mock(async () => ({
+				data: { exists: true },
+			})),
+			startLogin: mock(async ({ email }) => {
+				startedEmails.push(email);
+				return {
+					data: {
 						attemptId: "attempt",
 						salt: "srp-salt",
 						serverPublicKey: "server-public",
 						kdfParams,
-					};
-				}),
-			},
-			finishLogin: {
-				mutate: mock(async () => ({
+					},
+				};
+			}),
+			finishLogin: mock(async () => ({
+				data: {
 					token,
+					sessionId: "session-new",
 					serverProof: "server-proof",
-					user: { id: "user-new", email: "same@example.com" },
-					expiresAt: new Date(Date.now() + 60_000),
-				})),
-			},
-			logout: { mutate: mock(async () => ({ success: true })) },
-			refreshSession: {
-				mutate: mock(async () => ({
-					token,
-					sessionId: "session",
-					expiresAt: new Date(Date.now() + 60_000),
-				})),
-			},
+					user: loginUser("user-new", "same@example.com"),
+					expiresAt: new Date(Date.now() + 60_000).toISOString(),
+					vaultKeys: { items: [], hasMore: false },
+				},
+			})),
+			drainVaultKeys: mock(async (_token, initialPage) => ({
+				data: initialPage.items,
+			})),
 		},
-		vault: { list: { query: mock(async () => []) } },
 	};
 }
 
@@ -209,7 +238,6 @@ describe("account-routed authentication", () => {
 			await storage.storePinnedKdfProfile(kdfParams, metadata.accountId);
 		}
 
-		const clientAccountIds: string[] = [];
 		const startedEmails: string[] = [];
 		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
 		const { crypto, derivations } = createRecordingCryptoPort();
@@ -220,10 +248,7 @@ describe("account-routed authentication", () => {
 				{
 					crypto,
 					storage,
-					createAuthClientForAccount: async (resolvedAccountId) => {
-						clientAccountIds.push(resolvedAccountId);
-						return createAuthClient(startedEmails);
-					},
+					apiClient: createAuthClient(startedEmails),
 				},
 			);
 		}
@@ -240,7 +265,6 @@ describe("account-routed authentication", () => {
 			["account-b"],
 			["account-b"],
 		]);
-		expect(clientAccountIds).toEqual(["account-a", "account-b"]);
 		expect(startedEmails).toEqual(["same@example.com", "same@example.com"]);
 	});
 
@@ -260,8 +284,6 @@ describe("account-routed authentication", () => {
 		};
 		const startedEmails: string[] = [];
 		const handshakeClient = createAuthClient(startedEmails, "self-token");
-		const authenticatedClient = createAuthClient([], "self-token");
-
 		const result = await performSRPLogin(
 			{
 				email: "same@example.com",
@@ -271,13 +293,8 @@ describe("account-routed authentication", () => {
 			},
 			{
 				crypto,
-				authClient: handshakeClient,
+				apiClient: handshakeClient,
 				storage,
-				createAuthenticatedClient: (token, serverUrl) => {
-					expect(token).toBe("self-token");
-					expect(serverUrl).toBe("https://self-hosted.example");
-					return authenticatedClient;
-				},
 			},
 		);
 
@@ -286,6 +303,48 @@ describe("account-routed authentication", () => {
 		for (const write of Object.values(writes)) {
 			expect(write).not.toHaveBeenCalled();
 		}
+	});
+
+	it("binds pre-persistence vault-key paging to the login ceremony confirmation", async () => {
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const drainedOrigins: unknown[] = [];
+		const handshakeClient = createAuthClient([], "ceremony-token");
+		handshakeClient.auth.finishLogin = mock(async () => ({
+			data: {
+				token: "ceremony-token",
+				sessionId: "ceremony-session",
+				serverProof: SERVER_PROOF,
+				user: loginUser("new-user", "new@example.com"),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
+				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
+			},
+		}));
+		handshakeClient.auth.drainVaultKeys = mock(
+			async (_token, _initialPage, requestOrigin) => {
+				drainedOrigins.push(requestOrigin);
+				return { data: [] };
+			},
+		);
+
+		await performSRPLogin(
+			{
+				email: "new@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "http://server.example/",
+				insecureTransportConfirmed: true,
+			},
+			{ crypto, storage, apiClient: handshakeClient },
+		);
+
+		expect(drainedOrigins).toEqual([
+			{
+				kind: "authCeremony",
+				serverUrl: "http://server.example",
+				insecureTransportConfirmed: true,
+			},
+		]);
 	});
 
 	it("validates full login against the pin selected by normalized server and email", async () => {
@@ -316,8 +375,7 @@ describe("account-routed authentication", () => {
 			{
 				crypto,
 				storage,
-				authClient: createAuthClient([]),
-				createAuthenticatedClient: () => createAuthClient([]),
+				apiClient: createAuthClient([]),
 			},
 		);
 
@@ -345,10 +403,50 @@ describe("account-routed authentication", () => {
 					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
-				{ crypto, storage, authClient: createAuthClient([]) },
+				{ crypto, storage, apiClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("downgraded");
 		expect(derivations).toHaveLength(0);
+	});
+
+	/**
+	 * Every ceremony that speaks SRP builds the server challenge itself, so the field list is
+	 * the only place the seam's contract is visible from up here. The KDF profile reaches the
+	 * crypto through the SRP password it produced, never through this record.
+	 */
+	it("hands the SRP seam only the fields the crypto core reads", async () => {
+		const { crypto, srpChallengeFields } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "https://acct.example")],
+			crypto,
+		);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storePinnedKdfProfile(kdfParams, "acct");
+		const apiClient = createAuthClient([]);
+
+		await performSRPLogin(
+			{
+				email: "same@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "https://acct.example",
+			},
+			{ crypto, storage, apiClient },
+		);
+		await deriveSrpLoginProof(
+			{ accountId: "acct", password: "password" },
+			{ crypto, storage, apiClient },
+		);
+		await performSRPUnlock(
+			{ accountId: "acct", password: "password" },
+			{ crypto, storage, apiClient },
+		);
+
+		expect(srpChallengeFields).toEqual([
+			["salt", "serverPublicKey"],
+			["salt", "serverPublicKey"],
+			["salt", "serverPublicKey"],
+		]);
 	});
 
 	it("rejects ambiguous full-login account matches before derivation", async () => {
@@ -369,7 +467,7 @@ describe("account-routed authentication", () => {
 					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
-				{ crypto, storage, authClient: createAuthClient([]) },
+				{ crypto, storage, apiClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("Ambiguous account");
 		expect(derivations).toHaveLength(0);
@@ -405,7 +503,7 @@ describe("KDF agility on unlock", () => {
 			{
 				crypto,
 				storage,
-				createAuthClientForAccount: async () => createAuthClient([]),
+				apiClient: createAuthClient([]),
 			},
 		);
 
@@ -428,11 +526,58 @@ describe("KDF agility on unlock", () => {
 				{
 					crypto,
 					storage,
-					createAuthClientForAccount: async () => createAuthClient([]),
+					apiClient: createAuthClient([]),
 				},
 			),
 		).rejects.toThrow("sign in again");
 		expect(derivations).toHaveLength(0);
+	});
+
+	it("binds reauthentication vault-key paging to the persisted account", async () => {
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "http://server.example")],
+			crypto,
+		);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storeServerUrl("http://server.example", "acct");
+		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
+		const drainedOrigins: unknown[] = [];
+		const authClient = createAuthClient([], "reauth-token");
+		authClient.auth.finishLogin = mock(async () => ({
+			data: {
+				token: "reauth-token",
+				sessionId: "reauth-session",
+				serverProof: SERVER_PROOF,
+				user: loginUser("user", "same@example.com"),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
+				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
+			},
+		}));
+		authClient.auth.drainVaultKeys = mock(
+			async (_token, _initialPage, requestOrigin) => {
+				drainedOrigins.push(requestOrigin);
+				return { data: [] };
+			},
+		);
+
+		const result = await performSRPUnlock(
+			{ accountId: "acct", password: "password" },
+			{
+				crypto,
+				storage,
+				apiClient: authClient,
+			},
+		);
+
+		expect(result.mode).toBe("reauth");
+		expect(drainedOrigins).toEqual([
+			{
+				kind: "persistedAccount",
+				accountId: "acct",
+				serverUrl: "http://server.example",
+			},
+		]);
 	});
 
 	it("derives SRP login proofs with the negotiated server KDF params, not the current default", async () => {
@@ -444,26 +589,22 @@ describe("KDF agility on unlock", () => {
 		await storage.storeSecretKey("secret", "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 
-		const authClient = {
-			auth: {
-				startLogin: {
-					mutate: mock(async () => ({
-						attemptId: "attempt",
-						salt: "srp-salt",
-						serverPublicKey: "server-public",
-						kdfParams: { ...pinnedProfile },
-					})),
-				},
+		const authClient = createAuthClient([]);
+		authClient.auth.startLogin = mock(async () => ({
+			data: {
+				attemptId: "attempt",
+				salt: "srp-salt",
+				serverPublicKey: "server-public",
+				kdfParams: { ...pinnedProfile },
 			},
-			vault: { list: { query: mock(async () => []) } },
-		} as unknown as IAuthClient;
+		}));
 
 		await deriveSrpLoginProof(
 			{ accountId: "acct", password: "password" },
 			{
 				crypto,
 				storage,
-				createAuthClientForAccount: async () => authClient,
+				apiClient: authClient,
 			},
 		);
 
@@ -491,31 +632,31 @@ describe("storeLoginSession travel mode verification", () => {
 	function travelModeClientForToken(
 		token: string | null,
 		seenTokens: (string | null)[],
-	): TravelModeRpcClient {
+	): TravelModeApiClient {
 		return {
 			travelMode: {
-				getTravelMode: {
-					query: mock(async () => {
-						seenTokens.push(token);
-						if (!token) {
-							throw new Error("UNAUTHORIZED");
-						}
-						return {
+				get: mock(async () => {
+					seenTokens.push(token);
+					if (!token) {
+						throw new Error("UNAUTHORIZED");
+					}
+					return {
+						data: {
 							enabled: false,
 							hiddenVaultIds: [],
 							enabledAt: null,
 							updatedAt: new Date().toISOString(),
-						};
-					}),
-				},
+						},
+					};
+				}),
 			},
-		} as unknown as TravelModeRpcClient;
+		} as unknown as TravelModeApiClient;
 	}
 
 	it("verifies travel mode with the freshly issued login token", async () => {
 		resetTravelModeEnforcerForTests();
 		// A first login into an empty store: nothing is authenticated yet, so any
-		// ambient RPC client reading storage would be unauthenticated.
+		// ambient API client reading storage would be unauthenticated.
 		const { storage } = await makeStore();
 		const storePinnedKdfProfile = spyOn(storage, "storePinnedKdfProfile");
 		const seenTokens: (string | null)[] = [];
@@ -528,7 +669,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -538,6 +679,41 @@ describe("storeLoginSession travel mode verification", () => {
 			kdfParams,
 			expect.any(String),
 		);
+	});
+
+	// A full sign-in is the only moment account metadata is written from the server: a local
+	// unlock reads the badge straight back out of it, so whatever login omits stays blank on
+	// every avatar, account switcher and sidebar until something else refills it.
+	it("writes the team badge a fresh login reports into account metadata", async () => {
+		resetTravelModeEnforcerForTests();
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const seenTokens: (string | null)[] = [];
+
+		const result = await performSRPLogin(
+			{
+				email: "same@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "https://cloud.example",
+			},
+			{ crypto, apiClient: createAuthClient([]), storage },
+		);
+		const accountId = await storeLoginSession(
+			result,
+			SECRET_KEY,
+			storage,
+			(await createTestItemCache()).cache,
+			undefined,
+			{
+				createTravelModeApiClient: (token: string | null) =>
+					travelModeClientForToken(token, seenTokens),
+			},
+		);
+
+		const metadata = await storage.getAccountMetadata(accountId);
+		expect(metadata?.teamName).toBe(TEAM_NAME);
+		expect(metadata?.teamAvatarUrl).toBe(TEAM_AVATAR_URL);
 	});
 
 	// A reused accountId is the normal case, not an edge case:
@@ -558,7 +734,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -577,7 +753,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -605,7 +781,7 @@ describe("storeLoginSession travel mode verification", () => {
 				"user@example.com",
 				{
 					serverUrl: "https://cloud.example",
-					createTravelModeRpcClient: (token: string | null) =>
+					createTravelModeApiClient: (token: string | null) =>
 						travelModeClientForToken(token, []),
 				},
 			),
@@ -637,7 +813,7 @@ describe("storeLoginSession travel mode verification", () => {
 				"user@example.com",
 				{
 					serverUrl: "https://cloud.example",
-					createTravelModeRpcClient: (token: string | null) =>
+					createTravelModeApiClient: (token: string | null) =>
 						travelModeClientForToken(token, []),
 				},
 			),

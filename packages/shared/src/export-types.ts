@@ -54,20 +54,3 @@ export interface VaultExportPayload {
 		totalVaults: number;
 	};
 }
-
-/**
- * Final encrypted export file format
- */
-export interface EncryptedVaultExport {
-	format: "bittery-encrypted-export";
-	version: string;
-	exportDate: string;
-	encryption: {
-		version: string;
-		algorithm: string;
-		iterations: number;
-		salt: string;
-		iv: string;
-		ciphertext: string;
-	};
-}

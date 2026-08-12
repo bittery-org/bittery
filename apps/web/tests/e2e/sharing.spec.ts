@@ -342,9 +342,7 @@ test("revoking a link disables it for the recipient", async ({
 		toastWithText(page, uiText("sharing_links_list_toast_revoke_success")),
 	).toBeVisible();
 
-	// The list is only correct after a fresh load: `invalidateShare` invalidates
-	// `["share", ...]` while the RPC queries are keyed `["rpc", "share", ...]`,
-	// so nothing it does can match. Reported as a product bug for this step.
+	// A fresh load also verifies that revocation survived beyond the query cache.
 	await page.reload();
 	await openItem(page, item.title);
 	const refreshed = await openShareHistory(page);

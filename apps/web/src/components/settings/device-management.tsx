@@ -1,4 +1,6 @@
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import type { Session } from "@bittery/api-contract";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -69,7 +71,7 @@ function getPlatformLabel(platform: string | null | undefined, m: Messages) {
 }
 
 function formatDeviceDisplayLocalized(
-	device: DeviceSession,
+	device: Session,
 	m: Messages,
 ): { title: string; subtitle: string } {
 	const title = device.deviceName ?? m.settings_devices_common_unknown_device();
@@ -91,12 +93,11 @@ function formatDeviceDisplayLocalized(
 }
 
 function formatLastActiveLocalized(
-	date: Date | string,
+	lastActive: Date,
 	locale: string,
 	m: Messages,
 ): string {
 	const now = new Date();
-	const lastActive = typeof date === "string" ? new Date(date) : date;
 	const diffMs = now.getTime() - lastActive.getTime();
 	const diffMins = Math.floor(diffMs / 60_000);
 	const diffHours = Math.floor(diffMs / 3_600_000);
@@ -129,35 +130,23 @@ function formatLastActiveLocalized(
 	}).format(lastActive);
 }
 
-interface DeviceSession {
-	id: string;
-	deviceName: string | null;
-	platform: string | null;
-	browserName: string | null;
-	browserVersion: string | null;
-	osName: string | null;
-	osVersion: string | null;
-	ipAddress: string | null;
-	lastActiveAt: Date | string;
-	createdAt: Date | string;
-	isCurrentSession: boolean;
-}
-
 function RenameDeviceDialog({
 	session,
 	onSuccess,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onSuccess: () => void;
 }) {
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [deviceName, setDeviceName] = useState(session.deviceName || "");
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 
 	const renameMutation = useMutation({
 		mutationFn: (input: { sessionId: string; deviceName: string }) =>
-			rpcClient.auth.renameDevice.mutate(input),
+			api.auth.sessions.rename(input.sessionId, {
+				deviceName: input.deviceName,
+			}),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_rename_success());
 			setOpen(false);
@@ -234,16 +223,15 @@ function RevokeDeviceDialog({
 	session,
 	onSuccess,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onSuccess: () => void;
 }) {
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 
 	const revokeMutation = useMutation({
-		mutationFn: (sessionId: string) =>
-			rpcClient.auth.revokeDevice.mutate({ sessionId }),
+		mutationFn: (sessionId: string) => api.auth.sessions.revoke(sessionId),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_revoke_success());
 			setOpen(false);
@@ -303,7 +291,7 @@ function DeviceCard({
 	session,
 	onUpdate,
 }: {
-	session: DeviceSession;
+	session: Session;
 	onUpdate: () => void;
 }) {
 	const { m, locale } = useI18n();
@@ -372,9 +360,9 @@ function DeviceListSkeleton() {
 
 export function DeviceManagement() {
 	const { m } = useI18n();
-	const rpc = useRPC();
+	const api = useApiClient();
 
-	const devicesQuery = useQuery(rpc.auth.listDevices.queryOptions());
+	const devicesQuery = useQuery(apiQueries.auth.sessions(api));
 
 	const handleUpdate = () => {
 		devicesQuery.refetch();
@@ -406,9 +394,7 @@ export function DeviceManagement() {
 	const sortedDevices = [...devices].sort((a, b) => {
 		if (a.isCurrentSession) return -1;
 		if (b.isCurrentSession) return 1;
-		return (
-			new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime()
-		);
+		return b.lastActiveAt.getTime() - a.lastActiveAt.getTime();
 	});
 
 	return (

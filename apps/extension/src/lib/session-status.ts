@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import type { VaultSessionSnapshot } from "@/background/vault-session/types";
+import type { RouteResponse } from "@/background/router/contract";
+import { sendMessage } from "@/lib/messaging";
 
-/** Partial: the worker may answer before it has a snapshot, or not at all. */
-export type SessionStatusResponse = Partial<VaultSessionSnapshot> & {
-	success?: boolean;
-};
+/** `null` when the worker answered without a snapshot — treat as "unknown". */
+export type SessionStatus = Extract<
+	RouteResponse<"GET_SESSION_STATUS">,
+	{ success: true }
+>;
 
 /**
  * The worker's snapshot is the only answer to "is the vault unlocked, and who
@@ -15,10 +17,12 @@ export type SessionStatusResponse = Partial<VaultSessionSnapshot> & {
  * this handler is an in-memory read rather than a native round trip.
  */
 export function useSessionStatus() {
-	return useQuery<SessionStatusResponse>({
+	return useQuery<SessionStatus | null>({
 		queryKey: ["session-status"],
-		queryFn: async () =>
-			chrome.runtime.sendMessage({ type: "GET_SESSION_STATUS" }),
+		queryFn: async () => {
+			const response = await sendMessage({ type: "GET_SESSION_STATUS" });
+			return response.success ? response : null;
+		},
 		refetchInterval: 5000,
 	});
 }

@@ -78,8 +78,8 @@ interface Harness {
 	encryptCalls: EncryptCall[];
 	vaultKeyReads: Array<string | undefined>;
 	clientRequests: ClientRequest[];
-	mutateInputs: Array<Record<string, unknown>>;
-	defaultClientMutateInputs: Array<Record<string, unknown>>;
+	createInputs: Array<Record<string, unknown>>;
+	defaultClientCreateInputs: Array<Record<string, unknown>>;
 }
 
 async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
@@ -92,8 +92,8 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 	const encryptCalls: EncryptCall[] = [];
 	const vaultKeyReads: Array<string | undefined> = [];
 	const clientRequests: ClientRequest[] = [];
-	const mutateInputs: Array<Record<string, unknown>> = [];
-	const defaultClientMutateInputs: Array<Record<string, unknown>> = [];
+	const createInputs: Array<Record<string, unknown>> = [];
+	const defaultClientCreateInputs: Array<Record<string, unknown>> = [];
 	const unusedShareKeys = [...shareKeys];
 	const backend = createInMemoryCryptoPort();
 	const masterUnlockKey = await backend.importKey(new Uint8Array(32).fill(9));
@@ -145,22 +145,18 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 
 	const accountScopedClient = {
 		share: {
-			create: {
-				mutate: async (input: Record<string, unknown>) => {
-					mutateInputs.push(input);
-					return CREATE_RESPONSE;
-				},
+			create: async (itemId: string, input: Record<string, unknown>) => {
+				createInputs.push({ itemId, ...input });
+				return { data: { id: "share_1", ...CREATE_RESPONSE } };
 			},
 		},
 	};
 
 	const defaultClient = {
 		share: {
-			create: {
-				mutate: async (input: Record<string, unknown>) => {
-					defaultClientMutateInputs.push(input);
-					return CREATE_RESPONSE;
-				},
+			create: async (itemId: string, input: Record<string, unknown>) => {
+				defaultClientCreateInputs.push({ itemId, ...input });
+				return { data: { id: "share_1", ...CREATE_RESPONSE } };
 			},
 		},
 	};
@@ -208,8 +204,8 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 		encryptCalls,
 		vaultKeyReads,
 		clientRequests,
-		mutateInputs,
-		defaultClientMutateInputs,
+		createInputs,
+		defaultClientCreateInputs,
 	};
 }
 
@@ -358,7 +354,7 @@ describe("ShareService.createShare encryption", () => {
 });
 
 describe("ShareService.createShare server payload", () => {
-	// Existing share links are decrypted from exactly these mutation fields, so the
+	// Existing share links are decrypted from exactly these request fields, so the
 	// test pins the wire mapping while the real test port supplies randomized IVs.
 	test("sends the pinned share creation payload", async () => {
 		const harness = await createHarness();
@@ -376,7 +372,7 @@ describe("ShareService.createShare server payload", () => {
 			toBase64(SHARE_KEY_A),
 		]);
 
-		expect(harness.mutateInputs[0]).toEqual({
+		expect(harness.createInputs[0]).toEqual({
 			itemId: "item_1",
 			accessMode: "anyone",
 			isOneTimeUse: true,
@@ -400,8 +396,8 @@ describe("ShareService.createShare server payload", () => {
 			harness.defaultClient,
 		);
 
-		expect(harness.mutateInputs[0]?.accessMode).toBe("email-restricted");
-		expect(harness.mutateInputs[0]?.allowedEmails).toEqual([
+		expect(harness.createInputs[0]?.accessMode).toBe("email-restricted");
+		expect(harness.createInputs[0]?.allowedEmails).toEqual([
 			"bob@example.com",
 			"carol@example.com",
 		]);
@@ -418,7 +414,7 @@ describe("ShareService.createShare server payload", () => {
 			harness.defaultClient,
 		);
 
-		expect(harness.mutateInputs[0]?.allowedEmails).toBeNull();
+		expect(harness.createInputs[0]?.allowedEmails).toBeNull();
 	});
 });
 
@@ -438,7 +434,7 @@ describe("ShareService.createShare account identity", () => {
 
 		// `toEqual` treats `[undefined]` as `[]`, so assert the length directly.
 		expect(harness.vaultKeyReads.length).toBe(0);
-		expect(harness.mutateInputs.length).toBe(0);
+		expect(harness.createInputs.length).toBe(0);
 	});
 
 	test("refuses to share when the vault is locked", async () => {
@@ -448,7 +444,7 @@ describe("ShareService.createShare account identity", () => {
 			harness.service.createShare(shareInput(), harness.defaultClient),
 		).rejects.toThrow("Could not decrypt vault key");
 
-		expect(harness.mutateInputs.length).toBe(0);
+		expect(harness.createInputs.length).toBe(0);
 	});
 
 	test("creates the share on the account-scoped client", async () => {
@@ -459,8 +455,8 @@ describe("ShareService.createShare account identity", () => {
 		expect(harness.clientRequests).toEqual([
 			{ defaultClient: harness.defaultClient, accountId: ACCOUNT_ID },
 		]);
-		expect(harness.mutateInputs).toHaveLength(1);
-		expect(harness.defaultClientMutateInputs).toHaveLength(0);
+		expect(harness.createInputs).toHaveLength(1);
+		expect(harness.defaultClientCreateInputs).toHaveLength(0);
 	});
 });
 

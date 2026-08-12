@@ -1,4 +1,5 @@
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Badge,
 	Button,
@@ -22,17 +23,16 @@ import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export function PendingInvitations() {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
-	const pendingQuery = useQuery(rpc.team.invitations.pending.queryOptions());
+	const pendingQuery = useQuery(apiQueries.teams.pendingInvitations(api));
 	const { locale, m } = useI18n();
 
 	// Invitations are addressed by id here: only the SHA-256 digest of the token
 	// is stored server-side, so the pending list cannot hand back the raw token.
 	const acceptMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			rpcClient.team.invitations.acceptById.mutate(input),
+			api.teams.invitations.acceptMine(input.invitationId).then((r) => r.data),
 		onSuccess: async (data) => {
 			toast.success(
 				m.dashboard_pending_toast_joined({ teamName: data.teamName }),
@@ -46,7 +46,7 @@ export function PendingInvitations() {
 
 	const declineMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			rpcClient.team.invitations.declineById.mutate(input),
+			api.teams.invitations.declineMine(input.invitationId),
 		onSuccess: async () => {
 			toast.success(m.dashboard_pending_toast_declined());
 			await invalidator.invalidateTeamInvitations();

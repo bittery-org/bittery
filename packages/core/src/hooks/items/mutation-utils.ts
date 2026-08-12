@@ -1,4 +1,10 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import type { ItemCategory } from "@bittery/api-contract";
+import { useApiClient } from "@bittery/shared/api";
+import type { EncryptedItemPayload } from "@bittery/shared/item-mapping";
+import {
+	stripToDecryptedData,
+	toEncryptedPayload,
+} from "@bittery/shared/item-mapping";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import type { IPendingMutationQueue } from "@bittery/types";
 import {
@@ -23,6 +29,7 @@ type LocalFirstMutationType =
 	| "permanent_delete"
 	| "restore"
 	| "move"
+	| "cross_account_move"
 	| "toggle_favorite";
 
 interface BasePendingMutation {
@@ -30,11 +37,16 @@ interface BasePendingMutation {
 	entityId: string;
 	vaultId: string;
 	targetVaultId?: string;
-	category?: string;
+	targetAccountId?: string;
+	targetAccountEmail?: string;
+	targetItemId?: string;
+	category?: ItemCategory;
 	encryptedPayload?: {
 		encryptedData: string;
 		encryptionIv: string;
 		encryptionAlgorithm: string;
+		encryptionVersion: number;
+		encryptedByUserId: string;
 	};
 	favorite?: boolean;
 	baseVersion: number;
@@ -55,11 +67,8 @@ interface LocalItemMutationContextOptions {
 	includeDeleted?: boolean;
 }
 
-interface EncryptedPayloadLike {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
+/** The ciphertext triple as the crypto port returns it — one definition, in `@bittery/shared`. */
+type EncryptedPayloadLike = EncryptedItemPayload;
 
 export function createLocalId(prefix: string): string {
 	const random = globalThis?.crypto?.randomUUID?.();
@@ -72,23 +81,23 @@ export function createLocalId(prefix: string): string {
 export function enqueuePendingMutation(
 	queue: IPendingMutationQueue,
 	mutation: BasePendingMutation,
-): void {
-	queue.enqueue({
-		id: createLocalId("mutation"),
-		...mutation,
-		timestamp: Date.now(),
-		retryCount: 0,
-	});
+	applyOptimistic?: () => Promise<void>,
+): Promise<void> {
+	return queue.enqueue(
+		{
+			id: createLocalId("mutation"),
+			...mutation,
+			timestamp: Date.now(),
+			retryCount: 0,
+		},
+		applyOptimistic,
+	);
 }
 
 export function toQueueEncryptedPayload(
 	payload: EncryptedPayloadLike,
 ): NonNullable<BasePendingMutation["encryptedPayload"]> {
-	return {
-		encryptedData: payload.ciphertext,
-		encryptionIv: payload.iv,
-		encryptionAlgorithm: payload.algorithm,
-	};
+	return toEncryptedPayload(payload);
 }
 
 export function requireRepositoryForVault(
@@ -145,7 +154,7 @@ export function requireLocalItemMutationContext(
 	};
 }
 
-export function enqueueItemMutation(
+export async function enqueueItemMutation(
 	queue: IPendingMutationQueue,
 	context: Pick<
 		LocalItemMutationContext,
@@ -155,38 +164,26 @@ export function enqueueItemMutation(
 		BasePendingMutation,
 		"baseVersion" | "accountId" | "accountEmail"
 	>,
-): void {
-	enqueuePendingMutation(queue, {
-		...mutation,
-		baseVersion: context.baseVersion,
-		accountId: context.accountId,
-		accountEmail: context.accountEmail,
-	});
+	applyOptimistic?: () => Promise<void>,
+): Promise<void> {
+	await enqueuePendingMutation(
+		queue,
+		{
+			...mutation,
+			baseVersion: context.baseVersion,
+			accountId: context.accountId,
+			accountEmail: context.accountEmail,
+		},
+		applyOptimistic,
+	);
 }
 
 export function extractDecryptedItemData(item: unknown): DecryptedItemData {
-	const data = { ...(item as Record<string, unknown>) };
-	delete data.id;
-	delete data.vaultId;
-	delete data.category;
-	delete data.favorite;
-	delete data.createdAt;
-	delete data.updatedAt;
-	delete data.deletedAt;
-	delete data.version;
-	delete data.lastModifiedBy;
-	delete data.attachments;
-	delete data.accountEmail;
-	delete data.accountId;
-	delete data.serverUrl;
-	delete data._encrypted;
-	delete data.vault;
-	delete data.account;
-	return data as unknown as DecryptedItemData;
+	return stripToDecryptedData(item);
 }
 
 export function useItemMutationRuntime() {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const sync = usePlatformSync();
 	const invalidator = useQueryInvalidator();

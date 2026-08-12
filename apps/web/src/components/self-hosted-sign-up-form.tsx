@@ -1,4 +1,4 @@
-import { Badge, Button, cn, Input, Label } from "@bittery/ui";
+import { Badge, Button, Checkbox, cn, Input, Label } from "@bittery/ui";
 import {
 	IconCircleCheck as CheckCircle2,
 	IconClipboardPaste as Download,
@@ -15,10 +15,12 @@ export default function SelfHostedSignUpForm({
 	onSwitchToSignIn,
 	invitationToken,
 	redirectTo,
+	initialInsecureTransportConfirmed,
 }: {
 	onSwitchToSignIn: () => void;
 	invitationToken?: string;
 	redirectTo?: string;
+	initialInsecureTransportConfirmed?: boolean;
 }) {
 	const { m } = useI18n();
 	const {
@@ -45,7 +47,14 @@ export default function SelfHostedSignUpForm({
 		isInvitationSignup,
 		allowPublicSignup,
 		hasAllKeyMaterial,
-	} = useSignupForm({ invitationToken, redirectTo });
+		requiresInsecureTransportConfirmation,
+		insecureTransportConfirmed,
+		setInsecureTransportConfirmed,
+	} = useSignupForm({
+		invitationToken,
+		redirectTo,
+		initialInsecureTransportConfirmed,
+	});
 
 	const signupHeading = isInvitationSignup
 		? m.auth_self_hosted_title_accept_invitation()
@@ -284,6 +293,27 @@ export default function SelfHostedSignUpForm({
 								</p>
 							</div>
 						</button>
+
+						{requiresInsecureTransportConfirmation ? (
+							<Label
+								htmlFor="self-hosted-signup-insecure-http-confirmation"
+								className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+							>
+								<Checkbox
+									id="self-hosted-signup-insecure-http-confirmation"
+									checked={insecureTransportConfirmed}
+									onCheckedChange={(checked) =>
+										setInsecureTransportConfirmed(checked === true)
+									}
+								/>
+								<span className="grid gap-0.5">
+									<span>{m.auth_insecure_http_confirmation_label()}</span>
+									<span className="text-muted-foreground text-xs">
+										{m.auth_insecure_http_confirmation_description()}
+									</span>
+								</span>
+							</Label>
+						) : null}
 
 						<div className="pt-1">
 							<Button

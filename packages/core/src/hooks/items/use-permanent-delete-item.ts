@@ -31,8 +31,7 @@ export function usePermanentDeleteItem() {
 				vaultId: input.vaultId,
 				includeDeleted: true,
 			});
-			await context.repo.removeItem(input.itemId);
-			enqueueItemMutation(queue, context, {
+			await enqueueItemMutation(queue, context, {
 				type: "permanent_delete",
 				entityId: input.itemId,
 				vaultId: input.vaultId,

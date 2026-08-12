@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use ts_rs::TS;
 
 use crate::{
+    db::enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole, VaultType},
     error::AppError,
     repo::access::{
         count_member_share_links, is_team_member, load_member_sessions, load_member_share_links,
@@ -11,24 +11,24 @@ use crate::{
     services::{audit::mask_ip, team_admin::authorize_team_admin},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberAccessInput {
     pub user_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberVaultAccess {
     pub id: String,
     pub name: String,
-    pub vault_type: String,
-    pub role: String,
+    pub vault_type: VaultType,
+    pub role: VaultRole,
     pub granted_at: String,
     pub item_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberDevice {
     pub id: String,
@@ -42,13 +42,13 @@ pub struct MemberDevice {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberShareLink {
     pub id: String,
     pub item_id: String,
-    pub status: String,
-    pub access_mode: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareLinkAccessMode,
     pub access_count: u32,
     pub max_access_count: Option<u32>,
     pub expires_at: String,
@@ -58,7 +58,7 @@ pub struct MemberShareLink {
     pub is_expired: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberAccessResponse {
     pub vaults: Vec<MemberVaultAccess>,
@@ -98,7 +98,7 @@ pub(crate) async fn get_member_access(
         .collect();
     let active_share_link_count = share_links
         .iter()
-        .filter(|link| link.status == "active" && !link.is_expired)
+        .filter(|link| link.status == ShareLinkStatus::Active && !link.is_expired)
         .count();
 
     Ok(MemberAccessResponse {
@@ -149,7 +149,7 @@ fn to_share_link(row: MemberShareLinkRow, now: OffsetDateTime) -> MemberShareLin
     MemberShareLink {
         id: row.id,
         item_id: row.item_id,
-        is_expired: row.status == "active" && row.expires_at <= now,
+        is_expired: row.status == ShareLinkStatus::Active && row.expires_at <= now,
         status: row.status,
         access_mode: row.access_mode,
         access_count: to_count(row.access_count as i64),

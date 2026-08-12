@@ -12,7 +12,7 @@ import type { AccountInfo as CoreAccountInfo } from "../services/account-resolve
 import { peekAccountSessionManager } from "../services/account-session-manager";
 
 /**
- * Complete account information including metadata, credentials, and tRPC client
+ * Complete account information including metadata, credentials, and tAPI client
  */
 export type AccountInfo = CoreAccountInfo;
 
@@ -65,7 +65,7 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 		},
 		enabled: !!effectiveActiveAccount && options.enabled !== false,
 		staleTime: 0,
-		// AccountInfo carries a live RPC client (a Proxy), which is not
+		// AccountInfo carries a live API client (a Proxy), which is not
 		// JSON-serializable. React Query's default structural sharing throws on
 		// proxies, so it must be disabled for this query.
 		structuralSharing: false,

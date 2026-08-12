@@ -83,3 +83,35 @@ export function vaultsCollection(accountId: string): string {
 export function metaCollection(accountId: string): string {
 	return `${accountId}:meta`;
 }
+
+/** A bootstrap generation is unreachable until ItemCache publishes it from metadata. */
+export function stagedItemsCollection(
+	accountId: string,
+	generation: string,
+): string {
+	return `item-cache-stage:${accountId}:${generation}:items`;
+}
+
+/** See {@link stagedItemsCollection}; adapters must continue to treat this as opaque. */
+export function stagedVaultsCollection(
+	accountId: string,
+	generation: string,
+): string {
+	return `item-cache-stage:${accountId}:${generation}:vaults`;
+}
+
+/** Snapshot of the active items when a staged bootstrap starts. */
+export function stagedItemBaselineCollection(
+	accountId: string,
+	generation: string,
+): string {
+	return `item-cache-stage:${accountId}:${generation}:item-baseline`;
+}
+
+/** Snapshot of the active vaults when a staged bootstrap starts. */
+export function stagedVaultBaselineCollection(
+	accountId: string,
+	generation: string,
+): string {
+	return `item-cache-stage:${accountId}:${generation}:vault-baseline`;
+}

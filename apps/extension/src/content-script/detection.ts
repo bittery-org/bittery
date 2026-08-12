@@ -254,58 +254,6 @@ function setupShadowRootObserver(shadowRoot: ShadowRoot) {
 	}, shadowRoot);
 }
 
-/**
- * Legacy fallback detection for basic forms
- * Used when enhanced detection doesn't find fields
- */
-export function detectPasswordFieldsLegacy() {
-	const inputs = document.querySelectorAll<HTMLInputElement>(
-		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"], input[autocomplete*="one-time-code"]',
-	);
-
-	inputs.forEach((input) => {
-		if (contentState.detectedFields.has(input)) return;
-
-		// Determine field type
-		let type: "username" | "email" | "password" | "otp" = "username";
-		if (input.type === "password") {
-			type = "password";
-		} else if (
-			input.type === "email" ||
-			input.autocomplete?.includes("email")
-		) {
-			type = "email";
-		} else if (input.autocomplete?.includes("one-time-code")) {
-			type = "otp";
-		}
-
-		const field: CredentialField = { input, type };
-		contentState.detectedFields.set(input, field);
-		prewarmOverlay("credential");
-
-		// Disable browser's native autofill
-		input.setAttribute("autocomplete", "off");
-		input.setAttribute("data-form-type", "other");
-
-		// Also disable on the parent form if it exists
-		const form = input.closest("form");
-		if (form && !form.hasAttribute("data-bittery-processed")) {
-			form.setAttribute("autocomplete", "off");
-			form.setAttribute("data-bittery-processed", "true");
-		}
-
-		// Add focus listener
-		input.addEventListener("focus", () => handleFieldFocus(field));
-		input.addEventListener("blur", () => handleFieldBlur(field));
-
-		// Add form submission listeners
-		if (form && !contentState.processedForms.has(form)) {
-			attachFormSubmitListeners(form);
-			contentState.processedForms.add(form);
-		}
-	});
-}
-
 // Set up watcher for dynamically attached shadow roots
 export function setupShadowRootWatcher() {
 	observeShadowRoots((shadowRoot, _host) => {
@@ -330,8 +278,6 @@ export function setupDynamicDetectionObserver() {
 		contentState.detectionTimeout = setTimeout(() => {
 			cleanupDetachedAutofillState();
 			detectPasswordFields();
-			// Run legacy detection as fallback for any fields missed
-			detectPasswordFieldsLegacy();
 		}, DETECTION_DEBOUNCE_MS);
 	}, document);
 }

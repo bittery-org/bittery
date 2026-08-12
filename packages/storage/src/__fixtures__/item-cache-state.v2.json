@@ -1,0 +1,16 @@
+{
+	"v": 2,
+	"itemsPrimed": true,
+	"vaultsPrimed": true,
+	"metadata": {
+		"lastFullSyncAt": 1700000002000,
+		"itemCount": 0,
+		"cacheVersion": 1
+	},
+	"activeGeneration": null,
+	"nativeView": {
+		"v": 1,
+		"itemsKeyPrefix": "record:account-1:items:",
+		"vaultsKeyPrefix": "record:account-1:vaults:"
+	}
+}

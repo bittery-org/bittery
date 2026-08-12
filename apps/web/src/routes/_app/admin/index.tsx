@@ -1,5 +1,7 @@
+import type { AuditEvent, TeamMember } from "@bittery/api-contract";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -42,11 +44,11 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { formatDate, formatDateTime } from "@/lib/i18n-format";
 import {
 	normalizeDeploymentMode,
 	normalizeEntitlements,
-} from "@/lib/rpc-normalizers";
+} from "@/lib/api-normalizers";
+import { formatDate, formatDateTime } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =
@@ -61,31 +63,8 @@ type ResultFilter = "all" | "success" | "failure";
 type AdminTab = "people" | "activity";
 type AdminMessageCatalog = ReturnType<typeof useI18n>["m"];
 
-interface TeamEvent {
-	id: string;
-	timestamp: string;
-	source: "audit_log" | "share_access_log";
-	action: string;
-	actionGroup: Exclude<ActionGroup, "all">;
-	actor: { userId: string | null; name: string | null; email: string | null };
-	entity: { type: string | null; id: string | null };
-	result: Exclude<ResultFilter, "all">;
-	network: {
-		maskedIp: string | null;
-		maskedUserAgent: string | null;
-		fullIp: string | null;
-		fullUserAgent: string | null;
-	};
-	metadata: unknown;
-}
-
-interface TeamMember {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-	joinedAt: string | null;
-}
+/** The server's audit-event shape, under the name this console has always used for it. */
+type TeamEvent = AuditEvent;
 
 interface Filters {
 	actionGroup: ActionGroup;
@@ -197,7 +176,10 @@ function getEventActionLabel(action: string, m: AdminMessageCatalog) {
 	return labels[action]?.() ?? humanizeIdentifier(action);
 }
 
-function getEntityTypeLabel(type: string | null, m: AdminMessageCatalog) {
+function getEntityTypeLabel(
+	type: TeamEvent["entity"]["type"],
+	m: AdminMessageCatalog,
+) {
 	if (!type) return m.admin_page_fallback_empty();
 	const labels: Record<string, (() => string) | undefined> = {
 		item: m.admin_page_event_entity_type_item,
@@ -223,18 +205,18 @@ export const Route = createFileRoute("/_app/admin/")({
 	}),
 	beforeLoad: async ({ context }) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.rpc.billing.entitlements.queryOptions(),
+			apiQueries.billing.entitlements(context.api),
 		);
 		const mode = normalizeDeploymentMode(access.mode);
 		const entitlements = normalizeEntitlements(access.entitlements);
-		if (!entitlements.team_management) {
+		if (!entitlements.teamManagement) {
 			throw redirect({ to: mode === "cloud" ? "/billing" : "/home" });
 		}
 		if (mode === "cloud" && access.plan !== "team") {
 			throw redirect({ to: "/billing" });
 		}
 		const me = await context.queryClient.ensureQueryData(
-			context.rpc.auth.me.queryOptions(),
+			apiQueries.auth.me(context.api),
 		);
 		if (me.role !== "owner" && me.role !== "admin") {
 			throw redirect({ to: "/team" });
@@ -245,44 +227,44 @@ export const Route = createFileRoute("/_app/admin/")({
 });
 
 function TeamAdminConsolePage() {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const { m } = useI18n();
 	const navigate = useNavigate({ from: Route.fullPath });
 	const { tab } = Route.useSearch();
 	const [filters, setFilters] = useState<Filters>(defaultFilters);
 	const [selectedEvent, setSelectedEvent] = useState<TeamEvent | null>(null);
 
-	const teamQuery = useQuery(rpc.team.list.queryOptions());
+	const teamQuery = useQuery(apiQueries.teams.current(api));
 	const teamId = teamQuery.data?.id;
 	const membersQuery = useQuery({
-		...rpc.team.members.list.queryOptions({ teamId: teamId || "" }),
+		...apiQueries.teams.members(api, teamId || ""),
 		enabled: !!teamId,
 	});
 	const eventsQuery = useInfiniteQuery({
 		queryKey: ["admin-team-events", filters],
 		initialPageParam: undefined as string | undefined,
-		queryFn: ({ pageParam }) =>
-			rpcClient.audit.teamEvents.query({
-				limit: DEFAULT_LIMIT,
-				cursor: pageParam ?? null,
-				actionGroup: filters.actionGroup,
-				result: filters.result,
-				actorUserId: filters.actorUserId !== "all" ? filters.actorUserId : null,
-				search: filters.search.trim() || null,
-				from: toIso(filters.from),
-				to: toIso(filters.to),
-			}),
+		queryFn: async ({ pageParam }) =>
+			(
+				await api.audit.list({
+					limit: DEFAULT_LIMIT,
+					cursor: pageParam,
+					actionGroup: filters.actionGroup,
+					result: filters.result,
+					actorUserId:
+						filters.actorUserId !== "all" ? filters.actorUserId : undefined,
+					search: filters.search.trim() || undefined,
+					from: toIso(filters.from) ?? undefined,
+					to: toIso(filters.to) ?? undefined,
+				})
+			).data,
 		getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
 	});
 
 	const events = useMemo(
-		() =>
-			(eventsQuery.data?.pages.flatMap((page) => page.events) ??
-				[]) as TeamEvent[],
+		() => eventsQuery.data?.pages.flatMap((page) => page.events) ?? [],
 		[eventsQuery.data],
 	);
-	const members = (membersQuery.data ?? []) as TeamMember[];
+	const members = membersQuery.data ?? [];
 
 	return (
 		<div className="mx-auto flex w-full max-w-[1500px] flex-col gap-4 pb-10">
@@ -323,6 +305,7 @@ function TeamAdminConsolePage() {
 						isLoadingMembers={membersQuery.isLoading || teamQuery.isLoading}
 						m={m}
 						members={members}
+						teamId={teamId ?? ""}
 						onSelectEvent={setSelectedEvent}
 					/>
 				</TabsContent>
@@ -360,10 +343,11 @@ function TeamAdminConsolePage() {
 /* -------------------------------------------------------------------------- */
 
 interface PeopleTabProps {
-	events: TeamEvent[];
+	events: readonly TeamEvent[];
 	isLoadingMembers: boolean;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
+	teamId: string;
 	onSelectEvent: (event: TeamEvent) => void;
 }
 
@@ -372,9 +356,10 @@ function PeopleTab({
 	isLoadingMembers,
 	m,
 	members,
+	teamId,
 	onSelectEvent,
 }: PeopleTabProps) {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const [search, setSearch] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -394,9 +379,7 @@ function PeopleTab({
 		visibleMembers[0];
 
 	const accessQuery = useQuery({
-		...rpc.team.members.access.queryOptions({
-			userId: selectedMember?.userId ?? "",
-		}),
+		...apiQueries.teams.memberAccess(api, teamId, selectedMember?.userId ?? ""),
 		enabled: !!selectedMember?.userId,
 	});
 	const access = accessQuery.data;
@@ -878,13 +861,13 @@ function ActivityRow({
 /* -------------------------------------------------------------------------- */
 
 interface ActivityTabProps {
-	events: TeamEvent[];
+	events: readonly TeamEvent[];
 	filters: Filters;
 	hasNextPage: boolean;
 	isFetchingNextPage: boolean;
 	isLoading: boolean;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
 	onLoadMore: () => void;
 	onResetFilters: () => void;
 	onSelectEvent: (event: TeamEvent) => void;
@@ -1048,7 +1031,7 @@ function FilterBar({
 }: {
 	filters: Filters;
 	m: AdminMessageCatalog;
-	members: TeamMember[];
+	members: readonly TeamMember[];
 	onReset: () => void;
 	onUpdate: (next: Partial<Filters>) => void;
 }) {

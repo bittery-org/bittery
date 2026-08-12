@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
+import { cachedItem as buildCachedItem } from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type {
 	InMemoryPlatformPort,
@@ -39,19 +40,15 @@ function segmentsOf(accountId: string): string[] {
 }
 
 function cachedItem(id: string): CachedEncryptedItem {
-	return {
+	return buildCachedItem({
 		id,
 		vaultId: "vault-1",
-		category: "login",
-		favorite: false,
 		encryptedData: "ciphertext",
 		encryptionIv: "iv",
 		encryptionAlgorithm: "fake",
-		version: 1,
-		lastModifiedBy: null,
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
-	};
+	});
 }
 
 function cachedVault(id: string): CachedVaultMetadata {

@@ -1,7 +1,8 @@
+import type { VaultMember } from "@bittery/api-contract";
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useRPCClient } from "@bittery/shared/rpc";
-import type { KeyRotationResult } from "@bittery/types";
+import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
+import type { KeyRotationResult } from "@bittery/crypto-port";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -35,16 +36,9 @@ import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
-interface VaultMember {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-}
-
 interface VaultMemberListProps {
 	vaultId: string;
-	members: VaultMember[];
+	members: readonly VaultMember[];
 	userRole: string;
 }
 
@@ -53,7 +47,7 @@ export function VaultMemberList({
 	members,
 	userRole,
 }: VaultMemberListProps) {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -67,7 +61,15 @@ export function VaultMemberList({
 			vaultId: string;
 			userId: string;
 			role: "admin" | "member" | "read-only";
-		}) => rpcClient.vault.members.updateRole.mutate(input),
+		}) =>
+			api.vaults.members.updateRole(
+				input.vaultId,
+				input.userId,
+				{
+					role: input.role,
+				},
+				{},
+			),
 		onSuccess: async () => {
 			toast.success(m.vaults_member_list_toast_role_updated());
 			await invalidator.invalidateVaultMembers(vaultId);
@@ -109,10 +111,9 @@ export function VaultMemberList({
 				throw new Error("session_data_missing");
 			}
 
-			const rotationData = await rpcClient.vault.members.getRotationData.query({
-				vaultId,
-				excludeUserId: userId,
-			});
+			const rotationData = (
+				await api.vaults.members.removalRotationData(vaultId, userId)
+			).data;
 
 			const currentVaultKey = await vaultCrypto.getVaultKey({ vaultId });
 			if (!currentVaultKey) {
@@ -132,12 +133,7 @@ export function VaultMemberList({
 						encryptedData: item.encryptedData,
 						encryptionIv: item.encryptionIv,
 						encryptionAlgorithm: item.encryptionAlgorithm,
-						context: buildItemEncryptionContext({
-							vaultId,
-							itemId: item.id,
-							version: item.version,
-							userId: item.lastModifiedBy ?? currentUserId,
-						}),
+						context: buildStoredItemEncryptionContext({ ...item, vaultId }),
 					})),
 					vaultId,
 					rotationData.keyVersion + 1,
@@ -151,15 +147,19 @@ export function VaultMemberList({
 			}
 
 			// Step 4: Submit to server
-			const result = await rpcClient.vault.members.remove.mutate({
-				vaultId,
-				userId,
-				keyRotation: {
-					memberKeys: rotationResult.memberEncryptedKeys,
-					reEncryptedItems: rotationResult.reEncryptedItems,
-				},
-				clientId: null,
-			});
+			const result = (
+				await api.vaults.members.remove(
+					vaultId,
+					userId,
+					{
+						keyRotation: {
+							memberKeys: rotationResult.memberEncryptedKeys,
+							reEncryptedItems: rotationResult.reEncryptedItems,
+						},
+					},
+					{},
+				)
+			).data;
 
 			// Step 5: Update local session storage with new vault key
 			const vaultKeys = await storage.getVaultKeys();

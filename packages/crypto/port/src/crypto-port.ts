@@ -9,7 +9,7 @@
  * An adapter is pure marshalling onto one backend — argument order, base64 boundaries,
  * `KeyRef` bookkeeping, error translation. It makes no decisions. All policy lives above
  * this seam in `VaultCrypto`: the wrapped-vault-key envelope, wrap contexts, KDF pinning,
- * the legacy "decrypt without AAD then unwrap" fallback, and the seven account ceremonies.
+ * and the seven account ceremonies.
  * The algorithms live below it, in the one Rust core (ADR 0001).
  *
  * Behavioural rules every adapter must obey:
@@ -33,8 +33,9 @@ import type {
 	SRPClientSession,
 	SRPRegistration,
 	SRPServerChallenge,
+	TotpResult,
 	ValidationResult,
-} from "@bittery/types";
+} from "./types";
 
 declare const KEY_REF_BRAND: unique symbol;
 
@@ -82,7 +83,13 @@ export type DecryptManyResult =
 	| { id: string; ok: true; plaintext: string }
 	| { id: string; ok: false; error: string };
 
-/** Base64, because these are persisted and re-sent verbatim rather than fed to WebAuthn. */
+/**
+ * Base64, because these are persisted and re-sent verbatim rather than fed to WebAuthn.
+ *
+ * Deliberately narrower than the generated record, which also carries `publicKeySpki`: no
+ * caller above the seam has a use for the SPKI spelling, so the port drops it rather than
+ * inviting one. `./types.drift-guard` pins that to exactly one omitted field.
+ */
 export interface PasskeyKeypair {
 	privateKey: string;
 	publicKeyCose: string;
@@ -97,17 +104,6 @@ export interface PasskeyAttestation {
 export interface PasskeyAssertion {
 	authenticatorData: Uint8Array;
 	signatureDer: Uint8Array;
-}
-
-/** Generic description of the read-only plaintext envelope used by legacy ciphertexts. */
-export interface LegacyKeyEnvelope {
-	marker: string;
-	context: string;
-}
-
-export interface UnwrapKeyOptions {
-	context: EncryptionContext | null;
-	legacyEnvelope?: LegacyKeyEnvelope;
 }
 
 export interface CryptoPort {
@@ -200,7 +196,7 @@ export interface CryptoPort {
 	unwrapKey(
 		data: EncryptedData,
 		wrappingKey: KeyRef,
-		options?: UnwrapKeyOptions,
+		context: EncryptionContext | null,
 	): Promise<KeyRef>;
 
 	// ------------------------------------------------------------------
@@ -251,8 +247,7 @@ export interface CryptoPort {
 	/**
 	 * Moves one item's ciphertext onto a new vault key without changing what it is bound to:
 	 * `item.context` is both the AAD the stored ciphertext is opened with and the AAD the
-	 * replacement is sealed under. An item written before AAD binding existed opens with no
-	 * context and is re-sealed with none, because re-binding it is a persisted-format change.
+	 * replacement is sealed under.
 	 */
 	reEncryptItem(
 		item: ItemData,
@@ -351,6 +346,30 @@ export interface CryptoPort {
 		clientDataHashBase64: string,
 		signCount: number,
 	): Promise<PasskeyAssertion>;
+
+	// ------------------------------------------------------------------
+	// One-time codes
+	// ------------------------------------------------------------------
+
+	/**
+	 * The TOTP code for the window the backend's clock is currently in (RFC 6238).
+	 *
+	 * `secret` is the base32 an `otpauth:` URI carries, case-insensitive and tolerant of
+	 * spaces and `=` padding. `algorithm` is a hash name — `SHA1`, `SHA256` or `SHA512` in any
+	 * case, anything else being SHA-1 as RFC 6238 defaults. `digits` is 6-8 and `period` is at
+	 * least one second; the core rejects the rest as `invalid-input`.
+	 *
+	 * `algorithm` stays a `string` rather than a union because which hashes a stored item may
+	 * name is item policy, and this seam carries primitives. Nothing here holds a `KeyRef`:
+	 * a TOTP secret belongs to decrypted item plaintext, so it arrives as the string the
+	 * caller already has.
+	 */
+	generateTotp(
+		secret: string,
+		algorithm: string,
+		digits: number,
+		period: number,
+	): Promise<TotpResult>;
 
 	// ------------------------------------------------------------------
 	// Identifiers

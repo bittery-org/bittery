@@ -1,5 +1,18 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import type { AppApiClient } from "@bittery/shared/api-client";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import type {
+	EncryptedItemPayload,
+	ServerEncryptedItem,
+} from "@bittery/shared/item-mapping";
+import {
+	stripToDecryptedData,
+	toCachedItem,
+	toCachedItemFromRepositoryItem,
+	toEncryptedPayload,
+	toNewCachedItem,
+	withEncryptedPayload,
+} from "@bittery/shared/item-mapping";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	decodeVaultType,
@@ -9,25 +22,25 @@ import {
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import { resolveUserIdForAccount } from "@bittery/storage/account-id";
+import {
+	normalizeAccountServerUrl,
+	resolveUserIdForAccount,
+} from "@bittery/storage/account-id";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	EncryptedData,
+	ItemSyncAcknowledgement,
+	ItemSyncCommand,
+	VaultSummary,
 } from "@bittery/types";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import { isVaultHidden } from "./travel-mode-service";
-import type { VaultCrypto } from "./vault-crypto";
+import type { ItemWriteScope, VaultCrypto } from "./vault-crypto";
 
-export interface VaultView {
-	id: string;
-	name: string;
-	type: string;
-	icon: string | null;
-	imageUrl: string | null;
-}
+/** The vault a repository item names — the canonical {@link VaultSummary}. */
+export type VaultView = VaultSummary;
 
 export interface VaultRepositoryItem extends DecryptedItem {
 	accountId?: string;
@@ -35,7 +48,9 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	serverUrl?: string;
 	deletedAt: string | null;
 	version: number;
-	lastModifiedBy: string | null;
+	lastModifiedBy: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 	attachments?: CachedAttachment[];
 	_encrypted: {
 		data: string;
@@ -45,46 +60,34 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	vault: VaultView;
 }
 
-export interface EncryptedPayload {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
+/**
+ * The ciphertext triple as the crypto port returns it — `@bittery/shared`'s
+ * {@link EncryptedItemPayload}, whose only consumer this is. Aliased rather than restated
+ * so `toEncryptedPayload`, the one rename into the store's spelling, keeps its input pinned.
+ */
+export type EncryptedPayload = EncryptedItemPayload;
+
+type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
 
 interface BootstrapItemPage {
-	items: Array<{
-		id: string;
-		vaultId: string;
-		category: string;
-		favorite: boolean;
-		encryptedData: string;
-		encryptionIv: string;
-		encryptionAlgorithm: string;
-		version?: number;
-		lastModifiedBy?: string | null;
-		createdAt: string | Date;
-		updatedAt: string | Date;
-		deletedAt?: string | Date | null;
-		attachments?: CachedAttachment[];
-		vault: ServerVaultSummary;
-	}>;
+	/**
+	 * Structural so a client that is not the generated one still fits, but the item fields
+	 * are the contract's — restating them here is how a new server field went missing.
+	 */
+	items: ReadonlyArray<
+		ServerEncryptedItem & { vault?: ServerVaultSummary | null }
+	>;
 	hasMore: boolean;
-	nextCursor?: string;
+	nextCursor?: string | null;
+	syncCursor?: { id: string } | null;
 }
 
 export interface BootstrapItemsClient {
 	sync: {
-		bootstrapItems: {
-			query: (input: {
-				cursor?: string;
-				limit?: number;
-			}) => Promise<BootstrapItemPage>;
-		};
+		bootstrap(input?: BootstrapRequest): Promise<{ data: BootstrapItemPage }>;
 	};
-	vault?: {
-		list?: {
-			query: () => Promise<Array<ServerVaultListEntry>>;
-		};
+	vaults?: {
+		list?: () => Promise<{ data: ReadonlyArray<ServerVaultListEntry> }>;
 	};
 }
 
@@ -92,6 +95,8 @@ export class VaultRepository {
 	private readonly fallbackServerUrl = getDefaultServerUrl();
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
+	private readonly authoritativeItems = new Map<string, CachedEncryptedItem>();
+	private readonly pendingCommands = new Map<string, ItemSyncCommand>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();
 	private readonly vaultKeyEntries = new Map<string, VaultKeyData>();
 	private readonly listeners = new Set<() => void>();
@@ -103,7 +108,7 @@ export class VaultRepository {
 
 	/**
 	 * One repo is bound to one account for its whole life: every cache read, write,
-	 * RPC and crypto call below keys off this `accountId` rather than re-resolving.
+	 * API and crypto call below keys off this `accountId` rather than re-resolving.
 	 */
 	constructor(
 		private readonly crypto: CryptoPort,
@@ -267,6 +272,7 @@ export class VaultRepository {
 		for (const [itemId, item] of this.items) {
 			if (hidden.has(item.vaultId)) {
 				this.items.delete(itemId);
+				this.authoritativeItems.delete(itemId);
 			}
 		}
 		this.emit();
@@ -296,88 +302,12 @@ export class VaultRepository {
 		return resolveUserIdForAccount(this.storage, this.accountId);
 	}
 
-	private getVersionCandidates(version: number): number[] {
-		const normalized =
-			Number.isFinite(version) && version > 0 ? Math.floor(version) : 1;
-		const candidates: number[] = [];
-		for (let candidate = normalized; candidate >= 1; candidate -= 1) {
-			candidates.push(candidate);
-		}
-		return candidates;
-	}
-
 	private async decryptItemPayload(
 		item: CachedEncryptedItem,
 		vaultKey: KeyRef,
-		userId: string,
-	): Promise<string> {
-		let lastError: unknown = null;
-
-		for (const version of this.getVersionCandidates(item.version)) {
-			try {
-				const decrypted = await this.vaultCrypto.decryptItem(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					{
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version,
-						userId,
-					},
-				);
-
-				if (version !== item.version) {
-					console.warn(
-						`[VaultRepository] Recovered item ${item.id} with fallback encryption version ${version} (stored version ${item.version})`,
-					);
-				}
-
-				return decrypted;
-			} catch (error) {
-				lastError = error;
-			}
-		}
-
-		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
-	}
-
-	/**
-	 * Which of this account's vault keys, if any, opens a payload its own vault key
-	 * could not. Decrypts without AAD on purpose: that isolates "wrong key" from
-	 * "wrong encryption context", which is the only distinction worth making here.
-	 */
-	private async findVaultKeyThatOpens(
-		item: CachedEncryptedItem,
-	): Promise<string | null> {
-		for (const vaultId of this.vaultKeyEntries.keys()) {
-			let vaultKey: KeyRef;
-			try {
-				vaultKey = await this.decryptVaultKey(vaultId);
-			} catch {
-				continue;
-			}
-			try {
-				await this.crypto.decrypt(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					null,
-				);
-				return vaultId;
-			} catch {
-				// Not this key.
-			} finally {
-				await this.crypto.destroyKey(vaultKey);
-			}
-		}
-		return null;
+	): Promise<{ plaintext: string; item: CachedEncryptedItem }> {
+		const plaintext = await this.vaultCrypto.decryptStoredItem(item, vaultKey);
+		return { plaintext, item };
 	}
 
 	/**
@@ -387,8 +317,7 @@ export class VaultRepository {
 	private async describeUndecryptableItem(
 		item: CachedEncryptedItem,
 	): Promise<string> {
-		const openedBy = await this.findVaultKeyThatOpens(item);
-		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy ?? "null"} encryptedDataLength=${item.encryptedData.length} openedByVaultKey=${openedBy ?? "none"}`;
+		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy} encryptedDataLength=${item.encryptedData.length}`;
 	}
 
 	private async decryptItemBatch(
@@ -400,7 +329,6 @@ export class VaultRepository {
 		>
 	> {
 		if (items.length === 0) return [];
-		const defaultUserId = await this.resolveUserId();
 		const vaultKeys = new Map<string, KeyRef>();
 		const keyErrors = new Map<string, unknown>();
 
@@ -413,27 +341,12 @@ export class VaultRepository {
 				}
 			}
 
-			const decryptable = items.flatMap((item) => {
+			const candidates = items.map((item) => {
 				const vaultKey = vaultKeys.get(item.vaultId);
-				return vaultKey ? [{ item, vaultKey }] : [];
+				return vaultKey ? { item, vaultKey } : null;
 			});
-			const primary = await this.vaultCrypto.decryptItems(
-				decryptable.map(({ item, vaultKey }) => ({
-					id: item.id,
-					data: {
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					scope: {
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: item.version,
-						userId: item.lastModifiedBy ?? defaultUserId,
-					},
-				})),
-			);
+			const decryptable = candidates.filter((entry) => entry !== null);
+			const primary = await this.vaultCrypto.decryptStoredItems(decryptable);
 
 			const outcomeByItem = new Map<
 				CachedEncryptedItem,
@@ -453,48 +366,10 @@ export class VaultRepository {
 					});
 					continue;
 				}
-
-				let fallbackError: unknown = new Error(result.error);
-				for (const version of this.getVersionCandidates(
-					entry.item.version,
-				).slice(1)) {
-					try {
-						const plaintext = await this.vaultCrypto.decryptItem(
-							{
-								ciphertext: entry.item.encryptedData,
-								iv: entry.item.encryptionIv,
-								algorithm: entry.item.encryptionAlgorithm,
-							},
-							entry.vaultKey,
-							{
-								vaultId: entry.item.vaultId,
-								itemId: entry.item.id,
-								version,
-								userId: entry.item.lastModifiedBy ?? defaultUserId,
-							},
-						);
-						console.warn(
-							`[VaultRepository] Recovered item ${entry.item.id} with fallback encryption version ${version} (stored version ${entry.item.version})`,
-						);
-						outcomeByItem.set(entry.item, {
-							ok: true,
-							decrypted: this.buildItem(
-								entry.item,
-								JSON.parse(plaintext) as DecryptedItemData,
-							),
-						});
-						fallbackError = null;
-						break;
-					} catch (error) {
-						fallbackError = error;
-					}
-				}
-				if (fallbackError) {
-					outcomeByItem.set(entry.item, {
-						ok: false,
-						error: fallbackError,
-					});
-				}
+				outcomeByItem.set(entry.item, {
+					ok: false,
+					error: new Error(result.error),
+				});
 			}
 
 			return items.map((item) => {
@@ -518,24 +393,133 @@ export class VaultRepository {
 	}
 
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
+		return toCachedItemFromRepositoryItem(item, this.cacheScope());
+	}
+
+	/** The account fields a record inherits when it does not already name one. */
+	private cacheScope(): {
+		accountId: string;
+		accountEmail?: string;
+		serverUrl?: string;
+	} {
 		return {
-			id: item.id,
-			vaultId: item.vaultId,
-			accountId: item.accountId ?? this.accountId,
-			accountEmail: item.accountEmail ?? this.accountEmail,
-			serverUrl: item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item._encrypted.data,
-			encryptionIv: item._encrypted.iv,
-			encryptionAlgorithm: item._encrypted.algorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy,
-			createdAt: item.createdAt,
-			updatedAt: item.updatedAt,
-			deletedAt: item.deletedAt,
-			attachments: item.attachments,
+			accountId: this.accountId,
+			accountEmail: this.accountEmail,
+			serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 		};
+	}
+
+	private commandOperationId(command: ItemSyncCommand): string {
+		return command.operationId ?? command.id;
+	}
+
+	private commandsForItem(itemId: string): ItemSyncCommand[] {
+		return Array.from(this.pendingCommands.values())
+			.filter((command) => command.entityId === itemId)
+			.sort((left, right) => left.timestamp - right.timestamp);
+	}
+
+	private hasPendingEncryptedCommand(itemId: string): boolean {
+		return this.commandsForItem(itemId).some(
+			(command) =>
+				command.type === "create" ||
+				command.type === "update" ||
+				command.type === "move" ||
+				command.type === "cross_account_move",
+		);
+	}
+
+	private applyCommandToCachedItem(
+		base: CachedEncryptedItem | undefined,
+		command: ItemSyncCommand,
+	): CachedEncryptedItem | undefined {
+		const timestamp = new Date(command.timestamp).toISOString();
+		if (command.type === "permanent_delete") {
+			return base;
+		}
+		if (command.type === "create") {
+			const payload = command.encryptedPayload;
+			if (!payload || !command.category) {
+				throw new Error(
+					`Missing create projection data for ${command.entityId}`,
+				);
+			}
+			return toNewCachedItem(
+				{
+					id: command.entityId,
+					vaultId: command.vaultId,
+					category: command.category,
+					timestamp,
+					// Distinct fields that coincide here: a create binds its ciphertext to encryption
+					// version 1, and the server's INSERT lands the row at version 1 as well.
+					version: payload.encryptionVersion,
+					payload,
+				},
+				{
+					...this.cacheScope(),
+					accountEmail: command.accountEmail ?? this.accountEmail,
+				},
+			);
+		}
+		if (!base) {
+			return undefined;
+		}
+
+		switch (command.type) {
+			case "cross_account_move":
+				return base;
+			case "update":
+			case "move": {
+				const payload = command.encryptedPayload;
+				if (!payload) {
+					throw new Error(`Missing ${command.type} projection data`);
+				}
+				return withEncryptedPayload(base, payload, {
+					vaultId:
+						command.type === "move"
+							? (command.targetVaultId ?? base.vaultId)
+							: base.vaultId,
+					// Distinct fields that coincide here: an update/move binds its ciphertext to the
+					// base version + 1, which is exactly the version the CAS-guarded server write lands
+					// on. They are not interchangeable in general — the server advances `version` alone
+					// for favourite/trash/restore and for key rotation.
+					version: payload.encryptionVersion,
+					updatedAt: timestamp,
+				});
+			}
+			case "delete":
+				return { ...base, deletedAt: timestamp, updatedAt: timestamp };
+			case "restore":
+				return { ...base, deletedAt: null, updatedAt: timestamp };
+			case "toggle_favorite":
+				return {
+					...base,
+					favorite: command.favorite ?? false,
+					updatedAt: timestamp,
+				};
+		}
+	}
+
+	private async rebuildItemProjection(itemId: string): Promise<void> {
+		let projected = this.authoritativeItems.get(itemId);
+		for (const command of this.commandsForItem(itemId)) {
+			projected = this.applyCommandToCachedItem(projected, command);
+		}
+		if (!projected || (await this.isLocked())) {
+			this.items.delete(itemId);
+			this.emit();
+			return;
+		}
+		try {
+			this.items.set(itemId, await this.decryptItem(projected));
+		} catch (error) {
+			this.items.delete(itemId);
+			console.error(
+				`[VaultRepository] Failed to project ${await this.describeUndecryptableItem(projected)}:`,
+				error,
+			);
+		}
+		this.emit();
 	}
 
 	private mergeVaultKeyEntries(
@@ -569,12 +553,12 @@ export class VaultRepository {
 	private async fetchVaultKeysFromServer(
 		client: BootstrapItemsClient,
 	): Promise<VaultKeyData[] | null> {
-		if (!client.vault?.list?.query) {
+		if (!client.vaults?.list) {
 			return null;
 		}
 
 		try {
-			const vaults = await client.vault.list.query();
+			const { data: vaults } = await client.vaults.list();
 			return vaults.map(toVaultKeyEntry);
 		} catch (error) {
 			console.error("[VaultRepository] Failed to refresh vault keys:", error);
@@ -595,8 +579,8 @@ export class VaultRepository {
 	 * One `recordPut`, no read-modify-write. Delta sync calls this once per changed
 	 * item, which is exactly why `RecordPort` has per-record primitives.
 	 */
-	private async persistItem(item: CachedEncryptedItem): Promise<void> {
-		await this.itemCache.upsertCachedItem(item, this.accountId);
+	private async persistItem(item: CachedEncryptedItem): Promise<boolean> {
+		return this.itemCache.upsertCachedItem(item, this.accountId);
 	}
 
 	private buildItem(
@@ -616,6 +600,8 @@ export class VaultRepository {
 			deletedAt: cached.deletedAt ?? null,
 			version: cached.version,
 			lastModifiedBy: cached.lastModifiedBy,
+			encryptionVersion: cached.encryptionVersion,
+			encryptedByUserId: cached.encryptedByUserId,
 			attachments: cached.attachments,
 			...decryptedData,
 			_encrypted: {
@@ -641,42 +627,21 @@ export class VaultRepository {
 		}
 
 		const userId = await this.resolveUserId();
-		try {
-			return await this.vaultCrypto.unwrapStoredVaultKey({
-				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				vaultId,
-				userId,
-				accountId: this.accountId,
-			});
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : String(error ?? "");
-			if (
-				message !== "Vault key wrap vault mismatch" &&
-				message !== "Vault key wrap user mismatch"
-			) {
-				throw error;
-			}
-
-			return this.vaultCrypto.unwrapStoredVaultKey({
-				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				accountId: this.accountId,
-			});
-		}
+		return this.vaultCrypto.unwrapStoredVaultKey({
+			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+			vaultId,
+			userId,
+			accountId: this.accountId,
+		});
 	}
 
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
 		try {
-			const userId = item.lastModifiedBy ?? (await this.resolveUserId());
-			const decryptedData = await this.decryptItemPayload(
-				item,
-				vaultKey,
-				userId,
-			);
+			const decrypted = await this.decryptItemPayload(item, vaultKey);
 			return this.buildItem(
-				item,
-				JSON.parse(decryptedData) as DecryptedItemData,
+				decrypted.item,
+				JSON.parse(decrypted.plaintext) as DecryptedItemData,
 			);
 		} finally {
 			await this.crypto.destroyKey(vaultKey);
@@ -694,30 +659,19 @@ export class VaultRepository {
 		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
+		if (!(await this.persistItem(item))) {
+			return;
+		}
+		const currentBase = this.authoritativeItems.get(item.id);
+		if (currentBase && currentBase.version > item.version) {
+			return;
+		}
+		this.authoritativeItems.set(item.id, item);
 
 		// Sync keeps running on a locked account, and the ciphertext is all the cache
 		// wants from it. Decryption waits for the hydrate that follows the unlock, rather
 		// than failing once per delta.
-		if (await this.isLocked()) {
-			this.items.delete(item.id);
-			await this.persistItem(item);
-			this.emit();
-			return;
-		}
-
-		try {
-			this.items.set(item.id, await this.decryptItem(item));
-		} catch (error) {
-			// Dropping the stale plaintext also drops its superseded `_encrypted` blob,
-			// which a later favorite/delete write would otherwise persist over this ciphertext.
-			this.items.delete(item.id);
-			console.error(
-				`[VaultRepository] Failed to decrypt synced ${await this.describeUndecryptableItem(item)}:`,
-				error,
-			);
-		}
-		await this.persistItem(item);
-		this.emit();
+		await this.rebuildItemProjection(item.id);
 	}
 
 	async upsertLocal(
@@ -726,6 +680,8 @@ export class VaultRepository {
 	): Promise<void> {
 		const existing = this.items.get(item.id);
 		const now = new Date().toISOString();
+		const version = (existing?.version ?? 0) + 1;
+		const encryptedByUserId = encryptedPayload.encryptedByUserId;
 		const next: VaultRepositoryItem = {
 			...existing,
 			...item,
@@ -736,8 +692,13 @@ export class VaultRepository {
 			updatedAt: existing ? now : item.updatedAt,
 			createdAt: existing ? existing.createdAt : item.createdAt,
 			deletedAt: existing?.deletedAt ?? null,
-			version: (existing?.version ?? 0) + 1,
-			lastModifiedBy: existing?.lastModifiedBy ?? null,
+			version,
+			// This device is writing, so this device's user is the modifier. Stated rather
+			// than derived from `encryptedByUserId`: they coincide here only because the
+			// same write both re-seals and records the edit.
+			lastModifiedBy: encryptedByUserId,
+			encryptionVersion: encryptedPayload.encryptionVersion,
+			encryptedByUserId,
 			attachments: existing?.attachments,
 			_encrypted: {
 				data: encryptedPayload.ciphertext,
@@ -748,6 +709,7 @@ export class VaultRepository {
 		};
 
 		this.items.set(item.id, next);
+		this.authoritativeItems.set(item.id, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -767,6 +729,7 @@ export class VaultRepository {
 			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -786,29 +749,48 @@ export class VaultRepository {
 			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
 
 	async removeItem(itemId: string): Promise<void> {
 		this.items.delete(itemId);
+		this.authoritativeItems.delete(itemId);
+		for (const [operationId, command] of this.pendingCommands) {
+			if (command.entityId === itemId) {
+				this.pendingCommands.delete(operationId);
+			}
+		}
 		await this.itemCache.removeCachedItem(itemId, this.accountId);
 		this.emit();
 	}
 
 	replaceItemId(tempId: string, realId: string): void {
 		const existing = this.items.get(tempId);
-		if (!existing) {
-			return;
-		}
 		this.items.delete(tempId);
-		const migrated: VaultRepositoryItem = {
-			...existing,
-			id: realId,
-		};
-		this.items.set(realId, migrated);
-		void this.itemCache.removeCachedItem(tempId, this.accountId);
-		void this.persistItem(this.toCachedItem(migrated));
+		const authoritative = this.authoritativeItems.get(tempId);
+		if (authoritative) {
+			this.authoritativeItems.delete(tempId);
+			const current = this.authoritativeItems.get(realId);
+			if (!current || current.version < authoritative.version) {
+				this.authoritativeItems.set(realId, { ...authoritative, id: realId });
+			}
+		}
+		if (existing) {
+			this.items.set(realId, { ...existing, id: realId });
+		}
+		for (const command of this.pendingCommands.values()) {
+			if (command.entityId === tempId) {
+				command.entityId = realId;
+			}
+		}
+		const base = this.authoritativeItems.get(realId);
+		void Promise.all([
+			this.itemCache.removeCachedItem(tempId, this.accountId),
+			base ? this.persistItem(base) : Promise.resolve(),
+			this.rebuildItemProjection(realId),
+		]);
 		this.emit();
 	}
 
@@ -823,8 +805,128 @@ export class VaultRepository {
 			updatedAt: new Date().toISOString(),
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
+	}
+
+	async applyItemCommand(command: ItemSyncCommand): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) {
+			return;
+		}
+		this.pendingCommands.set(this.commandOperationId(command), command);
+		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async discardItemCommandAcknowledgedElsewhere(
+		command: ItemSyncCommand,
+	): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) return;
+		this.pendingCommands.delete(this.commandOperationId(command));
+		const cached = (await this.itemCache.getCachedItems(this.accountId))?.find(
+			(item) => item.id === command.entityId,
+		);
+		if (cached) {
+			await this.upsertEncrypted(cached, this.accountId);
+			return;
+		}
+		if (command.type === "permanent_delete") {
+			this.authoritativeItems.delete(command.entityId);
+			this.items.delete(command.entityId);
+			this.emit();
+			return;
+		}
+		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async preserveItemConflict(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncCommand | undefined> {
+		if (
+			!this.isForThisAccount(command.accountId) ||
+			(command.type !== "update" &&
+				command.type !== "move" &&
+				command.type !== "cross_account_move") ||
+			!command.conflictCopyId
+		) {
+			return undefined;
+		}
+		const local = this.items.get(command.entityId);
+		if (!local) return undefined;
+
+		const data = stripToDecryptedData(local);
+		const payload = await this.encryptWithVaultKey(local.vaultId, data, {
+			itemId: command.conflictCopyId,
+			version: 1,
+		});
+		this.pendingCommands.delete(this.commandOperationId(command));
+		await this.rebuildItemProjection(command.entityId);
+		const operationId = `conflict-copy:${this.commandOperationId(command)}`;
+		return {
+			accountId: this.accountId,
+			accountEmail: command.accountEmail ?? this.accountEmail,
+			id: operationId,
+			operationId,
+			type: "create",
+			entityId: command.conflictCopyId,
+			vaultId: local.vaultId,
+			category: local.category,
+			encryptedPayload: toEncryptedPayload(payload),
+			baseVersion: 0,
+			timestamp: Date.now(),
+			retryCount: 0,
+			status: "pending",
+		};
+	}
+
+	async acknowledgeItemCommand(
+		command: ItemSyncCommand,
+		acknowledgement: ItemSyncAcknowledgement,
+	): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) {
+			return;
+		}
+		const version = acknowledgement.version;
+		if (version === undefined) {
+			throw new Error(
+				`Item command ${command.operationId ?? command.id} returned no strong revision`,
+			);
+		}
+		this.pendingCommands.delete(this.commandOperationId(command));
+		if (command.type === "cross_account_move") {
+			this.authoritativeItems.delete(command.entityId);
+			await this.itemCache.removeCachedItem(command.entityId, this.accountId);
+			await this.rebuildItemProjection(command.entityId);
+			return;
+		}
+		if (command.type === "permanent_delete") {
+			this.authoritativeItems.delete(acknowledgement.entityId);
+			await this.itemCache.removeCachedItem(
+				acknowledgement.entityId,
+				this.accountId,
+			);
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+
+		const base = this.authoritativeItems.get(acknowledgement.entityId);
+		if (base && base.version >= version) {
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+		const projected = this.applyCommandToCachedItem(base, command);
+		if (!projected) {
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+		const acknowledged: CachedEncryptedItem = {
+			...projected,
+			id: acknowledgement.entityId,
+			version,
+		};
+		this.authoritativeItems.set(acknowledgement.entityId, acknowledged);
+		await this.persistItem(acknowledged);
+		await this.rebuildItemProjection(acknowledgement.entityId);
 	}
 
 	/**
@@ -851,6 +953,8 @@ export class VaultRepository {
 			vaultId: targetVaultId,
 			updatedAt: new Date().toISOString(),
 			version: existing.version + 1,
+			encryptionVersion: newEncryptedPayload.encryptionVersion,
+			encryptedByUserId: newEncryptedPayload.encryptedByUserId,
 			_encrypted: {
 				data: newEncryptedPayload.ciphertext,
 				iv: newEncryptedPayload.iv,
@@ -860,6 +964,7 @@ export class VaultRepository {
 		};
 
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -886,6 +991,7 @@ export class VaultRepository {
 				]);
 
 			this.items.clear();
+			this.authoritativeItems.clear();
 			this.vaults.clear();
 			this.vaultKeyEntries.clear();
 
@@ -905,12 +1011,25 @@ export class VaultRepository {
 			for (const outcome of await this.decryptItemBatch(cachedItems ?? [])) {
 				if ("decrypted" in outcome) {
 					this.items.set(outcome.item.id, outcome.decrypted);
+					this.authoritativeItems.set(
+						outcome.item.id,
+						this.toCachedItem(outcome.decrypted),
+					);
 				} else {
+					this.authoritativeItems.set(outcome.item.id, outcome.item);
 					console.error(
 						`[VaultRepository] Failed to decrypt cached ${await this.describeUndecryptableItem(outcome.item)}:`,
 						outcome.error,
 					);
 				}
+			}
+			for (const itemId of new Set(
+				Array.from(
+					this.pendingCommands.values(),
+					(command) => command.entityId,
+				),
+			)) {
+				await this.rebuildItemProjection(itemId);
 			}
 
 			this.hasCacheSnapshotFlag =
@@ -924,67 +1043,110 @@ export class VaultRepository {
 		}
 	}
 
-	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
+	async hydrateFromServer(
+		client: BootstrapItemsClient,
+	): Promise<{ id: string } | null> {
 		if (await this.isLocked()) {
-			return;
+			return null;
 		}
 
-		getTravelModeEnforcer(this.storage, this.itemCache).assertVerified(
-			this.accountId,
-		);
+		const travelMode = getTravelModeEnforcer(this.storage, this.itemCache);
+		travelMode.assertVerified(this.accountId);
 		await this.ensureServerUrl();
 
+		const conflictBases = new Map(
+			Array.from(this.authoritativeItems).filter(([itemId]) =>
+				this.hasPendingEncryptedCommand(itemId),
+			),
+		);
 		let cursor: string | undefined;
-		const cachedItems: CachedEncryptedItem[] = [];
-		const vaults = new Map<string, CachedVaultMetadata>();
+		let syncBaseline: { id: string } | null = null;
+		let syncBaselineCaptured = false;
+		const staging = await this.itemCache.beginStagedGeneration(this.accountId);
+		let refreshedVaultKeys: VaultKeyData[] | null = null;
 
-		while (true) {
-			const page = await client.sync.bootstrapItems.query({
-				cursor,
-				limit: 500,
-			});
-
-			for (const rawItem of page.items) {
-				const cachedItem: CachedEncryptedItem = {
-					id: rawItem.id,
-					vaultId: rawItem.vaultId,
-					accountId: this.accountId,
-					accountEmail: this.accountEmail,
-					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-					category: rawItem.category,
-					favorite: rawItem.favorite,
-					encryptedData: rawItem.encryptedData,
-					encryptionIv: rawItem.encryptionIv,
-					encryptionAlgorithm: rawItem.encryptionAlgorithm,
-					version: rawItem.version ?? 0,
-					lastModifiedBy: rawItem.lastModifiedBy ?? null,
-					createdAt: String(rawItem.createdAt),
-					updatedAt: String(rawItem.updatedAt),
-					deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
-					attachments: rawItem.attachments,
-				};
-				cachedItems.push(cachedItem);
-
-				vaults.set(rawItem.vault.id, {
-					...toCachedVaultFields(rawItem.vault),
-					accountId: this.accountId,
-					accountEmail: this.accountEmail,
-					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+		try {
+			while (true) {
+				const { data: page } = await client.sync.bootstrap({
+					cursor,
+					limit: 500,
+					syncCursor: syncBaseline?.id,
+					syncCursorCaptured: syncBaselineCaptured,
 				});
+				const pageSyncBaseline = page.syncCursor ?? null;
+				if (!syncBaselineCaptured) {
+					syncBaseline = pageSyncBaseline;
+					syncBaselineCaptured = true;
+				} else if (pageSyncBaseline?.id !== syncBaseline?.id) {
+					throw new Error(
+						"Bootstrap sync cursor changed before the cache generation completed.",
+					);
+				}
+
+				for (const rawItem of travelMode.filterItems(this.accountId, [
+					...page.items,
+				])) {
+					if (!rawItem.vault) {
+						throw new Error(
+							`Bootstrap Item ${rawItem.id} is missing its Vault summary.`,
+						);
+					}
+					const cachedItem = toCachedItem(rawItem, this.cacheScope());
+					// A staged bootstrap record always carries the field, so a promoted
+					// generation never mixes "no attachments" with "not loaded".
+					cachedItem.attachments ??= [];
+					await staging.upsertCachedItem(cachedItem);
+
+					await staging.upsertCachedVault({
+						...toCachedVaultFields(rawItem.vault),
+						accountId: this.accountId,
+						accountEmail: this.accountEmail,
+						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+					});
+				}
+
+				if (!page.hasMore || !page.nextCursor) {
+					break;
+				}
+				cursor = page.nextCursor;
 			}
 
-			if (!page.hasMore || !page.nextCursor) {
-				break;
-			}
-			cursor = page.nextCursor;
+			const fetchedVaultKeys = await this.fetchVaultKeysFromServer(client);
+			refreshedVaultKeys = fetchedVaultKeys
+				? travelMode.filterVaultKeys(this.accountId, fetchedVaultKeys)
+				: null;
+			await staging.promote({
+				lastFullSyncAt: Date.now(),
+				cacheVersion: 1,
+				syncBaseline: {
+					serverUrl: normalizeAccountServerUrl(
+						this.serverUrl ?? this.fallbackServerUrl,
+					),
+					cursorId: syncBaseline?.id ?? null,
+				},
+			});
+		} catch (error) {
+			await staging.discard();
+			throw error;
 		}
 
-		const refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+		const [promotedItems, cachedVaults] = await Promise.all([
+			this.itemCache.getCachedItems(this.accountId),
+			this.itemCache.getCachedVaults(this.accountId),
+		]);
+		const cachedItems = [...(promotedItems ?? [])];
+		const promotedIds = new Set(cachedItems.map((item) => item.id));
+		for (const [itemId, conflictBase] of conflictBases) {
+			if (!promotedIds.has(itemId)) {
+				cachedItems.push(conflictBase);
+				await this.persistItem(conflictBase);
+			}
+		}
 		const vaultKeys =
 			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.accountId));
 
 		this.vaults.clear();
-		for (const vault of vaults.values()) {
+		for (const vault of cachedVaults ?? []) {
 			this.vaults.set(vault.id, vault);
 		}
 
@@ -994,40 +1156,37 @@ export class VaultRepository {
 		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
+		this.authoritativeItems.clear();
 		for (const outcome of await this.decryptItemBatch(cachedItems)) {
 			if ("decrypted" in outcome) {
 				this.items.set(outcome.item.id, outcome.decrypted);
+				this.authoritativeItems.set(
+					outcome.item.id,
+					this.toCachedItem(outcome.decrypted),
+				);
 			} else {
+				this.authoritativeItems.set(outcome.item.id, outcome.item);
 				console.error(
 					`[VaultRepository] Failed to decrypt bootstrap ${await this.describeUndecryptableItem(outcome.item)}:`,
 					outcome.error,
 				);
 			}
 		}
-
-		await Promise.all([
-			this.itemCache.setCachedItems(cachedItems, this.accountId),
-			this.itemCache.setCachedVaults(
-				Array.from(this.vaults.values()),
-				this.accountId,
-			),
-			this.itemCache.setItemCacheMetadata(
-				{
-					lastFullSyncAt: Date.now(),
-					itemCount: cachedItems.length,
-					cacheVersion: 1,
-				},
-				this.accountId,
-			),
-		]);
+		for (const itemId of new Set(
+			Array.from(this.pendingCommands.values(), (command) => command.entityId),
+		)) {
+			await this.rebuildItemProjection(itemId);
+		}
 
 		this.hasCacheSnapshotFlag = true;
 		this.hydrated = true;
 		this.emit();
+		return syncBaseline;
 	}
 
 	clear(): void {
 		this.items.clear();
+		this.authoritativeItems.clear();
 		this.vaults.clear();
 		this.vaultKeyEntries.clear();
 		this.hydrated = false;
@@ -1048,7 +1207,13 @@ export class VaultRepository {
 		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
-		await this.removeItem(itemId);
+		if (this.hasPendingEncryptedCommand(itemId)) {
+			await this.rebuildItemProjection(itemId);
+			return;
+		}
+		this.authoritativeItems.delete(itemId);
+		await this.itemCache.removeCachedItem(itemId, this.accountId);
+		await this.rebuildItemProjection(itemId);
 	}
 
 	async upsertCachedVault(
@@ -1105,6 +1270,12 @@ export class VaultRepository {
 		for (const [itemId, item] of this.items.entries()) {
 			if (item.vaultId === vaultId) {
 				this.items.delete(itemId);
+				this.authoritativeItems.delete(itemId);
+			}
+		}
+		for (const [itemId, item] of this.authoritativeItems) {
+			if (item.vaultId === vaultId) {
+				this.authoritativeItems.delete(itemId);
 			}
 		}
 		await this.itemCache.removeCachedVault(vaultId, this.accountId);
@@ -1122,23 +1293,30 @@ export class VaultRepository {
 	async encryptWithVaultKey(
 		vaultId: string,
 		data: DecryptedItemData,
-		options?: {
-			itemId?: string;
-			version?: number;
+		options: {
+			itemId: string;
+			version: number;
 			userId?: string;
 		},
-	): Promise<EncryptedData> {
+	): Promise<EncryptedPayload> {
 		const vaultKey = await this.decryptVaultKey(vaultId);
 		try {
-			if (!options?.itemId) {
-				return this.crypto.encrypt(JSON.stringify(data), vaultKey, null);
-			}
-			return this.vaultCrypto.encryptItem(JSON.stringify(data), vaultKey, {
+			const encryptionVersion = options.version;
+			const encryptedByUserId = options.userId ?? (await this.resolveUserId());
+			// A write states its own revision: this ciphertext is about to *become*
+			// `encryptionVersion`, so there is no record yet to read it off.
+			const scope: ItemWriteScope = {
 				vaultId,
 				itemId: options.itemId,
-				version: options.version ?? 1,
-				userId: options.userId ?? (await this.resolveUserId()),
-			});
+				version: encryptionVersion,
+				userId: encryptedByUserId,
+			};
+			const encrypted = await this.vaultCrypto.encryptItem(
+				JSON.stringify(data),
+				vaultKey,
+				scope,
+			);
+			return { ...encrypted, encryptionVersion, encryptedByUserId };
 		} finally {
 			await this.crypto.destroyKey(vaultKey);
 		}

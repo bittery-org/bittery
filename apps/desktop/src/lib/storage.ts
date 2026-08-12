@@ -9,8 +9,7 @@
  * that has to drop both (sign-out, account removal, reset) sequences them from the app.
  *
  * This module also owns the **unlock broadcast**. `AccountStore` performs no IPC: it emits
- * `onUnlockStateChanged` and the desktop app does the `invoke("broadcast_unlock_event")`
- * itself.
+ * `onUnlockStateChanged` and the desktop app calls `broadcastUnlockEvent` itself.
  */
 
 import { m } from "@bittery/i18n/paraglide/messages";
@@ -25,8 +24,8 @@ import {
 	createTauriRecordPort,
 } from "@bittery/storage/adapters/tauri";
 import { toast } from "@bittery/ui";
-import { invoke } from "@tauri-apps/api/core";
 import { crypto } from "./crypto";
+import { broadcastUnlockEvent } from "./tauri-commands";
 
 const platformPort = createTauriPlatformPort();
 const recordPort = createTauriRecordPort();
@@ -49,7 +48,7 @@ export const itemCache: ItemCache = createItemCache({ port: recordPort });
  */
 function reportUnlockBroadcastFailure(error: unknown): void {
 	console.error(
-		'[storage] invoke("broadcast_unlock_event") failed; the browser extension will not learn about this unlock:',
+		"[storage] broadcastUnlockEvent failed; the browser extension will not learn about this unlock:",
 		error,
 	);
 	toast.error(m.toast_desktop_unlock_broadcast_failed());
@@ -68,9 +67,7 @@ function subscribeUnlockBroadcast(): void {
 		return;
 	}
 	unsubscribeUnlockBroadcast = storage.onUnlockStateChanged((accounts) => {
-		void invoke("broadcast_unlock_event", { accounts }).catch(
-			reportUnlockBroadcastFailure,
-		);
+		void broadcastUnlockEvent({ accounts }).catch(reportUnlockBroadcastFailure);
 	});
 }
 

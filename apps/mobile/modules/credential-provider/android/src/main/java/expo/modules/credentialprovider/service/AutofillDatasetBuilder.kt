@@ -15,14 +15,12 @@ import android.service.autofill.Dataset
 import android.service.autofill.InlinePresentation
 import expo.modules.credentialprovider.crypto.VaultDecryptor
 import expo.modules.credentialprovider.storage.CredentialDatabase
-import expo.modules.credentialprovider.storage.CredentialStorageManager
 import expo.modules.credentialprovider.storage.ItemEntity
 
 @RequiresApi(Build.VERSION_CODES.O)
 class AutofillDatasetBuilder(
     private val context: Context,
-    private val database: CredentialDatabase,
-    private val storageManager: CredentialStorageManager
+    private val database: CredentialDatabase
 ) {
     private data class PresentationContent(
         val title: String,
@@ -66,45 +64,13 @@ class AutofillDatasetBuilder(
             }
         }
 
-        if (datasets.isNotEmpty()) {
-            return datasets
-        }
-
-        // IMPORTANT: Don't return legacy credentials if vault is locked
-        // Legacy credentials require biometric, but we should respect the vault lock state
-        if (muk == null) {
-            Log.d(BitteryAutofillService.TAG, "Vault is locked (MUK null), not returning legacy credentials")
-            return datasets // Return empty list
-        }
-
-        val legacyCredentials = if (!domain.isNullOrBlank()) {
-            storageManager.getCredentialsByDomain(domain)
-        } else {
-            storageManager.getAllCredentials()
-        }
-
-        for (credential in legacyCredentials) {
-            val dataset = buildDatasetFromLegacyCredential(
-                credential.id,
-                credential.username,
-                credential.displayName,
-                fieldIds,
-                inlineSpec,
-                attributionIntent
-            )
-            if (dataset != null) {
-                datasets.add(dataset)
-                if (datasets.size >= BitteryAutofillService.MAX_DATASETS) break
-            }
-        }
-
-        return datasets
+		return datasets
     }
 
     private suspend fun getItemsForDomain(domain: String, userId: String): List<ItemEntity> {
         val parentDomain = extractParentDomain(domain)
         val items = if (parentDomain.isNotEmpty() && parentDomain != domain) {
-            database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain, userId)
+            database.itemDao().getLoginItemsByDomainAndParent(domain, parentDomain, userId)
         } else {
             database.itemDao().getLoginItemsByDomain(domain, userId)
         }
@@ -140,27 +106,6 @@ class AutofillDatasetBuilder(
             buildDataset(label, username, password, fieldIds, inlineSpec, attributionIntent)
         } catch (e: Exception) {
             Log.w(BitteryAutofillService.TAG, "Failed to decrypt item ${item.id}", e)
-            null
-        }
-    }
-
-    private suspend fun buildDatasetFromLegacyCredential(
-        credentialId: String,
-        username: String,
-        displayName: String,
-        fieldIds: FieldIds,
-        inlineSpec: InlinePresentationSpec?,
-        attributionIntent: PendingIntent?
-    ): Dataset? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
-        return try {
-            val iv = storageManager.getCredentialIv(credentialId) ?: return null
-            val cipher = storageManager.biometricKeyManager.getDecryptCipher(iv)
-            val password = storageManager.getDecryptedPassword(cipher, credentialId) ?: return null
-            val label = displayName.ifBlank { username }
-            buildDataset(label, username, password, fieldIds, inlineSpec, attributionIntent)
-        } catch (e: Exception) {
-            Log.w(BitteryAutofillService.TAG, "Failed to decrypt legacy credential $credentialId", e)
             null
         }
     }

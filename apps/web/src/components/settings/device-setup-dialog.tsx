@@ -2,7 +2,8 @@ import {
 	buildDeviceSetupLinkUri,
 	buildDeviceSetupQrUri,
 } from "@bittery/shared";
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Button,
 	copyWithToast,
@@ -45,10 +46,10 @@ function WebDeviceSetupDialogContent({
 	onOpenChange,
 }: Pick<WebDeviceSetupDialogProps, "onOpenChange">) {
 	const { m } = useI18n();
-	const rpc = useRPC();
+	const api = useApiClient();
 	const serverUrl = getServerUrl();
 
-	const meQuery = useQuery(rpc.auth.me.queryOptions());
+	const meQuery = useQuery(apiQueries.auth.me(api));
 	const email = meQuery.data?.email ?? "";
 	const teamName = meQuery.data?.teamName ?? meQuery.data?.name ?? "";
 

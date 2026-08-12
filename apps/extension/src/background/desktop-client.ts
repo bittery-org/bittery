@@ -13,7 +13,7 @@ const CACHE_TTL_MS = 5000;
 
 function describeSnapshotTransportError(error: unknown): string {
 	if (error instanceof DesktopProtocolMismatchError) {
-		return `protocol mismatch (expected ${error.expectedVersion}, received ${error.receivedVersion ?? "legacy"})`;
+		return `protocol mismatch (expected ${error.expectedVersion}, received ${error.receivedVersion ?? "missing"})`;
 	}
 	if (error instanceof Error) {
 		const normalizedMessage = error.message.toLowerCase();

@@ -119,30 +119,30 @@ export const featureCategories: FeatureCategory[] = [
 			{
 				label: "Storage",
 				values: {
-					free: formatBytes(planAttachmentLimits.free.attachment_storage_bytes),
+					free: formatBytes(planAttachmentLimits.free.attachmentStorageBytes),
 					personal: formatBytes(
-						planAttachmentLimits.personal.attachment_storage_bytes,
+						planAttachmentLimits.personal.attachmentStorageBytes,
 					),
 					family: formatBytes(
-						planAttachmentLimits.family.attachment_storage_bytes,
+						planAttachmentLimits.family.attachmentStorageBytes,
 					),
-					team: formatBytes(planAttachmentLimits.team.attachment_storage_bytes),
+					team: formatBytes(planAttachmentLimits.team.attachmentStorageBytes),
 				},
 			},
 			{
 				label: "Max file size",
 				values: {
 					free: formatBytes(
-						planAttachmentLimits.free.attachment_max_file_size_bytes,
+						planAttachmentLimits.free.attachmentMaxFileSizeBytes,
 					),
 					personal: formatBytes(
-						planAttachmentLimits.personal.attachment_max_file_size_bytes,
+						planAttachmentLimits.personal.attachmentMaxFileSizeBytes,
 					),
 					family: formatBytes(
-						planAttachmentLimits.family.attachment_max_file_size_bytes,
+						planAttachmentLimits.family.attachmentMaxFileSizeBytes,
 					),
 					team: formatBytes(
-						planAttachmentLimits.team.attachment_max_file_size_bytes,
+						planAttachmentLimits.team.attachmentMaxFileSizeBytes,
 					),
 				},
 			},

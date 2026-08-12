@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use rand::Rng;
 use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
 use tracing::{error, info};
 
 use crate::{
-    db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate, DbVaultOwnerRow},
+    db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate},
     integrations::storage,
 };
 
@@ -169,27 +167,6 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
             break;
         }
 
-        let fallback_vault_ids: Vec<String> = candidates
-            .iter()
-            .filter(|candidate| candidate.last_modified_by.is_none())
-            .map(|candidate| candidate.vault_id.clone())
-            .collect();
-
-        let fallback_users = if fallback_vault_ids.is_empty() {
-            Vec::new()
-        } else {
-            query_as::<_, DbVaultOwnerRow>("SELECT id, created_by_id FROM vault WHERE id = ANY($1)")
-                .bind(&fallback_vault_ids)
-                .fetch_all(pool)
-                .await?
-        };
-
-        let fallback_user_by_vault_id = HashMap::<String, String>::from_iter(
-            fallback_users
-                .into_iter()
-                .map(|entry| (entry.id, entry.created_by_id)),
-        );
-
         let candidate_ids: Vec<String> = candidates
             .iter()
             .map(|candidate| candidate.id.clone())
@@ -197,20 +174,15 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
 
         let event_rows: Vec<(String, String, String, String, i32, String)> = candidates
             .iter()
-            .filter_map(|candidate| {
-                let event_user_id = candidate
-                    .last_modified_by
-                    .clone()
-                    .or_else(|| fallback_user_by_vault_id.get(&candidate.vault_id).cloned())?;
-
-                Some((
+            .map(|candidate| {
+                (
                     generate_sync_event_id(),
                     candidate.id.clone(),
                     candidate.vault_id.clone(),
-                    event_user_id,
-                    candidate.version.unwrap_or(1),
+                    candidate.last_modified_by.clone(),
+                    candidate.version,
                     "{\"reason\":\"tombstone_cleanup\"}".to_string(),
-                ))
+                )
             })
             .collect();
 

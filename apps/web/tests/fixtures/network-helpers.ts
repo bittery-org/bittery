@@ -12,25 +12,19 @@ import type { Page, Request, Route } from "@playwright/test";
 
 type RouteMatcher = string | RegExp;
 
-const RPC_ROUTE_PATTERN = /\/rpc(?:\/|\?|$)/;
+const API_ROUTE_PATTERN = /\/api(?:\/|\?|$)/;
 
-const API_ROUTE_PATTERNS: readonly RegExp[] = [RPC_ROUTE_PATTERN];
+const API_ROUTE_PATTERNS: readonly RegExp[] = [API_ROUTE_PATTERN];
 
 function isApiRequestUrl(url: string): boolean {
 	return API_ROUTE_PATTERNS.some((pattern) => pattern.test(url));
 }
 
-function requestMatchesProcedure(
+function requestMatchesEndpoint(
 	request: Pick<Request, "url" | "postData">,
-	procedureName: string,
+	endpointPath: string,
 ): boolean {
-	const url = request.url();
-	if (!RPC_ROUTE_PATTERN.test(url)) {
-		return false;
-	}
-
-	const postData = request.postData();
-	return typeof postData === "string" && postData.includes(procedureName);
+	return new URL(request.url()).pathname === endpointPath;
 }
 
 /**
@@ -64,19 +58,83 @@ export const NetworkConditions = {
 };
 
 /**
- * API error responses for testing error handling
+ * API error responses for testing error handling.
+ *
+ * The server answers every failure with an RFC 9457 problem document
+ * (`apps/server/src/http/api/error.rs`), and the client only reads one whose
+ * `status`, `title`, `code` and `type` are all present and agree with the response
+ * (`packages/api-contract/src/errors.ts`) - so an injected failure has to be shaped
+ * like one or it exercises the fallback instead of the real error path.
  */
+function problem(
+	status: number,
+	code: string,
+	title: string,
+	detail: string,
+): { status: number; body: ApiProblemBody } {
+	return {
+		status,
+		body: {
+			type: `https://bittery.com/problems/${code.toLowerCase().replaceAll("_", "-")}`,
+			title,
+			status,
+			code,
+			detail,
+		},
+	};
+}
+
+export interface ApiProblemBody {
+	type: string;
+	title: string;
+	status: number;
+	code: string;
+	detail: string;
+}
+
 export const ApiErrors = {
-	INTERNAL_SERVER_ERROR: {
-		status: 500,
-		body: { error: "Internal Server Error" },
-	},
-	UNAUTHORIZED: { status: 401, body: { error: "Unauthorized" } },
-	FORBIDDEN: { status: 403, body: { error: "Forbidden" } },
-	NOT_FOUND: { status: 404, body: { error: "Not Found" } },
-	RATE_LIMITED: { status: 429, body: { error: "Too Many Requests" } },
-	BAD_REQUEST: { status: 400, body: { error: "Bad Request" } },
-	SERVICE_UNAVAILABLE: { status: 503, body: { error: "Service Unavailable" } },
+	INTERNAL_SERVER_ERROR: problem(
+		500,
+		"INTERNAL_ERROR",
+		"Internal Server Error",
+		"Something went wrong on the server.",
+	),
+	UNAUTHORIZED: problem(
+		401,
+		"UNAUTHORIZED",
+		"Unauthorized",
+		"This request needs a valid session.",
+	),
+	FORBIDDEN: problem(
+		403,
+		"FORBIDDEN",
+		"Forbidden",
+		"This account may not perform that action.",
+	),
+	NOT_FOUND: problem(
+		404,
+		"NOT_FOUND",
+		"Not Found",
+		"There is nothing at that address.",
+	),
+	RATE_LIMITED: problem(
+		429,
+		"RATE_LIMITED",
+		"Too Many Requests",
+		"Too many requests were sent in a row.",
+	),
+	BAD_REQUEST: problem(
+		400,
+		"BAD_REQUEST",
+		"Bad Request",
+		"The request was not understood.",
+	),
+	SERVICE_UNAVAILABLE: problem(
+		503,
+		"SERVICE_UNAVAILABLE",
+		"Service Unavailable",
+		"The service is temporarily unavailable.",
+	),
 };
 
 /**
@@ -122,15 +180,15 @@ export class NetworkSimulator {
 		}
 	}
 
-	private async routeProcedureRequests(
-		procedureName: string,
+	private async routeEndpointRequests(
+		endpointPath: string,
 		handler: (route: Route) => Promise<void> | void,
 	): Promise<void> {
-		const routePattern = RPC_ROUTE_PATTERN;
+		const routePattern = API_ROUTE_PATTERN;
 		this.interceptedRoutes.add(routePattern);
 
 		await this.page.route(routePattern, async (route) => {
-			if (!requestMatchesProcedure(route.request(), procedureName)) {
+			if (!requestMatchesEndpoint(route.request(), endpointPath)) {
 				await route.continue();
 				return;
 			}
@@ -188,30 +246,8 @@ export class NetworkSimulator {
 			const errorResponse = ApiErrors[error];
 			await route.fulfill({
 				status: errorResponse.status,
-				contentType: "application/json",
+				contentType: "application/problem+json",
 				body: JSON.stringify(errorResponse.body),
-			});
-		});
-	}
-
-	/**
-	 * Simulate RPC endpoint failure for a specific procedure.
-	 */
-	async simulateRpcFailure(
-		procedureName: string,
-		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR",
-	) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
-			const errorResponse = ApiErrors[error];
-			await route.fulfill({
-				status: errorResponse.status,
-				contentType: "application/json",
-				body: JSON.stringify({
-					error: {
-						message: errorResponse.body.error,
-						code: error,
-					},
-				}),
 			});
 		});
 	}
@@ -228,10 +264,10 @@ export class NetworkSimulator {
 	}
 
 	/**
-	 * Simulate network timeout for a specific RPC procedure.
+	 * Simulate network timeout for a specific API endpoint.
 	 */
-	async simulateProcedureTimeout(procedureName: string, timeoutMs = 30000) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
+	async simulateEndpointTimeout(endpointPath: string, timeoutMs = 30000) {
+		await this.routeEndpointRequests(endpointPath, async (route) => {
 			await settleAfterDelay(timeoutMs, () => route.abort("timedout"));
 		});
 	}
@@ -289,9 +325,9 @@ export class NetworkSimulator {
 	/**
 	 * Wait for specific API call
 	 */
-	async waitForApiCall(procedureName: string, timeout = 10000): Promise<void> {
+	async waitForApiCall(endpointPath: string, timeout = 10000): Promise<void> {
 		await this.page.waitForResponse(
-			(response) => requestMatchesProcedure(response.request(), procedureName),
+			(response) => requestMatchesEndpoint(response.request(), endpointPath),
 			{ timeout },
 		);
 	}
@@ -328,15 +364,6 @@ export class NetworkSimulator {
 			await route.abort("connectionreset");
 		});
 	}
-
-	/**
-	 * Simulate connection reset for a specific RPC procedure.
-	 */
-	async simulateProcedureConnectionReset(procedureName: string) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
-			await route.abort("connectionreset");
-		});
-	}
 }
 
 /**
@@ -354,28 +381,6 @@ export async function waitForNetworkIdle(
 	timeout = 5000,
 ): Promise<void> {
 	await page.waitForLoadState("networkidle", { timeout });
-}
-
-/**
- * @deprecated Use waitForPageReady() or specific DOM-based waits instead.
- * This function exists for backward compatibility but should be replaced
- * with more reliable DOM-based waiting strategies.
- */
-export async function waitForNetworkIdleExceptSSE(
-	page: Page,
-	_timeout = 30000,
-): Promise<void> {
-	await page.waitForLoadState("load");
-	// Wait for React hydration by checking for interactive elements
-	await page.waitForFunction(
-		() => {
-			return (
-				document.readyState === "complete" &&
-				!document.querySelector('[data-loading="true"]')
-			);
-		},
-		{ timeout: _timeout },
-	);
 }
 
 /**

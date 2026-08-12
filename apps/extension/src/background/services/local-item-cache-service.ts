@@ -6,20 +6,25 @@
  * desktop bridge invalidation stay consistent.
  */
 
+import type { EncryptedItemPayload } from "@bittery/shared/item-mapping";
+import {
+	toCachedItemMetadata,
+	toEncryptedPayload,
+	toNewCachedItem,
+	withEncryptedPayload,
+} from "@bittery/shared/item-mapping";
+import type { ItemCategory } from "@bittery/shared/types";
 import type { CachedEncryptedItem } from "@bittery/types";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
 
-interface EncryptedPayload {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
+/** The ciphertext triple as the crypto port returns it — one definition, in `@bittery/shared`. */
+type EncryptedPayload = EncryptedItemPayload;
 
 interface LocalItemCreatedInput {
 	itemId: string;
 	vaultId: string;
-	category: string;
+	category: ItemCategory;
 	encryptedData: EncryptedPayload;
 	accountEmail?: string;
 }
@@ -30,14 +35,8 @@ interface LocalItemUpdatedInput {
 	accountEmail?: string;
 }
 
-interface LegacyLocalCache {
-	onItemCreated: (input: LocalItemCreatedInput) => Promise<void>;
-	onItemUpdated: (input: LocalItemUpdatedInput) => Promise<void>;
-}
-
 interface LocalItemCacheServiceDeps {
 	vaultCoordinator?: typeof core.vaultCoordinator;
-	cache?: LegacyLocalCache;
 	desktopClient: {
 		clearCache: () => void;
 	};
@@ -73,12 +72,6 @@ export function createLocalItemCacheService(
 
 	return {
 		async onLocalItemCreated(input: LocalItemCreatedInput): Promise<void> {
-			if (deps.cache) {
-				await deps.cache.onItemCreated(input);
-				deps.desktopClient.clearCache();
-				return;
-			}
-
 			const vaultCoordinator = deps.vaultCoordinator;
 			if (!vaultCoordinator) {
 				return;
@@ -96,34 +89,24 @@ export function createLocalItemCacheService(
 				return;
 			}
 			const repo = resolvedAccount.repo;
-			const now = new Date().toISOString();
-			const item: CachedEncryptedItem = {
-				id: input.itemId,
-				vaultId: input.vaultId,
-				accountEmail,
-				serverUrl: repo.getServerUrl(),
-				category: input.category,
-				favorite: false,
-				encryptedData: input.encryptedData.ciphertext,
-				encryptionIv: input.encryptedData.iv,
-				encryptionAlgorithm: input.encryptedData.algorithm,
-				version: 1,
-				lastModifiedBy: null,
-				createdAt: now,
-				updatedAt: now,
-				deletedAt: null,
-			};
+			const item = toNewCachedItem(
+				{
+					id: input.itemId,
+					vaultId: input.vaultId,
+					category: input.category,
+					timestamp: new Date().toISOString(),
+					// The server's INSERT lands a create at version 1, whatever the ciphertext
+					// was bound to.
+					version: 1,
+					payload: toEncryptedPayload(input.encryptedData),
+				},
+				{ accountEmail, serverUrl: repo.getServerUrl() },
+			);
 			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 
 		async onLocalItemUpdated(input: LocalItemUpdatedInput): Promise<void> {
-			if (deps.cache) {
-				await deps.cache.onItemUpdated(input);
-				deps.desktopClient.clearCache();
-				return;
-			}
-
 			const vaultCoordinator = deps.vaultCoordinator;
 			if (!vaultCoordinator) {
 				return;
@@ -139,23 +122,20 @@ export function createLocalItemCacheService(
 			if (!existing) {
 				return;
 			}
-			const item: CachedEncryptedItem = {
-				id: existing.id,
-				vaultId: existing.vaultId,
-				accountEmail: existing.accountEmail ?? resolvedAccount.email,
-				serverUrl: existing.serverUrl ?? resolvedAccount.repo.getServerUrl(),
-				category: existing.category,
-				favorite: existing.favorite,
-				encryptedData: input.encryptedData.ciphertext,
-				encryptionIv: input.encryptedData.iv,
-				encryptionAlgorithm: input.encryptedData.algorithm,
-				version: existing.version + 1,
-				lastModifiedBy: existing.lastModifiedBy,
-				createdAt: existing.createdAt,
-				updatedAt: new Date().toISOString(),
-				deletedAt: existing.deletedAt,
-				attachments: existing.attachments,
-			};
+			const item: CachedEncryptedItem = withEncryptedPayload(
+				toCachedItemMetadata(existing, {
+					accountEmail: resolvedAccount.email,
+					serverUrl: resolvedAccount.repo.getServerUrl(),
+				}),
+				toEncryptedPayload(input.encryptedData),
+				{
+					// Distinct fields that coincide here: the caller bound this ciphertext to the base
+					// version + 1, which is the version the server write lands on. They diverge in
+					// general — favourite/trash/restore and key rotation advance `version` alone.
+					version: input.encryptedData.encryptionVersion,
+					updatedAt: new Date().toISOString(),
+				},
+			);
 			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},

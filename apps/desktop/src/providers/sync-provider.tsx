@@ -1,28 +1,18 @@
-import type {
-	OutboundQueue,
-	QueryInvalidator,
-	SyncStatus,
-} from "@bittery/sync";
+import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useDesktopClientId, useDesktopSync } from "../hooks/use-desktop-sync";
 
 /**
- * Context for sync state
+ * Desktop resolves its sync sources asynchronously (auth token + server URL per account, out
+ * of the Tauri store), so it publishes one member `useSync` cannot: whether that resolution
+ * has run yet. Everything else is the shared shape.
  */
-interface SyncContextValue {
-	status: SyncStatus;
-	clientId: string;
-	isConnected: boolean;
-	isOnline: boolean;
+interface DesktopSyncContextValue extends SyncContextValue {
 	isInitialized: boolean;
-	reconnect: () => Promise<void>;
-	disconnect: () => void;
-	invalidator: QueryInvalidator;
-	outboundQueue: OutboundQueue;
 }
 
-const SyncContext = createContext<SyncContextValue | null>(null);
+const SyncContext = createContext<DesktopSyncContextValue | null>(null);
 
 /**
  * Provider component for sync functionality (Desktop)

@@ -4,6 +4,7 @@ import {
 	useItem,
 	useToggleFavorite,
 	useUpdateItem,
+	type VaultInfoWithAccount,
 } from "@bittery/core/hooks";
 import { detectCardBrand } from "@bittery/shared/credit-card";
 import { getItemServerUrl } from "@bittery/shared/favicon";
@@ -48,19 +49,10 @@ import { Favicon } from "./favicon";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import { MoveItemDialog } from "./move-item-dialog";
 
-interface VaultInfo {
-	name: string;
-	type?: "personal" | "team";
-	icon?: string | null;
-	imageUrl?: string | null;
-	accountName?: string;
-	accountTeamName?: string;
-	accountTeamAvatarUrl?: string | null;
-}
-
 interface ItemDetailPageProps {
 	itemId: string;
-	vaultInfo?: VaultInfo;
+	/** The item's vault and the account holding it, straight from `useVaultInfo`. */
+	vaultInfo?: VaultInfoWithAccount | null;
 	availableTags: string[];
 	onTagClick: (tagName: string) => void;
 }
@@ -276,15 +268,13 @@ export function ItemDetailPage({
 					<div className="min-w-0">
 						<VaultInfoPopover
 							vaultName={
-								vaultInfo?.name ||
+								vaultInfo?.vaultName ||
 								m.vaults_detail_items_detail_page_vault_unknown()
 							}
-							vaultIcon={vaultInfo?.icon}
-							vaultImageUrl={vaultInfo?.imageUrl}
-							vaultType={vaultInfo?.type}
+							vaultIcon={vaultInfo?.vaultIcon}
+							vaultImageUrl={vaultInfo?.vaultImageUrl}
 							accountName={vaultInfo?.accountName}
 							accountTeamName={vaultInfo?.accountTeamName}
-							accountTeamAvatarUrl={vaultInfo?.accountTeamAvatarUrl}
 						/>
 					</div>
 					<div className="flex shrink-0 items-center gap-1">

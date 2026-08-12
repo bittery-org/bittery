@@ -11,19 +11,11 @@ import type {
 	ExportedVault,
 	VaultExportPayload,
 } from "@bittery/shared";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
-import { normalizeItemCategory } from "@/lib/rpc-normalizers";
-import { storage } from "@/lib/storage";
-
-function normalizeVersion(version: number): number {
-	if (!Number.isFinite(version) || version < 1) {
-		return 1;
-	}
-	return Math.floor(version);
-}
+import { normalizeItemCategory } from "@/lib/api-normalizers";
 
 export type ExportStage =
 	| "idle"
@@ -54,7 +46,7 @@ function createEmptyProgress(): ExportProgress {
 }
 
 export function useVaultExport() {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 
@@ -87,8 +79,8 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			const allItems = await rpcClient.vault.listAllItems.query();
-			const me = await rpcClient.auth.me.query();
+			const allItems = (await api.items.list()).data;
+			const me = (await api.auth.me()).data;
 
 			// Collect unique vaults
 			const vaultMap = new Map<
@@ -104,7 +96,11 @@ export function useVaultExport() {
 				if (!vaultMap.has(item.vaultId)) {
 					const vaultRecord = item.vault;
 					const vault = vaultRecord
-						? toCachedVaultFields(vaultRecord)
+						? toCachedVaultFields({
+								...vaultRecord,
+								icon: vaultRecord.icon ?? null,
+								imageUrl: vaultRecord.imageUrl ?? null,
+							})
 						: undefined;
 					vaultMap.set(item.vaultId, {
 						id: vault?.id ?? item.vaultId,
@@ -129,10 +125,6 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			// Get fallback userId for encryption context
-			const fallbackUserId =
-				(await storage.getActiveAccountUserId()) ?? me?.id ?? "";
-
 			for (const vaultId of vaultMap.keys()) {
 				const key = await vaultCrypto.getVaultKey({ vaultId });
 				if (key) {
@@ -142,8 +134,7 @@ export function useVaultExport() {
 
 			const exportedItems: ExportedItem[] = [];
 
-			for (let i = 0; i < allItems.length; i++) {
-				const item = allItems[i];
+			for (const [i, item] of allItems.entries()) {
 				const vaultKey = vaultKeyCache.get(item.vaultId);
 				if (!vaultKey) {
 					setProgress((prev) => ({
@@ -153,44 +144,21 @@ export function useVaultExport() {
 					continue;
 				}
 
-				const contextUserId = item.lastModifiedBy ?? fallbackUserId;
-				const storedVersion = normalizeVersion(item.version ?? 1);
-				let decryptedStr: string | null = null;
+				const decryptedStr = await vaultCrypto.decryptStoredItem(
+					item,
+					vaultKey,
+				);
 
-				for (let ver = storedVersion; ver >= 1; ver--) {
-					try {
-						decryptedStr = await vaultCrypto.decryptItem(
-							{
-								ciphertext: item.encryptedData,
-								iv: item.encryptionIv,
-								algorithm: item.encryptionAlgorithm,
-							},
-							vaultKey,
-							{
-								vaultId: item.vaultId,
-								itemId: item.id,
-								version: ver,
-								userId: contextUserId,
-							},
-						);
-						break;
-					} catch {
-						// try next version
-					}
-				}
-
-				if (decryptedStr) {
-					exportedItems.push({
-						id: item.id,
-						vaultId: item.vaultId,
-						category: normalizeItemCategory(item.category),
-						favorite: item.favorite,
-						data: JSON.parse(decryptedStr),
-						attachments: [],
-						createdAt: String(item.createdAt),
-						updatedAt: String(item.updatedAt),
-					});
-				}
+				exportedItems.push({
+					id: item.id,
+					vaultId: item.vaultId,
+					category: normalizeItemCategory(item.category),
+					favorite: item.favorite,
+					data: JSON.parse(decryptedStr),
+					attachments: [],
+					createdAt: String(item.createdAt),
+					updatedAt: String(item.updatedAt),
+				});
 
 				setProgress((prev) => ({
 					...prev,
@@ -219,7 +187,7 @@ export function useVaultExport() {
 
 				for (const attachment of item.attachments) {
 					try {
-						const contextUserId = attachment.uploadedBy ?? fallbackUserId;
+						const contextUserId = attachment.uploadedBy;
 
 						const blobContext = buildAttachmentBlobEncryptionContext({
 							vaultId: item.vaultId,
@@ -245,9 +213,7 @@ export function useVaultExport() {
 							encryptedName,
 							encryptedContentType,
 							encryptedContentTypeIv,
-						} = await rpcClient.vault.getAttachmentDownloadUrl.mutate({
-							attachmentId: attachment.id,
-						});
+						} = (await api.attachments.createDownloadUrl(attachment.id)).data;
 
 						const response = await fetch(downloadUrl);
 						if (!response.ok) {
@@ -279,7 +245,7 @@ export function useVaultExport() {
 						const contentType = await crypto.decrypt(
 							{
 								ciphertext: encryptedContentType,
-								iv: encryptedContentTypeIv ?? encryptionIv,
+								iv: encryptedContentTypeIv,
 								algorithm: encryptionAlgorithm,
 							},
 							vaultKey,
@@ -358,7 +324,7 @@ export function useVaultExport() {
 				await crypto.destroyKey(key);
 			}
 		}
-	}, [rpcClient, crypto, vaultCrypto]);
+	}, [api, crypto, vaultCrypto]);
 
 	const downloadArchive = useCallback(() => {
 		if (!archiveBlob) return;

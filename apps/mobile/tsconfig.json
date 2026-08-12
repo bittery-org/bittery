@@ -1,8 +1,13 @@
 {
-	"extends": "expo/tsconfig.base",
+	/* Bittery's strict base first, Expo's on top: Expo owns the React Native
+	   platform knobs (module "preserve", customConditions, moduleDetection and
+	   the native-build excludes) and must win where the two overlap. */
+	"extends": ["@bittery/config/tsconfig.base.json", "expo/tsconfig.base"],
 	"compilerOptions": {
 		"allowImportingTsExtensions": true,
-		"strict": true,
+		// Not a bun package; drop the base's ["bun"] rather than pull Bun's
+		// globals into a React Native runtime.
+		"types": [],
 		"paths": {
 			"@/*": ["./src/*"]
 		}

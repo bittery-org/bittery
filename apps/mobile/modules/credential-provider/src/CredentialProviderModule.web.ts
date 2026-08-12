@@ -1,12 +1,9 @@
 import { NativeModule, registerWebModule } from "expo";
 
 import type {
-	Credential,
 	CredentialProviderModuleEvents,
 	EscrowMukParams,
 	PendingPasskeyMutation,
-	SaveCredentialParams,
-	SyncResult,
 } from "./CredentialProvider.types";
 
 /**
@@ -91,30 +88,9 @@ class CredentialProviderModule extends NativeModule<CredentialProviderModuleEven
 		return false;
 	}
 
-	isKeyAvailable(): boolean {
-		return false;
-	}
-
 	openCredentialProviderSettings(): boolean {
 		console.warn("CredentialProvider: Not available on web");
 		return false;
-	}
-
-	async initializeKey(): Promise<boolean> {
-		console.warn("CredentialProvider: Not available on web");
-		return false;
-	}
-
-	async saveCredential(_params: SaveCredentialParams): Promise<string> {
-		console.warn("CredentialProvider: Not available on web");
-		throw new Error("Credential Provider is not available on web");
-	}
-
-	async syncCredentials(
-		_credentials: SaveCredentialParams[],
-	): Promise<SyncResult> {
-		console.warn("CredentialProvider: Not available on web");
-		return { synced: 0, deleted: 0 };
 	}
 
 	async syncVaultData(_dataJson: string): Promise<{
@@ -140,24 +116,6 @@ class CredentialProviderModule extends NativeModule<CredentialProviderModuleEven
 		_error: string,
 	): Promise<boolean> {
 		return true;
-	}
-
-	async getAllCredentials(): Promise<Credential[]> {
-		return [];
-	}
-
-	async getCredentialCount(): Promise<number> {
-		return 0;
-	}
-
-	async deleteCredential(_id: string): Promise<boolean> {
-		console.warn("CredentialProvider: Not available on web");
-		return false;
-	}
-
-	async clearAllCredentials(): Promise<boolean> {
-		console.warn("CredentialProvider: Not available on web");
-		return false;
 	}
 }
 

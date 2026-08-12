@@ -105,8 +105,8 @@ mock.module(path.join(libDir, "crypto.ts"), () => ({
 	crypto: {},
 }));
 
-mock.module(path.join(bgDir, "rpc-client.ts"), () => ({
-	rpcClient: {},
+mock.module(path.join(bgDir, "api-client.ts"), () => ({
+	apiClient: {},
 }));
 
 let desktopStatus: {
@@ -161,10 +161,9 @@ mock.module("@bittery/core/services/account-session-manager", () => ({
 	}),
 }));
 
-mock.module("@bittery/shared/rpc-client-factory", () => ({
-	createAccountRpcClient: () => ({}),
-	// The lifecycle `CredentialMirror` drops cached clients holding a revoked token.
-	clearAccountRpcClient: () => {},
+mock.module("@bittery/shared/api-client-factory", () => ({
+	createAccountApiClient: () => ({}),
+	createApiClientForServer: () => ({}),
 }));
 
 const { handleLogout, handleQuickUnlockAll } = await import(

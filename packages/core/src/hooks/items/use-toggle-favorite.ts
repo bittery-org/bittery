@@ -29,8 +29,7 @@ export function useToggleFavorite() {
 	return useMutation({
 		mutationFn: async (input: ToggleFavoriteInput) => {
 			const context = requireLocalItemMutationContext(core, input.itemId);
-			await context.repo.updateFavorite(input.itemId, input.favorite);
-			enqueueItemMutation(queue, context, {
+			await enqueueItemMutation(queue, context, {
 				type: "toggle_favorite",
 				entityId: input.itemId,
 				vaultId: input.vaultId,

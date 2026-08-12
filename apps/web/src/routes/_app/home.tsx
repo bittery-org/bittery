@@ -1,4 +1,5 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { Button } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -19,8 +20,8 @@ export const Route = createFileRoute("/_app/home")({
 });
 
 function RouteComponent() {
-	const rpc = useRPC();
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const api = useApiClient();
+	const userQuery = useQuery(apiQueries.auth.me(api));
 	const { m } = useI18n();
 	const name = userQuery.data?.name;
 

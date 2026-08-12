@@ -1,17 +1,22 @@
 import { usePlatformCrypto } from "@bittery/core/hooks";
 import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
 import { createAccountKeys } from "@bittery/core/services/vault-crypto";
+import type { KdfProfile } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { useApiClient } from "@bittery/shared/api";
+import {
+	createApiClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
+import { apiQueryKeys } from "@bittery/shared/api-query";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import type { KdfProfile } from "@bittery/types";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
 
@@ -26,6 +31,15 @@ type SignupFormValues = {
 	plan: CloudPlanId;
 	organizationName: string;
 };
+
+/**
+ * Message to surface for a thrown value. The API client rejects with `ApiError`, the crypto
+ * seam and storage with plain `Error`s; anything else carries nothing worth showing, so the
+ * caller's fallback wins.
+ */
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : "";
+}
 
 type SignupMutationInput = {
 	userId?: string;
@@ -53,17 +67,31 @@ export function useSignupForm({
 	initialPlan,
 	verificationMode = "dialog",
 	onVerificationRequested,
+	initialInsecureTransportConfirmed = false,
 }: {
 	invitationToken?: string;
 	redirectTo?: string;
 	initialPlan?: CloudPlanId;
 	verificationMode?: "dialog" | "inline";
 	onVerificationRequested?: () => void;
+	initialInsecureTransportConfirmed?: boolean;
 }) {
 	const navigate = useNavigate();
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] = useState(
+		initialInsecureTransportConfirmed,
+	);
+	const ceremonyApiClient = useMemo(
+		() =>
+			createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+				clientPlatform: "web",
+			}),
+		[insecureTransportConfirmed, serverUrl],
+	);
 	const [keyMaterialQueryId] = useState(() => globalThis.crypto.randomUUID());
 	const keyMaterialQuery = useQuery({
 		queryKey: ["signup-key-material", keyMaterialQueryId],
@@ -94,16 +122,43 @@ export function useSignupForm({
 		string | null
 	>(null);
 
+	const requireInsecureTransportConfirmation = () => {
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
+			return false;
+		}
+		return true;
+	};
+
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
-		...rpc.team.invitations.getByToken.queryOptions({
-			token: invitationToken || "",
-		}),
-		enabled: !!invitationToken,
+		queryKey: [
+			"api",
+			"v1",
+			"public",
+			"team-invitations",
+			invitationToken || "",
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.teams.invitations.public(invitationToken || ""))
+				.data,
+		enabled:
+			!!invitationToken &&
+			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
 	});
-	const registrationStatusQuery = useQuery(
-		rpc.auth.registrationStatus.queryOptions(),
-	);
+	const registrationStatusQuery = useQuery({
+		queryKey: [
+			...apiQueryKeys.auth.registrationStatus,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.registrationStatus()).data,
+		enabled:
+			!requiresInsecureTransportConfirmation || insecureTransportConfirmed,
+	});
 
 	const invitation = invitationQuery.data;
 	const hasInvitationToken = !!invitationToken;
@@ -132,70 +187,103 @@ export function useSignupForm({
 	};
 
 	const requestSignupVerificationMutation = useMutation({
-		mutationFn: async (input: { email: string }) =>
-			rpcClient.auth.requestSignupVerification.mutate({
-				email: input.email,
-				invitationToken: invitationToken ?? null,
-			}),
-		onError: (error: any) => {
+		mutationFn: async (input: { email: string }) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
+			return (
+				await ceremonyApiClient.auth.requestSignupVerification({
+					email: input.email,
+					invitationToken: invitationToken ?? null,
+				})
+			).data;
+		},
+		onError: (error) => {
 			toast.error(error.message || "Failed to send verification code");
 		},
 	});
 
 	const verifySignupVerificationMutation = useMutation({
-		mutationFn: async (input: { email: string; code: string }) =>
-			rpcClient.auth.verifySignupVerification.mutate({
-				email: input.email,
-				code: input.code,
-				invitationToken: invitationToken ?? null,
-			}),
-		onError: (error: any) => {
+		mutationFn: async (input: { email: string; code: string }) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
+			return (
+				await ceremonyApiClient.auth.verifySignupVerification({
+					email: input.email,
+					code: input.code,
+					invitationToken: invitationToken ?? null,
+				})
+			).data;
+		},
+		onError: (error) => {
 			toast.error(error.message || "Failed to verify code");
 		},
 	});
 
 	const signupMutation = useMutation({
 		mutationFn: async (input: SignupMutationInput) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
 			if (isInvitationSignup) {
-				return rpcClient.auth.signupWithInvitation.mutate({
-					token: input.token || "",
-					userId: input.userId ?? null,
-					vaultId: input.vaultId ?? null,
-					email: input.email,
-					signupVerificationToken: input.signupVerificationToken,
-					name: input.name,
-					secretKeyHint: input.secretKeyHint,
-					srpSalt: input.srpSalt,
-					srpVerifier: input.srpVerifier,
-					publicKey: input.publicKey,
-					encryptedPrivateKey: input.encryptedPrivateKey,
-					encryptedMasterKey: input.encryptedMasterKey,
-					recoveryKeyHint: input.recoveryKeyHint,
-					encryptedVaultKey: input.encryptedVaultKey,
-					kdfParams: input.kdfProfile,
-				});
+				return (
+					await ceremonyApiClient.auth.signUp(
+						{
+							invitationToken: input.token || "",
+							userId: input.userId ?? null,
+							vaultId: input.vaultId ?? null,
+							email: input.email,
+							signupVerificationToken: input.signupVerificationToken,
+							name: input.name,
+							secretKeyHint: input.secretKeyHint,
+							srpSalt: input.srpSalt,
+							srpVerifier: input.srpVerifier,
+							publicKey: input.publicKey,
+							encryptedPrivateKey: input.encryptedPrivateKey,
+							encryptedMasterKey: input.encryptedMasterKey,
+							recoveryKeyHint: input.recoveryKeyHint,
+							encryptedVaultKey: input.encryptedVaultKey,
+							kdfParams: input.kdfProfile,
+						},
+						{
+							kind: "authCeremony",
+							serverUrl,
+							insecureTransportConfirmed,
+						},
+					)
+				).data;
 			}
 
-			return rpcClient.auth.signup.mutate({
-				userId: input.userId ?? null,
-				vaultId: input.vaultId ?? null,
-				email: input.email,
-				signupVerificationToken: input.signupVerificationToken,
-				name: input.name,
-				plan: input.plan ?? null,
-				organizationName: input.organizationName ?? null,
-				secretKeyHint: input.secretKeyHint,
-				srpSalt: input.srpSalt,
-				srpVerifier: input.srpVerifier,
-				publicKey: input.publicKey,
-				encryptedPrivateKey: input.encryptedPrivateKey,
-				encryptedMasterKey: input.encryptedMasterKey,
-				recoveryKeyHint: input.recoveryKeyHint,
-				encryptedVaultKey: input.encryptedVaultKey,
-				kdfParams: input.kdfProfile,
-			});
+			return (
+				await ceremonyApiClient.auth.signUp(
+					{
+						userId: input.userId ?? null,
+						vaultId: input.vaultId ?? null,
+						email: input.email,
+						signupVerificationToken: input.signupVerificationToken,
+						name: input.name,
+						plan: input.plan ?? null,
+						organizationName: input.organizationName ?? null,
+						secretKeyHint: input.secretKeyHint,
+						srpSalt: input.srpSalt,
+						srpVerifier: input.srpVerifier,
+						publicKey: input.publicKey,
+						encryptedPrivateKey: input.encryptedPrivateKey,
+						encryptedMasterKey: input.encryptedMasterKey,
+						recoveryKeyHint: input.recoveryKeyHint,
+						encryptedVaultKey: input.encryptedVaultKey,
+						kdfParams: input.kdfProfile,
+					},
+					{
+						kind: "authCeremony",
+						serverUrl,
+						insecureTransportConfirmed,
+					},
+				)
+			).data;
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Failed to create account");
 		},
 	});
@@ -210,16 +298,18 @@ export function useSignupForm({
 			value.plan !== "free"
 		) {
 			try {
-				const checkout = await rpcClient.billing.createCheckoutSession.mutate({
-					plan: value.plan,
-				});
+				const checkout = (
+					await apiClient.billing.checkout({
+						plan: value.plan,
+					})
+				).data;
 				if (checkout.url) {
 					window.location.href = checkout.url;
 					return;
 				}
-			} catch (error: any) {
+			} catch (error) {
 				toast.error(
-					error?.message ||
+					errorMessage(error) ||
 						"Account created, but checkout could not be started. Open billing to continue.",
 				);
 				navigate({ to: "/billing" });
@@ -241,6 +331,9 @@ export function useSignupForm({
 		value: SignupFormValues,
 		verificationToken: string,
 	) => {
+		if (!requireInsecureTransportConfirmation()) {
+			return;
+		}
 		const teamName = value.organizationName.trim();
 		const email = getSignupEmail(value);
 		if (!email) {
@@ -249,7 +342,6 @@ export function useSignupForm({
 		}
 
 		setIsEncrypting(true);
-		const serverUrl = getDefaultServerUrl();
 		try {
 			const { keys, result } = await createAccountKeys(
 				{ email, password: value.password, secretKey, recoveryKey },
@@ -296,7 +388,13 @@ export function useSignupForm({
 						teamAvatarUrl: result.user.teamAvatarUrl,
 						encryptedPrivateKey: keys.encryptedPrivateKey,
 					},
-					vaultKeys: result.vaultKeys.map(toAuthVaultKeyEntry),
+					vaultKeys: result.vaultKeys.map((vault) =>
+						toAuthVaultKeyEntry({
+							...vault,
+							vaultIcon: vault.vaultIcon ?? null,
+							vaultImageUrl: vault.vaultImageUrl ?? null,
+						}),
+					),
 					masterUnlockKey: keys.masterUnlockKey,
 					kdfParams: keys.kdfProfile,
 					serverUrl,
@@ -306,7 +404,7 @@ export function useSignupForm({
 				itemCache,
 				crypto,
 				email,
-				{ serverUrl },
+				{ serverUrl, insecureTransportConfirmed },
 			);
 			await refreshActiveAccountId();
 
@@ -320,9 +418,9 @@ export function useSignupForm({
 			);
 
 			await goAfterSignup(value);
-		} catch (error: any) {
+		} catch (error) {
 			console.error("Signup error:", error);
-			toast.error(error.message || "Failed to create account");
+			toast.error(errorMessage(error) || "Failed to create account");
 		} finally {
 			setIsEncrypting(false);
 		}
@@ -550,5 +648,8 @@ export function useSignupForm({
 		allowPublicSignup,
 		requiresEmailVerification,
 		hasAllKeyMaterial,
+		requiresInsecureTransportConfirmation,
+		insecureTransportConfirmed,
+		setInsecureTransportConfirmed,
 	};
 }

@@ -1,0 +1,72 @@
+{
+	"v": 3,
+	"activeAccountId": "account-1",
+	"unlockedAccountIds": ["account-1"],
+	"autoLockTimeoutMs": 600000,
+	"deviceKey": { "key": "bittery_device_key", "store": "secret" },
+	"accounts": [
+		{
+			"accountId": "account-1",
+			"email": "person@example.com",
+			"userId": "user-1",
+			"name": "Person",
+			"secretKeyHint": "AB-CD",
+			"teamName": "Acme",
+			"teamAvatarUrl": "https://cdn.example.com/acme.png",
+			"addedAt": 1700000000000,
+			"lastActiveAt": 1700000002000,
+			"biometricEnabled": true,
+			"token": {
+				"key": "bittery_account_account-1_jwt_token",
+				"store": "secret"
+			},
+			"sessionData": {
+				"key": "bittery_account_account-1_session_data",
+				"store": "secret"
+			},
+			"vaultKeys": {
+				"key": "bittery_account_account-1_vault_keys",
+				"store": "secret"
+			},
+			"encryptedPrivateKey": {
+				"key": "bittery_account_account-1_encrypted_private_key",
+				"store": "secret"
+			},
+			"itemCacheState": {
+				"key": "record:account-1:meta:meta",
+				"store": "plain"
+			}
+		},
+		{
+			"accountId": "account-2",
+			"email": "other@example.com",
+			"userId": "user-2",
+			"name": "Other",
+			"secretKeyHint": "EF-GH",
+			"teamAvatarUrl": null,
+			"addedAt": 1700000000500,
+			"lastActiveAt": 1700000000500,
+			"biometricEnabled": false,
+			"token": {
+				"key": "bittery_account_account-2_jwt_token",
+				"store": "secret"
+			},
+			"sessionData": {
+				"key": "bittery_account_account-2_session_data",
+				"store": "secret"
+			},
+			"vaultKeys": {
+				"key": "bittery_account_account-2_vault_keys",
+				"store": "secret"
+			},
+			"encryptedPrivateKey": {
+				"key": "bittery_account_account-2_encrypted_private_key",
+				"store": "secret"
+			},
+			"itemCacheState": {
+				"key": "record:account-2:meta:meta",
+				"store": "plain"
+			}
+		}
+	]
+}

@@ -8,13 +8,17 @@ import {
 	type TestUser,
 	test,
 } from "../fixtures/auth";
-import { waitForNetworkIdleExceptSSE } from "../fixtures/network-helpers";
+import { uiText } from "../fixtures/messages";
+import { waitForPageReady } from "../fixtures/network-helpers";
 import {
 	createItem,
 	createVault,
 	itemRow,
 	itemRowTitles,
+	openItem,
+	openItemMenu,
 	openVault,
+	VAULT_READY_TIMEOUT_MS,
 } from "../fixtures/vault";
 
 /**
@@ -29,7 +33,7 @@ import {
  * there is nothing per test to reset: the receiving list is driven straight off
  * the vault repository's snapshot.
  *
- * The two contexts have separate localStorage, so `getOrCreateClientId` mints a
+ * The two contexts have separate sessionStorage, so `getOrCreateClientId` mints a
  * different `bittery_sync_client_id` in each - which is what makes them two
  * devices rather than one, and what the last test pins.
  */
@@ -55,6 +59,7 @@ const suffix = nanoid(6);
 const seedTitle = `Sync Seed ${suffix}`;
 const fromWriterTitle = `Sync From A ${suffix}`;
 const fromReaderTitle = `Sync From B ${suffix}`;
+const deleteForeverTitle = `Sync Delete Forever ${suffix}`;
 
 let user: TestUser;
 let vaultId: string;
@@ -66,7 +71,7 @@ let reader: Page;
 /** Put one context on the shared vault and wait for it to have hydrated. */
 async function openSharedVault(page: Page, expectedTitle: string) {
 	await openVault(page, vaultId);
-	await waitForNetworkIdleExceptSSE(page);
+	await waitForPageReady(page);
 	// Seeing an item that already existed proves this context finished its
 	// bootstrap and holds the vault key, so anything it misses afterwards is the
 	// stream's fault rather than a half-open session.
@@ -152,11 +157,35 @@ test("the reverse direction works too, and the writing context does not duplicat
 	expect((await itemRowTitles(reader)).sort()).toEqual(expected);
 });
 
+test("starring and unstarring converge in both directions without navigation", async () => {
+	test.setTimeout(TEST_BUDGET_MS);
+
+	await openItem(writer, fromWriterTitle);
+	await openItemMenu(writer);
+	await writer.getByTestId("item-favorite-button").click();
+
+	const favoritesHeading = (page: Page) =>
+		page.getByText(
+			uiText("vaults_detail_items_list_section_favorites", { count: 1 }),
+		);
+	await expect(favoritesHeading(reader)).toBeVisible({
+		timeout: SYNC_BUDGET_MS,
+	});
+
+	await openItem(reader, fromWriterTitle);
+	await openItemMenu(reader);
+	await reader.getByTestId("item-favorite-button").click();
+
+	await expect(favoritesHeading(writer)).toHaveCount(0, {
+		timeout: SYNC_BUDGET_MS,
+	});
+});
+
 test("the two contexts are two sync clients of one account", async () => {
 	test.setTimeout(TEST_BUDGET_MS);
 
 	const clientId = (page: Page) =>
-		page.evaluate(() => localStorage.getItem("bittery_sync_client_id"));
+		page.evaluate(() => sessionStorage.getItem("bittery_sync_client_id"));
 
 	const writerClientId = await clientId(writer);
 	const readerClientId = await clientId(reader);
@@ -171,4 +200,108 @@ test("the two contexts are two sync clients of one account", async () => {
 	// users who happen to see the same names.
 	expect(new URL(writer.url()).pathname).toBe(`/vaults/${vaultId}`);
 	expect(new URL(reader.url()).pathname).toBe(`/vaults/${vaultId}`);
+});
+
+test("Trash acknowledgement advances Delete Forever's If-Match and converges both clients", async () => {
+	test.setTimeout(TEST_BUDGET_MS);
+
+	await createItem(writer, "login", async (sheet) => {
+		await sheet.locator("#title").fill(deleteForeverTitle);
+		await sheet.locator("#username").fill(`delete_${suffix}`);
+		await sheet.locator("#password").fill(`Delete-Pass-${suffix}!`);
+	});
+	await expect(itemRow(reader, deleteForeverTitle)).toBeVisible({
+		timeout: SYNC_BUDGET_MS,
+	});
+	await openItem(writer, deleteForeverTitle);
+	const itemId = await writer
+		.getByTestId("item-detail-pane")
+		.getAttribute("data-item-id");
+	if (!itemId) {
+		throw new Error("The synced Item has no id.");
+	}
+
+	type ObservedWrite = {
+		operation: "trash" | "delete_forever";
+		status: number;
+		ifMatch: string | undefined;
+		etag: string | undefined;
+	};
+	const writes: ObservedWrite[] = [];
+	const observeWrite = async (
+		response: import("@playwright/test").Response,
+	) => {
+		const request = response.request();
+		const path = new URL(response.url()).pathname;
+		const itemPath = `/api/v1/items/${itemId}`;
+		if (request.method() !== "DELETE" || !path.startsWith(itemPath)) {
+			return;
+		}
+		const requestHeaders = await request.allHeaders();
+		const responseHeaders = await response.allHeaders();
+		writes.push({
+			operation: path.endsWith("/permanent") ? "delete_forever" : "trash",
+			status: response.status(),
+			ifMatch: requestHeaders["if-match"],
+			etag: responseHeaders.etag,
+		});
+	};
+	writer.on("response", observeWrite);
+
+	try {
+		await openItemMenu(writer);
+		await writer.getByTestId("item-delete-button").click();
+		await writer.getByTestId("delete-item-confirm-button").click();
+		await expect(itemRow(writer, deleteForeverTitle)).toHaveCount(0);
+
+		// Followed in-app rather than with `goto`: the row disappears optimistically,
+		// so a reload here tears the page down while the trash write is still being
+		// acknowledged, and the queue restored from storage resends a command the
+		// server has already applied. Its idempotency key makes that replay a no-op -
+		// at-least-once delivery working as intended - but it is not what this test is
+		// about, and CI is slow enough to lose that race every time.
+		await writer
+			.getByRole("link", { name: uiText("vaults_sidebar_link_trash") })
+			.first()
+			.click();
+		await writer.waitForURL("**/vaults/trash");
+		const deleteForever = writer.locator(
+			`[data-testid="trash-delete-forever-button"][data-item-id="${itemId}"]`,
+		);
+		await expect(deleteForever).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await deleteForever.click();
+		await writer
+			.getByRole("dialog")
+			.getByRole("button", {
+				name: uiText("vaults_trash_delete_dialog_action_confirm"),
+			})
+			.click();
+
+		await expect.poll(() => writes.length, { timeout: SYNC_BUDGET_MS }).toBe(2);
+		expect(writes).toEqual([
+			{
+				operation: "trash",
+				status: 200,
+				ifMatch: '"1"',
+				etag: '"2"',
+			},
+			{
+				operation: "delete_forever",
+				status: 200,
+				ifMatch: '"2"',
+				etag: '"3"',
+			},
+		]);
+
+		await reader.goto("/vaults/trash");
+		await expect(
+			reader.locator(
+				`[data-testid="trash-delete-forever-button"][data-item-id="${itemId}"]`,
+			),
+		).toHaveCount(0, { timeout: SYNC_BUDGET_MS });
+	} finally {
+		writer.off("response", observeWrite);
+	}
 });

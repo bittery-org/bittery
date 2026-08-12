@@ -1,5 +1,4 @@
 import { wipeDevice } from "@bittery/core/services/account-lifecycle";
-import { invoke } from "@tauri-apps/api/core";
 import {
 	Menu,
 	MenuItem,
@@ -9,6 +8,7 @@ import {
 import { Store } from "@tauri-apps/plugin-store";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
+import { keychainDelete } from "@/lib/tauri-commands";
 
 const RESET_MENU_ITEM_ID = "bittery-reset-app-completely";
 
@@ -41,9 +41,7 @@ async function resetDesktopAppCompletely(): Promise<void> {
 
 	try {
 		console.log("[macos-reset-menu] Deleting keychain device key");
-		await invoke<boolean>("keychain_delete", {
-			key: DEVICE_KEY_KEYCHAIN_KEY,
-		});
+		await keychainDelete({ key: DEVICE_KEY_KEYCHAIN_KEY });
 		console.log("[macos-reset-menu] Deleted keychain device key");
 	} catch (error) {
 		console.warn(

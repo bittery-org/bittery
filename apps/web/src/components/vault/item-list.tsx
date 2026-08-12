@@ -4,6 +4,7 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Checkbox,
 	cn,
+	type DragItemData,
 	Skeleton,
 	VaultItemListControls,
 	VaultItemListRow,
@@ -15,7 +16,7 @@ import {
 import { useDraggable } from "@dnd-kit/core";
 import { useCallback } from "react";
 import { useI18n } from "@/providers/i18n-provider";
-import { type DragItemData, useVaultDnd } from "@/providers/vault-dnd-provider";
+import { useVaultDnd } from "@/providers/vault-dnd-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListProps {

@@ -1,5 +1,6 @@
 import { type AppLocale, supportedLocales } from "@bittery/i18n";
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Badge,
 	Button,
@@ -62,14 +63,14 @@ export const Route = createFileRoute("/_app/settings/")({
 const GITHUB_REPO = "bittery-org/bittery";
 
 function SettingsPage() {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const { locale, setLocale, m } = useI18n();
 	const { theme, setTheme } = useTheme();
 	const activeLocaleLabel =
 		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const userQuery = useQuery(apiQueries.auth.me(api));
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 	const [isDeviceSetupDialogOpen, setIsDeviceSetupDialogOpen] = useState(false);

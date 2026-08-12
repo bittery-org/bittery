@@ -16,6 +16,7 @@ import {
 } from "@bittery/storage/account-id";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
+import { createStoredAccountApiClient } from "../services/api-client";
 import {
 	attachmentBase64ToBytes,
 	attachmentBytesToBase64,
@@ -27,7 +28,6 @@ import {
 	encryptAttachmentParts,
 	parseAttachmentBlobEnvelope,
 } from "../services/attachment-crypto";
-import { createStoredAccountRpcClient } from "../services/rpc-client";
 import { useItem } from "./use-item";
 
 export interface AttachmentMeta {
@@ -38,11 +38,11 @@ export interface AttachmentMeta {
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
-	/** IV used specifically for encryptedContentType. Falls back to encryptionIv for old rows. */
-	encryptedContentTypeIv: string | null;
+	/** IV used specifically for encryptedContentType. */
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 	fileSize: number;
-	uploadedBy: string | null;
+	uploadedBy: string;
 	createdAt: Date | string;
 }
 
@@ -125,12 +125,12 @@ export function useItemAttachments(
 	const accountScope =
 		accountEmail ?? rawItem?.account?.accountId ?? rawItem?.accountEmail;
 
-	async function getAccountRpcClient() {
+	async function getAccountApiClient() {
 		const accountId = await resolveAccountScopeId(storage, accountScope);
 		if (!accountId) {
 			throw new Error("Account context is required for attachment operations");
 		}
-		const accountClient = await createStoredAccountRpcClient(
+		const accountClient = await createStoredAccountApiClient(
 			storage,
 			accountId,
 		);
@@ -143,8 +143,8 @@ export function useItemAttachments(
 	const entitlementsQuery = useQuery({
 		queryKey: ["billing", "entitlements", accountScope ?? "active"],
 		queryFn: async () => {
-			const accountClient = await getAccountRpcClient();
-			return accountClient.billing.entitlements.query();
+			const accountClient = await getAccountApiClient();
+			return (await accountClient.billing.entitlements()).data;
 		},
 		enabled: Boolean(itemId && accountScope),
 	});
@@ -186,7 +186,7 @@ export function useItemAttachments(
 		attachment: AttachmentMeta,
 	): Promise<DecryptedAttachment> {
 		return withVaultKey(async (vaultKey) => {
-			const contextUserId = attachment.uploadedBy || (await getCurrentUserId());
+			const contextUserId = attachment.uploadedBy;
 			const { name, contentType } = await decryptAttachmentMetaShared(
 				vaultCrypto,
 				vaultKey,
@@ -213,7 +213,7 @@ export function useItemAttachments(
 			if (!vaultId) throw new Error("vaultId is required");
 			return withVaultKey(async (vaultKey) => {
 				const userId = await getCurrentUserId();
-				const accountClient = await getAccountRpcClient();
+				const accountClient = await getAccountApiClient();
 
 				// Read file as ArrayBuffer and convert to base64
 				const fileBuffer = await file.arrayBuffer();
@@ -222,12 +222,14 @@ export function useItemAttachments(
 
 				// storageKey is stable and available before metadata creation, so we use it
 				// as the attachment entity key for context binding.
-				const upload = await accountClient.vault.createAttachmentUpload.mutate({
+				const { data: upload } = await accountClient.attachments.createUpload(
 					itemId,
-					fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
-					contentType: "application/octet-stream",
-					fileSize: file.size,
-				});
+					{
+						fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
+						contentType: "application/octet-stream",
+						fileSize: file.size,
+					},
+				);
 
 				// Use custom display name if provided, otherwise use the file name
 				const nameToEncrypt = file.displayName?.trim() || file.name;
@@ -259,8 +261,7 @@ export function useItemAttachments(
 				}
 
 				// Save metadata
-				await accountClient.vault.createAttachment.mutate({
-					itemId,
+				await accountClient.attachments.create(itemId, {
 					storageKey: upload.key,
 					encryptedName: encrypted.encryptedName,
 					encryptedContentType: encrypted.encryptedContentType,
@@ -280,8 +281,7 @@ export function useItemAttachments(
 	const downloadMutation = useMutation({
 		mutationFn: async (attachment: AttachmentMeta) => {
 			return withVaultKey(async (vaultKey) => {
-				const contextUserId =
-					attachment.uploadedBy || (await getCurrentUserId());
+				const contextUserId = attachment.uploadedBy;
 				const scope = {
 					vaultId: attachment.vaultId,
 					attachmentKey: attachment.storageKey,
@@ -290,15 +290,15 @@ export function useItemAttachments(
 
 				// Get presigned download URL + encrypted metadata from server
 				const {
-					downloadUrl,
-					encryptionIv,
-					encryptionAlgorithm,
-					encryptedName,
-				} = await (
-					await getAccountRpcClient()
-				).vault.getAttachmentDownloadUrl.mutate({
-					attachmentId: attachment.id,
-				});
+					data: {
+						downloadUrl,
+						encryptionIv,
+						encryptionAlgorithm,
+						encryptedName,
+					},
+				} = await (await getAccountApiClient()).attachments.createDownloadUrl(
+					attachment.id,
+				);
 
 				// Fetch encrypted file from S3
 				const response = await fetch(downloadUrl);
@@ -349,8 +349,7 @@ export function useItemAttachments(
 				throw new Error("Attachment metadata not found");
 			}
 			return withVaultKey(async (vaultKey) => {
-				const contextUserId =
-					attachment.uploadedBy || (await getCurrentUserId());
+				const contextUserId = attachment.uploadedBy;
 				const encryptedName = await encryptAttachmentName(
 					vaultCrypto,
 					vaultKey,
@@ -361,8 +360,7 @@ export function useItemAttachments(
 					},
 					newName.trim(),
 				);
-				await (await getAccountRpcClient()).vault.updateAttachment.mutate({
-					attachmentId,
+				await (await getAccountApiClient()).attachments.update(attachmentId, {
 					encryptedName: encryptedName.ciphertext,
 					encryptionIv: encryptedName.iv,
 					encryptionAlgorithm: encryptedName.algorithm,
@@ -377,9 +375,7 @@ export function useItemAttachments(
 	// Delete mutation
 	const deleteMutation = useMutation({
 		mutationFn: async (attachmentId: string) => {
-			await (await getAccountRpcClient()).vault.deleteAttachment.mutate({
-				attachmentId,
-			});
+			await (await getAccountApiClient()).attachments.remove(attachmentId);
 		},
 		onSuccess: () => {
 			invalidateItem();

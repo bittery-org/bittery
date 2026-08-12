@@ -1,33 +1,153 @@
+//! The closed value sets Bittery shares between PostgreSQL, the service layer and the wire.
+//!
+//! Each type here is the single source of truth for one set. The PostgreSQL enum, the Rust
+//! variants, the JSON strings and the OpenAPI `enum` constraint are all derived from the same
+//! declaration, so a value can never be spelled three different ways in three layers.
+//!
+//! # Wire compatibility
+//!
+//! The strings in [`closed_enum!`] are the contract. They match the PostgreSQL labels created in
+//! `migrations/0000_fresh_pandemic.sql` (plus `migrations/0008_add_user_travel_mode.sql`) *and*
+//! the JSON the API has always emitted. Changing one is a breaking API change; `enums_tests.rs`
+//! pins every string.
+//!
+//! # Database representation
+//!
+//! [`closed_enum!`] hand-writes the sqlx traits rather than deriving `sqlx::Type`, so a value
+//! decodes from both `role` (the PostgreSQL enum) and `role::text` (the cast the queries use
+//! today). `Type::type_info` stays `TEXT`, which means binding one of these types behaves exactly
+//! like binding the `&str` it replaces: the SQL keeps its existing `$1::vault_role` casts.
+
+use std::{fmt, str::FromStr};
+
 use serde::{Deserialize, Serialize};
+use sqlx::{
+    encode::IsNull,
+    error::BoxDynError,
+    postgres::{PgArgumentBuffer, PgTypeInfo, PgValueRef},
+    Decode, Encode, Postgres, Type, TypeInfo,
+};
+use utoipa::ToSchema;
+
+/// A value that is outside one of the closed sets in this module.
+///
+/// Reaching this means the database, or a client, produced a label the server does not know —
+/// the mismatch is surfaced as a decode error rather than silently carried as an opaque string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownEnumValue {
+    /// The Rust type that rejected the value.
+    pub type_name: &'static str,
+    /// The value that was rejected.
+    pub value: String,
+}
+
+impl fmt::Display for UnknownEnumValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`{}` is not a valid {} value",
+            self.value, self.type_name
+        )
+    }
+}
+
+impl std::error::Error for UnknownEnumValue {}
+
+/// Declares the conversions, PostgreSQL codec and parsing for one closed set.
+///
+/// The variant-to-string table given here is the only place the wire strings appear; `as_str`,
+/// `Display`, `FromStr`, `TryFrom` and the sqlx codec are all generated from it.
+macro_rules! closed_enum {
+    ($name:ident, $pg_type:literal, { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        impl $name {
+            /// Every variant, in declaration order. Used by the wire-format tests.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub const fn as_str(&self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire,)+
+                }
+            }
+
+            /// The PostgreSQL enum type this set mirrors.
+            pub const fn pg_type_name() -> &'static str {
+                $pg_type
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = UnknownEnumValue;
+
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                match value {
+                    $($wire => Ok(Self::$variant),)+
+                    _ => Err(UnknownEnumValue {
+                        type_name: stringify!($name),
+                        value: value.to_owned(),
+                    }),
+                }
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = UnknownEnumValue;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                value.as_str().parse()
+            }
+        }
+
+        impl Type<Postgres> for $name {
+            fn type_info() -> PgTypeInfo {
+                <str as Type<Postgres>>::type_info()
+            }
+
+            fn compatible(ty: &PgTypeInfo) -> bool {
+                <str as Type<Postgres>>::compatible(ty) || ty.name().eq_ignore_ascii_case($pg_type)
+            }
+        }
+
+        impl Encode<'_, Postgres> for $name {
+            fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+                <&str as Encode<Postgres>>::encode(self.as_str(), buf)
+            }
+        }
+
+        impl<'r> Decode<'r, Postgres> for $name {
+            fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+                Ok(value.as_str()?.parse()?)
+            }
+        }
+    };
+}
 
 /// Vault role — maps to PostgreSQL `vault_role` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "vault_role")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum VaultRole {
-    #[sqlx(rename = "owner")]
     #[serde(rename = "owner")]
     Owner,
-    #[sqlx(rename = "admin")]
     #[serde(rename = "admin")]
     Admin,
-    #[sqlx(rename = "member")]
     #[serde(rename = "member")]
     Member,
-    #[sqlx(rename = "read-only")]
     #[serde(rename = "read-only")]
     ReadOnly,
 }
 
-impl VaultRole {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Admin => "admin",
-            Self::Member => "member",
-            Self::ReadOnly => "read-only",
-        }
-    }
+closed_enum!(VaultRole, "vault_role", {
+    Owner => "owner",
+    Admin => "admin",
+    Member => "member",
+    ReadOnly => "read-only",
+});
 
+impl VaultRole {
     pub fn can_write(&self) -> bool {
         matches!(self, Self::Owner | Self::Admin | Self::Member)
     }
@@ -37,441 +157,282 @@ impl VaultRole {
     }
 }
 
-impl std::fmt::Display for VaultRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Team role — maps to PostgreSQL `team_role` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "team_role")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum TeamRole {
-    #[sqlx(rename = "owner")]
     #[serde(rename = "owner")]
     Owner,
-    #[sqlx(rename = "admin")]
     #[serde(rename = "admin")]
     Admin,
-    #[sqlx(rename = "member")]
     #[serde(rename = "member")]
     Member,
 }
 
-impl TeamRole {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Admin => "admin",
-            Self::Member => "member",
-        }
-    }
+closed_enum!(TeamRole, "team_role", {
+    Owner => "owner",
+    Admin => "admin",
+    Member => "member",
+});
 
+impl TeamRole {
     pub fn can_manage(&self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
     }
-}
 
-impl std::fmt::Display for TeamRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+    /// The vault role a team member of this rank receives on team vaults.
+    ///
+    /// Team owners administer the team but hold the same vault rights as an admin; the vault
+    /// owner is whoever created the vault.
+    pub fn vault_role(&self) -> VaultRole {
+        match self {
+            Self::Owner | Self::Admin => VaultRole::Admin,
+            Self::Member => VaultRole::Member,
+        }
     }
 }
 
 /// Vault type — maps to PostgreSQL `vault_type` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "vault_type")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum VaultType {
-    #[sqlx(rename = "personal")]
     #[serde(rename = "personal")]
     Personal,
-    #[sqlx(rename = "team")]
     #[serde(rename = "team")]
     Team,
 }
 
-impl VaultType {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Personal => "personal",
-            Self::Team => "team",
-        }
-    }
-}
-
-impl std::fmt::Display for VaultType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(VaultType, "vault_type", {
+    Personal => "personal",
+    Team => "team",
+});
 
 /// Team type — maps to PostgreSQL `team_type` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "team_type")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum TeamType {
-    #[sqlx(rename = "personal")]
     #[serde(rename = "personal")]
     Personal,
-    #[sqlx(rename = "family")]
     #[serde(rename = "family")]
     Family,
-    #[sqlx(rename = "organization")]
     #[serde(rename = "organization")]
     Organization,
 }
 
-impl TeamType {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Personal => "personal",
-            Self::Family => "family",
-            Self::Organization => "organization",
-        }
-    }
-}
-
-impl std::fmt::Display for TeamType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(TeamType, "team_type", {
+    Personal => "personal",
+    Family => "family",
+    Organization => "organization",
+});
 
 /// Billing plan — maps to PostgreSQL `billing_plan` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "billing_plan")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum BillingPlan {
-    #[sqlx(rename = "free")]
     #[serde(rename = "free")]
     Free,
-    #[sqlx(rename = "personal")]
     #[serde(rename = "personal")]
     Personal,
-    #[sqlx(rename = "family")]
     #[serde(rename = "family")]
     Family,
-    #[sqlx(rename = "team")]
     #[serde(rename = "team")]
     Team,
 }
 
-impl BillingPlan {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Free => "free",
-            Self::Personal => "personal",
-            Self::Family => "family",
-            Self::Team => "team",
-        }
-    }
+closed_enum!(BillingPlan, "billing_plan", {
+    Free => "free",
+    Personal => "personal",
+    Family => "family",
+    Team => "team",
+});
 
+impl BillingPlan {
     pub fn is_paid(&self) -> bool {
         !matches!(self, Self::Free)
     }
 }
 
-impl std::fmt::Display for BillingPlan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Billing status — maps to PostgreSQL `billing_status` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "billing_status")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum BillingStatus {
-    #[sqlx(rename = "none")]
     #[serde(rename = "none")]
     None,
-    #[sqlx(rename = "incomplete")]
     #[serde(rename = "incomplete")]
     Incomplete,
-    #[sqlx(rename = "trialing")]
     #[serde(rename = "trialing")]
     Trialing,
-    #[sqlx(rename = "active")]
     #[serde(rename = "active")]
     Active,
-    #[sqlx(rename = "past_due")]
     #[serde(rename = "past_due")]
     PastDue,
-    #[sqlx(rename = "canceled")]
     #[serde(rename = "canceled")]
     Canceled,
-    #[sqlx(rename = "unpaid")]
     #[serde(rename = "unpaid")]
     Unpaid,
 }
 
-impl BillingStatus {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Incomplete => "incomplete",
-            Self::Trialing => "trialing",
-            Self::Active => "active",
-            Self::PastDue => "past_due",
-            Self::Canceled => "canceled",
-            Self::Unpaid => "unpaid",
-        }
-    }
+closed_enum!(BillingStatus, "billing_status", {
+    None => "none",
+    Incomplete => "incomplete",
+    Trialing => "trialing",
+    Active => "active",
+    PastDue => "past_due",
+    Canceled => "canceled",
+    Unpaid => "unpaid",
+});
 
+impl BillingStatus {
     pub fn is_active(&self) -> bool {
         matches!(self, Self::Active | Self::Trialing)
     }
 }
 
-impl std::fmt::Display for BillingStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Invitation status — maps to PostgreSQL `invitation_status` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "invitation_status")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum InvitationStatus {
-    #[sqlx(rename = "pending")]
     #[serde(rename = "pending")]
     Pending,
-    #[sqlx(rename = "accepted")]
     #[serde(rename = "accepted")]
     Accepted,
-    #[sqlx(rename = "declined")]
     #[serde(rename = "declined")]
     Declined,
-    #[sqlx(rename = "expired")]
     #[serde(rename = "expired")]
     Expired,
 }
 
-impl InvitationStatus {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Declined => "declined",
-            Self::Expired => "expired",
-        }
-    }
-}
-
-impl std::fmt::Display for InvitationStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(InvitationStatus, "invitation_status", {
+    Pending => "pending",
+    Accepted => "accepted",
+    Declined => "declined",
+    Expired => "expired",
+});
 
 /// Share link status — maps to PostgreSQL `share_link_status` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "share_link_status")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum ShareLinkStatus {
-    #[sqlx(rename = "active")]
     #[serde(rename = "active")]
     Active,
-    #[sqlx(rename = "expired")]
     #[serde(rename = "expired")]
     Expired,
-    #[sqlx(rename = "exhausted")]
     #[serde(rename = "exhausted")]
     Exhausted,
-    #[sqlx(rename = "revoked")]
     #[serde(rename = "revoked")]
     Revoked,
 }
 
-impl ShareLinkStatus {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Expired => "expired",
-            Self::Exhausted => "exhausted",
-            Self::Revoked => "revoked",
-        }
-    }
-}
-
-impl std::fmt::Display for ShareLinkStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(ShareLinkStatus, "share_link_status", {
+    Active => "active",
+    Expired => "expired",
+    Exhausted => "exhausted",
+    Revoked => "revoked",
+});
 
 /// Share link access mode — maps to PostgreSQL `share_link_access_mode` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "share_link_access_mode")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum ShareLinkAccessMode {
-    #[sqlx(rename = "anyone")]
     #[serde(rename = "anyone")]
     Anyone,
-    #[sqlx(rename = "email-restricted")]
     #[serde(rename = "email-restricted")]
     EmailRestricted,
 }
 
-impl ShareLinkAccessMode {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Anyone => "anyone",
-            Self::EmailRestricted => "email-restricted",
-        }
-    }
-}
-
-impl std::fmt::Display for ShareLinkAccessMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(ShareLinkAccessMode, "share_link_access_mode", {
+    Anyone => "anyone",
+    EmailRestricted => "email-restricted",
+});
 
 /// Sync event type — maps to PostgreSQL `sync_event_type` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "sync_event_type")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum SyncEventType {
-    #[sqlx(rename = "item_created")]
     #[serde(rename = "item_created")]
     ItemCreated,
-    #[sqlx(rename = "item_updated")]
     #[serde(rename = "item_updated")]
     ItemUpdated,
-    #[sqlx(rename = "item_deleted")]
     #[serde(rename = "item_deleted")]
     ItemDeleted,
-    #[sqlx(rename = "item_restored")]
     #[serde(rename = "item_restored")]
     ItemRestored,
-    #[sqlx(rename = "item_permanently_deleted")]
     #[serde(rename = "item_permanently_deleted")]
     ItemPermanentlyDeleted,
-    #[sqlx(rename = "item_moved")]
     #[serde(rename = "item_moved")]
     ItemMoved,
-    #[sqlx(rename = "vault_created")]
     #[serde(rename = "vault_created")]
     VaultCreated,
-    #[sqlx(rename = "vault_updated")]
     #[serde(rename = "vault_updated")]
     VaultUpdated,
-    #[sqlx(rename = "vault_deleted")]
     #[serde(rename = "vault_deleted")]
     VaultDeleted,
-    #[sqlx(rename = "vault_access_revoked")]
     #[serde(rename = "vault_access_revoked")]
     VaultAccessRevoked,
-    #[sqlx(rename = "vault_member_added")]
     #[serde(rename = "vault_member_added")]
     VaultMemberAdded,
-    #[sqlx(rename = "vault_member_removed")]
     #[serde(rename = "vault_member_removed")]
     VaultMemberRemoved,
-    #[sqlx(rename = "vault_key_rotated")]
     #[serde(rename = "vault_key_rotated")]
     VaultKeyRotated,
-    #[sqlx(rename = "travel_mode_updated")]
     #[serde(rename = "travel_mode_updated")]
     TravelModeUpdated,
 }
 
-impl SyncEventType {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::ItemCreated => "item_created",
-            Self::ItemUpdated => "item_updated",
-            Self::ItemDeleted => "item_deleted",
-            Self::ItemRestored => "item_restored",
-            Self::ItemPermanentlyDeleted => "item_permanently_deleted",
-            Self::ItemMoved => "item_moved",
-            Self::VaultCreated => "vault_created",
-            Self::VaultUpdated => "vault_updated",
-            Self::VaultDeleted => "vault_deleted",
-            Self::VaultAccessRevoked => "vault_access_revoked",
-            Self::VaultMemberAdded => "vault_member_added",
-            Self::VaultMemberRemoved => "vault_member_removed",
-            Self::VaultKeyRotated => "vault_key_rotated",
-            Self::TravelModeUpdated => "travel_mode_updated",
-        }
-    }
-}
-
-impl std::fmt::Display for SyncEventType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(SyncEventType, "sync_event_type", {
+    ItemCreated => "item_created",
+    ItemUpdated => "item_updated",
+    ItemDeleted => "item_deleted",
+    ItemRestored => "item_restored",
+    ItemPermanentlyDeleted => "item_permanently_deleted",
+    ItemMoved => "item_moved",
+    VaultCreated => "vault_created",
+    VaultUpdated => "vault_updated",
+    VaultDeleted => "vault_deleted",
+    VaultAccessRevoked => "vault_access_revoked",
+    VaultMemberAdded => "vault_member_added",
+    VaultMemberRemoved => "vault_member_removed",
+    VaultKeyRotated => "vault_key_rotated",
+    TravelModeUpdated => "travel_mode_updated",
+});
 
 /// Sync entity type — maps to PostgreSQL `sync_entity_type` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "sync_entity_type")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum SyncEntityType {
-    #[sqlx(rename = "item")]
     #[serde(rename = "item")]
     Item,
-    #[sqlx(rename = "vault")]
     #[serde(rename = "vault")]
     Vault,
-    #[sqlx(rename = "vault_member")]
     #[serde(rename = "vault_member")]
     VaultMember,
-    #[sqlx(rename = "vault_key")]
     #[serde(rename = "vault_key")]
     VaultKey,
-    #[sqlx(rename = "user")]
     #[serde(rename = "user")]
     User,
 }
 
-impl SyncEntityType {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Item => "item",
-            Self::Vault => "vault",
-            Self::VaultMember => "vault_member",
-            Self::VaultKey => "vault_key",
-            Self::User => "user",
-        }
-    }
-}
-
-impl std::fmt::Display for SyncEntityType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+closed_enum!(SyncEntityType, "sync_entity_type", {
+    Item => "item",
+    Vault => "vault",
+    VaultMember => "vault_member",
+    VaultKey => "vault_key",
+    User => "user",
+});
 
 /// Item category — maps to PostgreSQL `item_category` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "item_category")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum ItemCategory {
-    #[sqlx(rename = "login")]
     #[serde(rename = "login")]
     Login,
-    #[sqlx(rename = "secure-note")]
     #[serde(rename = "secure-note")]
     SecureNote,
-    #[sqlx(rename = "credit-card")]
     #[serde(rename = "credit-card")]
     CreditCard,
-    #[sqlx(rename = "identity")]
     #[serde(rename = "identity")]
     Identity,
-    #[sqlx(rename = "totp")]
     #[serde(rename = "totp")]
     Totp,
 }
 
-impl ItemCategory {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Login => "login",
-            Self::SecureNote => "secure-note",
-            Self::CreditCard => "credit-card",
-            Self::Identity => "identity",
-            Self::Totp => "totp",
-        }
-    }
-}
+closed_enum!(ItemCategory, "item_category", {
+    Login => "login",
+    SecureNote => "secure-note",
+    CreditCard => "credit-card",
+    Identity => "identity",
+    Totp => "totp",
+});
 
-impl std::fmt::Display for ItemCategory {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+#[cfg(test)]
+#[path = "enums_tests.rs"]
+mod tests;

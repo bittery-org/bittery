@@ -20,6 +20,7 @@ import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { fillItemIntoActiveTab } from "@/lib/autofill-active-tab";
 import { hostnameMatches } from "@/lib/hostname";
 import { lockVaultThroughWorker } from "@/lib/lock-vault";
+import { sendMessage } from "@/lib/messaging";
 import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -208,10 +209,8 @@ export function VaultPage() {
 	const { data: items = [], isLoading } = useQuery<DecryptedItemWithContext[]>({
 		queryKey: ["vault-items"],
 		queryFn: async () => {
-			const response = await chrome.runtime.sendMessage({
-				type: "GET_VAULT_ITEMS",
-			});
-			return response.items || [];
+			const response = await sendMessage({ type: "GET_VAULT_ITEMS" });
+			return response.success ? response.items : [];
 		},
 	});
 
@@ -227,9 +226,7 @@ export function VaultPage() {
 
 	const handleOpenDesktopApp = useCallback(async () => {
 		try {
-			const response = await chrome.runtime.sendMessage({
-				type: "OPEN_DESKTOP_APP",
-			});
+			const response = await sendMessage({ type: "OPEN_DESKTOP_APP" });
 			if (!response?.success) {
 				throw new Error(response?.error || "Failed to open desktop app");
 			}
@@ -250,7 +247,7 @@ export function VaultPage() {
 					currentWindow: true,
 				});
 				const tabUrl = tab?.url?.startsWith("http") ? tab.url : undefined;
-				const response = await chrome.runtime.sendMessage({
+				const response = await sendMessage({
 					type: "OPEN_DESKTOP_APP",
 					payload: { intent: "create_item", url: tabUrl },
 				});
@@ -284,7 +281,7 @@ export function VaultPage() {
 		async (item: DecryptedItemWithContext) => {
 			if (isDesktopMode) {
 				try {
-					const response = await chrome.runtime.sendMessage({
+					const response = await sendMessage({
 						type: "OPEN_DESKTOP_APP",
 						payload: {
 							intent: "view_item",
@@ -470,9 +467,8 @@ export function VaultPage() {
 			hostnameMatches(selectedItem.url, currentHostname),
 	);
 
-	const footerText = isDesktopMode
-		? m.ext_vault_status_synced()
-		: locksInMinutes != null
+	const lockStatusText =
+		locksInMinutes != null
 			? m.ext_vault_status_locks_in({ minutes: locksInMinutes })
 			: m.ext_vault_status_unlocked();
 
@@ -624,24 +620,22 @@ export function VaultPage() {
 						)}
 					</div>
 
-					<footer className="flex h-[30px] shrink-0 items-center gap-1.5 border-t bg-sidebar px-2.5 text-[11px] text-muted-foreground">
-						<span
-							aria-hidden
-							className="size-1.5 rounded-full bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]"
-						/>
-						<span className="truncate">{footerText}</span>
-						{canLockLocally && (
-							<button
-								type="button"
-								onClick={handleLockNow}
-								disabled={isLocking}
-								className="ml-auto inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-							>
-								<IconLock className="size-3" />
-								{m.ext_vault_lock_now()}
-							</button>
-						)}
-					</footer>
+					{!isDesktopMode && (
+						<footer className="flex h-[30px] shrink-0 items-center border-t bg-sidebar px-2.5 text-[11px] text-muted-foreground">
+							<span className="truncate">{lockStatusText}</span>
+							{canLockLocally && (
+								<button
+									type="button"
+									onClick={handleLockNow}
+									disabled={isLocking}
+									className="ml-auto inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+								>
+									<IconLock className="size-3" />
+									{m.ext_vault_lock_now()}
+								</button>
+							)}
+						</footer>
+					)}
 				</main>
 			</div>
 		</div>

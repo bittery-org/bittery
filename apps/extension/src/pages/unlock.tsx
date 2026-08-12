@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import iconMark from "../../icons/icon-128.png";
 import { BIOMETRIC_TRANSFER_FAILURE } from "../background/biometric-transfer";
 import { PENDING_DESKTOP_UNLOCK } from "../background/desktop-protocol";
+import { sendMessage } from "../lib/messaging";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -75,20 +76,16 @@ export function UnlockPage() {
 	const { data: desktopStatus } = useQuery({
 		queryKey: ["desktop-sync-status-unlock"],
 		queryFn: async () => {
-			try {
-				const response = await chrome.runtime.sendMessage({
-					type: "CHECK_DESKTOP_STATUS",
-				});
-				return response;
-			} catch {
-				return null;
-			}
+			const response = await sendMessage({
+				type: "CHECK_DESKTOP_STATUS",
+			}).catch(() => null);
+			return response?.success ? response : null;
 		},
 		refetchInterval: 3000,
 	});
 
 	const desktopLocked = Boolean(
-		desktopStatus?.success && desktopStatus?.available && desktopStatus?.locked,
+		desktopStatus?.available && desktopStatus.locked,
 	);
 
 	/**
@@ -113,7 +110,7 @@ export function UnlockPage() {
 		mutationFn: async (values: { password: string }) => {
 			setVaultState("unlocking");
 			// Send to background worker to unlock all accounts
-			const response = await chrome.runtime.sendMessage({
+			const response = await sendMessage({
 				type: "QUICK_UNLOCK_ALL",
 				payload: { password: values.password },
 			});
@@ -169,7 +166,7 @@ export function UnlockPage() {
 		mutationFn: async () => {
 			setVaultState("unlocking");
 			// Send to background worker for native biometric unlock
-			const response = await chrome.runtime.sendMessage({
+			const response = await sendMessage({
 				type: "NATIVE_BIOMETRIC_UNLOCK_ALL",
 			});
 
@@ -228,11 +225,14 @@ export function UnlockPage() {
 		staleTime: Number.POSITIVE_INFINITY,
 		queryFn: async () => {
 			try {
-				const response = await chrome.runtime.sendMessage({
+				const response = await sendMessage({
 					type: "CHECK_NATIVE_BIOMETRIC",
 				});
 				const desktopAvailable = Boolean(
-					response.available && response.enabled && response.appRunning,
+					response.success &&
+						response.available &&
+						response.enabled &&
+						response.appRunning,
 				);
 				if (desktopAvailable && !hasAttemptedBiometric.current) {
 					hasAttemptedBiometric.current = true;
@@ -265,11 +265,9 @@ export function UnlockPage() {
 	 */
 	const handleUnlockDesktopApp = async () => {
 		try {
-			const response = await chrome.runtime.sendMessage({
-				type: "TRIGGER_DESKTOP_UNLOCK",
-			});
-			if (!response?.success) {
-				throw new Error(response?.error);
+			const response = await sendMessage({ type: "TRIGGER_DESKTOP_UNLOCK" });
+			if (!response.success) {
+				throw new Error(response.error);
 			}
 		} catch {
 			toast.error(m.ext_vault_toast_desktop_open_failed());

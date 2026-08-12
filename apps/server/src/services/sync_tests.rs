@@ -2,8 +2,8 @@ use std::future::Future;
 
 use axum::{
     body::{to_bytes, Body},
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Request, StatusCode},
-    middleware, Router as HttpRouter,
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, StatusCode},
+    Router as HttpRouter,
 };
 use rand::random;
 use serde_json::{json, Value};
@@ -12,14 +12,13 @@ use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
+use crate::db::enums::{SyncEntityType, SyncEventType};
 use crate::error::AppErrorCode;
 use crate::{
-    http::sync_sse::create_sync_http_router,
-    rpc_request_context_middleware,
     services::session_control::record_session_revocations,
     test_support::{
         acquire_env_lock, acquire_env_lock_async, authenticated_json_headers, seed_item, seed_user,
-        seed_vault, seed_vault_key, with_rpc_test_app, RpcTestApp,
+        seed_vault, seed_vault_key, with_api_test_app, ApiTestApp,
     },
     AppState,
 };
@@ -80,14 +79,6 @@ fn sync_notification_session_revoked_serializes_correctly() {
 }
 
 #[test]
-fn validate_client_id_accepts_and_rejects_expected_values() {
-    assert!(validate_client_id("client_1-test").is_ok());
-    assert!(validate_client_id("").is_err());
-    assert!(validate_client_id("contains space").is_err());
-    assert!(validate_client_id(&"a".repeat(65)).is_err());
-}
-
-#[test]
 fn validate_resource_id_accepts_uuid_and_slug_variants() {
     assert!(validate_resource_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
     assert!(validate_resource_id("resource_01").is_ok());
@@ -97,14 +88,11 @@ fn validate_resource_id_accepts_uuid_and_slug_variants() {
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_variants() {
+fn bittery_mode_accepts_the_canonical_value() {
     with_bittery_mode(Some("self-hosted"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
-    with_bittery_mode(Some("SELF_HOSTED"), || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-    with_bittery_mode(Some("selfhosted"), || {
+    with_bittery_mode(Some("SELF-HOSTED"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
     with_bittery_mode(Some("cloud"), || {
@@ -120,9 +108,9 @@ fn sync_event_dto_parses_metadata_and_rejects_invalid_json() {
     let payload = sync_event_dto(DbSyncEventRow {
         id: "event-1".to_string(),
         seq: 1,
-        event_type: "item_updated".to_string(),
+        event_type: SyncEventType::ItemUpdated,
         entity_id: "item-1".to_string(),
-        entity_type: "item".to_string(),
+        entity_type: SyncEntityType::Item,
         vault_id: Some("vault-1".to_string()),
         version: 2,
         client_id: Some("client-1".to_string()),
@@ -138,9 +126,9 @@ fn sync_event_dto_parses_metadata_and_rejects_invalid_json() {
     let error = sync_event_dto(DbSyncEventRow {
         id: "event-2".to_string(),
         seq: 2,
-        event_type: "item_updated".to_string(),
+        event_type: SyncEventType::ItemUpdated,
         entity_id: "item-1".to_string(),
-        entity_type: "item".to_string(),
+        entity_type: SyncEntityType::Item,
         vault_id: Some("vault-1".to_string()),
         version: 3,
         client_id: None,
@@ -204,12 +192,7 @@ struct SyncHttpTestResponse {
 
 impl SyncHttpTestApp {
     fn new(state: AppState) -> Self {
-        let router = create_sync_http_router()
-            .route_layer(middleware::from_fn_with_state(
-                state.clone(),
-                rpc_request_context_middleware,
-            ))
-            .with_state(state);
+        let router = crate::test_support::create_test_router(state);
 
         Self { router }
     }
@@ -253,7 +236,6 @@ struct SyncRouterFixture {
     hidden_vault_id: String,
     primary_item_id: String,
     secondary_item_id: String,
-    hidden_item_id: String,
     old_primary_event_id: String,
     latest_primary_event_id: String,
     secondary_event_id: String,
@@ -263,30 +245,34 @@ struct SyncRouterFixture {
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 async fn with_sync_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
 where
-    F: FnOnce(RpcTestApp) -> Fut,
+    F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
     let unique_name = format!("{test_name}_{:016x}", random::<u64>());
-    with_rpc_test_app(&unique_name, test_fn).await
+    with_api_test_app(&unique_name, test_fn).await
 }
 
 async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
@@ -473,7 +459,6 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
         hidden_vault_id,
         primary_item_id,
         secondary_item_id,
-        hidden_item_id,
         old_primary_event_id,
         latest_primary_event_id,
         secondary_event_id,
@@ -545,34 +530,18 @@ async fn seed_attachment(
 #[tokio::test]
 async fn sync_handlers_require_authentication() {
     with_sync_test_app("sync_handlers_require_authentication", |app| async move {
-        let protected_calls = vec![
-            ("sync.bootstrapItems", json!([{}])),
-            ("sync.getEventsSince", json!([{}])),
-            (
-                "sync.acknowledgeEvents",
-                json!([{ "eventIds": [], "clientId": "client-sync" }]),
-            ),
-            (
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-            ),
-            ("sync.getSyncState", json!([{ "vaultIds": [] }])),
-            (
-                "sync.checkConflict",
-                json!([{ "itemId": "item_sync_01", "expectedVersion": 1 }]),
-            ),
-        ];
+        let protected_calls = ["/api/v1/sync/bootstrap", "/api/v1/sync/changes"];
 
-        for (method, params) in protected_calls {
+        for path in protected_calls {
             let response = app
-                .rpc_call(method, params, unauthenticated_json_headers())
+                .api_json(Method::GET, path, None, unauthenticated_json_headers())
                 .await;
-            assert_eq!(
-                response.status,
-                StatusCode::OK,
-                "unexpected status for {method}"
+            response.assert_contract_status();
+            assert_transport_error(
+                &response.body,
+                "UNAUTHORIZED",
+                "A valid bearer session is required.",
             );
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -587,119 +556,26 @@ async fn sync_handlers_reject_malformed_request_input() {
             let session = app.issue_session(&fixture.owner_user_id).await;
             let headers = authenticated_json_headers(&session.token);
 
-            let cases = vec![
+            let cases = [
                 (
-                    "sync.bootstrapItems",
-                    json!([{ "limit": 0 }]),
+                    "/api/v1/sync/bootstrap?limit=0",
                     "BAD_REQUEST",
                     "Invalid params",
                 ),
                 (
-                    "sync.getEventsSince",
-                    json!([{ "sinceId": "bad!" }]),
-                    "BAD_REQUEST",
-                    "Invalid resource ID",
-                ),
-                (
-                    "sync.acknowledgeEvents",
-                    json!([{ "eventIds": [], "clientId": "bad client" }]),
-                    "BAD_REQUEST",
-                    "Invalid client ID",
-                ),
-                (
-                    "sync.getLastAcknowledged",
-                    json!([{ "clientId": "bad client" }]),
-                    "BAD_REQUEST",
-                    "Invalid client ID",
-                ),
-                (
-                    "sync.getSyncState",
-                    json!([{ "vaultIds": ["bad!"] }]),
-                    "BAD_REQUEST",
-                    "Invalid resource ID",
-                ),
-                (
-                    "sync.checkConflict",
-                    json!([{ "itemId": "bad!", "expectedVersion": 1 }]),
+                    "/api/v1/sync/changes?sinceId=bad!",
                     "BAD_REQUEST",
                     "Invalid resource ID",
                 ),
             ];
 
-            for (method, params, code, message) in cases {
-                let response = app.rpc_call(method, params, headers.clone()).await;
-                assert_eq!(
-                    response.status,
-                    StatusCode::OK,
-                    "unexpected status for {method}"
-                );
+            for (path, code, message) in cases {
+                let response = app.api_json(Method::GET, path, None, headers.clone()).await;
+                response.assert_contract_status();
                 assert_handler_error(&response.body, code, message);
             }
         },
     )
-    .await;
-}
-
-#[tokio::test]
-async fn check_conflict_reports_not_found_and_latest_version() {
-    with_sync_test_app("sync_check_conflict_paths", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let headers = authenticated_json_headers(&session.token);
-
-        let not_found = app
-            .rpc_call(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.hidden_item_id,
-                    "expectedVersion": 1
-                }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(not_found.status, StatusCode::OK);
-        assert_handler_error(&not_found.body, "NOT_FOUND", "Item not found");
-
-        let no_conflict = app
-            .rpc_call(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.primary_item_id,
-                    "expectedVersion": 3
-                }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(no_conflict.status, StatusCode::OK);
-        assert_eq!(
-            no_conflict.body["result"]["Ok"]["hasConflict"],
-            json!(false)
-        );
-        assert_eq!(no_conflict.body["result"]["Ok"]["currentVersion"], json!(3));
-
-        let conflict = app
-            .rpc_call(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.primary_item_id,
-                    "expectedVersion": 2
-                }]),
-                headers,
-            )
-            .await;
-        assert_eq!(conflict.status, StatusCode::OK);
-        assert_eq!(conflict.body["result"]["Ok"]["hasConflict"], json!(true));
-        assert_eq!(
-            conflict.body["result"]["Ok"]["lastModifiedBy"],
-            json!(fixture.owner_user_id)
-        );
-        assert!(
-            conflict.body["result"]["Ok"]["lastModifiedAt"]
-                .as_i64()
-                .expect("last modified timestamp should be present")
-                > 0
-        );
-    })
     .await;
 }
 
@@ -711,98 +587,167 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         let headers = authenticated_json_headers(&session.token);
 
         let first_page = app
-            .rpc_call(
-                "sync.getEventsSince",
-                json!([{ "limit": 1 }]),
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/changes?limit=1",
+                None,
                 headers.clone(),
             )
             .await;
-        assert_eq!(first_page.status, StatusCode::OK);
+        first_page.assert_contract_status();
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"]
+            first_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["id"],
+            first_page.body["events"][0]["id"],
             json!(fixture.old_primary_event_id)
         );
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["metadata"]["reason"],
+            first_page.body["events"][0]["metadata"]["reason"],
             json!("import")
         );
-        assert_eq!(first_page.body["result"]["Ok"]["hasMore"], json!(true));
+        assert_eq!(first_page.body["hasMore"], json!(true));
         assert_eq!(
-            first_page.body["result"]["Ok"]["cursor"]["id"],
+            first_page.body["cursor"]["id"],
             json!(fixture.old_primary_event_id)
         );
 
+        let filtered_path = format!(
+            "/api/v1/sync/changes?vaultIds={}&vaultIds={}",
+            fixture.secondary_vault_id, fixture.hidden_vault_id
+        );
         let filtered = app
-				.rpc_call(
-					"sync.getEventsSince",
-					json!([{
-						"vaultIds": [fixture.secondary_vault_id.clone(), fixture.hidden_vault_id.clone()]
-					}]),
-					headers.clone(),
-				)
-				.await;
-        assert_eq!(filtered.status, StatusCode::OK);
+            .api_json(Method::GET, &filtered_path, None, headers.clone())
+            .await;
+        filtered.assert_contract_status();
         assert_eq!(
-            filtered.body["result"]["Ok"]["events"]
+            filtered.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            filtered.body["result"]["Ok"]["events"][0]["id"],
+            filtered.body["events"][0]["id"],
             json!(fixture.secondary_event_id)
         );
 
+        let next_page_path = format!(
+            "/api/v1/sync/changes?sinceId={}",
+            fixture.old_primary_event_id
+        );
         let next_page = app
-            .rpc_call(
-                "sync.getEventsSince",
-                json!([{ "sinceId": fixture.old_primary_event_id }]),
-                headers.clone(),
-            )
+            .api_json(Method::GET, &next_page_path, None, headers.clone())
             .await;
-        assert_eq!(next_page.status, StatusCode::OK);
+        next_page.assert_contract_status();
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"]
+            next_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             2
         );
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"][0]["id"],
+            next_page.body["events"][0]["id"],
             json!(fixture.latest_primary_event_id)
         );
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"][1]["id"],
+            next_page.body["events"][1]["id"],
             json!(fixture.secondary_event_id)
         );
-        assert_eq!(next_page.body["result"]["Ok"]["hasMore"], json!(false));
+        assert_eq!(next_page.body["hasMore"], json!(false));
 
+        let full_refresh_path = format!("/api/v1/sync/changes?sinceId={}", fixture.hidden_event_id);
         let full_refresh = app
-            .rpc_call(
-                "sync.getEventsSince",
-                json!([{ "sinceId": fixture.hidden_event_id }]),
-                headers,
+            .api_json(Method::GET, &full_refresh_path, None, headers)
+            .await;
+        full_refresh.assert_contract_status();
+        assert_eq!(full_refresh.body["events"], json!([]));
+        assert_eq!(full_refresh.body["requiresFullRefresh"], json!(true));
+        assert_eq!(
+            full_refresh.body["cursor"]["id"],
+            json!(fixture.secondary_event_id)
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
+    with_sync_test_app("sync_changes_byte_budget", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let metadata = format!(r#"{{"payload":"{}"}}"#, "x".repeat(1_048_000));
+        let expected_ids: Vec<String> = (0..6)
+            .map(|index| format!("sync_budget_event_{index}"))
+            .collect();
+        for (index, event_id) in expected_ids.iter().enumerate() {
+            seed_sync_event(
+                &app.pool,
+                event_id,
+                "item_updated",
+                &fixture.primary_item_id,
+                "item",
+                Some(&fixture.primary_vault_id),
+                &fixture.owner_user_id,
+                index as i32 + 10,
+                Some("budget-client"),
+                Some(&metadata),
+                datetime!(2025-05-02 10:00 UTC),
             )
             .await;
-        assert_eq!(full_refresh.status, StatusCode::OK);
-        assert_eq!(full_refresh.body["result"]["Ok"]["events"], json!([]));
-        assert_eq!(
-            full_refresh.body["result"]["Ok"]["requiresFullRefresh"],
-            json!(true)
-        );
-        assert_eq!(
-            full_refresh.body["result"]["Ok"]["cursor"]["id"],
-            json!(fixture.secondary_event_id)
-        );
+        }
+
+        let mut since_id = fixture.secondary_event_id.clone();
+        let mut seen_ids = Vec::new();
+        for _ in 0..3 {
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/sync/changes?limit=500&sinceId={since_id}"),
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(
+                response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES,
+                "serialized sync page was {} bytes",
+                response.body_bytes
+            );
+            let events = response.body["events"]
+                .as_array()
+                .expect("bounded sync page should contain events");
+            assert!(
+                events.len() <= 3,
+                "pre-budget query materialized too many maximum-size events"
+            );
+            seen_ids.extend(
+                events
+                    .iter()
+                    .filter_map(|event| event["id"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            since_id = response.body["cursor"]["id"]
+                .as_str()
+                .expect("continued sync page should have a cursor")
+                .to_string();
+        }
+
+        for event_id in expected_ids {
+            assert_eq!(
+                seen_ids.iter().filter(|seen| **seen == event_id).count(),
+                1,
+                "sync event {event_id} should occur exactly once"
+            );
+        }
     })
     .await;
 }
@@ -816,62 +761,88 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             let headers = authenticated_json_headers(&session.token);
 
             let first_page = app
-                .rpc_call(
-                    "sync.bootstrapItems",
-                    json!([{ "limit": 1 }]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sync/bootstrap?limit=1",
+                    None,
                     headers.clone(),
                 )
                 .await;
-            assert_eq!(first_page.status, StatusCode::OK);
+            first_page.assert_contract_status();
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"]
+                first_page.body["items"]
                     .as_array()
                     .expect("items should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["id"],
+                first_page.body["items"][0]["id"],
                 json!(fixture.primary_item_id)
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["attachments"]
+                first_page.body["items"][0]["attachments"]
                     .as_array()
                     .expect("attachments should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["vault"]["encryptedVaultKey"],
+                first_page.body["items"][0]["vault"]["encryptedVaultKey"],
                 json!("encrypted-vault-key-primary")
             );
-            assert_eq!(first_page.body["result"]["Ok"]["hasMore"], json!(true));
+            assert_eq!(first_page.body["hasMore"], json!(true));
             assert_eq!(
-                first_page.body["result"]["Ok"]["nextCursor"],
+                first_page.body["nextCursor"],
                 json!(fixture.primary_item_id)
             );
-
-            let second_page = app
-                .rpc_call(
-                    "sync.bootstrapItems",
-                    json!([{ "cursor": fixture.primary_item_id }]),
-                    headers,
-                )
-                .await;
-            assert_eq!(second_page.status, StatusCode::OK);
             assert_eq!(
-                second_page.body["result"]["Ok"]["items"]
+                first_page.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
+
+            let later_event_id = "event_sync_after_bootstrap_page_1";
+            seed_sync_event(
+                &app.pool,
+                later_event_id,
+                "item_updated",
+                &fixture.secondary_item_id,
+                "item",
+                Some(&fixture.secondary_vault_id),
+                &fixture.owner_user_id,
+                2,
+                Some("client-sync-after-page-1"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
+            )
+            .await;
+
+            let second_page_path = format!(
+                "/api/v1/sync/bootstrap?cursor={}&syncCursor={}",
+                fixture.primary_item_id, fixture.secondary_event_id
+            );
+            let second_page = app
+                .api_json(Method::GET, &second_page_path, None, headers)
+                .await;
+            second_page.assert_contract_status();
+            assert_eq!(
+                second_page.body["items"]
                     .as_array()
                     .expect("items should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                second_page.body["result"]["Ok"]["items"][0]["id"],
+                second_page.body["items"][0]["id"],
                 json!(fixture.secondary_item_id)
             );
-            assert_eq!(second_page.body["result"]["Ok"]["hasMore"], json!(false));
-            assert_eq!(second_page.body["result"]["Ok"]["nextCursor"], Value::Null);
+            assert_eq!(second_page.body["hasMore"], json!(false));
+            assert_eq!(second_page.body["nextCursor"], Value::Null);
+            assert_eq!(
+                second_page.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
+            assert_ne!(second_page.body["syncCursor"]["id"], json!(later_event_id));
         })
         .await;
     })
@@ -879,116 +850,356 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
 }
 
 #[tokio::test]
-async fn acknowledge_events_and_get_last_acknowledged_filter_inaccessible_events() {
-    with_sync_test_app("sync_acknowledge_and_last_acknowledged", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let headers = authenticated_json_headers(&session.token);
+async fn bootstrap_rejects_invalid_or_inaccessible_sync_cursors() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_cursor_visibility", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
 
-        let before_ack = app
-            .rpc_call(
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(before_ack.status, StatusCode::OK);
-        assert_eq!(before_ack.body["result"]["Ok"], Value::Null);
+            for (sync_cursor, expected_detail) in [
+                ("bad!", "Invalid resource ID"),
+                (fixture.hidden_event_id.as_str(), "Invalid params"),
+            ] {
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?syncCursor={sync_cursor}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
 
-        let acknowledge = app
-				.rpc_call(
-					"sync.acknowledgeEvents",
-					json!([{
-						"eventIds": [fixture.latest_primary_event_id.clone(), fixture.hidden_event_id.clone()],
-						"clientId": "client-sync"
-					}]),
-					headers.clone(),
-				)
-				.await;
-        assert_eq!(acknowledge.status, StatusCode::OK);
-        assert_eq!(acknowledge.body["result"]["Ok"]["acknowledged"], json!(1));
-
-        let ack_count = query_scalar::<_, i64>(
-            "SELECT COUNT(*)::bigint FROM sync_event_ack WHERE user_id = $1 AND client_id = $2",
-        )
-        .bind(&fixture.owner_user_id)
-        .bind("client-sync")
-        .fetch_one(&app.pool)
-        .await
-        .expect("ack count should query");
-        assert_eq!(ack_count, 1);
-
-        let last_ack = app
-            .rpc_call(
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-                headers,
-            )
-            .await;
-        assert_eq!(last_ack.status, StatusCode::OK);
-        assert_eq!(
-            last_ack.body["result"]["Ok"]["eventId"],
-            json!(fixture.latest_primary_event_id)
-        );
-        assert!(
-            last_ack.body["result"]["Ok"]["timestamp"]
-                .as_i64()
-                .expect("ack timestamp should be present")
-                > 0
-        );
+                assert_eq!(response.status, StatusCode::BAD_REQUEST);
+                assert_handler_error(&response.body, "BAD_REQUEST", expected_detail);
+            }
+        })
+        .await;
     })
     .await;
 }
 
 #[tokio::test]
-async fn get_sync_state_returns_latest_visible_event_per_accessible_vault() {
-    with_sync_test_app("sync_get_sync_state_paths", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let response = app
-            .rpc_call(
-                "sync.getSyncState",
-                json!([{
-                    "vaultIds": [
-                        fixture.primary_vault_id.clone(),
-                        fixture.secondary_vault_id.clone(),
-                        fixture.hidden_vault_id.clone()
-                    ]
-                }]),
-                authenticated_json_headers(&session.token),
+async fn bootstrap_captures_sync_cursor_before_fetching_the_first_item_page() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_capture_order", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+
+            let mut item_lock = app.pool.begin().await.expect("item lock should begin");
+            query("LOCK TABLE item IN ACCESS EXCLUSIVE MODE")
+                .execute(&mut *item_lock)
+                .await
+                .expect("item reads should be held until the watermark is captured");
+
+            let request_app = app.clone();
+            let response_task = tokio::spawn(async move {
+                request_app
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/sync/bootstrap?limit=1",
+                        None,
+                        headers,
+                    )
+                    .await
+            });
+
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let item_fetch_is_waiting = query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%WITH candidates AS (%')",
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("blocked bootstrap query should be observable");
+                    if item_fetch_is_waiting {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("bootstrap should reach the blocked item fetch");
+
+            let later_event_id = "event_sync_during_first_bootstrap_page";
+            seed_sync_event(
+                &app.pool,
+                later_event_id,
+                "item_updated",
+                &fixture.primary_item_id,
+                "item",
+                Some(&fixture.primary_vault_id),
+                &fixture.owner_user_id,
+                4,
+                Some("client-sync-during-bootstrap"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
             )
             .await;
+            item_lock.commit().await.expect("item fetch should resume");
 
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.primary_vault_id]["latestEventId"],
-            json!(fixture.latest_primary_event_id)
-        );
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.secondary_vault_id]["latestEventId"],
-            json!(fixture.secondary_event_id)
-        );
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.hidden_vault_id],
-            Value::Null
-        );
+            let response = response_task.await.expect("bootstrap task should finish");
+            response.assert_contract_status();
+            assert_eq!(
+                response.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
+            assert_ne!(response.body["syncCursor"]["id"], json!(later_event_id));
+        })
+        .await;
     })
     .await;
 }
 
 #[tokio::test]
-async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
+async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_empty_cursor", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            query("DELETE FROM sync_event")
+                .execute(&app.pool)
+                .await
+                .expect("fixture events should be removable");
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+
+            let first_page = app
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sync/bootstrap?limit=1",
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            first_page.assert_contract_status();
+            assert_eq!(first_page.status, StatusCode::OK);
+            assert_eq!(first_page.body["syncCursor"], Value::Null);
+            let next_cursor = first_page.body["nextCursor"]
+                .as_str()
+                .expect("first page should continue");
+
+            seed_sync_event(
+                &app.pool,
+                "event_sync_after_empty_bootstrap_cursor",
+                "item_updated",
+                &fixture.secondary_item_id,
+                "item",
+                Some(&fixture.secondary_vault_id),
+                &fixture.owner_user_id,
+                2,
+                Some("client-sync-after-empty-cursor"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
+            )
+            .await;
+
+            let second_page = app
+                .api_json(
+                    Method::GET,
+                    &format!(
+                        "/api/v1/sync/bootstrap?cursor={}&limit=1&syncCursorCaptured=true",
+                        next_cursor
+                    ),
+                    None,
+                    headers,
+                )
+                .await;
+            second_page.assert_contract_status();
+            assert_eq!(second_page.status, StatusCode::OK);
+            assert_eq!(second_page.body["syncCursor"], Value::Null);
+            assert_eq!(second_page.body["items"].as_array().map(Vec::len), Some(1));
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn max_ciphertext_bootstrap_pages_stay_byte_bounded_and_continue() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_byte_budget", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+            let ciphertext = "x".repeat(1_048_576);
+            let expected_ids: Vec<String> = (0..6)
+                .map(|index| format!("zz_sync_budget_{index}"))
+                .collect();
+            for item_id in &expected_ids {
+                seed_item(
+                    &app.pool,
+                    item_id,
+                    &fixture.primary_vault_id,
+                    "login",
+                    &ciphertext,
+                    "budget-iv",
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+
+            let mut cursor = None;
+            let mut seen_ids = Vec::new();
+            for _ in 0..4 {
+                let query = cursor.as_deref().map_or_else(
+                    || "limit=500".to_string(),
+                    |cursor| format!("limit=500&cursor={cursor}"),
+                );
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?{query}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
+                response.assert_contract_status();
+                assert!(
+                    response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES,
+                    "serialized bootstrap page was {} bytes",
+                    response.body_bytes
+                );
+                let items = response.body["items"]
+                    .as_array()
+                    .expect("bounded bootstrap page should contain items");
+                assert!(
+                    items
+                        .iter()
+                        .filter(|item| {
+                            item["encryptedData"]
+                                .as_str()
+                                .is_some_and(|value| value.len() >= 1_048_576)
+                        })
+                        .count()
+                        <= 3,
+                    "pre-budget query materialized too many maximum-size rows"
+                );
+                seen_ids.extend(
+                    items
+                        .iter()
+                        .filter_map(|item| item["id"].as_str().map(str::to_string)),
+                );
+                if response.body["hasMore"] == json!(false) {
+                    break;
+                }
+                cursor = Some(
+                    response.body["nextCursor"]
+                        .as_str()
+                        .expect("continued bootstrap page should have a cursor")
+                        .to_string(),
+                );
+            }
+
+            for item_id in expected_ids {
+                assert_eq!(
+                    seen_ids.iter().filter(|seen| **seen == item_id).count(),
+                    1,
+                    "bootstrap item {item_id} should occur exactly once"
+                );
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_vault_metadata_budget", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+            let large_name = "n".repeat(crate::services::vault::VAULT_NAME_MAX_CHARS);
+            let large_key = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+            let expected_ids: Vec<String> = (0..70)
+                .map(|index| format!("sync_metadata_item_{index:03}"))
+                .collect();
+            for (index, item_id) in expected_ids.iter().enumerate() {
+                let vault_id = format!("sync_metadata_vault_{index:03}");
+                seed_vault(
+                    &app.pool,
+                    &vault_id,
+                    &large_name,
+                    "personal",
+                    &fixture.owner_user_id,
+                    None,
+                )
+                .await;
+                seed_vault_key(
+                    &app.pool,
+                    &format!("sync_metadata_key_{index:03}"),
+                    &vault_id,
+                    &fixture.owner_user_id,
+                    &large_key,
+                    "owner",
+                )
+                .await;
+                seed_item(
+                    &app.pool,
+                    item_id,
+                    &vault_id,
+                    "login",
+                    "ciphertext",
+                    "iv",
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+
+            let mut cursor = None;
+            let mut seen_ids = Vec::new();
+            for _ in 0..4 {
+                let query = cursor.as_deref().map_or_else(
+                    || "limit=500".to_string(),
+                    |cursor| format!("limit=500&cursor={cursor}"),
+                );
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?{query}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
+                response.assert_contract_status();
+                assert!(response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES);
+                seen_ids.extend(
+                    response.body["items"]
+                        .as_array()
+                        .expect("bootstrap page should contain items")
+                        .iter()
+                        .filter_map(|item| item["id"].as_str().map(str::to_string)),
+                );
+                if response.body["hasMore"] == json!(false) {
+                    break;
+                }
+                cursor = Some(
+                    response.body["nextCursor"]
+                        .as_str()
+                        .expect("continued bootstrap page should have a cursor")
+                        .to_string(),
+                );
+            }
+            for item_id in expected_ids {
+                assert_eq!(seen_ids.iter().filter(|seen| **seen == item_id).count(), 1);
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sync_sse_route_covers_auth_and_revocation_paths() {
     with_sync_test_app("sync_http_routes_paths", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let http_app = SyncHttpTestApp::new(app.state.clone());
 
-        let health = http_app.get("/health", HeaderMap::new()).await;
-        assert_eq!(health.status, StatusCode::OK);
-        assert!(health.body.contains(r#"{"status":"ok"}"#));
-
-        let unauthorized = http_app.get("/events", HeaderMap::new()).await;
+        let unauthorized = http_app.get("/api/v1/sync/events", HeaderMap::new()).await;
         assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
-        assert!(unauthorized.body.contains(r#"{"error":"Unauthorized"}"#));
+        assert!(unauthorized.body.contains(r#""code":"UNAUTHORIZED""#));
 
         let session = app.issue_session(&fixture.owner_user_id).await;
         record_session_revocations(
@@ -1001,7 +1212,10 @@ async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
         .expect("session revocation should seed");
 
         let stream = http_app
-            .get("/events", authenticated_json_headers(&session.token))
+            .get(
+                "/api/v1/sync/events",
+                authenticated_json_headers(&session.token),
+            )
             .await;
         assert_eq!(stream.status, StatusCode::OK);
         assert_eq!(

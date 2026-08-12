@@ -5,8 +5,7 @@
 //! with a new key to ensure the removed member cannot decrypt future data.
 
 use crate::encryption::{
-    decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, generate_encryption_key, AadContext,
-    EncryptedData,
+    decrypt_with_aad, encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
 };
 use crate::error::CryptoError;
 use crate::rsa::rsa_encrypt;
@@ -203,12 +202,7 @@ pub fn decrypt_vault_key_with_muk(
     Ok(decrypted)
 }
 
-/// Re-encrypt an item with a new vault key, preserving how it is bound to its context
-///
-/// An item written since AAD binding exists is re-encrypted under the same `AadContext`. An
-/// item written before it decrypts with no AAD and carries its context inside the plaintext
-/// envelope instead; that one is re-encrypted with no AAD, because binding it here would
-/// rewrite a persisted format that only a migration may change.
+/// Re-encrypt an item with a new vault key under the same authenticated context.
 ///
 /// # Arguments
 /// * `item` - Item data to re-encrypt, including the context its ciphertext is bound to
@@ -228,20 +222,8 @@ pub fn re_encrypt_item(
         algorithm: item.encryption_algorithm.clone(),
     };
 
-    let (mut decrypted_data, was_aad_bound) =
-        match decrypt_with_aad(&old_encrypted_data, old_vault_key, &item.context) {
-            Ok(plaintext) => (plaintext, true),
-            Err(aad_error) => match decrypt(&old_encrypted_data, old_vault_key) {
-                Ok(plaintext) => (plaintext, false),
-                Err(_) => return Err(aad_error),
-            },
-        };
-
-    let re_encrypted = if was_aad_bound {
-        encrypt_with_aad(&decrypted_data, new_vault_key, &item.context)
-    } else {
-        encrypt(&decrypted_data, new_vault_key)
-    };
+    let mut decrypted_data = decrypt_with_aad(&old_encrypted_data, old_vault_key, &item.context)?;
+    let re_encrypted = encrypt_with_aad(&decrypted_data, new_vault_key, &item.context);
     let new_encrypted_data = match re_encrypted {
         Ok(value) => value,
         Err(e) => {
@@ -364,6 +346,7 @@ pub fn validate_rotation_data(members: &[MemberKeyData]) -> ValidationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encryption::decrypt;
     use crate::rsa::{generate_rsa_key_pair, rsa_decrypt};
 
     #[test]
@@ -417,38 +400,6 @@ mod tests {
     }
 
     #[test]
-    fn test_re_encrypt_item_keeps_a_legacy_item_unbound() {
-        let old_key = generate_new_vault_key();
-        let new_key = generate_new_vault_key();
-
-        let original_data = "Secret item data";
-        let encrypted = encrypt(original_data, &old_key).unwrap();
-
-        let item = ItemData {
-            id: "test-item-1".to_string(),
-            encrypted_data: encrypted.ciphertext,
-            encryption_iv: encrypted.iv,
-            encryption_algorithm: encrypted.algorithm,
-            context: item_context("test-item-1"),
-        };
-
-        let re_encrypted = re_encrypt_item(&item, &old_key, &new_key).unwrap();
-
-        let new_encrypted = EncryptedData {
-            ciphertext: re_encrypted.encrypted_data,
-            iv: re_encrypted.encryption_iv,
-            algorithm: "AES-GCM-AAD-V1".to_string(),
-        };
-        let decrypted = decrypt(&new_encrypted, &new_key).unwrap();
-
-        assert_eq!(decrypted, original_data);
-
-        // Should NOT be able to decrypt with old key
-        let result = decrypt(&new_encrypted, &old_key);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_re_encrypt_item_keeps_an_aad_bound_item_bound() {
         let old_key = generate_new_vault_key();
         let new_key = generate_new_vault_key();
@@ -481,6 +432,61 @@ mod tests {
         assert!(decrypt_with_aad(&new_encrypted, &new_key, &item_context("other-item")).is_err());
     }
 
+    /// Rotation re-binds a ciphertext to the *same* context it came in with. Any store that
+    /// bumps the recorded encryption version or re-stamps the encrypting user alongside a
+    /// rotation therefore describes a context the ciphertext was never sealed under, and the
+    /// item can no longer be opened. This pins that the drift is fatal, not merely untidy.
+    #[test]
+    fn test_re_encrypt_item_is_unreadable_under_a_drifted_stored_context() {
+        let old_key = generate_new_vault_key();
+        let new_key = generate_new_vault_key();
+        let context = item_context("item-1");
+
+        let encrypted = encrypt_with_aad("Secret item data", &old_key, &context).unwrap();
+        let item = ItemData {
+            id: "item-1".to_string(),
+            encrypted_data: encrypted.ciphertext,
+            encryption_iv: encrypted.iv,
+            encryption_algorithm: encrypted.algorithm,
+            context: context.clone(),
+        };
+
+        let re_encrypted = re_encrypt_item(&item, &old_key, &new_key).unwrap();
+        let rotated = EncryptedData {
+            ciphertext: re_encrypted.encrypted_data,
+            iv: re_encrypted.encryption_iv,
+            algorithm: "AES-GCM-AAD-V1".to_string(),
+        };
+
+        // The context the caller supplied still opens it.
+        assert_eq!(
+            decrypt_with_aad(&rotated, &new_key, &context).unwrap(),
+            "Secret item data"
+        );
+
+        // A store that recorded `version + 1` alongside the rotation has bricked the item.
+        let bumped_version = AadContext {
+            version: context.version + 1,
+            ..context.clone()
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &bumped_version).is_err());
+
+        // So has one that re-stamped the rotating admin as the encrypting user.
+        let rotating_admin = AadContext {
+            user_id: "admin-user".to_string(),
+            ..context.clone()
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &rotating_admin).is_err());
+
+        // Both at once — exactly what a rotation-apply UPDATE that touches both columns writes.
+        let both = AadContext {
+            version: context.version + 1,
+            user_id: "admin-user".to_string(),
+            ..context
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &both).is_err());
+    }
+
     #[test]
     fn test_re_encrypt_item_rejects_a_mismatched_context() {
         let old_key = generate_new_vault_key();
@@ -507,10 +513,11 @@ mod tests {
         let old_vault_key = generate_new_vault_key();
         let muk = generate_new_vault_key();
 
-        // One item bound to its context, one written before AAD binding existed.
+        // Every item is bound to its exact context.
         let item1 =
             encrypt_with_aad("Item 1 data", &old_vault_key, &item_context("item-1")).unwrap();
-        let item2 = encrypt("Item 2 data", &old_vault_key).unwrap();
+        let item2 =
+            encrypt_with_aad("Item 2 data", &old_vault_key, &item_context("item-2")).unwrap();
 
         let items = vec![
             ItemData {
@@ -584,7 +591,7 @@ mod tests {
         let member_key_bytes = BASE64.decode(member_decrypted.as_bytes()).unwrap();
         assert_eq!(member_key_bytes, owner_decrypted);
 
-        // Each item keeps the binding style it arrived with.
+        // Each item keeps its authenticated context.
         let rotated_1 = EncryptedData {
             ciphertext: result.re_encrypted_items[0].encrypted_data.clone(),
             iv: result.re_encrypted_items[0].encryption_iv.clone(),
@@ -600,7 +607,7 @@ mod tests {
             "Item 1 data"
         );
         assert_eq!(
-            decrypt(&rotated_2, &member_key_bytes).unwrap(),
+            decrypt_with_aad(&rotated_2, &member_key_bytes, &item_context("item-2")).unwrap(),
             "Item 2 data"
         );
     }

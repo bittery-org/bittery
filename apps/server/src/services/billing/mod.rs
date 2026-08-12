@@ -3,7 +3,6 @@ mod webhook;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_scalar, PgPool};
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 pub(crate) use self::webhook::{
     is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
@@ -19,132 +18,84 @@ use crate::integrations::stripe::{
 };
 use crate::{
     config::{bittery_mode, cloud_billing_enabled, format_timestamp},
-    db::models::{DbBillingActorRow, DbBillingContactRow},
+    db::{
+        enums::{BillingPlan, BillingStatus, TeamRole},
+        models::{DbBillingActorRow, DbBillingContactRow},
+    },
     error::AppError,
     repo::billing::{
         count_team_members, get_committed_attachment_storage_bytes, load_billing_actor,
         load_billing_contact, load_optional_billing_state,
+    },
+    shapes::{
+        attachment_usage_shape, billing_entitlements_response_shape, billing_entitlements_shape,
+        billing_status_shape, checkout_session_shape, entitlement_limits_shape,
+        portal_session_shape, seat_invoice_line_shape, seat_invoice_preview_shape,
     },
 };
 
 const MB: i64 = 1024 * 1024;
 const GB: i64 = 1024 * 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct BillingStatusResponse {
-    pub enabled: bool,
-    pub plan: String,
-    pub status: String,
-    pub is_active: bool,
-    pub requires_payment: bool,
-    pub is_stripe_configured: bool,
-    pub stripe_customer_id: Option<String>,
-    pub stripe_subscription_id: Option<String>,
-    pub stripe_price_id: Option<String>,
-    pub current_period_end: Option<String>,
-    pub cancel_at_period_end: bool,
-    pub seats_purchased: Option<i32>,
-}
+billing_status_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BillingStatusResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct BillingEntitlements {
-    pub sentinel: bool,
-    pub team_management: bool,
-    pub vault_sharing: bool,
-    pub share_links: bool,
-    pub billing_portal: bool,
-    pub attachments: bool,
-}
+billing_entitlements_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BillingEntitlements
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct EntitlementLimits {
-    pub share_links: Option<i64>,
-    pub shared_vaults: Option<i64>,
-    pub attachment_max_file_size_bytes: Option<i64>,
-    pub attachment_storage_bytes: Option<i64>,
-}
+entitlement_limits_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct EntitlementLimits
+}, limit = i64);
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct BillingEntitlementsResponse {
-    pub mode: String,
-    pub billing_enabled: bool,
-    pub plan: String,
-    pub status: String,
-    pub is_active: bool,
-    pub entitlements: BillingEntitlements,
-    pub limits: EntitlementLimits,
-}
+billing_entitlements_response_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BillingEntitlementsResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachmentUsageResponse {
-    pub mode: String,
-    pub attachments_enabled: bool,
-    pub quota_bytes: Option<i64>,
-    pub committed_storage_bytes: i64,
-}
+attachment_usage_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct AttachmentUsageResponse
+}, bytes = i64);
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutPlanInput {
-    pub plan: Option<String>,
+    pub plan: Option<BillingPlan>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckoutSessionResponse {
-    pub url: String,
-    pub session_id: String,
-}
+checkout_session_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CheckoutSessionResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PortalSessionResponse {
-    pub url: String,
-}
+portal_session_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PortalSessionResponse
+});
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSeatsInput {
-    pub team_id: Option<String>,
-}
+seat_invoice_line_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TeamSeatInvoicePreviewLineResponse
+}, amount = i64);
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSeatsResponse {
-    pub synced: bool,
-    pub reason: Option<String>,
-    pub quantity: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamSeatInvoicePreviewLineResponse {
-    pub id: String,
-    pub description: String,
-    pub amount_cents: i64,
-    pub currency: String,
-    pub period_start: String,
-    pub period_end: String,
-    pub quantity: Option<i64>,
-    pub unit_amount_cents: Option<i64>,
-    pub is_proration: bool,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamSeatInvoicePreviewResponse {
-    pub currency: String,
-    pub current_quantity: i64,
-    pub next_quantity: i64,
-    pub estimated_next_payment_cents: i64,
-    pub total_line_items_cents: i64,
-    pub lines: Vec<TeamSeatInvoicePreviewLineResponse>,
-}
+seat_invoice_preview_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TeamSeatInvoicePreviewResponse
+}, amount = i64, line = TeamSeatInvoicePreviewLineResponse);
 
 struct BillingSnapshot {
     entitlements: BillingEntitlements,
@@ -168,13 +119,13 @@ pub(crate) async fn get_billing_status(
         .clone()
         .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
-    let requires_payment = team.billing_plan != "free";
+    let requires_payment = team.billing_plan.is_paid();
 
     Ok(BillingStatusResponse {
         enabled: true,
         plan: team.billing_plan,
-        status: team.billing_status.clone(),
-        is_active: is_billing_active(&team.billing_status),
+        status: team.billing_status,
+        is_active: team.billing_status.is_active(),
         requires_payment,
         is_stripe_configured: is_stripe_api_configured(),
         stripe_customer_id: team.stripe_customer_id,
@@ -198,31 +149,31 @@ pub(crate) async fn get_billing_entitlements(
         };
         let plan = state
             .as_ref()
-            .and_then(|actor| actor.billing_plan.clone())
-            .unwrap_or_else(|| "team".to_string());
+            .and_then(|actor| actor.billing_plan)
+            .unwrap_or(BillingPlan::Team);
         let billing_status = state
             .as_ref()
-            .and_then(|actor| actor.billing_status.clone())
-            .unwrap_or_else(|| "active".to_string());
-        let snapshot = get_billing_snapshot(&mode, &plan, &billing_status);
+            .and_then(|actor| actor.billing_status)
+            .unwrap_or(BillingStatus::Active);
+        let snapshot = get_billing_snapshot(&mode, plan, billing_status);
 
         return Ok(BillingEntitlementsResponse {
             mode,
             billing_enabled: false,
             plan,
-            status: billing_status.clone(),
-            is_active: is_billing_active(&billing_status),
+            status: billing_status,
+            is_active: billing_status.is_active(),
             entitlements: snapshot.entitlements,
             limits: snapshot.limits,
         });
     }
     if !cloud_billing_enabled() {
-        let snapshot = get_billing_snapshot(&mode, "free", "none");
+        let snapshot = get_billing_snapshot(&mode, BillingPlan::Free, BillingStatus::None);
         return Ok(BillingEntitlementsResponse {
             mode,
             billing_enabled: false,
-            plan: "free".to_string(),
-            status: "none".to_string(),
+            plan: BillingPlan::Free,
+            status: BillingStatus::None,
             is_active: false,
             entitlements: snapshot.entitlements,
             limits: snapshot.limits,
@@ -235,14 +186,14 @@ pub(crate) async fn get_billing_entitlements(
         .clone()
         .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
-    let snapshot = get_billing_snapshot(&mode, &team.billing_plan, &team.billing_status);
+    let snapshot = get_billing_snapshot(&mode, team.billing_plan, team.billing_status);
 
     Ok(BillingEntitlementsResponse {
         mode,
         billing_enabled: true,
         plan: team.billing_plan,
-        status: team.billing_status.clone(),
-        is_active: is_billing_active(&team.billing_status),
+        status: team.billing_status,
+        is_active: team.billing_status.is_active(),
         entitlements: snapshot.entitlements,
         limits: snapshot.limits,
     })
@@ -267,7 +218,7 @@ pub(crate) async fn get_attachment_usage(
         .clone()
         .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
-    let snapshot = get_billing_snapshot(&mode, &team.billing_plan, &team.billing_status);
+    let snapshot = get_billing_snapshot(&mode, team.billing_plan, team.billing_status);
 
     Ok(AttachmentUsageResponse {
         mode,
@@ -289,19 +240,15 @@ pub(crate) async fn create_checkout_session(
         .clone()
         .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor.clone())?;
-    ensure_billing_admin(&actor.role)?;
+    ensure_billing_admin(actor.role)?;
 
-    let target_plan = input
-        .plan
-        .as_deref()
-        .unwrap_or(team.billing_plan.as_str())
-        .to_string();
-    if !is_paid_plan(&target_plan) {
+    let target_plan = input.plan.unwrap_or(team.billing_plan);
+    if !target_plan.is_paid() {
         return Err(AppError::bad_request("Free plan does not require checkout"));
     }
 
     if team.stripe_subscription_id.is_some()
-        && is_billing_active(&team.billing_status)
+        && team.billing_status.is_active()
         && team.billing_plan == target_plan
     {
         return Err(AppError::bad_request(
@@ -309,10 +256,10 @@ pub(crate) async fn create_checkout_session(
         ));
     }
 
-    let stripe_price_id = get_stripe_price_id(&target_plan).ok_or_else(|| {
+    let stripe_price_id = get_stripe_price_id(target_plan).ok_or_else(|| {
         AppError::internal(format!("Missing Stripe price ID for {target_plan} plan"))
     })?;
-    let quantity = if target_plan == "team" {
+    let quantity = if target_plan == BillingPlan::Team {
         count_team_members(pool, &team_id).await?.max(1)
     } else {
         1
@@ -324,7 +271,7 @@ pub(crate) async fn create_checkout_session(
         user_id,
         customer_id: customer_id.as_deref(),
         customer_email: &actor.email,
-        plan: &target_plan,
+        plan: target_plan.as_str(),
         price_id: &stripe_price_id,
         quantity,
         success_url: format!("{base_url}/billing?checkout=success"),
@@ -343,7 +290,7 @@ pub(crate) async fn create_checkout_session(
     query(
 		"UPDATE team SET billing_plan = $1::billing_plan, billing_status = 'incomplete', updated_at = $2 WHERE id = $3",
 	)
-	.bind(&target_plan)
+	.bind(target_plan)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&team_id)
 	.execute(pool)
@@ -363,9 +310,9 @@ pub(crate) async fn create_portal_session(
     assert_cloud_billing_enabled()?;
     let actor = load_billing_actor(pool, user_id).await?;
     let team = ensure_team_billing(actor.clone())?;
-    ensure_billing_admin(&actor.role)?;
+    ensure_billing_admin(actor.role)?;
 
-    let snapshot = get_billing_snapshot(bittery_mode(), &team.billing_plan, &team.billing_status);
+    let snapshot = get_billing_snapshot(bittery_mode(), team.billing_plan, team.billing_status);
     if !snapshot.entitlements.billing_portal {
         return Err(AppError::forbidden(
             "Billing portal is unavailable for your current plan",
@@ -388,73 +335,12 @@ pub(crate) async fn create_portal_session(
     Ok(PortalSessionResponse { url })
 }
 
-pub(crate) async fn sync_seats(
+pub(crate) async fn sync_team_seats_best_effort(
     pool: &PgPool,
-    user_id: &str,
-    input: SyncSeatsInput,
-) -> Result<SyncSeatsResponse, AppError> {
-    assert_cloud_billing_enabled()?;
-    let actor = load_billing_actor(pool, user_id).await?;
-    let team_id = actor
-        .team_id
-        .clone()
-        .ok_or_else(|| AppError::not_found("Team not found"))?;
-    let team = ensure_team_billing(actor.clone())?;
-    ensure_billing_admin(&actor.role)?;
-
-    let target_team_id = input.team_id.unwrap_or_else(|| team_id.clone());
-    if target_team_id != team_id {
-        return Err(AppError::forbidden(
-            "You can only sync seats for your own team",
-        ));
-    }
-
-    if team.billing_plan != "team" {
-        return Ok(SyncSeatsResponse {
-            synced: false,
-            reason: Some("not_team_plan".to_string()),
-            quantity: None,
-        });
-    }
-    let subscription_item_id = match team.stripe_subscription_item_id.as_deref() {
-        Some(value) => value,
-        None => {
-            return Ok(SyncSeatsResponse {
-                synced: false,
-                reason: Some("missing_subscription_item".to_string()),
-                quantity: None,
-            })
-        }
-    };
-
-    let quantity = count_team_members(pool, &target_team_id).await?.max(1);
-    stripe_update_subscription_item_quantity(subscription_item_id, quantity)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Internal error");
-            AppError::internal("An internal error occurred")
-        })?;
-
-    query("UPDATE team SET seats_purchased = $1, updated_at = $2 WHERE id = $3")
-        .bind(quantity as i32)
-        .bind(OffsetDateTime::now_utc())
-        .bind(&target_team_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update purchased seats");
-            AppError::internal("Failed to update purchased seats")
-        })?;
-
-    Ok(SyncSeatsResponse {
-        synced: true,
-        reason: None,
-        quantity: Some(quantity),
-    })
-}
-
-pub(crate) async fn sync_team_seats_best_effort(pool: &PgPool, team_id: &str, billing_plan: &str) {
-    if billing_plan != "team" || !is_stripe_api_configured() {
+    team_id: &str,
+    billing_plan: BillingPlan,
+) {
+    if billing_plan != BillingPlan::Team || !is_stripe_api_configured() {
         return;
     }
 
@@ -496,7 +382,7 @@ pub(crate) async fn preview_additional_team_seat(
     assert_cloud_billing_enabled()?;
 
     let actor = load_billing_actor(pool, user_id).await?;
-    ensure_billing_admin(&actor.role)?;
+    ensure_billing_admin(actor.role)?;
     let team = ensure_team_billing(actor)?;
 
     let Some(stripe_customer_id) = team.stripe_customer_id.as_deref() else {
@@ -880,8 +766,8 @@ fn mock_stripe_preview_upcoming_team_seat_invoice(
 
 #[derive(Clone)]
 struct TeamBillingState {
-    billing_plan: String,
-    billing_status: String,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
     stripe_customer_id: Option<String>,
     stripe_subscription_id: Option<String>,
     stripe_subscription_item_id: Option<String>,
@@ -962,7 +848,11 @@ async fn ensure_team_stripe_customer(
     Ok(Some(customer_id))
 }
 
-fn get_billing_snapshot(mode: &str, billing_plan: &str, billing_status: &str) -> BillingSnapshot {
+fn get_billing_snapshot(
+    mode: &str,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
+) -> BillingSnapshot {
     let resolved_entitlements = resolve_effective_entitlements(mode, billing_plan, billing_status);
     let limits = resolve_effective_entitlement_limits(mode, billing_plan, &resolved_entitlements);
     BillingSnapshot {
@@ -973,8 +863,8 @@ fn get_billing_snapshot(mode: &str, billing_plan: &str, billing_status: &str) ->
 
 fn resolve_effective_entitlements(
     mode: &str,
-    billing_plan: &str,
-    billing_status: &str,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
 ) -> BillingEntitlements {
     if mode == "self-hosted" {
         return BillingEntitlements {
@@ -987,10 +877,9 @@ fn resolve_effective_entitlements(
         };
     }
 
-    let is_active = is_billing_active(billing_status);
-    let paid_inactive = requires_paid_subscription(billing_plan) && !is_active;
+    let paid_inactive = billing_plan.is_paid() && !billing_status.is_active();
     match billing_plan {
-        "personal" => BillingEntitlements {
+        BillingPlan::Personal => BillingEntitlements {
             sentinel: !paid_inactive,
             team_management: false,
             vault_sharing: false,
@@ -998,7 +887,7 @@ fn resolve_effective_entitlements(
             billing_portal: true,
             attachments: !paid_inactive,
         },
-        "family" | "team" => BillingEntitlements {
+        BillingPlan::Family | BillingPlan::Team => BillingEntitlements {
             sentinel: !paid_inactive,
             team_management: !paid_inactive,
             vault_sharing: !paid_inactive,
@@ -1006,7 +895,7 @@ fn resolve_effective_entitlements(
             billing_portal: true,
             attachments: !paid_inactive,
         },
-        _ => BillingEntitlements {
+        BillingPlan::Free => BillingEntitlements {
             sentinel: false,
             team_management: false,
             vault_sharing: false,
@@ -1019,7 +908,7 @@ fn resolve_effective_entitlements(
 
 fn resolve_effective_entitlement_limits(
     mode: &str,
-    billing_plan: &str,
+    billing_plan: BillingPlan,
     resolved_entitlements: &BillingEntitlements,
 ) -> EntitlementLimits {
     if mode == "self-hosted" {
@@ -1032,25 +921,25 @@ fn resolve_effective_entitlement_limits(
     }
 
     let mut limits = match billing_plan {
-        "personal" => EntitlementLimits {
+        BillingPlan::Personal => EntitlementLimits {
             share_links: Some(5),
             shared_vaults: Some(0),
             attachment_max_file_size_bytes: Some(10 * MB),
             attachment_storage_bytes: Some(250 * MB),
         },
-        "family" => EntitlementLimits {
+        BillingPlan::Family => EntitlementLimits {
             share_links: None,
             shared_vaults: Some(5),
             attachment_max_file_size_bytes: Some(25 * MB),
             attachment_storage_bytes: Some(GB),
         },
-        "team" => EntitlementLimits {
+        BillingPlan::Team => EntitlementLimits {
             share_links: None,
             shared_vaults: None,
             attachment_max_file_size_bytes: Some(50 * MB),
             attachment_storage_bytes: Some(2 * GB),
         },
-        _ => EntitlementLimits {
+        BillingPlan::Free => EntitlementLimits {
             share_links: Some(0),
             shared_vaults: Some(0),
             attachment_max_file_size_bytes: Some(0),
@@ -1075,8 +964,8 @@ fn resolve_effective_entitlement_limits(
 fn self_hosted_billing_status() -> BillingStatusResponse {
     BillingStatusResponse {
         enabled: false,
-        plan: "free".to_string(),
-        status: "none".to_string(),
+        plan: BillingPlan::Free,
+        status: BillingStatus::None,
         is_active: false,
         requires_payment: false,
         is_stripe_configured: false,
@@ -1092,8 +981,8 @@ fn self_hosted_billing_status() -> BillingStatusResponse {
 fn cloud_billing_disabled_status() -> BillingStatusResponse {
     BillingStatusResponse {
         enabled: false,
-        plan: "free".to_string(),
-        status: "none".to_string(),
+        plan: BillingPlan::Free,
+        status: BillingStatus::None,
         is_active: false,
         requires_payment: false,
         is_stripe_configured: false,
@@ -1126,26 +1015,14 @@ fn assert_cloud_billing_enabled() -> Result<(), AppError> {
     Ok(())
 }
 
-fn is_billing_active(billing_status: &str) -> bool {
-    matches!(billing_status, "active" | "trialing")
-}
-
-fn ensure_billing_admin(role: &str) -> Result<(), AppError> {
-    if role == "owner" || role == "admin" {
+fn ensure_billing_admin(role: TeamRole) -> Result<(), AppError> {
+    if role.can_manage() {
         Ok(())
     } else {
         Err(AppError::forbidden(
             "Only team owner or admin can manage billing",
         ))
     }
-}
-
-fn requires_paid_subscription(plan: &str) -> bool {
-    plan != "free"
-}
-
-fn is_paid_plan(plan: &str) -> bool {
-    plan == "personal" || plan == "family" || plan == "team"
 }
 
 fn is_stripe_api_configured() -> bool {
@@ -1155,12 +1032,12 @@ fn is_stripe_api_configured() -> bool {
         .unwrap_or(false)
 }
 
-fn get_stripe_price_id(plan: &str) -> Option<String> {
+fn get_stripe_price_id(plan: BillingPlan) -> Option<String> {
     let env_name = match plan {
-        "personal" => "STRIPE_PRICE_PERSONAL_MONTHLY",
-        "family" => "STRIPE_PRICE_FAMILY_MONTHLY",
-        "team" => "STRIPE_PRICE_TEAM_SEAT_MONTHLY",
-        _ => return None,
+        BillingPlan::Personal => "STRIPE_PRICE_PERSONAL_MONTHLY",
+        BillingPlan::Family => "STRIPE_PRICE_FAMILY_MONTHLY",
+        BillingPlan::Team => "STRIPE_PRICE_TEAM_SEAT_MONTHLY",
+        BillingPlan::Free => return None,
     };
 
     std::env::var(env_name)

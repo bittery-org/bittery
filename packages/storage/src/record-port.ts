@@ -18,6 +18,12 @@
  * per-record store (sqlite row, IndexedDB key, one store key per record).
  */
 export interface RecordPort {
+	/**
+	 * Prefix before record collections in the backing store. It is empty unless a native
+	 * host reads the same store, where ItemCache publishes fully-resolved cache prefixes.
+	 */
+	readonly recordKeyPrefix: string;
+
 	initialize(): Promise<void>;
 	recordPut(collection: string, id: string, value: string): Promise<void>;
 	recordGet(collection: string, id: string): Promise<string | null>;

@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::test_support::{
-    acquire_env_lock_async, seed_item, seed_user, seed_vault, with_rpc_test_app, EnvVarGuard,
+    acquire_env_lock_async, seed_item, seed_user, seed_vault, with_api_test_app, EnvVarGuard,
 };
 
 const EMAIL: &str = "verification-codes@example.com";
@@ -20,7 +20,7 @@ fn generated_codes_are_six_ascii_digits() {
 
 #[tokio::test]
 async fn codes_expire_exhaust_and_consume_once_for_each_purpose() {
-    with_rpc_test_app("verification_code_lifecycle", |app| async move {
+    with_api_test_app("verification_code_lifecycle", |app| async move {
         seed_share_link(&app.pool).await;
         let codes = VerificationCodeService::new(&app.pool);
 
@@ -70,7 +70,7 @@ async fn signup_lockout_burns_pending_codes() {
         ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
     ]);
 
-    with_rpc_test_app("verification_code_signup_lockout", |app| async move {
+    with_api_test_app("verification_code_signup_lockout", |app| async move {
         let codes = VerificationCodeService::new(&app.pool);
         let purpose = VerificationPurpose::Signup {
             invitation_token: None,
@@ -110,7 +110,7 @@ async fn a_code_that_could_not_be_delivered_is_not_left_active() {
     let _env_lock = acquire_env_lock_async().await;
     let _env = EnvVarGuard::set(&[("BITTERY_ENABLE_DEV_AUTH_STUBS", "false")]);
 
-    with_rpc_test_app("verification_code_undelivered", |app| async move {
+    with_api_test_app("verification_code_undelivered", |app| async move {
         seed_share_link(&app.pool).await;
         let codes = VerificationCodeService::new(&app.pool);
 

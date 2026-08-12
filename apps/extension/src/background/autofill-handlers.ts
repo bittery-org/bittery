@@ -10,19 +10,23 @@ import {
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import { isDesktopLockedNow, isDesktopUnlockedNow } from "./desktop-status";
+import type {
+	Acknowledgement,
+	CheckAutofillAuthResponse,
+	VaultItemsResponse,
+} from "./router/contract";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
  */
-export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
+export async function handleCheckAutofillAuth(): Promise<CheckAutofillAuthResponse> {
 	const desktopUnlocked = await isDesktopUnlockedNow();
 	let unlocked = isUnlocked();
 
@@ -66,7 +70,7 @@ export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
 /**
  * Handle UPDATE_AUTOFILL_TIMESTAMP message - Update activity timestamp
  */
-export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> {
+export async function handleUpdateAutofillTimestamp(): Promise<Acknowledgement> {
 	updateActivity();
 	return { success: true };
 }
@@ -76,7 +80,7 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
  */
 export async function handleGetAutofillItems(payload: {
 	hostname: string;
-}): Promise<MessageResponse> {
+}): Promise<VaultItemsResponse> {
 	updateActivity();
 
 	const { hostname } = payload;
@@ -96,7 +100,7 @@ export async function handleGetAutofillItems(payload: {
 /**
  * Handle GET_AUTOFILL_CREDIT_CARDS message - Get all credit card items
  */
-export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
+export async function handleGetAutofillCreditCards(): Promise<VaultItemsResponse> {
 	updateActivity();
 
 	const items = await getDecryptedItemsForCurrentMode();
@@ -111,7 +115,7 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 /**
  * Handle GET_AUTOFILL_IDENTITIES message - Get all identity items
  */
-export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
+export async function handleGetAutofillIdentities(): Promise<VaultItemsResponse> {
 	updateActivity();
 
 	const items = await getDecryptedItemsForCurrentMode();

@@ -1,5 +1,6 @@
 import { createRoute, redirect } from "@tanstack/react-router";
 import { isDesktopStatusUnlocked } from "../background/desktop-protocol";
+import { sendMessage } from "../lib/messaging";
 import { Route as RootRoute } from "./__root";
 
 export const Route = createRoute({
@@ -7,17 +8,17 @@ export const Route = createRoute({
 	path: "/",
 	beforeLoad: async () => {
 		// Check auth status via background worker
-		const response = await chrome.runtime.sendMessage({
-			type: "CHECK_AUTH",
-		});
+		const response = await sendMessage({ type: "CHECK_AUTH" });
 
-		if (response.authenticated) {
+		if (response.success && response.authenticated) {
 			throw redirect({ to: "/vault" });
 		}
 
-		const desktopStatusResponse = await chrome.runtime.sendMessage({
+		const desktopStatusResponse = await sendMessage({
 			type: "CHECK_DESKTOP_STATUS",
 		});
+		const desktopAvailable =
+			desktopStatusResponse.success && desktopStatusResponse.available;
 		const desktopUnlocked =
 			desktopStatusResponse.success &&
 			isDesktopStatusUnlocked(desktopStatusResponse);
@@ -27,15 +28,13 @@ export const Route = createRoute({
 		}
 
 		// Check if quick unlock is available (has stored session)
-		const quickUnlockResponse = await chrome.runtime.sendMessage({
-			type: "CAN_QUICK_UNLOCK",
-		});
+		const quickUnlockResponse = await sendMessage({ type: "CAN_QUICK_UNLOCK" });
 
-		if (quickUnlockResponse.canQuickUnlock) {
+		if (quickUnlockResponse.success && quickUnlockResponse.canQuickUnlock) {
 			throw redirect({ to: "/unlock" });
 		}
 
-		if (desktopStatusResponse.success && desktopStatusResponse.available) {
+		if (desktopAvailable) {
 			// Desktop is available - redirect to unlock screen
 			// User can unlock via desktop (biometric or password)
 			throw redirect({ to: "/unlock" });

@@ -4,7 +4,7 @@
  * Converts an existing vault between personal and team types.
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { useMutation } from "@tanstack/react-query";
 import {
 	useCoreContext,
@@ -27,7 +27,7 @@ export interface ConvertVaultTypeResult {
 }
 
 export function useConvertVaultType() {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const refreshAfterMutation = useRefreshAfterVaultMutation();

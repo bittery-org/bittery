@@ -1,32 +1,20 @@
-use axum::{middleware, routing::get, Extension, Json, Router};
+use axum::{middleware, routing::get, Json, Router};
 use serde_json::json;
 
 use crate::{
-    catch_panic_layer, create_public_http_router, create_rpc_router, create_sync_http_router,
-    edge_http_middleware, http_trace_layer, rpc_request_context_middleware,
-    rpc_request_guard_middleware, rpc_tracing_middleware, AppState, EdgeHttpConfig,
+    api_response_headers, catch_panic_layer, create_api_router, create_public_http_router,
+    edge_http_middleware, http_trace_layer, request_context_middleware, AppState, EdgeHttpConfig,
 };
 
 pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
-    let (qubit_service, server_handle) = create_rpc_router().as_rpc(state.clone()).into_service();
-    let rpc_routes = Router::new()
-        .nest_service("/rpc", qubit_service)
-        .route_layer(middleware::from_fn(rpc_tracing_middleware))
+    let public_http_routes = create_public_http_router().with_state(state.clone());
+    let api_routes = create_api_router()
+        .route_layer(middleware::from_fn(api_response_headers))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
-            rpc_request_context_middleware,
+            request_context_middleware,
         ))
-        .layer(middleware::from_fn(rpc_request_guard_middleware))
-        // Dropping the handle tells jsonrpsee to stop, closing WebSocket sessions and their
-        // subscriptions; the router owns it so the stop signal fires only once the app shuts down.
-        .layer(Extension(server_handle));
-    let sync_routes = create_sync_http_router()
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            rpc_request_context_middleware,
-        ))
-        .with_state(state.clone());
-    let public_http_routes = create_public_http_router().with_state(state);
+        .with_state(state);
 
     Router::new()
         .route("/", get(|| async { "OK" }))
@@ -35,8 +23,7 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
             get(|| async { Json(json!({ "status": "ok" })) }),
         )
         .merge(public_http_routes)
-        .nest("/sync", sync_routes)
-        .merge(rpc_routes)
+        .merge(api_routes)
         // Catch panics before the edge layer so its 500 receives security/CORS headers
         // and the outer trace layer records the completed response.
         .layer(catch_panic_layer())
@@ -49,7 +36,7 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc, time::Duration};
+    use std::{sync::Arc, time::Duration};
 
     use async_trait::async_trait;
     use axum::{
@@ -57,10 +44,7 @@ mod tests {
         http::{header, HeaderMap, Request, StatusCode},
     };
     use serde_json::json;
-    use soketto::handshake::{Client, ServerResponse};
     use sqlx::postgres::PgPoolOptions;
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio_util::compat::TokioAsyncReadCompatExt;
     use tower::util::ServiceExt;
 
     use super::create_app;
@@ -88,11 +72,33 @@ mod tests {
             .await
             .expect("app request should resolve");
         let status = response.status();
-        let headers = response.headers().clone();
-        let body = to_bytes(response.into_body(), usize::MAX)
+        let mut headers = response.headers().clone();
+        let request_id = headers
+            .get("bittery-request-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        headers.remove("bittery-request-id");
+        let mut body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("app response body should read")
             .to_vec();
+        if headers.get(header::CONTENT_TYPE).is_some_and(|value| {
+            value
+                .to_str()
+                .is_ok_and(|value| value.starts_with("application/problem+json"))
+        }) {
+            let mut problem: serde_json::Value =
+                serde_json::from_slice(&body).expect("problem response should be JSON");
+            let request_id = request_id.expect("problem response should carry a request ID");
+            assert_eq!(problem["requestId"], request_id);
+            assert_eq!(
+                problem["instance"],
+                format!("urn:bittery:request:{request_id}")
+            );
+            problem["requestId"] = json!("normalized-request-id");
+            problem["instance"] = json!("urn:bittery:request:normalized-request-id");
+            body = serde_json::to_vec(&problem).expect("normalized problem should serialize");
+        }
 
         ResponseSignature {
             status,
@@ -139,14 +145,37 @@ mod tests {
         assert_eq!(health.status, StatusCode::OK);
         assert_eq!(health.body, br#"{"status":"ok"}"#);
 
-        let sync = assert_matching_response(&production, &test_support, || {
+        let api_meta = assert_matching_response(&production, &test_support, || {
+            Request::builder()
+                .uri("/api/meta")
+                .body(Body::empty())
+                .expect("API metadata request should build")
+        })
+        .await;
+        assert_eq!(api_meta.status, StatusCode::OK);
+        let metadata = serde_json::from_slice::<serde_json::Value>(&api_meta.body)
+            .expect("API metadata should be JSON");
+        assert_eq!(metadata["serverRelease"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(metadata["api"]["supportedMajors"], json!([1]));
+        assert_eq!(metadata["api"]["preferredMajor"], json!(1));
+
+        let api_v1 = assert_matching_response(&production, &test_support, || {
+            Request::builder()
+                .uri("/api/v1")
+                .body(Body::empty())
+                .expect("API v1 request should build")
+        })
+        .await;
+        assert_eq!(api_v1.status, StatusCode::NOT_FOUND);
+
+        let legacy_sync = assert_matching_response(&production, &test_support, || {
             Request::builder()
                 .uri("/sync/health")
                 .body(Body::empty())
                 .expect("sync request should build")
         })
         .await;
-        assert_eq!(sync.status, StatusCode::OK);
+        assert_eq!(legacy_sync.status, StatusCode::NOT_FOUND);
 
         let public = assert_matching_response(&production, &test_support, || {
             Request::builder()
@@ -159,92 +188,16 @@ mod tests {
         .await;
         assert_ne!(public.status, StatusCode::NOT_FOUND);
 
-        let rpc_guard = assert_matching_response(&production, &test_support, || {
+        let legacy_rpc = assert_matching_response(&production, &test_support, || {
             Request::builder()
                 .method("POST")
                 .uri("/rpc")
                 .header(header::CONTENT_TYPE, "text/plain")
                 .body(Body::from("{}"))
-                .expect("rpc guard request should build")
+                .expect("legacy route request should build")
         })
         .await;
-        assert_eq!(rpc_guard.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-
-        let rpc = assert_matching_response(&production, &test_support, || {
-            Request::builder()
-                .method("POST")
-                .uri("/rpc")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "healthCheck",
-                        "params": [],
-                    })
-                    .to_string(),
-                ))
-                .expect("rpc request should build")
-        })
-        .await;
-        assert_eq!(rpc.status, StatusCode::OK);
-    }
-
-    /// Qubit's `into_service` hands back a `ServerHandle` whose drop tells jsonrpsee to stop, which
-    /// closes every WebSocket session as soon as it is established.
-    #[tokio::test]
-    async fn websocket_rpc_sessions_outlive_the_handshake() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("test listener should bind");
-        let address = listener
-            .local_addr()
-            .expect("test listener should report its address");
-        let app = create_app(AppState::default(), EdgeHttpConfig::default());
-        let server = tokio::spawn(async move {
-            axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await
-            .expect("test server should serve")
-        });
-
-        let socket = TcpStream::connect(address)
-            .await
-            .expect("websocket client should connect");
-        let mut client = Client::new(socket.compat(), "localhost", "/rpc");
-        assert!(matches!(
-            client
-                .handshake()
-                .await
-                .expect("websocket handshake should complete"),
-            ServerResponse::Accepted { .. }
-        ));
-
-        let (mut sender, mut receiver) = client.into_builder().finish();
-        sender
-            .send_text(
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "healthCheck",
-                    "params": [],
-                })
-                .to_string(),
-            )
-            .await
-            .expect("rpc request should send");
-        sender.flush().await.expect("rpc request should flush");
-
-        let mut response = Vec::new();
-        tokio::time::timeout(Duration::from_secs(5), receiver.receive_data(&mut response))
-            .await
-            .expect("rpc response should arrive before the timeout")
-            .expect("websocket session should stay open");
-        assert!(String::from_utf8_lossy(&response).contains(r#""result":"OK""#));
-
-        server.abort();
+        assert_eq!(legacy_rpc.status, StatusCode::NOT_FOUND);
     }
 
     struct PanickingRateLimiter;
@@ -295,18 +248,13 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/rpc")
+                    .uri("/api/v1/auth/login-attempts")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::ORIGIN, "https://app.example.com")
                     .body(Body::from(
                         json!({
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "method": "auth.startLogin",
-                            "params": [{
-                                "email": "panic@example.com",
-                                "clientPublicKey": "00",
-                            }],
+                            "email": "panic@example.com",
+                            "clientPublicKey": "00",
                         })
                         .to_string(),
                     ))
@@ -332,7 +280,9 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("panic response body should read");
-        assert!(String::from_utf8_lossy(&body).contains("Internal Server Error"));
+        let problem: serde_json::Value =
+            serde_json::from_slice(&body).expect("panic response should use problem JSON");
+        assert_eq!(problem["code"], "INTERNAL_ERROR");
         assert!(!String::from_utf8_lossy(&body).contains("rate limiter panic"));
     }
 }

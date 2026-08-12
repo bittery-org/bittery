@@ -7,8 +7,11 @@ import {
 	Timer,
 	User,
 } from "lucide-react-native";
-import type { ComponentType } from "react";
 import { withUniwind } from "uniwind";
+import type { AppIcon } from "@/components/ui";
+import type { useI18n } from "@/providers/i18n-provider";
+
+type MessageCatalog = ReturnType<typeof useI18n>["m"];
 
 // Create styled icon components
 const StyledGrid3x3 = withUniwind(Grid3x3);
@@ -21,10 +24,10 @@ const StyledTimer = withUniwind(Timer);
 export interface CategoryOption {
 	value: ItemCategory | "all";
 	label: string;
-	icon: ComponentType<any>;
+	icon: AppIcon;
 }
 
-export function getCategoryOptions(m: any): CategoryOption[] {
+export function getCategoryOptions(m: MessageCatalog): CategoryOption[] {
 	return [
 		{ value: "all", label: m.mob_category_all(), icon: StyledGrid3x3 },
 		{ value: "login", label: m.mob_category_login(), icon: StyledKey },
@@ -44,7 +47,7 @@ export function getCategoryOptions(m: any): CategoryOption[] {
 }
 
 export function getCategoryLabels(
-	m: any,
+	m: MessageCatalog,
 ): Record<ItemCategory | "all", string> {
 	return {
 		all: m.mob_category_all(),

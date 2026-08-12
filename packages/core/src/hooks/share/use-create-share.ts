@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -23,7 +23,7 @@ export interface CreateShareInput {
 }
 
 export function useCreateShare() {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 
@@ -42,8 +42,8 @@ export function useCreateShare() {
 				defaultClient,
 			);
 		},
-		onSuccess: async () => {
-			await invalidator.invalidateShare();
+		onSuccess: async (_result, input) => {
+			await invalidator.invalidateShare(input.item.id);
 		},
 	});
 }

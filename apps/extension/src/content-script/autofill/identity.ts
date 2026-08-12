@@ -1,4 +1,5 @@
 import type { DecryptedItem } from "@bittery/shared/types";
+import { sendMessage } from "../../lib/messaging";
 import { contentState } from "../state";
 import type { IdentityField } from "../types";
 import { hideAutofillOverlay } from "./credential";
@@ -34,9 +35,12 @@ export async function handleIdentityFieldFocus(field: IdentityField) {
 
 	contentState.currentFocusedIdentityField = field;
 
-	const response = await chrome.runtime.sendMessage({
-		type: "CHECK_AUTOFILL_AUTH",
-	});
+	const response = await sendMessage({ type: "CHECK_AUTOFILL_AUTH" });
+	// A route-level failure reads exactly like a locked vault, which is what the
+	// overlay showed before this response was typed.
+	const authenticated = response.success && response.authenticated;
+	const needsReauth = response.success && response.needsReauth === true;
+	const desktopLocked = response.success && response.desktopLocked === true;
 
 	if (contentState.currentFocusedIdentityField !== field) return;
 
@@ -48,13 +52,13 @@ export async function handleIdentityFieldFocus(field: IdentityField) {
 		}
 	};
 
-	if (!response.authenticated) {
+	if (!authenticated) {
 		field.hasItems = false;
 		showFieldIcon(field, false, handleIconToggle);
 
-		if (response.needsReauth) {
+		if (needsReauth) {
 			showIdentityReauthPrompt(field);
-		} else if (response.desktopLocked) {
+		} else if (desktopLocked) {
 			showIdentityDesktopUnlockPrompt(field);
 		} else {
 			showIdentityUnlockPrompt(field);
@@ -62,18 +66,19 @@ export async function handleIdentityFieldFocus(field: IdentityField) {
 		return;
 	}
 
-	const itemsResponse = await chrome.runtime.sendMessage({
+	const itemsResponse = await sendMessage({
 		type: "GET_AUTOFILL_IDENTITIES",
 	});
 
 	if (contentState.currentFocusedIdentityField !== field) return;
 
-	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	const items = itemsResponse.success ? itemsResponse.items : [];
+	const hasItems = items.length > 0;
 	field.hasItems = hasItems;
 
 	if (hasItems) {
 		showFieldIcon(field, true, handleIconToggle);
-		showIdentityAutofillOverlay(field, itemsResponse.items);
+		showIdentityAutofillOverlay(field, items);
 	} else {
 		showFieldIcon(field, false, handleIconToggle);
 	}

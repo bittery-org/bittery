@@ -2,11 +2,13 @@ use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
-use ts_rs::TS;
 
 use crate::{
     config::{bittery_mode, db_pool, format_timestamp},
-    db::models::*,
+    db::{
+        enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole},
+        models::*,
+    },
     error::AppError,
     repo::common::hash_token,
     repo::{
@@ -22,6 +24,11 @@ use crate::{
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
+    shapes::{
+        allowed_email_shape, create_share_link_shape, email_verification_shape,
+        public_share_access_shape, public_share_info_shape, share_access_log_shape,
+        share_link_list_entry_shape, share_link_list_shape,
+    },
     AppState,
 };
 
@@ -30,37 +37,26 @@ const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
 const MAX_VERIFICATION_CODES_PER_EMAIL: i64 = 5;
 const DEFAULT_SHARE_LINK_DAILY_LIMIT: i64 = 50;
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "ShareItemIdInput")]
 pub struct ItemIdInput {
     pub item_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct LinkIdInput {
     pub link_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct UpdateShareLinkInput {
-    pub link_id: String,
-    pub is_one_time_use: Option<bool>,
-    pub add_emails: Option<Vec<String>>,
-    pub remove_email_ids: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateShareLinkInput {
     pub item_id: String,
-    pub access_mode: String,
+    pub access_mode: ShareLinkAccessMode,
     #[serde(default)]
     pub is_one_time_use: bool,
     pub expires_in: String,
@@ -71,96 +67,49 @@ pub struct CreateShareLinkInput {
     pub share_key_iv: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateShareLinkResponse {
-    pub id: String,
-    /// The only time the raw token is ever disclosed. The database holds just its
-    /// digest, so a link that is not copied here cannot be reconstructed later.
-    pub token: String,
-    pub expires_at: String,
-    pub base_share_url: String,
-}
+create_share_link_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateShareLinkResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareAllowedEmailSummary {
-    pub email: String,
-    pub verified: bool,
-}
+allowed_email_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShareAllowedEmailSummary
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareAllowedEmailDetails {
-    pub id: String,
-    pub email: String,
-    pub verified: bool,
-    pub verified_at: Option<String>,
-}
+share_link_list_entry_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShareLinkListEntry
+}, email = ShareAllowedEmailSummary);
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareLinkListEntry {
-    pub id: String,
-    pub status: String,
-    pub access_mode: String,
-    pub is_one_time_use: bool,
-    pub access_count: i32,
-    pub max_access_count: Option<i32>,
-    pub allowed_emails: Vec<ShareAllowedEmailSummary>,
-    pub expires_at: String,
-    pub created_at: String,
-    pub last_accessed_at: Option<String>,
-}
+share_link_list_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShareLinkListResponse
+}, link = ShareLinkListEntry);
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareLinkListResponse {
-    pub links: Vec<ShareLinkListEntry>,
-    pub base_share_url: String,
-}
+share_access_log_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShareAccessLogResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareLinkDetailsResponse {
-    pub id: String,
-    pub status: String,
-    pub access_mode: String,
-    pub is_one_time_use: bool,
-    pub access_count: i32,
-    pub max_access_count: Option<i32>,
-    pub allowed_emails: Vec<ShareAllowedEmailDetails>,
-    pub expires_at: String,
-    pub created_at: String,
-    pub last_accessed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ShareAccessLogResponse {
-    pub id: String,
-    pub accessed_by_email: Option<String>,
-    pub ip_address: Option<String>,
-    pub user_agent: Option<String>,
-    pub success: bool,
-    pub failure_reason: Option<String>,
-    pub accessed_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[ts(rename = "ShareSuccessResponse")]
+#[derive(Debug, Clone, Serialize)]
 pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PublicTokenInput {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestEmailVerificationInput {
@@ -168,14 +117,13 @@ pub struct RequestEmailVerificationInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestEmailVerificationResponse {
-    pub success: bool,
-    pub message: String,
-}
+email_verification_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RequestEmailVerificationResponse
+});
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifyEmailAndAccessInput {
@@ -184,29 +132,21 @@ pub struct VerifyEmailAndAccessInput {
     pub code: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicShareInfoResponse {
-    pub valid: bool,
-    pub reason: Option<String>,
-    pub access_mode: String,
-    pub is_one_time_use: Option<bool>,
-    pub expires_at: Option<String>,
-}
+public_share_info_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PublicShareInfoResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicShareAccessResponse {
-    pub encrypted_item_data: String,
-    pub encryption_iv: String,
-    pub encrypted_share_key: String,
-    pub share_key_iv: String,
-}
+public_share_access_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PublicShareAccessResponse
+});
 
 struct VisibleShareLink {
     link: DbShareLinkRow,
-    allowed_emails: Vec<DbShareLinkAllowedEmailRow>,
-    actor_role: String,
+    actor_role: VaultRole,
 }
 
 struct PublicShareLinkDetails {
@@ -231,7 +171,7 @@ pub(crate) async fn create_share_link(
         return Err(AppError::not_found("Item not found"));
     };
 
-    if scoped_item.role == "read-only" {
+    if !scoped_item.role.can_write() {
         return Err(AppError::forbidden("Read-only users cannot share items"));
     }
 
@@ -295,7 +235,7 @@ pub(crate) async fn create_share_link(
 	.bind(&scoped_item.item_id)
 	.bind(user_id)
 	.bind(hash_token(&token))
-	.bind(&input.access_mode)
+	.bind(input.access_mode)
 	.bind(input.is_one_time_use)
 	.bind(&input.encrypted_item_data)
 	.bind(&input.encryption_iv)
@@ -307,7 +247,7 @@ pub(crate) async fn create_share_link(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link"); AppError::internal("Failed to insert share link") })?;
 
-    if input.access_mode == "email-restricted" {
+    if input.access_mode == ShareLinkAccessMode::EmailRestricted {
         for email in input.allowed_emails.as_ref().into_iter().flatten() {
             query(
 				"INSERT INTO share_link_allowed_email (id, share_link_id, email) VALUES ($1, $2, $3)",
@@ -350,7 +290,7 @@ pub(crate) async fn list_share_links_by_item(
 
     let links = load_share_links_for_item(pool, &scoped_item.item_id).await?;
     let now = time::OffsetDateTime::now_utc();
-    let visible_links = if scoped_item.role == "owner" || scoped_item.role == "admin" {
+    let visible_links = if scoped_item.role.can_manage() {
         links
     } else {
         links
@@ -397,41 +337,6 @@ pub(crate) async fn list_share_links_by_item(
     })
 }
 
-pub(crate) async fn get_share_link(
-    pool: &PgPool,
-    user_id: &str,
-    input: LinkIdInput,
-) -> Result<ShareLinkDetailsResponse, AppError> {
-    assert_share_links_entitlement(pool, user_id).await?;
-
-    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
-    let Some(visible_link) = visible_link else {
-        return Err(AppError::not_found("Share link not found"));
-    };
-
-    Ok(ShareLinkDetailsResponse {
-        id: visible_link.link.id,
-        status: visible_link.link.status,
-        access_mode: visible_link.link.access_mode,
-        is_one_time_use: visible_link.link.is_one_time_use,
-        access_count: visible_link.link.access_count,
-        max_access_count: visible_link.link.max_access_count,
-        allowed_emails: visible_link
-            .allowed_emails
-            .into_iter()
-            .map(|email| ShareAllowedEmailDetails {
-                id: email.id,
-                email: email.email,
-                verified: email.verified,
-                verified_at: email.verified_at.map(format_timestamp),
-            })
-            .collect(),
-        expires_at: format_timestamp(visible_link.link.expires_at),
-        created_at: format_timestamp(visible_link.link.created_at),
-        last_accessed_at: visible_link.link.last_accessed_at.map(format_timestamp),
-    })
-}
-
 pub(crate) async fn revoke_share_link(
     pool: &PgPool,
     user_id: &str,
@@ -442,7 +347,7 @@ pub(crate) async fn revoke_share_link(
         return Err(AppError::not_found("Share link not found"));
     };
 
-    let creator_role = query_scalar::<_, Option<String>>(
+    let creator_role = query_scalar::<_, Option<VaultRole>>(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
     .bind(&visible_link.link.vault_id)
@@ -453,12 +358,15 @@ pub(crate) async fn revoke_share_link(
         tracing::error!(error = %e, "Failed to load share link creator role");
         AppError::internal("Failed to load share link creator role")
     })?
-    .unwrap_or_else(|| "member".to_string());
+    .unwrap_or(VaultRole::Member);
 
-    if visible_link.actor_role == "read-only"
-        || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
-        || (visible_link.actor_role == "admin" && creator_role == "owner")
-    {
+    let revoker_outranks_creator = match visible_link.actor_role {
+        VaultRole::Owner => true,
+        VaultRole::Admin => creator_role != VaultRole::Owner,
+        VaultRole::Member => visible_link.link.created_by_id == user_id,
+        VaultRole::ReadOnly => false,
+    };
+    if !revoker_outranks_creator {
         return Err(AppError::forbidden(
             "You do not have permission to revoke this link",
         ));
@@ -478,103 +386,12 @@ pub(crate) async fn revoke_share_link(
     Ok(SuccessResponse { success: true })
 }
 
-pub(crate) async fn update_share_link(
-    pool: &PgPool,
-    user_id: &str,
-    input: UpdateShareLinkInput,
-) -> Result<SuccessResponse, AppError> {
-    assert_share_links_entitlement(pool, user_id).await?;
-
-    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
-    let Some(visible_link) = visible_link else {
-        return Err(AppError::not_found("Share link not found"));
-    };
-
-    if visible_link.actor_role == "read-only"
-        || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
-    {
-        return Err(AppError::forbidden("Access denied"));
-    }
-
-    if let Some(is_one_time_use) = input.is_one_time_use {
-        query("UPDATE share_link SET is_one_time_use = $1, max_access_count = $2 WHERE id = $3")
-            .bind(is_one_time_use)
-            .bind(if is_one_time_use { Some(1_i32) } else { None })
-            .bind(&input.link_id)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update share link");
-                AppError::internal("Failed to update share link")
-            })?;
-    }
-
-    if let Some(add_emails) = input.add_emails.as_ref() {
-        if add_emails.len() > 100 {
-            return Err(AppError::bad_request("Too many emails to add"));
-        }
-        for email in add_emails {
-            validate_email(email)?;
-        }
-
-        for email in add_emails {
-            query(
-				"INSERT INTO share_link_allowed_email (id, share_link_id, email) VALUES ($1, $2, $3)",
-			)
-			.bind(generate_resource_id("share_email"))
-			.bind(&input.link_id)
-			.bind(email.to_ascii_lowercase())
-			.execute(pool)
-			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to add allowed email"); AppError::internal("Failed to add allowed email") })?;
-        }
-    }
-
-    if let Some(remove_email_ids) = input.remove_email_ids.as_ref() {
-        if remove_email_ids.len() > 100 {
-            return Err(AppError::bad_request("Too many email ids to remove"));
-        }
-        let unique_ids = unique_email_ids(remove_email_ids)?;
-        if !unique_ids.is_empty() {
-            let removed_emails = query_as::<_, DbShareLinkAllowedEmailDeleteRow>(
-				"DELETE FROM share_link_allowed_email WHERE share_link_id = $1 AND id = ANY($2) RETURNING id, email",
-			)
-			.bind(&input.link_id)
-			.bind(&unique_ids)
-			.fetch_all(pool)
-			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to remove allowed emails"); AppError::internal("Failed to remove allowed emails") })?;
-
-            if removed_emails.len() != unique_ids.len() {
-                return Err(AppError::bad_request(
-                    "One or more removeEmailIds are invalid for this share link",
-                ));
-            }
-
-            let revoked_emails = removed_emails
-                .into_iter()
-                .map(|row| row.email.to_ascii_lowercase())
-                .collect::<Vec<_>>();
-
-            query(
-				"UPDATE share_email_verification SET used_at = $1 WHERE share_link_id = $2 AND email = ANY($3) AND used_at IS NULL",
-			)
-			.bind(time::OffsetDateTime::now_utc())
-			.bind(&input.link_id)
-			.bind(&revoked_emails)
-			.execute(pool)
-			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to invalidate removed email verifications"); AppError::internal("Failed to invalidate removed email verifications") })?;
-        }
-    }
-
-    Ok(SuccessResponse { success: true })
-}
-
 pub(crate) async fn get_share_access_logs(
     pool: &PgPool,
     user_id: &str,
     input: LinkIdInput,
+    cursor: Option<(time::OffsetDateTime, String)>,
+    limit: i64,
 ) -> Result<Vec<ShareAccessLogResponse>, AppError> {
     assert_share_links_entitlement(pool, user_id).await?;
 
@@ -583,7 +400,7 @@ pub(crate) async fn get_share_access_logs(
         return Err(AppError::not_found("Share link not found"));
     }
 
-    let logs = load_share_access_logs(pool, &input.link_id, 100).await?;
+    let logs = load_share_access_logs(pool, &input.link_id, cursor, limit).await?;
 
     Ok(logs
         .into_iter()
@@ -704,9 +521,12 @@ pub(crate) async fn request_email_verification(
     let pool = db_pool(app_state)?;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
-    let details =
-        load_public_share_link_details_by_token(pool, &input.token, Some("email-restricted"))
-            .await?;
+    let details = load_public_share_link_details_by_token(
+        pool,
+        &input.token,
+        Some(ShareLinkAccessMode::EmailRestricted),
+    )
+    .await?;
     let Some(details) = details else {
         return Err(AppError::not_found("Share link not found"));
     };
@@ -963,7 +783,7 @@ async fn load_visible_share_link(
         return Ok(None);
     };
 
-    let actor_role = query_scalar::<_, String>(
+    let actor_role = query_scalar::<_, VaultRole>(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
     .bind(&link.vault_id)
@@ -978,25 +798,12 @@ async fn load_visible_share_link(
     let Some(actor_role) = actor_role else {
         return Ok(None);
     };
-    let can_view =
-        actor_role == "owner" || actor_role == "admin" || link.created_by_id == actor_user_id;
+    let can_view = actor_role.can_manage() || link.created_by_id == actor_user_id;
     if !can_view {
         return Ok(None);
     }
 
-    let allowed_emails = query_as::<_, DbShareLinkAllowedEmailRow>(
-		"SELECT id, share_link_id, email, verified, verified_at, created_at FROM share_link_allowed_email WHERE share_link_id = $1 ORDER BY created_at ASC",
-	)
-	.bind(link_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link allowed emails"); AppError::internal("Failed to load share link allowed emails") })?;
-
-    Ok(Some(VisibleShareLink {
-        link,
-        allowed_emails,
-        actor_role,
-    }))
+    Ok(Some(VisibleShareLink { link, actor_role }))
 }
 
 /// `token` is the caller-supplied plaintext; both query variants below compare its
@@ -1004,7 +811,7 @@ async fn load_visible_share_link(
 async fn load_public_share_link_details_by_token(
     pool: &PgPool,
     token: &str,
-    required_access_mode: Option<&str>,
+    required_access_mode: Option<ShareLinkAccessMode>,
 ) -> Result<Option<PublicShareLinkDetails>, AppError> {
     let token_hash = hash_token(token);
     let link = match required_access_mode {
@@ -1082,11 +889,7 @@ async fn resolve_share_links_access(
         });
     };
 
-    let policy = resolve_share_links_policy(
-        mode,
-        actor.billing_plan.as_deref(),
-        actor.billing_status.as_deref(),
-    );
+    let policy = resolve_share_links_policy(mode, actor.billing_plan, actor.billing_status);
     let team_id = actor.team_id;
 
     if team_id.is_none() {
@@ -1132,7 +935,7 @@ async fn get_public_share_state(
             reason: Some("disabled".to_string()),
         });
     }
-    if link.status == "revoked" {
+    if link.status == ShareLinkStatus::Revoked {
         return Ok(PublicShareState {
             valid: false,
             reason: Some("revoked".to_string()),
@@ -1159,23 +962,7 @@ async fn get_public_share_state(
     })
 }
 
-fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, AppError> {
-    let mut unique = Vec::new();
-    for id in ids {
-        if unique.iter().any(|existing| existing == id) {
-            return Err(AppError::bad_request(
-                "Duplicate removeEmailIds are not allowed",
-            ));
-        }
-        unique.push(id.clone());
-    }
-    Ok(unique)
-}
-
 fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppError> {
-    if input.access_mode != "anyone" && input.access_mode != "email-restricted" {
-        return Err(AppError::bad_request("Invalid access mode"));
-    }
     if input.encrypted_item_data.is_empty()
         || input.encryption_iv.is_empty()
         || input.encrypted_share_key.is_empty()
@@ -1183,7 +970,7 @@ fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppEr
     {
         return Err(AppError::bad_request("Missing encrypted share payload"));
     }
-    if input.access_mode == "email-restricted" {
+    if input.access_mode == ShareLinkAccessMode::EmailRestricted {
         let Some(allowed_emails) = input.allowed_emails.as_ref() else {
             return Err(AppError::bad_request(
                 "At least one email address is required for email-restricted sharing",
@@ -1253,16 +1040,22 @@ fn base_share_url() -> String {
     format!("{}/share/", web_app_url.trim_end_matches('/'))
 }
 
-fn effective_share_link_status(link: &DbShareLinkRow, now: time::OffsetDateTime) -> String {
-    if link.status == "active" && link.expires_at < now {
-        "expired".to_string()
-    } else if link.status == "active"
-        && link.max_access_count.is_some()
-        && link.access_count >= link.max_access_count.unwrap_or_default()
+fn effective_share_link_status(
+    link: &DbShareLinkRow,
+    now: time::OffsetDateTime,
+) -> ShareLinkStatus {
+    if link.status != ShareLinkStatus::Active {
+        return link.status;
+    }
+    if link.expires_at < now {
+        ShareLinkStatus::Expired
+    } else if link
+        .max_access_count
+        .is_some_and(|maximum| link.access_count >= maximum)
     {
-        "exhausted".to_string()
+        ShareLinkStatus::Exhausted
     } else {
-        link.status.clone()
+        link.status
     }
 }
 

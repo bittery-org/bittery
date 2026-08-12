@@ -32,7 +32,7 @@ export interface MoveItemInput {
  * Hook for moving an item to a different vault.
  */
 export function useMoveItem() {
-	const { core, defaultClient, invalidator, queue } = useItemMutationRuntime();
+	const { core, invalidator, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: MoveItemInput) => {
@@ -51,14 +51,34 @@ export function useMoveItem() {
 				);
 
 			if (sourceContext.accountId !== targetAccountId) {
-				return core.items.moveItem(
-					{
-						...input,
-						sourceAccountEmail: sourceContext.accountEmail,
-						targetAccountEmail,
-					},
-					defaultClient,
-				);
+				const targetItemId = await core.items.generateItemId();
+				const encryptedData = await requireRepositoryForVault(
+					core,
+					input.targetVaultId,
+					targetAccountId,
+					targetAccountEmail,
+				).repo.encryptWithVaultKey(input.targetVaultId, input.decryptedData, {
+					itemId: targetItemId,
+					version: 1,
+				});
+				await enqueueItemMutation(queue, sourceContext, {
+					type: "cross_account_move",
+					entityId: input.itemId,
+					vaultId: input.sourceVaultId,
+					targetVaultId: input.targetVaultId,
+					targetAccountId,
+					targetAccountEmail,
+					targetItemId,
+					category: input.category,
+					encryptedPayload: toQueueEncryptedPayload(encryptedData),
+				});
+				return {
+					crossAccount: true,
+					newItemId: targetItemId,
+					_encryptedData: encryptedData,
+					_sourceAccountEmail: sourceContext.accountEmail,
+					_targetAccountEmail: targetAccountEmail,
+				};
 			}
 
 			// Matched on accountId: `accountEmail` falls back to the account id when
@@ -70,10 +90,7 @@ export function useMoveItem() {
 			if (!sourceAccount) {
 				throw new Error("Source account not found");
 			}
-			const contextUserId =
-				sourceAccount?.userId ??
-				sourceContext.item.lastModifiedBy ??
-				"unknown-user";
+			const contextUserId = sourceAccount.userId;
 
 			const encryptedData = await sourceContext.repo.encryptWithVaultKey(
 				input.targetVaultId,
@@ -84,14 +101,7 @@ export function useMoveItem() {
 					userId: contextUserId,
 				},
 			);
-			await sourceContext.repo.moveItem(
-				input.itemId,
-				input.targetVaultId,
-				encryptedData,
-				input.decryptedData,
-			);
-
-			enqueueItemMutation(queue, sourceContext, {
+			await enqueueItemMutation(queue, sourceContext, {
 				type: "move",
 				entityId: input.itemId,
 				vaultId: input.sourceVaultId,

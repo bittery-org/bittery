@@ -4,7 +4,13 @@ use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, PgPool, Postgres};
 use time::OffsetDateTime;
 
-use crate::{db::models::DbScopedItemAccessRow, error::AppError};
+use crate::{
+    db::{
+        enums::{SyncEntityType, SyncEventType},
+        models::DbScopedItemAccessRow,
+    },
+    error::AppError,
+};
 
 /// Generate a prefixed random ID (e.g. `audit_0a1b2c3d4e5f6789`).
 pub fn generate_resource_id(prefix: &str) -> String {
@@ -69,9 +75,9 @@ pub async fn insert_audit_event<'e>(
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_sync_event<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
-    event_type: &str,
+    event_type: SyncEventType,
     entity_id: &str,
-    entity_type: &str,
+    entity_type: SyncEntityType,
     vault_id: &str,
     user_id: &str,
     version: i32,
@@ -125,9 +131,9 @@ pub async fn insert_sync_event<'e>(
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_user_sync_event<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
-    event_type: &str,
+    event_type: SyncEventType,
     entity_id: &str,
-    entity_type: &str,
+    entity_type: SyncEntityType,
     user_id: &str,
     version: i32,
     client_id: Option<&str>,

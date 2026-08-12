@@ -8,7 +8,7 @@ import {
 	lockAccount,
 	lockAllAccounts,
 } from "@bittery/core/services/account-lifecycle";
-import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { useRouter } from "expo-router";
 import {
@@ -203,7 +203,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			if (result.success) {
 				const accountId = activeAccount.accountId;
 				try {
-					const client = await createStoredAccountRpcClient(
+					const client = await createStoredAccountApiClient(
 						storage,
 						accountId,
 					).catch(() => null);

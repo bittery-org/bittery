@@ -507,7 +507,7 @@ async fn main() {
                         message
                             .protocol_version
                             .map(|version| version.to_string())
-                            .unwrap_or_else(|| "legacy".to_string())
+                            .unwrap_or_else(|| "missing".to_string())
                     ));
                     let _ = out_tx.send(NativeResponse::current(
                         message.request_id,

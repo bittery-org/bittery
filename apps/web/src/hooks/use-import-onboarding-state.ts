@@ -1,4 +1,5 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -28,8 +29,8 @@ function writeLocalFlag(key: string, value: boolean): void {
 }
 
 export function useImportOnboardingState() {
-	const rpc = useRPC();
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const api = useApiClient();
+	const userQuery = useQuery(apiQueries.auth.me(api));
 	const userId = userQuery.data?.id ?? null;
 
 	const [isDismissed, setIsDismissed] = useState(false);

@@ -6,28 +6,32 @@
  * - Resolve the account/token/server context used for SSE connection.
  * - Resolve deterministic account candidates for incoming sync events.
  * - Apply delta sync updates to item cache(s) before UI invalidation.
- * - Fall back to global cache updates when account-scoped updates cannot be applied.
  */
 
 import { AccountResolver } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { RpcVaultClient } from "@bittery/core/services/vault-service";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
-import type { DeltaSyncClient, SyncEvent, SyncItemCache } from "@bittery/sync";
+import type {
+	DeltaSyncApiClient,
+	SyncApiClient,
+	SyncCursor,
+	SyncEvent,
+	SyncItemCache,
+} from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
-import { rpcClient } from "../rpc-client";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
 export type SyncConnectionContext = {
+	accountId: string | null;
 	email: string | null;
 	serverUrl: string;
-	token: string;
+	client: SyncEventApiClient;
 };
 
 type VaultKeyLike = {
@@ -49,7 +53,10 @@ export interface SyncCacheStorage {
 	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
 	getServerUrl: (accountId?: string) => Promise<string | null>;
 	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
-	getAccountMetadata: (accountId: string) => Promise<{ email?: string } | null>;
+	getAccountMetadata: (accountId: string) => Promise<{
+		email?: string;
+		insecureTransportConfirmed?: boolean;
+	} | null>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -57,18 +64,7 @@ export interface SyncCacheDesktopClient {
 	clearCache: () => void;
 }
 
-export interface SyncEventQueryClient extends DeltaSyncClient {
-	sync: {
-		getEventsSince: {
-			query: (input: { sinceId?: string | null; limit?: number }) => Promise<{
-				events: SyncEvent[];
-				hasMore: boolean;
-				requiresFullRefresh: boolean;
-				cursor: { id: string } | null;
-			}>;
-		};
-	};
-}
+export type SyncEventApiClient = SyncApiClient;
 
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
@@ -78,16 +74,16 @@ export interface SyncCacheServiceDeps {
 	 */
 	itemCache: SyncItemCache;
 	desktopClient: SyncCacheDesktopClient;
-	defaultClient: SyncEventQueryClient;
 	createAccountClient: (
 		token: string,
 		serverUrl: string,
-	) => SyncEventQueryClient;
+		insecureTransportConfirmed: boolean,
+	) => SyncEventApiClient;
 	/**
 	 * Mirrors `performDeltaSync` exactly: `(accountScope, serverUrl, accountEmail)`.
 	 */
 	deltaSync: (
-		client: DeltaSyncClient,
+		client: DeltaSyncApiClient,
 		cache: SyncItemCache,
 		event: SyncEvent,
 		accountScope: string,
@@ -97,8 +93,13 @@ export interface SyncCacheServiceDeps {
 	handleTravelModeSync?: (
 		event: SyncEvent,
 		accountId: string,
-		accountClient: SyncEventQueryClient | null,
+		accountClient: SyncEventApiClient | null,
 	) => Promise<void>;
+	refreshFromServer: () => Promise<void>;
+	initializeFromServer: (
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	) => Promise<SyncCursor | null>;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
@@ -106,9 +107,10 @@ const defaultDeps: SyncCacheServiceDeps = {
 	storage,
 	itemCache: core.vaultCoordinator,
 	desktopClient,
-	defaultClient: rpcClient as unknown as SyncEventQueryClient,
-	createAccountClient: (token, serverUrl) =>
-		createAccountRpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
+	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
+		createAccountApiClient(token, serverUrl, undefined, undefined, {
+			insecureTransportConfirmed,
+		}),
 	deltaSync: performDeltaSync,
 	handleTravelModeSync: async (event, accountId, accountClient) => {
 		const accounts = new AccountResolver(storage);
@@ -120,10 +122,26 @@ const defaultDeps: SyncCacheServiceDeps = {
 			core.vaultCoordinator as VaultRepositoryCoordinator,
 			accountClient
 				? {
-						rpcClient: accountClient as unknown as RpcVaultClient,
+						apiClient: accountClient,
 						accounts,
 					}
 				: undefined,
+		);
+	},
+	refreshFromServer: async () => {
+		const accounts = await new AccountResolver(
+			storage,
+		).resolveUnlockedAccounts();
+		await core.vaultCoordinator.refreshFromServer(accounts);
+	},
+	initializeFromServer: async (accountId, currentCursor) => {
+		const accounts = await new AccountResolver(
+			storage,
+		).resolveUnlockedAccounts();
+		return core.vaultCoordinator.initializeSyncBaseline(
+			accounts,
+			accountId,
+			currentCursor,
 		);
 	},
 	logger: console,
@@ -158,10 +176,17 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 
 export interface SyncCacheService {
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
-	getClientForEmail: (email?: string | null) => Promise<SyncEventQueryClient>;
+	/** Null when the account has no reachable token; callers must not fall back to another account's client. */
+	getClientForAccountId: (
+		accountId: string,
+	) => Promise<SyncEventApiClient | null>;
 	resolveCandidateAccountIdsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
-	clearItemCachesForKnownAccounts: () => Promise<void>;
+	refreshItemCachesForKnownAccounts: () => Promise<void>;
+	initializeSyncBaselineForAccount: (
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	) => Promise<SyncCursor | null>;
 }
 
 export function createSyncCacheService(
@@ -245,14 +270,21 @@ export function createSyncCacheService(
 
 	async function getAccountClientForAccountId(
 		accountId: string,
-	): Promise<SyncEventQueryClient | null> {
+	): Promise<SyncEventApiClient | null> {
 		const token = await getAuthTokenForAccountId(accountId);
 		if (!token) {
 			return null;
 		}
 
-		const serverUrl = await getServerUrlForAccountId(accountId);
-		return deps.createAccountClient(token, serverUrl);
+		const [serverUrl, account] = await Promise.all([
+			getServerUrlForAccountId(accountId),
+			deps.storage.getAccountMetadata(accountId),
+		]);
+		return deps.createAccountClient(
+			token,
+			serverUrl,
+			account?.insecureTransportConfirmed === true,
+		);
 	}
 
 	async function resolveConnectionContext(): Promise<SyncConnectionContext | null> {
@@ -261,61 +293,25 @@ export function createSyncCacheService(
 		const candidates = buildOrderedCandidates(activeAccountId, knownAccountIds);
 
 		for (const accountId of candidates) {
-			const token = await getAuthTokenForAccountId(accountId);
-			if (!token) {
+			const client = await getAccountClientForAccountId(accountId);
+			if (!client) {
 				continue;
 			}
 
-			const serverUrl = await getServerUrlForAccountId(accountId);
 			const email = await resolveEmailForAccountId(accountId);
 			deps.logger.info(
 				`[sync-cache-service] Selected account-scoped sync context: ${accountId}`,
 			);
 			return {
+				accountId,
 				email: email ? normalizeEmail(email) : null,
-				serverUrl,
-				token,
+				serverUrl: await getServerUrlForAccountId(accountId),
+				client,
 			};
 		}
 
-		// Compatibility fallback for legacy/global token resolution paths.
-		const fallbackToken = await deps.storage.getAuthToken();
-		if (!fallbackToken) {
-			deps.logger.info(
-				"[sync-cache-service] No account-scoped or fallback token available",
-			);
-			return null;
-		}
-
-		const fallbackServerUrl = await getServerUrlForAccountId(null);
-		deps.logger.info(
-			"[sync-cache-service] Using fallback sync context without explicit account scope",
-		);
-		return {
-			email: null,
-			serverUrl: fallbackServerUrl,
-			token: fallbackToken,
-		};
-	}
-
-	async function getClientForEmail(
-		email?: string | null,
-	): Promise<SyncEventQueryClient> {
-		if (!email) {
-			return deps.defaultClient;
-		}
-
-		const normalizedEmail = normalizeEmail(email);
-		const accounts = await deps.storage.getAccountsList();
-		const matchedAccount = accounts.find(
-			(account) => normalizeEmail(account.email) === normalizedEmail,
-		);
-		if (!matchedAccount) {
-			return deps.defaultClient;
-		}
-
-		const client = await getAccountClientForAccountId(matchedAccount.accountId);
-		return client ?? deps.defaultClient;
+		deps.logger.info("[sync-cache-service] No account-scoped token available");
+		return null;
 	}
 
 	async function resolveCandidateAccountIdsForEvent(
@@ -468,6 +464,7 @@ export function createSyncCacheService(
 					`[sync-cache-service] Delta sync failed for ${accountId} (${event.type})`,
 					error,
 				);
+				throw error;
 			}
 		}
 
@@ -489,30 +486,24 @@ export function createSyncCacheService(
 		}
 	}
 
-	async function clearItemCachesForKnownAccounts(): Promise<void> {
-		const activeSingleAccountId = await resolveActiveSingleAccountId();
-		const allAccountIds = await getAllKnownAccountIds();
-		const candidates = buildOrderedCandidates(
-			activeSingleAccountId,
-			allAccountIds,
-		);
+	async function refreshItemCachesForKnownAccounts(): Promise<void> {
+		await deps.refreshFromServer();
+	}
 
-		// No known accounts means no collections to clear.
-		if (candidates.length === 0) {
-			return;
-		}
-
-		await Promise.all(
-			candidates.map((accountId) => clearItemCacheForAccountId(accountId)),
-		);
+	async function initializeSyncBaselineForAccount(
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	): Promise<SyncCursor | null> {
+		return deps.initializeFromServer(accountId, currentCursor);
 	}
 
 	return {
 		resolveConnectionContext,
-		getClientForEmail,
+		getClientForAccountId: getAccountClientForAccountId,
 		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,
-		clearItemCachesForKnownAccounts,
+		refreshItemCachesForKnownAccounts,
+		initializeSyncBaselineForAccount,
 	};
 }
 

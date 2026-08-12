@@ -225,7 +225,7 @@ test("the sidebar and the guards both follow the plan, from Free up to Team", as
 		page.getByText(uiText("sentinel_score_gauge_label")),
 	);
 	await expect(page).toHaveURL(/\/security$/);
-	// Admin needs `team_management`, which Personal does not carry.
+	// Admin needs `teamManagement`, which Personal does not carry.
 	await gotoRoute(page, "/admin", billingHeading);
 	await expect(page).toHaveURL(/\/billing$/);
 

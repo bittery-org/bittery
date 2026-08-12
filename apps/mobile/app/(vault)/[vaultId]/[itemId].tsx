@@ -63,7 +63,6 @@ export default function ItemDetailScreen() {
 			toast.show({
 				variant: "accent",
 				label: m.mob_item_detail_toast_deleted(),
-				description: m.mob_item_detail_toast_deleted_description(),
 				placement: "bottom",
 			});
 			router.back();
@@ -92,7 +91,6 @@ export default function ItemDetailScreen() {
 			toast.show({
 				variant: "accent",
 				label: m.mob_item_detail_toast_password_restored(),
-				description: m.mob_item_detail_toast_password_restored_description(),
 				placement: "bottom",
 			});
 			setPasswordHistoryVisible(false);

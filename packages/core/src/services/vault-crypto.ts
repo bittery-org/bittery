@@ -5,9 +5,8 @@
  * between — which key opens which value, what gets bound into the AAD, what a wrapped vault
  * key looks like on the wire, which KDF profiles this client will accept — is policy, and it
  * lives here so that exactly one implementation of it exists. Before this module the four
- * platform adapters each carried a copy: every one of them attached the vault-key wrap
- * context inside `encrypt()` and ran the legacy AAD fallback inside `decrypt()`, so the
- * envelope format was defined four times and enforced nowhere.
+ * platform adapters each carried a copy of the vault-key wrap context inside `encrypt()`,
+ * so the envelope format was defined four times and enforced nowhere.
  *
  * ## `KeyRef` ownership
  *
@@ -28,6 +27,9 @@
 import type {
 	CryptoPort,
 	DecryptManyResult,
+	EncryptedData,
+	EncryptionContext,
+	KdfProfile,
 	KeyRef,
 } from "@bittery/crypto-port";
 import { getRecoveryKeyHint, getSecretKeyHint } from "@bittery/shared/crypto";
@@ -37,11 +39,7 @@ import {
 } from "@bittery/shared/kdf-policy";
 import type { VaultKeyEntry } from "@bittery/shared/vault-mapping";
 import type { SessionExpiryInput } from "@bittery/storage/types";
-import type {
-	EncryptedData,
-	EncryptionContext,
-	KdfProfile,
-} from "@bittery/types";
+import type { CachedEncryptedItem } from "@bittery/types";
 
 // ============================================================================
 // The encryption contexts (AAD)
@@ -51,14 +49,43 @@ import type {
  * Every ciphertext in a vault is bound to the entity it belongs to, so a ciphertext moved
  * from one item, field or vault to another fails to decrypt instead of silently opening.
  * These builders are the only place that binding is spelled out.
+ *
+ * An item has two of them and they are deliberately not interchangeable:
+ *
+ * - **Writing** binds the revision the ciphertext is *about to become* — `existing.version + 1`,
+ *   a number no record carries yet — so the writer states it. That is {@link ItemWriteScope}.
+ * - **Reading** binds the revision the ciphertext was *sealed at*, which the stored record
+ *   already carries. Readers therefore hand over the record ({@link StoredItemBinding}) and
+ *   the fields are pulled from it, because a reader who retypes them can pair one item's
+ *   ciphertext with another item's binding and lose that plaintext permanently.
+ *
+ * `encryptionVersion` is not `version`: a bump for optimistic concurrency leaves the
+ * ciphertext alone, so the two drift apart as a matter of course.
  */
 
-interface ItemContextInput {
+/** Where a *new* ciphertext will sit — the revision being written, not one already stored. */
+export interface ItemWriteScope {
 	vaultId: string;
 	itemId: string;
 	version: number;
 	userId: string;
 }
+
+/**
+ * The stored fields an item's AAD was bound to. Read paths pass the record itself, so the
+ * compiler pulls these four rather than the programmer.
+ */
+export type StoredItemBinding = Pick<
+	CachedEncryptedItem,
+	"id" | "vaultId" | "encryptionVersion" | "encryptedByUserId"
+>;
+
+/** A stored item's ciphertext together with the binding it was sealed under. */
+export type StoredItemCiphertext = StoredItemBinding &
+	Pick<
+		CachedEncryptedItem,
+		"encryptedData" | "encryptionIv" | "encryptionAlgorithm"
+	>;
 
 interface AttachmentContextInput {
 	vaultId: string;
@@ -82,16 +109,42 @@ function normalizeVersion(version: number): number {
 	return Math.floor(version);
 }
 
-export function buildItemEncryptionContext(
-	input: ItemContextInput,
-): EncryptionContext {
+/**
+ * Not exported: `encryptItem` is the only way to bind a write context, so nobody can seal a
+ * ciphertext against a context this module never saw.
+ */
+function buildItemEncryptionContext(scope: ItemWriteScope): EncryptionContext {
 	return {
-		vaultId: input.vaultId,
-		entityId: input.itemId,
+		vaultId: scope.vaultId,
+		entityId: scope.itemId,
 		entityType: "item",
-		version: normalizeVersion(input.version),
-		userId: input.userId,
+		version: normalizeVersion(scope.version),
+		userId: scope.userId,
 	};
+}
+
+/** The stored ciphertext triple, read off the record beside the binding it belongs to. */
+function storedItemData(item: StoredItemCiphertext): EncryptedData {
+	return {
+		ciphertext: item.encryptedData,
+		iv: item.encryptionIv,
+		algorithm: item.encryptionAlgorithm,
+	};
+}
+
+/**
+ * Rebuilds the context a stored item was sealed under, from the record itself. Exported for
+ * key rotation, which re-encrypts under the binding each item already has.
+ */
+export function buildStoredItemEncryptionContext(
+	item: StoredItemBinding,
+): EncryptionContext {
+	return buildItemEncryptionContext({
+		vaultId: item.vaultId,
+		itemId: item.id,
+		version: item.encryptionVersion,
+		userId: item.encryptedByUserId,
+	});
 }
 
 export function buildAttachmentNameEncryptionContext(
@@ -143,70 +196,6 @@ function buildVaultKeyEncryptionContext(
 }
 
 // ============================================================================
-// The legacy context envelope (back-compat only)
-// ============================================================================
-
-const CONTEXT_ENVELOPE_MARKER = "bittery-context-envelope-v1";
-
-interface ContextEnvelope {
-	marker: typeof CONTEXT_ENVELOPE_MARKER;
-	context: string;
-	payload: string;
-}
-
-function serializeEncryptionContext(context: EncryptionContext): string {
-	return [
-		context.vaultId,
-		context.entityId,
-		context.entityType,
-		String(context.version),
-		context.userId,
-	].join("\0");
-}
-
-/**
- * Reads a context envelope out of a plaintext.
- *
- * Ciphertext written before the AES-GCM AAD binding existed carries its context *inside*
- * the plaintext as this JSON envelope instead of alongside the ciphertext. Such records are
- * still in real vaults and are only rewritten when the value they hold is next saved, so
- * this cannot be deleted until every one of them has been re-encrypted — a migration
- * nothing schedules today. The envelope is read-only on purpose: no new write produces one.
- */
-function unwrapPlaintextWithContext(
-	decrypted: string,
-	context: EncryptionContext,
-): string {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(decrypted);
-	} catch {
-		throw new Error("Missing encryption context envelope");
-	}
-
-	if (
-		typeof parsed !== "object" ||
-		parsed === null ||
-		!("marker" in parsed) ||
-		!("context" in parsed) ||
-		!("payload" in parsed)
-	) {
-		throw new Error("Invalid encryption context envelope");
-	}
-
-	const envelope = parsed as ContextEnvelope;
-	if (envelope.marker !== CONTEXT_ENVELOPE_MARKER) {
-		throw new Error("Invalid encryption context marker");
-	}
-
-	if (envelope.context !== serializeEncryptionContext(context)) {
-		throw new Error("Encryption context mismatch");
-	}
-
-	return envelope.payload;
-}
-
-// ============================================================================
 // The wrapped vault key envelope
 // ============================================================================
 
@@ -220,7 +209,7 @@ interface WrappedVaultKey {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	context?: {
+	context: {
 		vaultId: string;
 		userId: string;
 		keyVersion: number;
@@ -273,14 +262,6 @@ export interface VaultCryptoDeps {
 	storage: VaultCryptoStore;
 }
 
-/** Where an item's ciphertext sits, which is what its AAD is built from. */
-export interface ItemScope {
-	vaultId: string;
-	itemId: string;
-	version: number;
-	userId: string;
-}
-
 export interface AttachmentScope {
 	vaultId: string;
 	attachmentKey: string;
@@ -289,18 +270,16 @@ export interface AttachmentScope {
 
 export type AttachmentField = "name" | "contentType" | "blob";
 
-export interface DecryptItemRequest {
-	id: string;
-	data: EncryptedData;
+export interface DecryptStoredItemRequest {
+	item: StoredItemCiphertext;
 	vaultKey: KeyRef;
-	scope: ItemScope;
 }
 
 export interface EncryptedAttachmentMetaInput {
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
-	encryptedContentTypeIv: string | null;
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 }
 
@@ -401,21 +380,25 @@ export interface VaultCrypto {
 
 	// --- item payloads ---
 
+	/**
+	 * Seals a new revision. The scope's `version` is the revision this ciphertext will be
+	 * stored as, which is why it is stated rather than read off a record.
+	 */
 	encryptItem(
 		plaintext: string,
 		vaultKey: KeyRef,
-		scope: ItemScope,
+		scope: ItemWriteScope,
 	): Promise<EncryptedData>;
 
-	decryptItem(
-		data: EncryptedData,
+	/** Opens a stored item under the binding its own record carries. */
+	decryptStoredItem(
+		item: StoredItemCiphertext,
 		vaultKey: KeyRef,
-		scope: ItemScope,
 	): Promise<string>;
 
-	/** One port round trip for the primary path; legacy envelopes are retried in place. */
-	decryptItems(
-		requests: readonly DecryptItemRequest[],
+	/** One port round trip for the whole batch; results keep request order and item ids. */
+	decryptStoredItems(
+		requests: readonly DecryptStoredItemRequest[],
 	): Promise<readonly DecryptManyResult[]>;
 
 	encryptAttachment(
@@ -450,26 +433,12 @@ export interface VaultCrypto {
 export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 	const { crypto, storage } = deps;
 
-	/**
-	 * Decryption with the AAD bound, falling back to the pre-AAD format.
-	 *
-	 * The fallback is load-bearing back-compat, not defensive coding: a record written
-	 * before AAD binding decrypts with no context at all and carries its context in the
-	 * plaintext envelope, which `unwrapPlaintextWithContext` then verifies. Both paths bind
-	 * the same context, so neither accepts a ciphertext from a different entity — the only
-	 * difference is where the binding is written. It can go once no such record is left.
-	 */
 	async function decryptBoundToContext(
 		data: EncryptedData,
 		key: KeyRef,
 		context: EncryptionContext,
 	): Promise<string> {
-		try {
-			return await crypto.decrypt(data, key, context);
-		} catch {
-			const decrypted = await crypto.decrypt(data, key, null);
-			return unwrapPlaintextWithContext(decrypted, context);
-		}
+		return crypto.decrypt(data, key, context);
 	}
 
 	function parseEncryptedData(serialized: string): EncryptedData {
@@ -529,19 +498,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				userId: wrapContext.userId,
 				keyVersion: wrapContext.keyVersion,
 			});
-			try {
-				return await crypto.unwrapKey(encryptedData, masterUnlockKey, {
-					context,
-				});
-			} catch {
-				return crypto.unwrapKey(encryptedData, masterUnlockKey, {
-					context: null,
-					legacyEnvelope: {
-						marker: CONTEXT_ENVELOPE_MARKER,
-						context: serializeEncryptionContext(context),
-					},
-				});
-			}
+			return crypto.unwrapKey(encryptedData, masterUnlockKey, context);
 		}
 
 		if (!encryptedPrivateKey) {
@@ -680,7 +637,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 		async encryptItem(
 			plaintext: string,
 			vaultKey: KeyRef,
-			scope: ItemScope,
+			scope: ItemWriteScope,
 		): Promise<EncryptedData> {
 			return crypto.encrypt(
 				plaintext,
@@ -689,61 +646,27 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 			);
 		},
 
-		async decryptItem(
-			data: EncryptedData,
+		async decryptStoredItem(
+			item: StoredItemCiphertext,
 			vaultKey: KeyRef,
-			scope: ItemScope,
 		): Promise<string> {
 			return decryptBoundToContext(
-				data,
+				storedItemData(item),
 				vaultKey,
-				buildItemEncryptionContext(scope),
+				buildStoredItemEncryptionContext(item),
 			);
 		},
 
-		async decryptItems(
-			requests: readonly DecryptItemRequest[],
+		async decryptStoredItems(
+			requests: readonly DecryptStoredItemRequest[],
 		): Promise<readonly DecryptManyResult[]> {
-			const primary = await crypto.decryptMany(
-				requests.map((request) => ({
-					id: request.id,
-					data: request.data,
-					key: request.vaultKey,
-					context: buildItemEncryptionContext(request.scope),
+			return crypto.decryptMany(
+				requests.map(({ item, vaultKey }) => ({
+					id: item.id,
+					data: storedItemData(item),
+					key: vaultKey,
+					context: buildStoredItemEncryptionContext(item),
 				})),
-			);
-
-			return Promise.all(
-				primary.map(async (result, index): Promise<DecryptManyResult> => {
-					if (result.ok) {
-						return result;
-					}
-					const request = requests[index];
-					if (!request) {
-						return result;
-					}
-					try {
-						const decrypted = await crypto.decrypt(
-							request.data,
-							request.vaultKey,
-							null,
-						);
-						return {
-							id: result.id,
-							ok: true,
-							plaintext: unwrapPlaintextWithContext(
-								decrypted,
-								buildItemEncryptionContext(request.scope),
-							),
-						};
-					} catch (error) {
-						return {
-							id: result.id,
-							ok: false,
-							error: error instanceof Error ? error.message : String(error),
-						};
-					}
-				}),
 			);
 		},
 
@@ -791,7 +714,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				decryptBoundToContext(
 					{
 						ciphertext: encrypted.encryptedContentType,
-						iv: encrypted.encryptedContentTypeIv ?? encrypted.encryptionIv,
+						iv: encrypted.encryptedContentTypeIv,
 						algorithm: encrypted.encryptionAlgorithm,
 					},
 					vaultKey,
@@ -950,8 +873,11 @@ const NO_LOCAL_ACCOUNT: VaultCryptoStore = {
  */
 function ownerWrapKeyVersion(encryptedVaultKey: string): number {
 	const parsed = JSON.parse(encryptedVaultKey) as WrappedVaultKey;
-	const keyVersion = parsed.context?.keyVersion;
-	return Number.isInteger(keyVersion) ? (keyVersion as number) : 1;
+	const keyVersion = parsed.context.keyVersion;
+	if (!Number.isInteger(keyVersion) || keyVersion < 1) {
+		throw new Error("Invalid vault key wrap version");
+	}
+	return keyVersion;
 }
 
 interface ReKeyedAccount extends AccountReKeyPayload {

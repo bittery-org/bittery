@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	Button,
 	Dialog,
@@ -20,12 +20,12 @@ import { useQueryInvalidator } from "../../providers/sync-provider";
 export function CreateTeamDialog() {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 
 	const createMutation = useMutation({
 		mutationFn: (input: { name: string; teamType: null }) =>
-			rpcClient.team.create.mutate(input),
+			api.teams.create(input),
 		onSuccess: async () => {
 			toast.success("Team created");
 			await invalidator.invalidateTeam();

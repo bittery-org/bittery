@@ -1,5 +1,5 @@
 import { TeamAvatarError, useTeamAvatar } from "@bittery/core/hooks";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	Avatar,
 	AvatarFallback,
@@ -49,7 +49,7 @@ export function TeamSettings({
 	const [isEditing, setIsEditing] = useState(false);
 	const [name, setName] = useState(teamName);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const { uploadAvatar, removeAvatar, isUploading, isRemoving } =
 		useTeamAvatar();
@@ -60,9 +60,7 @@ export function TeamSettings({
 
 	const updateMutation = useMutation({
 		mutationFn: (input: { teamId: string; name: string }) =>
-			rpcClient.team.update.mutate(
-				input as Parameters<typeof rpcClient.team.update.mutate>[0],
-			),
+			api.teams.update(input.teamId, { name: input.name }),
 		onSuccess: async () => {
 			toast.success(m.team_settings_toast_name_updated());
 			await invalidator.invalidateTeam();

@@ -1,10 +1,7 @@
 import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
-import {
-	createAppRpcOptionsProxy,
-	isUnauthorizedRpcError,
-} from "@bittery/shared/rpc-client";
-import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { isUnauthorizedApiError } from "@bittery/shared/api-client";
+import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
@@ -13,9 +10,18 @@ import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
-const fallbackServerUrl =
-	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
-	"http://localhost:3000";
+const discoveryPolicy = { operatorEnabled: true, accountConfirmed: true };
+
+function resolveFallbackServerUrl(): string {
+	const configured = import.meta.env.VITE_SERVER_URL;
+	if (!configured?.trim()) return "http://localhost:3000";
+	const normalized = normalizeServerUrl(configured, discoveryPolicy);
+	if (normalized) return normalized;
+	throw new TypeError(
+		"Configured server URL is invalid or remote HTTP transport is not authorized.",
+	);
+}
+const fallbackServerUrl = resolveFallbackServerUrl();
 
 let isHandlingAuthError = false;
 
@@ -51,7 +57,7 @@ function handleUnauthorizedError() {
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -67,7 +73,7 @@ const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -82,53 +88,65 @@ async function resolveDesktopServerUrl(): Promise<string> {
 		: null;
 	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
 	return (
-		normalizeServerUrl(accountServerUrl ?? "") ??
+		normalizeServerUrl(accountServerUrl ?? "", discoveryPolicy) ??
 		activeAuthServerUrl ??
 		fallbackServerUrl
 	);
 }
 
-const rpcClient = createSessionRefreshingRpcClient({
-	defaultServerUrl: fallbackServerUrl,
-	getServerUrl: resolveDesktopServerUrl,
-	appPlatform: "desktop",
-	getSessionSnapshot: async () => {
-		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount) {
-			return { token: null, issuedAt: null, expiresAt: null };
-		}
+export async function createDesktopApiClient() {
+	const serverUrl = await resolveDesktopServerUrl();
+	return createSessionRefreshingApiClient({
+		defaultServerUrl: serverUrl,
+		clientPlatform: "desktop",
+		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+		getAccountSnapshot: async (originAccountId) => {
+			const activeAccount =
+				originAccountId ?? (await storage.getActiveAccount());
+			if (!activeAccount) return null;
 
-		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(activeAccount),
-			storage.getStoredSessionData(activeAccount),
-		]);
+			const [token, sessionData, accountServerUrl, account] = await Promise.all(
+				[
+					storage.getAuthToken(activeAccount),
+					storage.getStoredSessionData(activeAccount),
+					storage.getServerUrl(activeAccount),
+					storage.getAccountMetadata(activeAccount),
+				],
+			);
+			const normalizedAccountServerUrl = accountServerUrl
+				? normalizeServerUrl(accountServerUrl, {
+						operatorEnabled: true,
+						accountConfirmed: true,
+					})
+				: null;
+			if (accountServerUrl && !normalizedAccountServerUrl) {
+				throw new TypeError(
+					"Account server URL is invalid or remote HTTP transport is not authorized.",
+				);
+			}
 
-		return {
-			token,
-			issuedAt: sessionData?.createdAt ?? null,
-			expiresAt: sessionData?.expiresAt ?? null,
-		};
-	},
-	getRefreshToken: async () => {
-		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount) {
-			return null;
-		}
-		return storage.getAuthToken(activeAccount);
-	},
-	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount) {
-			await storage.storeAuthToken(token, activeAccount);
-			await storage.updateStoredSessionMetadata(activeAccount, {
+			return {
+				accountId: activeAccount,
+				serverUrl: normalizedAccountServerUrl ?? fallbackServerUrl,
+				token,
+				issuedAt: sessionData?.createdAt ?? null,
+				expiresAt: sessionData?.expiresAt ?? null,
+				insecureTransportConfirmed:
+					account?.insecureTransportConfirmed === true,
+			};
+		},
+		storeRefreshedSession: async (
+			snapshot,
+			{ token, sessionId, expiresAt },
+		) => {
+			await storage.storeAuthToken(token, snapshot.accountId);
+			await storage.updateStoredSessionMetadata(snapshot.accountId, {
 				sessionId,
 				expiresAt,
 			});
-		}
-	},
-	getClientId: async () => getOrCreateDesktopSyncClientId(),
-});
+		},
+		getClientId: async () => getOrCreateDesktopSyncClientId(),
+	});
+}
 
-const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
-
-export { rpc, rpcClient, queryClient };
+export { queryClient };

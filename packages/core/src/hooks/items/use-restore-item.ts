@@ -31,8 +31,7 @@ export function useRestoreItem() {
 				vaultId: input.vaultId,
 				includeDeleted: true,
 			});
-			await context.repo.restore(input.itemId);
-			enqueueItemMutation(queue, context, {
+			await enqueueItemMutation(queue, context, {
 				type: "restore",
 				entityId: input.itemId,
 				vaultId: input.vaultId,

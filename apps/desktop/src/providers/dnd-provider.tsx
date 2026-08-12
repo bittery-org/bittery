@@ -1,6 +1,11 @@
 import { useMoveItem } from "@bittery/core/hooks";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
-import { toast } from "@bittery/ui";
+import {
+	type DragItemData,
+	type DropVaultData,
+	ItemDragPreview,
+	toast,
+} from "@bittery/ui";
 import {
 	DndContext,
 	type DragEndEvent,
@@ -12,25 +17,8 @@ import {
 } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useState } from "react";
-import { ItemDragPreview } from "../components/vault/item-drag-preview";
-
-/**
- * Data attached to draggable items
- */
-export interface DragItemData {
-	type: "vault-item";
-	item: DecryptedItem;
-	sourceVaultId: string;
-}
-
-/**
- * Data attached to droppable vault targets
- */
-export interface DropVaultData {
-	type: "vault";
-	vaultId: string;
-	role: string;
-}
+import { readCurrentAuthServerUrl } from "../lib/auth-server";
+import { useI18n } from "../providers/i18n-provider";
 
 interface DndContextValue {
 	activeItem: DecryptedItem | null;
@@ -51,6 +39,7 @@ interface VaultDndProviderProps {
 }
 
 export function VaultDndProvider({ children }: VaultDndProviderProps) {
+	const { m } = useI18n();
 	const [activeItem, setActiveItem] = useState<DecryptedItem | null>(null);
 	const [sourceVaultId, setSourceVaultId] = useState<string | null>(null);
 	const moveItem = useMoveItem();
@@ -153,18 +142,11 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 			{
 				onSuccess: (result) => {
 					if (result.crossAccount) {
-						toast.success("Item transferred to other account successfully");
-						// For cross-account transfers, use the new item ID
-						navigate({
-							to: "/vault/$id/$itemId",
-							params: {
-								id: targetVaultId,
-								itemId: result.newItemId || draggedItem.id,
-							},
-						});
+						toast.info(
+							m.vaults_detail_items_move_dialog_toast_cross_account_pending(),
+						);
 					} else {
-						toast.success("Item moved successfully");
-						// Navigate to the item in the target vault
+						toast.success(m.vaults_dnd_move_success());
 						navigate({
 							to: "/vault/$id/$itemId",
 							params: { id: targetVaultId, itemId: draggedItem.id },
@@ -173,7 +155,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 				},
 				onError: (error) => {
 					const errorMessage =
-						error instanceof Error ? error.message : "Failed to move item";
+						error instanceof Error ? error.message : m.vaults_dnd_move_error();
 					toast.error(errorMessage);
 				},
 			},
@@ -195,7 +177,12 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 			>
 				{children}
 				<DragOverlay>
-					{activeItem && <ItemDragPreview item={activeItem} />}
+					{activeItem && (
+						<ItemDragPreview
+							item={activeItem}
+							defaultServerUrl={readCurrentAuthServerUrl()}
+						/>
+					)}
 				</DragOverlay>
 			</DndContext>
 		</VaultDndContext.Provider>

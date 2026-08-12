@@ -18,7 +18,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
-import type { DesktopStatus } from "../background/desktop-protocol";
+import { sendMessage } from "../lib/messaging";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 import { useTheme } from "../providers/theme-provider";
@@ -86,14 +86,10 @@ export function SettingsPage() {
 	const desktopStatusQuery = useQuery({
 		queryKey: ["desktopStatus"],
 		queryFn: async () => {
-			return await new Promise<DesktopStatus | null>((resolve) => {
-				chrome.runtime.sendMessage(
-					{ type: "CHECK_DESKTOP_STATUS" },
-					(response: DesktopStatus) => {
-						resolve(response?.available ? response : null);
-					},
-				);
-			});
+			const response = await sendMessage({
+				type: "CHECK_DESKTOP_STATUS",
+			}).catch(() => null);
+			return response?.success && response.available ? response : null;
 		},
 	});
 	const autoLockTimeout = useMemo(
@@ -110,12 +106,12 @@ export function SettingsPage() {
 		toast.success(m.settings_auto_lock_toast_updated());
 
 		// Notify background service worker that settings changed
-		chrome.runtime.sendMessage({ type: "SETTINGS_CHANGED" });
+		void sendMessage({ type: "SETTINGS_CHANGED" });
 	};
 
 	const handleSignOut = async () => {
 		try {
-			const response = await chrome.runtime.sendMessage({ type: "LOGOUT" });
+			const response = await sendMessage({ type: "LOGOUT" });
 			if (response.success) {
 				toast.success(m.ext_settings_toast_signed_out());
 				navigate({ to: "/login" });

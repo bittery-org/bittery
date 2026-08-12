@@ -1,4 +1,5 @@
 import type { DecryptedItem } from "@bittery/shared/types";
+import { sendMessage } from "../../lib/messaging";
 import {
 	createAutofillSelectSchema,
 	openPopupMessageSchema,
@@ -238,7 +239,7 @@ export function showAuthStateOverlay(
 				schema: openPopupMessageSchema,
 			})
 		) {
-			chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {
+			sendMessage({ type: "OPEN_POPUP" }).catch(() => {
 				// The popup can only be opened programmatically on newer Chrome
 				// builds; the toolbar icon remains the fallback either way.
 			});
@@ -253,12 +254,10 @@ export function showAuthStateOverlay(
 				schema: unlockDesktopMessageSchema,
 			})
 		) {
-			chrome.runtime
-				.sendMessage({ type: "TRIGGER_DESKTOP_UNLOCK" })
-				.catch(() => {
-					// Desktop went away between the status read and the click; the
-					// overlay re-checks on the next focus either way.
-				});
+			sendMessage({ type: "TRIGGER_DESKTOP_UNLOCK" }).catch(() => {
+				// Desktop went away between the status read and the click; the
+				// overlay re-checks on the next focus either way.
+			});
 			overlay.hide();
 			field.overlay = undefined;
 			return;

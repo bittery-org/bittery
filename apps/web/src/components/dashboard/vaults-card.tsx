@@ -1,12 +1,13 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { Badge, Button, VaultAvatar } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function VaultsCard() {
-	const rpc = useRPC();
-	const vaultsQuery = useQuery(rpc.vault.list.queryOptions());
+	const api = useApiClient();
+	const vaultsQuery = useQuery(apiQueries.vaults.list(api));
 	const { m } = useI18n();
 	const vaults = vaultsQuery.data ?? [];
 
@@ -39,10 +40,10 @@ export function VaultsCard() {
 							<div className="min-w-0 flex-1">
 								<p className="truncate font-medium text-sm">{vault.name}</p>
 								<p className="mt-0.5 text-muted-foreground text-xs">
-									{vault.items.length === 1
+									{Number(vault.itemCount) === 1
 										? m.dashboard_home_items_count_single({ count: 1 })
 										: m.dashboard_home_items_count_plural({
-												count: vault.items.length,
+												count: Number(vault.itemCount),
 											})}
 								</p>
 							</div>

@@ -5,7 +5,7 @@ import { getTeamPageAccess } from "./team-access.ts";
 test("personal owner stays read-only when team management entitlement is disabled", () => {
 	const access = getTeamPageAccess({
 		userRole: "owner",
-		entitlements: { team_management: false },
+		entitlements: { teamManagement: false },
 	});
 
 	assert.deepEqual(access, {
@@ -19,7 +19,7 @@ test("personal owner stays read-only when team management entitlement is disable
 test("family or team owner can manage the team when team management entitlement is enabled", () => {
 	const access = getTeamPageAccess({
 		userRole: "owner",
-		entitlements: { team_management: true },
+		entitlements: { teamManagement: true },
 	});
 
 	assert.deepEqual(access, {
@@ -33,7 +33,7 @@ test("family or team owner can manage the team when team management entitlement 
 test("team members stay read-only even when the entitlement is enabled", () => {
 	const access = getTeamPageAccess({
 		userRole: "member",
-		entitlements: { team_management: true },
+		entitlements: { teamManagement: true },
 	});
 
 	assert.deepEqual(access, {
@@ -47,7 +47,7 @@ test("team members stay read-only even when the entitlement is enabled", () => {
 test("self-hosted owners can manage the team when the entitlement is enabled", () => {
 	const access = getTeamPageAccess({
 		userRole: "owner",
-		entitlements: { team_management: true },
+		entitlements: { teamManagement: true },
 	});
 
 	assert.deepEqual(access, {

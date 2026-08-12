@@ -49,25 +49,7 @@ interface ItemDao {
     """)
     suspend fun getLoginItemsByDomain(domain: String, userId: String): List<ItemEntity>
 
-    /**
-     * Fallback lookup using denormalized primaryDomain when item_domains rows are missing/stale.
-     */
-    @Query("""
-        SELECT * FROM items
-        WHERE category = 'login'
-          AND userId = :userId
-          AND (primaryDomain = :domain OR primaryDomain = :canonicalDomain)
-        ORDER BY lastUsedAt DESC, updatedAt DESC, displayTitle ASC
-    """)
-    suspend fun getLoginItemsByPrimaryDomain(
-        domain: String,
-        canonicalDomain: String,
-        userId: String
-    ): List<ItemEntity>
-
-    /**
-     * Cross-user fallback lookup used to detect matching items that exist but are currently locked.
-     */
+    /** Cross-user lookup used to detect matching items that are currently locked. */
     @Query("""
         SELECT DISTINCT i.* FROM items i
         INNER JOIN item_domains d ON i.id = d.itemId
@@ -75,20 +57,6 @@ interface ItemDao {
         ORDER BY i.lastUsedAt DESC, i.updatedAt DESC, i.displayTitle ASC
     """)
     suspend fun getLoginItemsByDomainsAnyUser(domains: List<String>): List<ItemEntity>
-
-    /**
-     * Cross-user fallback lookup using denormalized primaryDomain.
-     */
-    @Query("""
-        SELECT * FROM items
-        WHERE category = 'login'
-          AND (primaryDomain = :domain OR primaryDomain = :canonicalDomain)
-        ORDER BY lastUsedAt DESC, updatedAt DESC, displayTitle ASC
-    """)
-    suspend fun getLoginItemsByPrimaryDomainAnyUser(
-        domain: String,
-        canonicalDomain: String
-    ): List<ItemEntity>
 
     /**
      * Get login items by domain with subdomain matching.
@@ -105,7 +73,7 @@ interface ItemDao {
             i.lastUsedAt DESC,
             i.displayTitle ASC
     """)
-    suspend fun getLoginItemsByDomainWithFallback(
+    suspend fun getLoginItemsByDomainAndParent(
         domain: String,
         parentDomain: String,
         userId: String

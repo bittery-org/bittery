@@ -1,5 +1,5 @@
 import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
-import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
+import { Badge, Button, Checkbox, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconArrowLeft as ArrowLeft,
 	IconBriefcase as Briefcase,
@@ -89,6 +89,45 @@ export default function SignUpForm({
 		onVerificationRequested: () => setCloudSignupStep("verify"),
 	});
 
+	if (
+		signup.requiresInsecureTransportConfirmation &&
+		!signup.insecureTransportConfirmed
+	) {
+		return (
+			<div className="w-full">
+				<div className="text-center">
+					<h1 className="font-semibold text-2xl tracking-tight">
+						{m.auth_signup_header_create_account()}
+					</h1>
+					<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
+						{m.auth_insecure_http_confirmation_description()}
+					</p>
+				</div>
+
+				<div className="mt-6 rounded-2xl border bg-card p-6">
+					<div className="space-y-4">
+						<Label
+							htmlFor="signup-insecure-http-confirmation"
+							className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+						>
+							<Checkbox
+								id="signup-insecure-http-confirmation"
+								checked={signup.insecureTransportConfirmed}
+								onCheckedChange={(checked) =>
+									signup.setInsecureTransportConfirmed(checked === true)
+								}
+							/>
+							<span>{m.auth_insecure_http_confirmation_label()}</span>
+						</Label>
+						<Button type="button" onClick={onSwitchToSignIn} className="w-full">
+							{m.auth_signup_button_back_to_signin()}
+						</Button>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	// Delegate to self-hosted component for self-hosted or invitation flows
 	if (signup.isSelfHostedMode || signup.isInvitationSignup) {
 		return (
@@ -96,6 +135,7 @@ export default function SignUpForm({
 				onSwitchToSignIn={onSwitchToSignIn}
 				invitationToken={invitationToken}
 				redirectTo={redirectTo}
+				initialInsecureTransportConfirmed={signup.insecureTransportConfirmed}
 			/>
 		);
 	}
@@ -514,6 +554,9 @@ function AccountSetupStep({
 		hasAllKeyMaterial,
 		hasVerifiedSignup,
 		requestSignupVerificationMutation,
+		requiresInsecureTransportConfirmation,
+		insecureTransportConfirmed,
+		setInsecureTransportConfirmed,
 	} = signup;
 
 	return (
@@ -704,6 +747,27 @@ function AccountSetupStep({
 					/>
 				)}
 			</button>
+
+			{requiresInsecureTransportConfirmation ? (
+				<Label
+					htmlFor="signup-insecure-http-confirmation"
+					className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+				>
+					<Checkbox
+						id="signup-insecure-http-confirmation"
+						checked={insecureTransportConfirmed}
+						onCheckedChange={(checked) =>
+							setInsecureTransportConfirmed(checked === true)
+						}
+					/>
+					<span className="grid gap-0.5">
+						<span>{m.auth_insecure_http_confirmation_label()}</span>
+						<span className="text-muted-foreground text-xs">
+							{m.auth_insecure_http_confirmation_description()}
+						</span>
+					</span>
+				</Label>
+			) : null}
 
 			{/* Submit */}
 			<div className="pt-1">

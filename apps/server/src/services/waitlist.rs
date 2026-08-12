@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query_as, FromRow, PgPool};
 use std::sync::LazyLock;
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 use crate::error::AppError;
 
@@ -16,7 +15,7 @@ const MAX_NAME_LEN: usize = 120;
 const MAX_USE_CASE_LEN: usize = 500;
 const MAX_SOURCE_LEN: usize = 80;
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitlistSignupInput {
     pub email: String,
@@ -25,7 +24,7 @@ pub struct WaitlistSignupInput {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitlistSignupResponse {
     pub success: bool,

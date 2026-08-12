@@ -37,9 +37,9 @@ Railway's free tier includes enough resources to run a personal Bittery instance
 
 | Service | Details |
 |---------|---------|
-| **caddy** | Public reverse proxy — routes `/rpc`, `/sync`, and `/cdn` to server over private networking; everything else to web |
-| **bittery-server** | Rust API server from `ghcr.io/bittery-org/bittery-server:latest` |
-| **bittery-web** | Web vault SPA from `ghcr.io/bittery-org/bittery-web:latest` |
+| **caddy** | Public reverse proxy — routes `/api`, `/cdn`, and related server paths over private networking; everything else to web |
+| **bittery-server** | Rust API server pinned to the template's Bittery release |
+| **bittery-web** | Web vault SPA pinned to the same Bittery release as the server |
 | **PostgreSQL** | Managed Railway Postgres instance |
 | **Object storage** | S3-compatible bucket for file attachments |
 
@@ -61,11 +61,11 @@ See [Configuration Reference](/docs/self-hosting/configuration) for the full lis
 
 ## Updating
 
-Railway automatically tracks the `latest` Docker image tag. To update:
+Pin the server and web services to the same exact release tag. To update:
 
 1. Go to your Railway project dashboard
-2. Click **Redeploy** on each service
-3. Railway pulls the latest images and restarts
+2. Change both image tags to the same target release
+3. Redeploy both services as one coordinated update
 
 <Callout type="info">
 Database migrations run automatically on server startup — no manual migration step is needed.

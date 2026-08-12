@@ -32,7 +32,7 @@ import {
  * invitation link.
  *
  * The console is gated three ways (`beforeLoad` in `src/routes/_app/admin/index.tsx`):
- * the `team_management` entitlement, the `team` plan, and an owner-or-admin
+ * the `teamManagement` entitlement, the `team` plan, and an owner-or-admin
  * role. A cloud E2E signup lands on Free with no Stripe, so the first test
  * exercises the unentitled side for real; everything after it runs on the same
  * plan columns a Stripe webhook would have written (see `../fixtures/billing`).
@@ -106,7 +106,7 @@ test("an unentitled account is redirected off /admin to /billing", async ({
 	test.setTimeout(TEST_BUDGET_MS);
 	await signIn(page, owner);
 
-	// Free carries no `team_management`, so the guard bounces to the page that
+	// Free carries no `teamManagement`, so the guard bounces to the page that
 	// can fix that - which is the cloud redirect target for every entitlement.
 	await gotoRoute(
 		page,

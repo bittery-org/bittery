@@ -1,6 +1,6 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -30,7 +30,7 @@ interface LeaveTeamDialogProps {
 export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [isLeaving, setIsLeaving] = useState(false);
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -61,9 +61,8 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			}
 
 			// Fetch rotation data for all team vaults
-			const leaveRotationData = await rpcClient.team.getLeaveRotationData.query(
-				{ teamId },
-			);
+			const leaveRotationData = (await api.teams.leaveRotationData(teamId))
+				.data;
 
 			// Perform key rotation for each team vault
 			const vaultRotations: Array<{
@@ -104,11 +103,9 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 							encryptedData: item.encryptedData,
 							encryptionIv: item.encryptionIv,
 							encryptionAlgorithm: item.encryptionAlgorithm,
-							context: buildItemEncryptionContext({
+							context: buildStoredItemEncryptionContext({
+								...item,
 								vaultId: vaultData.vaultId,
-								itemId: item.id,
-								version: item.version,
-								userId: item.lastModifiedBy ?? currentUserId,
 							}),
 						})),
 						vaultData.vaultId,
@@ -131,10 +128,8 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				}
 			}
 
-			await rpcClient.team.leave.mutate({
-				teamId,
+			await api.teams.leave(teamId, {
 				vaultRotations,
-				clientId: null,
 			});
 
 			toast.success(m.team_leave_dialog_toast_left());

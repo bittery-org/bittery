@@ -30,6 +30,10 @@ const RATE_LIMIT_DOC_FILES = ["configuration.mdx", "docker-compose.mdx"];
 
 // Documented, but deliberately not read by the Rust server.
 const DOCS_ONLY_VARS = new Map([
+	[
+		"BITTERY_RELEASE",
+		"consumed by Compose to pin the coordinated server and web image pair",
+	],
 	["DOMAIN", "consumed by Caddy and Compose for TLS; never reaches the server"],
 	["COMPOSE_PROFILES", "a docker compose flag, not an application variable"],
 	["MINIO_ROOT_PASSWORD", "read by the bundled MinIO image, not by the server"],
@@ -59,18 +63,6 @@ const UNDOCUMENTED_SERVER_VARS = new Map([
 	[
 		"BITTERY_ENABLE_DEV_AUTH_STUBS",
 		"local-development stub for auth email delivery; must not be advertised as a deployment option",
-	],
-	[
-		"BITTERY_RPC_SLOW_MS",
-		"internal slow-RPC tracing threshold with a compiled-in default",
-	],
-	[
-		"BITTERY_RUST_RPC_OUTPUT_DIR",
-		"build tooling only: output directory of the write-bindings binary",
-	],
-	[
-		"BITTERY_STORAGE_PUBLIC_URL",
-		"legacy fallback for BITTERY_STORAGE_CDN_URL, which is the documented name",
 	],
 	[
 		"DATABASE_MAX_CONNECTIONS",

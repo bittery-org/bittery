@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 use crate::{
     config::format_timestamp,
+    db::enums::{SyncEntityType, SyncEventType},
     error::AppError,
     repo::{
         common::insert_user_sync_event,
@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TravelModeResponse {
     pub enabled: bool,
@@ -22,27 +22,18 @@ pub struct TravelModeResponse {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SetTravelModeHiddenVaultsInput {
     pub hidden_vault_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct EnableTravelModeInput {
     pub hidden_vault_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct DisableTravelModeInput {
-    pub attempt_id: String,
-    pub client_public_key: String,
-    pub client_proof: String,
 }
 
 fn map_travel_mode_row(row: crate::repo::travel_mode::DbUserTravelModeRow) -> TravelModeResponse {
@@ -77,9 +68,9 @@ async fn insert_travel_mode_sync_event<'e>(
 
     insert_user_sync_event(
         executor,
-        "travel_mode_updated",
+        SyncEventType::TravelModeUpdated,
         user_id,
-        "user",
+        SyncEntityType::User,
         user_id,
         1,
         client_id,
@@ -200,7 +191,7 @@ mod tests {
     use rand::random;
     use sqlx::{query, Row};
 
-    use crate::test_support::{seed_user, seed_vault, seed_vault_key, with_rpc_test_app};
+    use crate::test_support::{seed_user, seed_vault, seed_vault_key, with_api_test_app};
 
     use super::*;
 
@@ -237,7 +228,7 @@ mod tests {
     async fn travel_mode_enable_disable_and_validation() {
         let test_name = format!("travel_mode_flow_{:016x}", random::<u64>());
         let fixture_name = test_name.clone();
-        with_rpc_test_app(&test_name, move |app| async move {
+        with_api_test_app(&test_name, move |app| async move {
             let pool = app.pool.clone();
             let (user_id, _email, vault_id) =
                 seed_travel_mode_fixture(&pool, &fixture_name).await;

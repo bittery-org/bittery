@@ -1,5 +1,5 @@
+import type { EncryptedData } from "@bittery/crypto-port";
 import type { VaultKeyData } from "@bittery/storage";
-import type { EncryptedData } from "@bittery/types";
 import { sendNativeMessage } from "./native-messaging-client";
 
 export const BIOMETRIC_TRANSFER_FAILURE = {

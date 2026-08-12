@@ -23,7 +23,7 @@ Chrome extension (Manifest V3) for the Bittery password manager with secure auto
 - **Background Service Worker** (`background/`): 
   - Manages Master Unlock Key in memory
   - Handles all cryptographic operations
-  - Proxies RPC calls to the API server
+  - Proxies API calls to the server
   - Tracks autofill authentication state
 
 - **Content Script** (`content.ts`):
@@ -119,14 +119,14 @@ apps/extension/
 The extension uses shared packages:
 
 - **@bittery/ui**: shadcn components (Button, Input, Card, etc.)
-- **@bittery/shared**: Utilities (crypto wrappers, favicon, RPC clients, billing metadata)
+- **@bittery/shared**: Utilities (crypto wrappers, favicon, API clients, billing metadata)
 - **@bittery/crypto**: Core cryptography (including chrome.storage adapter)
 
 ## Configuration
 
 ### API Server URL
 
-Update the RPC server URL in:
+Update the API server URL in:
 
 - `src/popup.tsx`
 - `src/pages/login.tsx`

@@ -2,14 +2,16 @@
  * Background Message Router Registry
  *
  * Declarative `message.type -> RouteDefinition` table. Runtime message types
- * are preserved for popup/content-script compatibility; see `index.ts` for
- * the dispatcher that looks routes up here.
+ * are preserved for popup/content-script compatibility; see `index.ts` for the
+ * dispatcher that looks routes up here.
+ *
+ * Payload and response types are contextual: `RouteRegistry` is a total map
+ * over `RouteContract`, so each `handle` gets its payload typed from the
+ * contract and has its return value checked against it. Handlers therefore
+ * carry no payload annotations of their own — the contract is the only place
+ * a route's shape is written down.
  */
 
-import type {
-	PasskeyCreateHandlerPayload,
-	PasskeyGetHandlerPayload,
-} from "../../passkey/types";
 import {
 	handleCanQuickUnlock,
 	handleCheckAuth,
@@ -45,6 +47,14 @@ import {
 	handleOpenDesktopApp,
 } from "../native-messaging";
 import {
+	activateAndDrainOutboundCommand,
+	cancelStagedOutboundCommand,
+	claimStagedOutboundCommands,
+	drainOutboundQueue,
+	getOutboundCommandSummary,
+	stageOutboundCommand,
+} from "../outbound-drain";
+import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "../qr-scan-handlers";
@@ -54,12 +64,12 @@ import {
 	handleSetPendingSavePrompt,
 } from "../save-prompt-handlers";
 import { refreshAutoLockTimeout } from "../session-manager";
-import type { MessageResponse } from "../types";
 import {
 	handleGetVaultItem,
 	handleGetVaultItems,
 	handleGetWritableVaults,
 } from "../vault-handlers";
+import type { PasswordUnlockAllResponse, UnlockResponse } from "./contract";
 import {
 	cleanupSync,
 	connectSync,
@@ -74,24 +84,23 @@ import type { RouteRegistry } from "./types";
  * app takes over the unlock, the vault is still closed and there is nothing to
  * sync yet. Sync starts on the pushed `unlock` event instead.
  */
-const didUnlock = (response: MessageResponse) =>
+const didUnlock = (response: UnlockResponse | PasswordUnlockAllResponse) =>
 	Boolean(response.success && response.status !== PENDING_DESKTOP_UNLOCK);
 
 export const routeRegistry: RouteRegistry = {
 	// Authentication
 	LOGIN: {
-		handle: (payload: { email: string; password: string; secretKey: string }) =>
-			handleLogin(payload),
+		handle: (payload) => handleLogin(payload),
 		syncInitOnSuccess: true,
 	},
 
 	QUICK_UNLOCK: {
-		handle: (payload: { password: string }) => handleQuickUnlock(payload),
+		handle: (payload) => handleQuickUnlock(payload),
 		syncInitOnSuccess: didUnlock,
 	},
 
 	QUICK_UNLOCK_ALL: {
-		handle: (payload: { password: string }) => handleQuickUnlockAll(payload),
+		handle: (payload) => handleQuickUnlockAll(payload),
 		syncInitOnSuccess: didUnlock,
 	},
 
@@ -152,13 +161,99 @@ export const routeRegistry: RouteRegistry = {
 		handle: async () => ({ success: true, clientId: await getSyncClientId() }),
 	},
 
+	GET_SYNC_COMMAND_SUMMARY: {
+		handle: async () => ({
+			success: true,
+			summary: await getOutboundCommandSummary(),
+		}),
+	},
+
+	CLAIM_STAGED_ITEM_COMMANDS: {
+		handle: async (payload) => {
+			const claim = await claimStagedOutboundCommands(payload.claimId);
+			return { success: true, ...claim };
+		},
+	},
+
+	ENQUEUE_ITEM_COMMAND: {
+		handle: async (payload) => {
+			try {
+				if (!(await stageOutboundCommand(payload.command, payload.claimId))) {
+					return {
+						success: false,
+						code: "ALREADY_EXISTS",
+						error: "Item command already exists",
+					};
+				}
+				return { success: true };
+			} catch (error) {
+				return { success: false, error: String(error) };
+			}
+		},
+	},
+
+	CANCEL_STAGED_ITEM_COMMAND: {
+		handle: async (payload) => {
+			try {
+				if (
+					!(await cancelStagedOutboundCommand(
+						payload.accountId,
+						payload.operationId,
+						payload.claimId,
+					))
+				) {
+					return {
+						success: false,
+						code: "CLAIM_LOST",
+						error: "Staged Item command claim was lost",
+					};
+				}
+				return { success: true };
+			} catch (error) {
+				return { success: false, error: String(error) };
+			}
+		},
+	},
+
+	/**
+	 * Sent by the popup after it queues a mutation. The push runs here because
+	 * only the worker can authenticate as the account that produced it.
+	 */
+	DRAIN_OUTBOUND_QUEUE: {
+		handle: async (payload) => {
+			try {
+				if (payload?.accountId && payload.operationId && payload.claimId) {
+					if (
+						!(await activateAndDrainOutboundCommand(
+							payload.accountId,
+							payload.operationId,
+							payload.claimId,
+						))
+					) {
+						return {
+							success: false,
+							code: "CLAIM_LOST",
+							error: "Staged Item command claim was lost",
+						};
+					}
+				} else {
+					await drainOutboundQueue();
+				}
+				return { success: true };
+			} catch (error) {
+				console.error("[Background router] Outbound drain failed:", error);
+				return { success: false, error: String(error) };
+			}
+		},
+	},
+
 	// Vault operations
 	GET_VAULT_ITEMS: {
 		handle: () => handleGetVaultItems(),
 	},
 
 	GET_VAULT_ITEM: {
-		handle: (payload: { itemId: string }) => handleGetVaultItem(payload),
+		handle: (payload) => handleGetVaultItem(payload),
 	},
 
 	GET_WRITABLE_VAULTS: {
@@ -167,36 +262,19 @@ export const routeRegistry: RouteRegistry = {
 
 	// Credential management
 	CHECK_EXISTING_CREDENTIALS: {
-		handle: (payload: { url: string; username?: string; password?: string }) =>
-			handleCheckExistingCredentials(payload),
+		handle: (payload) => handleCheckExistingCredentials(payload),
 	},
 
 	SAVE_NEW_CREDENTIAL: {
-		handle: (payload: {
-			vaultId: string;
-			username: string;
-			password: string;
-			url: string;
-		}) => handleSaveNewCredential(payload),
+		handle: (payload) => handleSaveNewCredential(payload),
 	},
 
 	UPDATE_EXISTING_CREDENTIAL: {
-		handle: (payload: {
-			itemId: string;
-			vaultId: string;
-			username: string;
-			password: string;
-			url: string;
-		}) => handleUpdateExistingCredential(payload),
+		handle: (payload) => handleUpdateExistingCredential(payload),
 	},
 
 	SET_PENDING_SAVE_PROMPT: {
-		handle: (payload: {
-			username: string;
-			password: string;
-			url: string;
-			hostname: string;
-		}) => handleSetPendingSavePrompt(payload),
+		handle: (payload) => handleSetPendingSavePrompt(payload),
 	},
 
 	GET_PENDING_SAVE_PROMPT: {
@@ -217,7 +295,7 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	GET_AUTOFILL_ITEMS: {
-		handle: (payload: { hostname: string }) => handleGetAutofillItems(payload),
+		handle: (payload) => handleGetAutofillItems(payload),
 	},
 
 	GET_AUTOFILL_CREDIT_CARDS: {
@@ -231,18 +309,15 @@ export const routeRegistry: RouteRegistry = {
 	// Passkeys (dispatched through ctx.passkeyHandlers so tests can override
 	// individual handlers without mocking the whole passkey-handlers module).
 	PASSKEY_CREATE: {
-		handle: (payload: PasskeyCreateHandlerPayload, ctx) =>
-			ctx.passkeyHandlers.handlePasskeyCreate(payload),
+		handle: (payload, ctx) => ctx.passkeyHandlers.handlePasskeyCreate(payload),
 	},
 
 	PASSKEY_GET: {
-		handle: (payload: PasskeyGetHandlerPayload, ctx) =>
-			ctx.passkeyHandlers.handlePasskeyGet(payload),
+		handle: (payload, ctx) => ctx.passkeyHandlers.handlePasskeyGet(payload),
 	},
 
 	PASSKEY_CANCEL: {
-		handle: (payload: { requestId?: string }, ctx) =>
-			ctx.passkeyHandlers.handlePasskeyCancel(payload),
+		handle: (payload, ctx) => ctx.passkeyHandlers.handlePasskeyCancel(payload),
 	},
 
 	// Native messaging (biometric unlock)
@@ -261,12 +336,7 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	OPEN_DESKTOP_APP: {
-		handle: (payload?: {
-			intent?: "create_item" | "view_item";
-			url?: string;
-			itemId?: string;
-			vaultId?: string;
-		}) => handleOpenDesktopApp(payload),
+		handle: (payload) => handleOpenDesktopApp(payload),
 	},
 
 	// QR code scanning
@@ -275,17 +345,7 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	UPDATE_ITEM_TOTP: {
-		handle: (payload: {
-			itemId: string;
-			totp: {
-				totpSecret: string;
-				totpIssuer?: string;
-				totpAccountName?: string;
-				totpAlgorithm?: "SHA1" | "SHA256" | "SHA512";
-				totpDigits?: 6 | 7 | 8;
-				totpPeriod?: number;
-			};
-		}) => handleUpdateItemTotp(payload),
+		handle: (payload) => handleUpdateItemTotp(payload),
 	},
 
 	/**

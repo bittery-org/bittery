@@ -11,6 +11,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
+import { createAccountStore } from "../account-store";
+import { createItemCache } from "../item-cache";
 import { runPortConformance } from "./port-conformance";
 import { createTauriPlatformPort, createTauriRecordPort } from "./tauri";
 import { createTauriDoubles, type TauriDoubles } from "./tauri-test-doubles";
@@ -71,12 +74,58 @@ describe("tauri adapter — platform-specific mapping", () => {
 		await record.recordPut("acct-a:items", "item-1", "cipher");
 
 		// The half of the contract a platform-agnostic suite cannot state: the key really
-		// is discoverable under the published prefix by the store's own enumeration, which
-		// is exactly what the native host does with `native_view.accounts[].itemsKeyPrefix`.
+		// is discoverable under the prefix ItemCache writes into its native-view metadata.
 		const prefix = `${platform.recordKeyPrefix}acct-a:items:`;
 		expect(
 			[...doubles.store.entries.keys()].filter((key) => key.startsWith(prefix)),
 		).toEqual([`${prefix}item-1`]);
+	});
+
+	test("publishes a cache-state ref whose promoted prefix follows the active generation", async () => {
+		const { platform, record, doubles } = await makeTauriPorts();
+		const accountStore = createAccountStore({
+			port: platform,
+			crypto: createInMemoryCryptoPort(),
+		});
+		const cache = createItemCache({ port: record });
+		await accountStore.initialize();
+		await cache.initialize();
+		await accountStore.addAccount({
+			accountId: "acct-a",
+			email: "alice@example.com",
+			userId: "user-a",
+			name: "Alice",
+			serverUrl: "https://app.bittery.io",
+			secretKeyHint: "ABCD••••",
+			addedAt: 1,
+			lastActiveAt: 1,
+			biometricEnabled: false,
+			insecureTransportConfirmed: false,
+		});
+
+		const nativeView = JSON.parse(
+			(await platform.kvGet("bittery_native_view", "device")) ?? "{}",
+		) as {
+			accounts?: Array<{ itemCacheState?: { key?: string } }>;
+		};
+		const stateKey = nativeView.accounts?.[0]?.itemCacheState?.key;
+		expect(stateKey).toBe("record:acct-a:meta:meta");
+
+		const stage = await cache.beginStagedGeneration("acct-a");
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		const state = JSON.parse(
+			String(doubles.store.entries.get(stateKey ?? "")),
+		) as {
+			activeGeneration?: string;
+			nativeView?: { itemsKeyPrefix?: string; vaultsKeyPrefix?: string };
+		};
+		expect(state.nativeView?.itemsKeyPrefix).toBe(
+			`record:item-cache-stage:acct-a:${state.activeGeneration}:items:`,
+		);
+		expect(state.nativeView?.vaultsKeyPrefix).toBe(
+			`record:item-cache-stage:acct-a:${state.activeGeneration}:vaults:`,
+		);
 	});
 
 	test("device-scope keys are written bare, so Rust can read them", async () => {

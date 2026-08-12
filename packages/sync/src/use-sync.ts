@@ -1,18 +1,20 @@
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { OutboundQueue, type OutboundQueueClient } from "./outbound-queue";
+import { ItemSyncEngine, type OutboundQueueApiClient } from "./outbound-queue";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
-	type QueryKeyHelpers,
+	type QueryInvalidator,
 } from "./query-invalidation";
 import {
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
+import { subscribeToNewTerminalCommands } from "./terminal-command-status";
 import type {
 	SessionRevokedControlPayload,
+	SyncCommandSummary,
 	SyncEvent,
 	SyncItemCache,
 	SyncStatus,
@@ -56,13 +58,33 @@ class NamespacedSyncStorage implements SyncStorage {
 	remove(key: string): Promise<void> {
 		return this.storage.remove(this.key(key));
 	}
+
+	update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		if (!this.storage.update) {
+			return this.storage.get<T>(this.key(key)).then(async (current) => {
+				const next = updater(current);
+				if (next === null) {
+					await this.storage.remove(this.key(key));
+				} else {
+					await this.storage.set(this.key(key), next);
+				}
+				return next;
+			});
+		}
+		return this.storage.update(this.key(key), updater);
+	}
 }
 
 export interface SyncSource {
 	id: string;
 	serverUrl: string;
 	getAuthToken: () => Promise<string | null>;
-	rpcClient: SyncOrchestratorOptions["rpcClient"];
+	apiClient: SyncOrchestratorOptions["apiClient"];
+	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
+	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
@@ -78,6 +100,7 @@ export interface SyncEventContext {
 function aggregateStatuses(
 	statuses: Iterable<SyncStatus>,
 	pendingChanges: number,
+	commandSummary: SyncCommandSummary,
 ): SyncStatus {
 	const list = Array.from(statuses);
 	if (list.length === 0) {
@@ -85,6 +108,7 @@ function aggregateStatuses(
 			connectionStatus: "disconnected",
 			lastSyncTime: null,
 			pendingChanges,
+			commandSummary,
 			error: null,
 		};
 	}
@@ -114,6 +138,7 @@ function aggregateStatuses(
 		connectionStatus,
 		lastSyncTime,
 		pendingChanges,
+		commandSummary,
 		error: list.find((status) => status.error)?.error ?? null,
 	};
 }
@@ -124,6 +149,22 @@ function aggregateStatuses(
  */
 export function selectScopedSyncSources(sources: SyncSource[]): SyncSource[] {
 	return sources.filter((source) => !!source.itemCacheAccountId);
+}
+
+export function buildDefaultSyncSourceId(
+	serverUrl: string,
+	accountId: string | null | undefined,
+): string {
+	if (!accountId) {
+		return "unscoped";
+	}
+	let normalizedServerUrl = serverUrl.trim().replace(/\/+$/, "");
+	try {
+		normalizedServerUrl = new URL(serverUrl).toString().replace(/\/+$/, "");
+	} catch {
+		// A malformed URL still gets a deterministic isolated scope.
+	}
+	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(normalizedServerUrl)}`;
 }
 
 /**
@@ -144,10 +185,9 @@ export interface UseSyncOptions {
 	sources?: SyncSource[];
 	getClientForAccount?: (
 		accountId: string,
-	) => OutboundQueueClient | Promise<OutboundQueueClient>;
-	resolveLegacyAccountId?: (
-		email: string,
-	) => string | undefined | Promise<string | undefined>;
+	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
+	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
+	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
@@ -155,16 +195,39 @@ export interface UseSyncOptions {
 		event: SyncEvent,
 		context: SyncEventContext,
 	) => void | Promise<void>;
-	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
-	fetch?: (url: string, init?: any) => Promise<Response>;
+	onTerminalCommandFailure?: (newTerminalCount: number) => void;
+}
+
+/**
+ * What {@link useSync} returns, and therefore what a platform's sync React context carries.
+ *
+ * Declared here rather than once per app because web, desktop and mobile had three
+ * near-identical private copies of it, and a member added to the hook's return silently
+ * reached none of them. Desktop and mobile extend it with `isInitialized`, which is genuinely
+ * theirs: both resolve their sync sources asynchronously at boot and gate on the answer,
+ * whereas web's are available synchronously.
+ *
+ * The extension does NOT use this. Its provider does not own a connection — the background
+ * worker does — so it publishes the worker's {@link ConnectionStatus} instead of a
+ * {@link SyncStatus} and has no `reconnect`/`disconnect` to offer. See the note on its own
+ * declaration.
+ */
+export interface SyncContextValue {
+	status: SyncStatus;
+	clientId: string;
+	isConnected: boolean;
+	isOnline: boolean;
+	reconnect: () => Promise<void>;
+	disconnect: () => void;
+	invalidator: QueryInvalidator;
+	outboundQueue: ItemSyncEngine;
 }
 
 /**
  * React hook for real-time synchronization
  */
-export function useSync(options: UseSyncOptions) {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+export function useSync(options: UseSyncOptions): SyncContextValue {
+	const apiClient = useApiClient();
 
 	const {
 		serverUrl,
@@ -180,10 +243,11 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheServerUrl,
 		sources,
 		getClientForAccount,
-		resolveLegacyAccountId,
+		refreshFromServer,
+		initializeFromServer,
 		onSessionRevoked,
 		onEventProcessed,
-		fetch: fetchImpl,
+		onTerminalCommandFailure,
 	} = options;
 
 	const syncStorage = useMemo<SyncStorage>(
@@ -191,8 +255,31 @@ export function useSync(options: UseSyncOptions) {
 		[storage],
 	);
 	const outboundQueue = useMemo(
-		() => new OutboundQueue(syncStorage, clientId, resolveLegacyAccountId),
-		[syncStorage, clientId, resolveLegacyAccountId],
+		() =>
+			new ItemSyncEngine(syncStorage, clientId, {
+				apply: async (command) => {
+					await itemCacheAdapter?.applyItemCommand(command);
+				},
+				executeSemanticCommand: async (command) =>
+					itemCacheAdapter?.executeSemanticItemCommand(command),
+				discardAcknowledgedElsewhere: async (command) => {
+					await itemCacheAdapter?.discardItemCommandAcknowledgedElsewhere(
+						command,
+					);
+				},
+				preserveConflict: async (command) =>
+					itemCacheAdapter?.preserveItemConflict(command),
+				reconcileAuthoritative: async (command, item) => {
+					await itemCacheAdapter?.upsertCachedItem(item, command.accountId);
+				},
+				acknowledge: async (command, acknowledgement) => {
+					await itemCacheAdapter?.acknowledgeItemCommand(
+						command,
+						acknowledgement,
+					);
+				},
+			}),
+		[syncStorage, clientId, itemCacheAdapter],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
@@ -201,6 +288,12 @@ export function useSync(options: UseSyncOptions) {
 		connectionStatus: "disconnected",
 		lastSyncTime: null,
 		pendingChanges: 0,
+		commandSummary: {
+			pending: 0,
+			retrying: 0,
+			conflicted: 0,
+			failed: 0,
+		},
 		error: null,
 	});
 
@@ -208,11 +301,10 @@ export function useSync(options: UseSyncOptions) {
 		async (event: Parameters<typeof invalidateQueriesForEvent>[0]["event"]) => {
 			await invalidateQueriesForEvent({
 				queryClient,
-				rpc: rpc as unknown as QueryKeyHelpers,
 				event,
 			});
 		},
-		[queryClient, rpc],
+		[queryClient],
 	);
 
 	const syncSources = useMemo<SyncSource[]>(() => {
@@ -222,10 +314,12 @@ export function useSync(options: UseSyncOptions) {
 
 		return selectScopedSyncSources([
 			{
-				id: "default",
+				id: buildDefaultSyncSourceId(serverUrl, itemCacheAccountId),
 				serverUrl,
 				getAuthToken,
-				rpcClient: rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
+				apiClient,
+				refreshFromServer,
+				initializeFromServer,
 				itemCacheAccountId,
 				itemCacheAccountEmail,
 				itemCacheServerUrl,
@@ -235,7 +329,9 @@ export function useSync(options: UseSyncOptions) {
 		sources,
 		serverUrl,
 		getAuthToken,
-		rpcClient,
+		apiClient,
+		refreshFromServer,
+		initializeFromServer,
 		itemCacheAccountId,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
@@ -259,6 +355,7 @@ export function useSync(options: UseSyncOptions) {
 				aggregateStatuses(
 					sourceStatusesRef.current.values(),
 					outboundQueue.getPendingCount(),
+					outboundQueue.getCommandSummary(),
 				),
 			);
 		};
@@ -270,13 +367,12 @@ export function useSync(options: UseSyncOptions) {
 			);
 			const orchestrator = new SyncOrchestrator({
 				syncManager: {
-					serverUrl: source.serverUrl,
-					getAuthToken: source.getAuthToken,
 					clientId,
 					storage: sourceStorage,
-					fetch: fetchImpl,
 				},
-				rpcClient: source.rpcClient,
+				apiClient: source.apiClient,
+				refreshFromServer: source.refreshFromServer,
+				initializeFromServer: source.initializeFromServer,
 				itemCache: itemCacheAdapter,
 				outboundQueue,
 				itemCacheAccountId: source.itemCacheAccountId,
@@ -316,9 +412,15 @@ export function useSync(options: UseSyncOptions) {
 			if (disposed) {
 				return;
 			}
+			unsubscribers.push(
+				subscribeToNewTerminalCommands(outboundQueue, (newTerminalCount) => {
+					onTerminalCommandFailure?.(newTerminalCount);
+				}),
+			);
 			setStatus((prev) => ({
 				...prev,
 				pendingChanges: outboundQueue.getPendingCount(),
+				commandSummary: outboundQueue.getCommandSummary(),
 			}));
 
 			await Promise.all(
@@ -345,11 +447,11 @@ export function useSync(options: UseSyncOptions) {
 		syncSources,
 		clientId,
 		syncStorage,
-		fetchImpl,
 		outboundQueue,
 		getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed,
+		onTerminalCommandFailure,
 		invalidateForEvent,
 		realtimeEnabled,
 	]);
@@ -387,9 +489,8 @@ export function useSync(options: UseSyncOptions) {
 		() =>
 			createQueryInvalidator({
 				queryClient,
-				rpc: rpc as unknown as QueryKeyHelpers,
 			}),
-		[queryClient, rpc],
+		[queryClient],
 	);
 
 	return {

@@ -570,32 +570,10 @@ pub async fn unwrap_key(
     data: EncryptedData,
     wrapping_key: Arc<KeyHandle>,
     context: Option<EncryptionContext>,
-    legacy_marker: Option<String>,
-    legacy_context: Option<String>,
 ) -> Result<Arc<KeyHandle>, CryptoError> {
     run_crypto(move || {
         let wrapping_material = wrapping_key.copy_material()?;
         let mut plaintext = decrypt_inner(data, &wrapping_material, context)?;
-        if let (Some(marker), Some(expected_context)) = (legacy_marker, legacy_context) {
-            let envelope: serde_json::Value = serde_json::from_str(&plaintext)
-                .map_err(|error| CryptoError::InvalidInput(error.to_string()))?;
-            if envelope.get("marker").and_then(|value| value.as_str()) != Some(marker.as_str())
-                || envelope.get("context").and_then(|value| value.as_str())
-                    != Some(expected_context.as_str())
-            {
-                plaintext.zeroize();
-                return Err(CryptoError::InvalidInput(
-                    "legacy key envelope did not match".to_string(),
-                ));
-            }
-            plaintext = envelope
-                .get("payload")
-                .and_then(|value| value.as_str())
-                .ok_or_else(|| {
-                    CryptoError::InvalidInput("legacy key envelope has no payload".into())
-                })?
-                .to_string();
-        }
         let decoded = BASE64.decode(plaintext.as_bytes())?;
         plaintext.zeroize();
         if decoded.len() != 32 {

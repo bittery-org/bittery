@@ -212,7 +212,6 @@ export function AccountSwitcher() {
 					</View>
 
 					<View className="h-px bg-separator" />
-
 					<View className="px-4 pt-2 pb-6">
 						<SheetAction
 							label={m.mob_account_switcher_add_account()}

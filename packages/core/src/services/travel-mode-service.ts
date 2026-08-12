@@ -2,33 +2,25 @@ import type { TravelModeConfig, VaultKeyData } from "@bittery/storage/types";
 
 export interface TravelModeServerResponse {
 	enabled: boolean;
-	hiddenVaultIds: string[];
-	enabledAt: string | null;
+	hiddenVaultIds: readonly string[];
+	enabledAt?: string | null;
 	updatedAt: string;
 }
 
-export interface TravelModeRpcClient {
+export interface TravelModeApiClient {
 	travelMode: {
-		getTravelMode: {
-			query: () => Promise<TravelModeServerResponse>;
-		};
-		setTravelModeHiddenVaults: {
-			mutate: (input: {
-				hiddenVaultIds: string[];
-			}) => Promise<TravelModeServerResponse>;
-		};
-		enableTravelMode: {
-			mutate: (input: {
-				hiddenVaultIds: string[];
-			}) => Promise<TravelModeServerResponse>;
-		};
-		disableTravelMode: {
-			mutate: (input: {
-				attemptId: string;
-				clientPublicKey: string;
-				clientProof: string;
-			}) => Promise<TravelModeServerResponse>;
-		};
+		get: () => Promise<{ data: TravelModeServerResponse }>;
+		setHiddenVaults: (input: {
+			hiddenVaultIds: string[];
+		}) => Promise<{ data: TravelModeServerResponse }>;
+		enable: (input: {
+			hiddenVaultIds: string[];
+		}) => Promise<{ data: TravelModeServerResponse }>;
+		disable: (input: {
+			attemptId: string;
+			clientPublicKey: string;
+			clientProof: string;
+		}) => Promise<{ data: TravelModeServerResponse }>;
 	};
 }
 
@@ -47,7 +39,7 @@ export function mapTravelModeResponse(
 ): TravelModeConfig {
 	return {
 		enabled: response.enabled,
-		hiddenVaultIds: response.hiddenVaultIds,
+		hiddenVaultIds: [...response.hiddenVaultIds],
 		enabledAt: response.enabledAt ? Date.parse(response.enabledAt) : null,
 		updatedAt: Date.parse(response.updatedAt),
 	};

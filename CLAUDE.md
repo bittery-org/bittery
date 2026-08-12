@@ -1,14 +1,46 @@
-## Must Follow Guidelines
+# Bittery
 
-- For user-facing UI, follow the design system spec in `DESIGN.md` (tokens, elevation ladder, selection/hover/button recipes).
-- Name concepts with the vocabulary in `CONTEXT.md`, in code and in UI copy alike. Settled architectural decisions are recorded in `docs/adr/` — read the relevant one before proposing a change that contradicts it.
-- Verify changes with `pnpm check-types` and `pnpm test` (`pnpm test:server` for Rust).
-- Never hand-fix formatting or class sorting — run `pnpm biome check --write <changed files>` instead. Don't run `pnpm check:fix`; it applies `--unsafe` fixes repo-wide.
-- Never run the dev server (one is always running) and never run a build command unless explicitly asked.
-- Database migrations live in `apps/server/migrations`. Create with `pnpm run db:create -- <name>`, apply with `pnpm run db:migrate`. Never generate migrations from an ORM schema.
-- Avoid `useEffect` — find a way without it first, and refactor existing ones away when you touch them.
-- Strict i18n: never hardcode user-facing text. Add new keys to every `packages/i18n/messages/*.json`, then run `pnpm i18n:generate`.
-- For a critical bug, write a failing automated test first, then fix it.
-- Follow [RELEASING.md](RELEASING.md) for version changes and releases. Do not edit release versions or create release tags by hand.
-- Comments: explain **why**, never **what**. Max 1-2 lines, only for non-obvious constraints, workarounds, or security rules. If a comment restates the code, delete it and pick a better name. No comment blocks, no commented-out code, and no changelog ("was X, now Y") — describe the code as it stands. Constraints that still bind (back-compat shims, version pins, old data shapes) are a why, so keep those.
-- For crypto core, API, or binding changes, follow [`packages/crypto/core/DEVELOPMENT.md`](packages/crypto/core/DEVELOPMENT.md).
+## Checks
+
+`pnpm exec turbo -F <pkg> check-types` while working (`-F '...<pkg>'` to include dependents,
+`pnpm check:server` for Rust). `pnpm check:ci` when done, plus `pnpm check:ci:rust` if you
+touched Rust.
+
+Not `pnpm --filter <app> check-types` — skips Paraglide, fakes missing-module errors.
+Not root `pnpm test` — drags `cargo test` into the sandbox and fails there.
+
+## Tests
+
+Prefer test-first: write the failing test, then the code. Always for bugfixes — a bug without a
+reproducing test isn't fixed. Prototypes and spikes are exempt; say which you're doing.
+
+| most packages, and `web` | `pnpm --filter <name> exec bun test src/x.test.ts -t "name"` |
+| --- | --- |
+| `apps/extension` | `bun test tests/background/x.test.ts` — one file per process, `mock.module` leaks |
+| root `scripts/`, `desktop` | `node --test scripts/release-version.test.mjs` |
+| server | `cargo test --manifest-path apps/server/Cargo.toml services::auth::tests::name` |
+| crypto | `cargo test --manifest-path packages/crypto/core/Cargo.toml -p bittery-crypto-core <name>` |
+| e2e | `pnpm --filter web exec playwright test --project=cloud tests/e2e/x.spec.ts -g "name"` |
+
+Server tests need a running database, in dev one is always running and attach via `#[cfg(test)] #[path = "auth_tests.rs"] mod
+tests;` at the bottom of the parent file. E2E rebuilds the server and boots Vite every run — save
+it for `tests/e2e` changes.
+
+## Bites
+
+- i18n keys go in `en.json` and `de.json`, then `pnpm i18n:generate`.
+- `pnpm exec biome check --write <changed files>`; `check:fix` is repo-wide `--unsafe`.
+- Clippy only runs in CI, so local `cargo check` proves little.
+- New server route: `write-openapi`, `@bittery/api-contract generate`, bump the `assert_eq!` counts.
+- Rust-defined type? Generate it, never re-type it — ADR 0012. Closed sets live in `db/enums.rs`.
+- Migrations: `pnpm run db:create -- <name>`, and frozen once merged.
+- `react`, `zod`, `hono`, `@types/react*` come from the `catalog:`.
+
+## Style
+
+`DESIGN.md` for UI (tokens, the `@bittery/ui/icons` barrel, semantic colours). `CONTEXT.md` for
+vocabulary. `docs/adr/` for settled decisions — ADR 0002: server services own their SQL, ADR 0012:
+one generated definition per cross-language type.
+
+Avoid `useEffect`. Comments say *why*, briefly. A dev server is always running; skip builds unless
+asked. `RELEASING.md` for versions, `packages/crypto/core/DEVELOPMENT.md` for crypto.

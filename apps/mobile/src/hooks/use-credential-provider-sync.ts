@@ -1,11 +1,13 @@
-import { useAccountsInfo, useItems } from "@bittery/core/hooks";
+import {
+	useAccountsInfo,
+	useItems,
+	usePlatformSync,
+} from "@bittery/core/hooks";
+import { createNativeItemSyncCommand } from "@bittery/sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, InteractionManager, Platform } from "react-native";
 import { storage } from "@/services/storage";
-import type {
-	PendingPasskeyMutation,
-	SaveCredentialParams,
-} from "../../modules/credential-provider";
+import type { PendingPasskeyMutation } from "../../modules/credential-provider";
 import CredentialProvider from "../../modules/credential-provider";
 import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../services/credential-provider-master-unlock-key";
 
@@ -77,28 +79,6 @@ function debugLog(message: string, payload?: unknown) {
 }
 
 /**
- * Extracts the domain from a URL string
- */
-function extractDomain(url: string | undefined): string | null {
-	if (!url) return null;
-
-	try {
-		// Add protocol if missing
-		let urlWithProtocol = url;
-		if (!url.startsWith("http://") && !url.startsWith("https://")) {
-			urlWithProtocol = `https://${url}`;
-		}
-
-		const parsedUrl = new URL(urlWithProtocol);
-		return parsedUrl.hostname.replace(/^www\./, "");
-	} catch {
-		// If URL parsing fails, try to extract domain directly
-		const match = url.match(/^(?:https?:\/\/)?(?:www\.)?([^/]+)/i);
-		return match ? match[1] : null;
-	}
-}
-
-/**
  * Hook options for credential provider sync
  */
 export interface UseCredentialProviderSyncOptions {
@@ -133,6 +113,7 @@ export function useCredentialProviderSync(
 		refetch: refetchItems,
 	} = useItems({ enabled });
 	const { accountsInfo } = useAccountsInfo({ enabled });
+	const platformSync = usePlatformSync();
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -173,67 +154,15 @@ export function useCredentialProviderSync(
 
 		const credentialProviderAvailable = CredentialProvider.isAvailable();
 		const biometricAvailable = CredentialProvider.isBiometricAvailable();
-		const keyAvailable = CredentialProvider.isKeyAvailable();
-
 		debugLog("[CredentialProviderSync] Availability check:", {
 			credentialProviderAvailable,
 			biometricAvailable,
-			keyAvailable,
 			sdkVersion: Platform.Version,
 		});
 
 		setIsAvailable(credentialProviderAvailable);
 		setIsBiometricAvailable(biometricAvailable);
 	}, [enabled]);
-
-	/**
-	 * Extract credentials from decrypted login items
-	 */
-	const extractCredentials = useCallback((): SaveCredentialParams[] => {
-		const credentials: SaveCredentialParams[] = [];
-
-		for (const item of loginItems) {
-			// Get domain from primary URL or first of multiple URLs
-			const primaryUrl = item.url || item.urls?.[0];
-			const domain = extractDomain(primaryUrl);
-
-			// Skip items without valid domain or credentials
-			if (!domain || !item.username || !item.password) {
-				continue;
-			}
-
-			credentials.push({
-				vaultId: item.vaultId,
-				itemId: item.id,
-				domain,
-				username: item.username,
-				password: item.password,
-				displayName: item.title || `${item.username} @ ${domain}`,
-			});
-
-			// Also add credentials for additional URLs if they have different domains
-			if (item.urls && item.urls.length > 1) {
-				for (let i = 1; i < item.urls.length; i++) {
-					const additionalUrl = item.urls[i];
-					if (!additionalUrl) continue;
-					const additionalDomain = extractDomain(additionalUrl);
-					if (additionalDomain && additionalDomain !== domain) {
-						credentials.push({
-							vaultId: item.vaultId,
-							itemId: `${item.id}_url_${i}`, // Unique ID for additional URLs
-							domain: additionalDomain,
-							username: item.username,
-							password: item.password,
-							displayName:
-								item.title || `${item.username} @ ${additionalDomain}`,
-						});
-					}
-				}
-			}
-		}
-
-		return credentials;
-	}, [loginItems]);
 
 	/**
 	 * Ensure the MUK is set in the native VaultStateManager.
@@ -390,38 +319,63 @@ export function useCredentialProviderSync(
 							createdAt: new Date(item.createdAt).getTime(),
 							updatedAt: new Date(item.updatedAt).getTime(),
 							isFavorite: item.favorite || false,
-							version: item.version ?? 1,
+							version: item.version,
 							lastModifiedBy: item.lastModifiedBy ?? null,
+							encryptionVersion: item.encryptionVersion,
+							encryptedByUserId: item.encryptedByUserId,
 						};
 					});
 
 				const vaultKeysData = vaultKeys.map((vaultKey) => {
-					let encryptedKey: string;
-					let encryptionIv: string;
-					let encryptionAlgorithm: string;
-					let keyVersion = 1;
+					if (!vaultKey.encryptedVaultKey.startsWith("{")) {
+						return {
+							vaultId: vaultKey.vaultId,
+							vaultName: vaultKey.vaultName,
+							vaultType: vaultKey.vaultType,
+							encryptedKey: vaultKey.encryptedVaultKey,
+							encryptionIv: "",
+							encryptionAlgorithm: "RSA-OAEP",
+							role: vaultKey.role,
+							keyVersion: 1,
+						};
+					}
 
-					try {
-						const parsed = JSON.parse(vaultKey.encryptedVaultKey);
-						encryptedKey = parsed.ciphertext;
-						encryptionIv = parsed.iv;
-						encryptionAlgorithm = parsed.algorithm || "AES-GCM-AAD-V1";
-						keyVersion = parsed.context?.keyVersion ?? 1;
-					} catch {
-						encryptedKey = vaultKey.encryptedVaultKey;
-						encryptionIv = "";
-						encryptionAlgorithm = "AES-GCM-AAD-V1";
+					const parsed = JSON.parse(vaultKey.encryptedVaultKey) as {
+						ciphertext?: unknown;
+						iv?: unknown;
+						algorithm?: unknown;
+						context?: {
+							vaultId?: unknown;
+							userId?: unknown;
+							keyVersion?: unknown;
+							purpose?: unknown;
+						};
+					};
+					if (
+						typeof parsed.ciphertext !== "string" ||
+						typeof parsed.iv !== "string" ||
+						parsed.algorithm !== "AES-GCM-AAD-V1" ||
+						parsed.context?.vaultId !== vaultKey.vaultId ||
+						parsed.context.userId !== account.userId ||
+						parsed.context.purpose !== "vault-key-wrap" ||
+						typeof parsed.context.keyVersion !== "number" ||
+						!Number.isInteger(parsed.context.keyVersion) ||
+						parsed.context.keyVersion < 1
+					) {
+						throw new Error(
+							`Invalid wrapped vault key for ${vaultKey.vaultId}`,
+						);
 					}
 
 					return {
 						vaultId: vaultKey.vaultId,
 						vaultName: vaultKey.vaultName,
 						vaultType: vaultKey.vaultType,
-						encryptedKey,
-						encryptionIv,
-						encryptionAlgorithm,
+						encryptedKey: parsed.ciphertext,
+						encryptionIv: parsed.iv,
+						encryptionAlgorithm: parsed.algorithm,
 						role: vaultKey.role,
-						keyVersion,
+						keyVersion: parsed.context.keyVersion,
 					};
 				});
 
@@ -565,33 +519,14 @@ export function useCredentialProviderSync(
 			}
 
 			try {
-				if (mutation.operation === "update_item") {
-					await account.rpcClient.vault.updateItem.mutate({
-						itemId: mutation.itemId,
-						encryptedData: mutation.encryptedData,
-						encryptionIv: mutation.encryptionIv,
-						encryptionAlgorithm:
-							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						expectedVersion: null,
-						clientId: null,
-					});
-				} else if (mutation.operation === "create_item") {
-					await account.rpcClient.vault.createItem.mutate({
-						itemId: mutation.itemId,
-						vaultId: mutation.vaultId,
-						category: "login",
-						encryptedData: mutation.encryptedData,
-						encryptionIv: mutation.encryptionIv,
-						encryptionAlgorithm:
-							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						clientId: null,
-					});
-				} else {
-					throw new Error(
-						`Unsupported passkey mutation operation: ${mutation.operation}`,
-					);
+				if (!platformSync) {
+					throw new Error("Item sync engine is unavailable");
 				}
-
+				const command = createNativeItemSyncCommand(mutation, {
+					accountId: account.accountId,
+					accountEmail: account.email,
+				});
+				await platformSync.outboundQueue.enqueue(command);
 				appliedIds.push(mutation.id);
 			} catch (error) {
 				const message = getErrorMessage(error);
@@ -632,7 +567,7 @@ export function useCredentialProviderSync(
 			),
 			discarded: discardedIds.length,
 		};
-	}, [enabled, accountsInfo, isAvailable]);
+	}, [enabled, accountsInfo, isAvailable, platformSync]);
 
 	const flushPendingPasskeyMutationsAndRefresh = useCallback(async () => {
 		const result = await flushPendingPasskeyMutations();
@@ -648,12 +583,7 @@ export function useCredentialProviderSync(
 		});
 	}, []);
 
-	/**
-	 * Perform the legacy sync operation.
-	 *
-	 * This syncs decrypted credentials to the credential provider storage.
-	 * The native side re-encrypts passwords with BiometricKeyManager.
-	 */
+	/** Sync encrypted vault data and flush provider-originated passkey writes. */
 	const syncOnce = useCallback(async (): Promise<{
 		synced: number;
 		deleted: number;
@@ -705,29 +635,9 @@ export function useCredentialProviderSync(
 				debugLog("[CredentialProviderSync] Vault sync complete:", vaultResult);
 			}
 
-			// Skip legacy credential sync when vault-based sync succeeded.
-			// Legacy sync triggers a separate native BiometricPrompt ("Sync Passwords")
-			// which causes a redundant second biometric prompt on app startup.
-			if (vaultResult) {
-				setLastSyncResult({ synced: 0, deleted: 0 });
-				return { synced: 0, deleted: 0 };
-			}
-
-			// Fallback to legacy sync only when vault sync failed
-			const credentials = extractCredentials();
-
-			if (credentials.length === 0) {
-				debugLog("[CredentialProviderSync] No legacy credentials to sync");
-				setLastSyncResult({ synced: 0, deleted: 0 });
-				return { synced: 0, deleted: 0 };
-			}
-
-			debugLog(
-				"[CredentialProviderSync] Calling CredentialProvider.syncCredentials...",
-			);
-			const result = await CredentialProvider.syncCredentials(credentials);
-			debugLog("[CredentialProviderSync] Legacy sync result:", result);
-
+			const result = vaultResult
+				? { synced: vaultResult.items, deleted: 0 }
+				: { synced: 0, deleted: 0 };
 			setLastSyncResult(result);
 			return result;
 		} catch (err) {
@@ -743,7 +653,6 @@ export function useCredentialProviderSync(
 		enabled,
 		isAvailable,
 		isBiometricAvailable,
-		extractCredentials,
 		syncVaultData,
 		flushPendingPasskeyMutationsAndRefresh,
 		waitForInteractionsToFinish,
@@ -912,7 +821,5 @@ export function useCredentialProviderSync(
 		error,
 		/** Manually trigger a sync */
 		sync,
-		/** Get the credentials that would be synced */
-		getCredentialsToSync: extractCredentials,
 	};
 }

@@ -1,5 +1,6 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Badge,
 	Button,
@@ -45,7 +46,7 @@ interface InviteDialogProps {
 type TeamMessageCatalog = ReturnType<typeof useI18n>["m"];
 
 function formatCurrencyFromCents(
-	amountCents: number | bigint,
+	amountCents: number | bigint | string,
 	currency: string,
 ): string {
 	return formatLocalizedCurrency(
@@ -72,7 +73,7 @@ function formatPeriodRange(start: Date | string, end: Date | string): string {
 }
 
 function getSeatCountLabel(
-	count: number | bigint,
+	count: number | bigint | string,
 	m: TeamMessageCatalog,
 ): string {
 	const normalizedCount = Number(count);
@@ -86,8 +87,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState<"admin" | "member">("member");
 	const [inviteLink, setInviteLink] = useState<string | null>(null);
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -95,11 +95,11 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 
 	// Query team vaults for key provisioning
 	const teamVaultsQuery = useQuery({
-		...rpc.team.vaults.queryOptions({ teamId }),
+		...apiQueries.teams.vaults(api, teamId),
 		enabled: open, // Only fetch when dialog is open
 	});
 	const billingStatusQuery = useQuery({
-		...rpc.billing.status.queryOptions(),
+		...apiQueries.billing.status(api),
 		enabled: open,
 	});
 	const shouldFetchSeatPreview =
@@ -109,7 +109,8 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 		billingStatusQuery.data.isActive;
 
 	const seatPreviewQuery = useQuery({
-		...rpc.billing.previewAdditionalTeamSeat.queryOptions(),
+		queryKey: ["api", "v1", "billing", "team-seats", "addition-preview"],
+		queryFn: async () => (await api.billing.seatAdditionPreview()).data,
 		enabled: shouldFetchSeatPreview,
 	});
 	const seatPreview = seatPreviewQuery.data;
@@ -122,10 +123,13 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 			role: "admin" | "member";
 		}) => {
 			// First, send the invitation to get user's public key (if they exist)
-			const result = await rpcClient.team.invitations.send.mutate({
-				...input,
-				pendingVaultKeys: null,
-			});
+			const result = (
+				await api.teams.invitations.send(input.teamId, {
+					email: input.email,
+					role: input.role,
+					pendingVaultKeys: null,
+				})
+			).data;
 
 			// If the user already exists and has a public key, we need to provision vault keys
 			if (result.existingUserPublicKey && teamVaultsQuery.data) {
@@ -168,13 +172,14 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 				// If we have vault keys to provision, update the invitation
 				if (pendingVaultKeys.length > 0) {
 					// Cancel the existing invitation and create a new one with vault keys
-					await rpcClient.team.invitations.cancel.mutate({
-						invitationId: result.invitationId,
-					});
-					return rpcClient.team.invitations.send.mutate({
-						...input,
-						pendingVaultKeys,
-					});
+					await api.teams.invitations.cancel(input.teamId, result.invitationId);
+					return (
+						await api.teams.invitations.send(input.teamId, {
+							email: input.email,
+							role: input.role,
+							pendingVaultKeys,
+						})
+					).data;
 				}
 			}
 
@@ -220,7 +225,8 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 			>
 				{(() => {
 					const seatDelta = seatPreview
-						? Number(seatPreview.nextQuantity - seatPreview.currentQuantity)
+						? Number(seatPreview.nextQuantity) -
+							Number(seatPreview.currentQuantity)
 						: 0;
 					return (
 						<form onSubmit={handleSubmit}>
@@ -376,20 +382,20 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 																						),
 																					},
 																				)
-																			: line.quantity !== null
+																			: line.quantity != null
 																				? m.team_invite_dialog_invoice_preview_line_quantity(
 																						{ quantity: Number(line.quantity) },
 																					)
 																				: ""}
 																		{(line.isProration ||
-																			line.quantity !== null) &&
-																		line.unitAmountCents !== null &&
-																		line.quantity !== null &&
+																			line.quantity != null) &&
+																		line.unitAmountCents != null &&
+																		line.quantity != null &&
 																		Number(line.quantity) > 0
 																			? " · "
 																			: ""}
-																		{line.unitAmountCents !== null &&
-																		line.quantity !== null &&
+																		{line.unitAmountCents != null &&
+																		line.quantity != null &&
 																		Number(line.quantity) > 0
 																			? m.team_invite_dialog_invoice_preview_line_each(
 																					{

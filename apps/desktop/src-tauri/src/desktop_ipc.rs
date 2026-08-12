@@ -1,18 +1,47 @@
+//! The desktop↔extension wire format.
+//!
+//! Every type here is the *single* definition of its shape: ts-rs writes the
+//! TypeScript mirror into `apps/desktop/src/generated/desktop-ipc.ts`, which the
+//! browser extension imports. Nothing downstream may restate one of these shapes
+//! (ADR 0012).
+//!
+//! `export_to` is resolved against ts-rs's default export directory,
+//! `<crate root>/bindings`, so `../../src/generated/...` lands in
+//! `apps/desktop/src/generated/` no matter which directory `cargo test` was
+//! invoked from. That matters: `cargo test --manifest-path …` from the repo root
+//! would not pick up a `.cargo/config.toml` living next to this crate.
+//!
+//! `i64` timestamps carry `#[ts(type = "number")]` because ts-rs maps 64-bit
+//! integers to `bigint` by default, and these travel as JSON numbers.
+
 use serde::{Deserialize, Serialize};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use ts_rs::TS;
 
-// Kept at 1: additive fields remain compatible with older desktop peers.
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// The pinned version as a TypeScript literal, so the extension's constant is
+/// checked against this one instead of restating it. The assertion is what keeps
+/// the literal honest: bumping the constant fails the build here first.
+#[allow(dead_code)]
+#[derive(TS)]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
+pub struct DesktopProtocolVersion(#[ts(type = "1")] u32);
+
+const _: () = assert!(DESKTOP_PROTOCOL_VERSION == 1);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub struct ProtocolEnvelope<T> {
     #[serde(
         rename = "protocolVersion",
         default,
         skip_serializing_if = "Option::is_none"
     )]
+    #[ts(optional)]
     pub protocol_version: Option<u32>,
     #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub request_id: Option<String>,
     #[serde(flatten)]
     pub payload: T,
@@ -30,8 +59,9 @@ impl<T> ProtocolEnvelope<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "type")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub enum DesktopRequest {
     #[serde(rename = "PING")]
     Ping,
@@ -53,6 +83,7 @@ pub enum DesktopRequest {
     GetDesktopItemsSnapshot {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[serde(rename = "accountIds")]
+        #[ts(optional)]
         account_ids: Option<Vec<String>>,
     },
     #[serde(rename = "SUBSCRIBE_DESKTOP_EVENTS")]
@@ -67,6 +98,7 @@ pub enum DesktopRequest {
         extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         #[serde(rename = "accountId")]
+        #[ts(optional)]
         account_id: Option<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_ALL_REQUEST")]
@@ -78,27 +110,75 @@ pub enum DesktopRequest {
     TriggerDesktopUnlock,
     #[serde(rename = "OPEN_DESKTOP_APP")]
     OpenDesktopApp {
-        // Additive, protocol v1: older peers omit these and older hosts
-        // ignore them, simply opening the app without the intent.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "tolerant_option"
+        )]
+        #[ts(optional)]
+        intent: Option<OpenDesktopAppIntent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        intent: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         url: Option<String>,
         #[serde(default, rename = "itemId", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         item_id: Option<String>,
         #[serde(default, rename = "vaultId", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         vault_id: Option<String>,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Read a closed-set field without letting an unknown member fail the frame.
+///
+/// The desktop app, the native host and the extension are installed separately,
+/// so a peer may name a variant this build has never heard of. Every closed set
+/// on this wire used to be a `String` that the receiver matched loosely and
+/// otherwise ignored; this keeps exactly that behaviour now that the sets are
+/// enums, so naming them costs no forward compatibility.
+fn tolerant_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let raw = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(raw.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// What the extension wants the desktop app to do once it is in the foreground.
+///
+/// A closed set, so it is an enum rather than a `String`: the app matches on it
+/// and an unknown value has no defined behaviour. Spelling the alternatives here
+/// is also what lets the generated TypeScript keep the narrow union the
+/// extension has always declared.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
+pub enum OpenDesktopAppIntent {
+    CreateItem,
+    ViewItem,
+}
+
+/// The desktop app's appearance preference, as the extension mirrors it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
+pub enum DesktopTheme {
+    Light,
+    Dark,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "type")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub enum DesktopResponse {
     #[serde(rename = "PROTOCOL_MISMATCH")]
     ProtocolMismatch {
         #[serde(rename = "expectedVersion")]
         expected_version: u32,
         #[serde(rename = "receivedVersion", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         received_version: Option<u32>,
     },
     #[serde(rename = "PONG")]
@@ -109,15 +189,22 @@ pub enum DesktopResponse {
         locked: bool,
         #[serde(rename = "unlockedAccounts")]
         unlocked_accounts: Vec<String>,
+        #[ts(type = "number")]
         timestamp: i64,
         #[serde(rename = "autolockTimeoutMs")]
+        #[ts(type = "number")]
         autolock_timeout_ms: i64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        theme: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "tolerant_option"
+        )]
+        #[ts(optional)]
+        theme: Option<DesktopTheme>,
     },
     #[serde(rename = "DESKTOP_ACCOUNTS")]
     DesktopAccounts {
-        accounts: Vec<serde_json::Value>,
+        accounts: Vec<DesktopAccountEntry>,
         #[serde(rename = "activeAccount")]
         active_account: Option<String>,
         #[serde(rename = "unlockedAccounts")]
@@ -131,8 +218,10 @@ pub enum DesktopResponse {
         #[serde(rename = "authToken")]
         auth_token: String,
         #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+        #[ts(optional, type = "number")]
         expires_at: Option<i64>,
         #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         user_id: Option<String>,
     },
     #[serde(rename = "DESKTOP_VAULT_KEYS")]
@@ -143,17 +232,22 @@ pub enum DesktopResponse {
         #[serde(rename = "vaultKeys")]
         vault_keys: String,
     },
+    /// Each item is the account's decrypted item plaintext with a handful of
+    /// metadata fields merged over it (`build_snapshot_item_payload` in
+    /// `lib.rs`). The plaintext is a client-owned shape with no Rust definition —
+    /// this process only ever passes it through — so it stays opaque here rather
+    /// than growing a second, Rust-flavoured declaration of it. The extension
+    /// validates the structural fields in `desktop-snapshot.ts`.
     #[serde(rename = "DESKTOP_ITEMS_SNAPSHOT")]
     DesktopItemsSnapshot {
+        #[ts(type = "Array<Record<string, unknown>>")]
         items: Vec<serde_json::Value>,
         #[serde(rename = "generatedAt")]
+        #[ts(type = "number")]
         generated_at: i64,
     },
     #[serde(rename = "DESKTOP_EVENT")]
-    DesktopEvent {
-        event: DesktopEventKind,
-        payload: serde_json::Value,
-    },
+    DesktopEvent(DesktopEvent),
     #[serde(rename = "DESKTOP_EVENT_SUBSCRIPTION")]
     DesktopEventSubscription { subscribed: bool },
     #[serde(rename = "BIOMETRIC_STATUS")]
@@ -172,8 +266,10 @@ pub enum DesktopResponse {
         device_key: String,
         signature: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         auth_token: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         vault_keys: Option<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_FAILED")]
@@ -192,33 +288,104 @@ pub enum DesktopResponse {
     OpenDesktopAppResult {
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         error: Option<String>,
     },
     #[serde(rename = "TRIGGER_DESKTOP_UNLOCK_RESULT")]
     TriggerDesktopUnlockResult {
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         error: Option<String>,
     },
     #[serde(rename = "ERROR")]
     Error { message: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One account, exactly as `DESKTOP_ACCOUNTS` publishes it.
+///
+/// A pure republication of the native-host view's account entry: the extension
+/// stores the result as its own `AccountMetadata`, so every field it needs is
+/// published rather than defaulted or re-derived on either side.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
+pub struct DesktopAccountEntry {
+    pub account_id: String,
+    pub email: String,
+    pub user_id: String,
+    pub name: String,
+    pub secret_key_hint: String,
+    /// Omitted entirely when the view omitted it, so "no team" never arrives at
+    /// the consumer as an empty string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub team_name: Option<String>,
+    /// Nullable rather than skipped: the consumer's field is `string | null`.
+    pub team_avatar_url: Option<String>,
+    #[ts(type = "number")]
+    pub added_at: i64,
+    #[ts(type = "number")]
+    pub last_active_at: i64,
+    pub biometric_enabled: bool,
+}
+
+/// A pushed desktop event and its payload, as one adjacently tagged pair.
+///
+/// The tag rides in `event` and the body in `payload`, which is the shape this
+/// protocol has always had; expressing it as an enum is what lets the generated
+/// TypeScript correlate the two instead of handing the consumer an opaque
+/// payload next to a free-standing tag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "event", content = "payload", rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
+pub enum DesktopEvent {
+    Lock {
+        reason: String,
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+    Unlock {
+        accounts: Vec<String>,
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+    DesktopClose {
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+    #[serde(rename_all = "camelCase")]
+    ActiveAccountChanged {
+        account_id: String,
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+    ThemeChanged {
+        theme: DesktopTheme,
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub struct AccountUnlockData {
     #[serde(rename = "accountId")]
     pub account_id: String,
     pub email: String,
     pub encrypted_session: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub auth_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub vault_keys: Option<String>,
 }
 
 // The native host compiles this shared schema but never constructs desktop-side material.
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub struct BiometricUnlockMaterial {
     pub account: AccountUnlockData,
     pub device_key: String,
@@ -226,23 +393,14 @@ pub struct BiometricUnlockMaterial {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/desktop-ipc.ts")]
 pub struct BiometricUnlockAllMaterial {
     pub device_key: String,
     pub signature: String,
     pub accounts: Vec<AccountUnlockData>,
     pub unlocked: Vec<String>,
     pub failed: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DesktopEventKind {
-    Lock,
-    Unlock,
-    DesktopClose,
-    ActiveAccountChanged,
-    ThemeChanged,
 }
 
 pub async fn read_frame<R, T>(reader: &mut R) -> io::Result<T>
@@ -283,8 +441,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, write_frame, AccountUnlockData, DesktopEnvelope, DesktopEventKind,
-        DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+        read_frame, write_frame, AccountUnlockData, DesktopAccountEntry, DesktopEnvelope,
+        DesktopEvent, DesktopRequest, DesktopResponse, DesktopTheme, OpenDesktopAppIntent,
+        DESKTOP_PROTOCOL_VERSION,
     };
     use tokio::io::duplex;
 
@@ -320,7 +479,7 @@ mod tests {
         assert_eq!(
             decoded.payload,
             DesktopRequest::OpenDesktopApp {
-                intent: Some("create_item".to_string()),
+                intent: Some(OpenDesktopAppIntent::CreateItem),
                 url: Some("https://example.com/login".to_string()),
                 item_id: None,
                 vault_id: None,
@@ -338,7 +497,7 @@ mod tests {
         assert_eq!(
             decoded.payload,
             DesktopRequest::OpenDesktopApp {
-                intent: Some("view_item".to_string()),
+                intent: Some(OpenDesktopAppIntent::ViewItem),
                 url: None,
                 item_id: Some("item-1".to_string()),
                 vault_id: Some("vault-1".to_string()),
@@ -391,13 +550,10 @@ mod tests {
         let message = DesktopEnvelope {
             protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: None,
-            payload: DesktopResponse::DesktopEvent {
-                event: DesktopEventKind::Unlock,
-                payload: serde_json::json!({
-                    "accounts": ["alice@example.com"],
-                    "timestamp": 123,
-                }),
-            },
+            payload: DesktopResponse::DesktopEvent(DesktopEvent::Unlock {
+                accounts: vec!["alice@example.com".to_string()],
+                timestamp: 123,
+            }),
         };
 
         write_frame(&mut writer, &message)
@@ -411,6 +567,116 @@ mod tests {
         assert_eq!(decoded, message);
         let serialized = serde_json::to_value(&decoded).expect("response should serialize");
         assert_eq!(serialized["protocolVersion"], DESKTOP_PROTOCOL_VERSION);
+    }
+
+    /// The exact bytes an extension subscriber has always seen for a pushed
+    /// event: the tag beside its payload, both inside the response envelope.
+    #[test]
+    fn desktop_event_wire_shape_is_tag_beside_payload() {
+        let envelope = DesktopEnvelope::current(
+            None,
+            DesktopResponse::DesktopEvent(DesktopEvent::ActiveAccountChanged {
+                account_id: "account-1".to_string(),
+                timestamp: 17,
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(&envelope).expect("event should serialize"),
+            serde_json::json!({
+                "protocolVersion": 1,
+                "type": "DESKTOP_EVENT",
+                "event": "active_account_changed",
+                "payload": { "accountId": "account-1", "timestamp": 17 },
+            })
+        );
+    }
+
+    #[test]
+    fn theme_changed_event_wire_shape_is_unchanged() {
+        let envelope = DesktopEnvelope::current(
+            None,
+            DesktopResponse::DesktopEvent(DesktopEvent::ThemeChanged {
+                theme: DesktopTheme::System,
+                timestamp: 17,
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(&envelope).expect("event should serialize"),
+            serde_json::json!({
+                "protocolVersion": 1,
+                "type": "DESKTOP_EVENT",
+                "event": "theme_changed",
+                "payload": { "theme": "system", "timestamp": 17 },
+            })
+        );
+    }
+
+    /// A newer peer may name an intent or a theme this build has never heard of.
+    /// The field drops out; the rest of the message still has to be usable.
+    #[test]
+    fn unknown_closed_set_members_are_dropped_not_fatal() {
+        let raw = r#"{"protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"share_item","url":"https://example.com"}"#;
+        let decoded: DesktopEnvelope<DesktopRequest> =
+            serde_json::from_str(raw).expect("an unknown intent must not fail the frame");
+        assert_eq!(
+            decoded.payload,
+            DesktopRequest::OpenDesktopApp {
+                intent: None,
+                url: Some("https://example.com".to_string()),
+                item_id: None,
+                vault_id: None,
+            }
+        );
+
+        let raw = r#"{"protocolVersion":1,"type":"DESKTOP_STATUS","available":true,"locked":false,"unlockedAccounts":[],"timestamp":1,"autolockTimeoutMs":2,"theme":"sepia"}"#;
+        let decoded: DesktopEnvelope<DesktopResponse> =
+            serde_json::from_str(raw).expect("an unknown theme must not fail the frame");
+        assert_eq!(
+            decoded.payload,
+            DesktopResponse::DesktopStatus {
+                available: true,
+                locked: false,
+                unlocked_accounts: Vec::new(),
+                timestamp: 1,
+                autolock_timeout_ms: 2,
+                theme: None,
+            }
+        );
+    }
+
+    /// `DESKTOP_ACCOUNTS` entries are typed now; the bytes are not allowed to
+    /// move. `teamName` is omitted when absent, `teamAvatarUrl` is sent as null.
+    #[test]
+    fn desktop_account_entry_wire_shape_is_unchanged() {
+        let entry = DesktopAccountEntry {
+            account_id: "account-1".to_string(),
+            email: "person@example.com".to_string(),
+            user_id: "user-1".to_string(),
+            name: "Person".to_string(),
+            secret_key_hint: "AB-CD".to_string(),
+            team_name: None,
+            team_avatar_url: None,
+            added_at: 1,
+            last_active_at: 2,
+            biometric_enabled: true,
+        };
+
+        assert_eq!(
+            serde_json::to_value(&entry).expect("entry should serialize"),
+            serde_json::json!({
+                "accountId": "account-1",
+                "email": "person@example.com",
+                "userId": "user-1",
+                "name": "Person",
+                "secretKeyHint": "AB-CD",
+                "teamAvatarUrl": serde_json::Value::Null,
+                "addedAt": 1,
+                "lastActiveAt": 2,
+                "biometricEnabled": true,
+            })
+        );
     }
 
     #[test]

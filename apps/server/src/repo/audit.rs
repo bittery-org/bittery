@@ -1,14 +1,17 @@
 use sqlx::{query_as, PgPool};
 use time::OffsetDateTime;
 
-use crate::error::AppError;
+use crate::{
+    db::enums::{BillingPlan, BillingStatus, TeamRole},
+    error::AppError,
+};
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct AuditActorRow {
     pub team_id: Option<String>,
-    pub role: String,
-    pub billing_plan: Option<String>,
-    pub billing_status: Option<String>,
+    pub role: TeamRole,
+    pub billing_plan: Option<BillingPlan>,
+    pub billing_status: Option<BillingStatus>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

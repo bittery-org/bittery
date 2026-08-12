@@ -1,10 +1,10 @@
 import { m } from "@bittery/i18n/paraglide/messages";
-import { RpcProvider } from "@bittery/shared/rpc";
+import { ApiProvider } from "@bittery/shared/api";
 import {
-	createAppRpcOptionsProxy,
-	isUnauthorizedRpcError,
-} from "@bittery/shared/rpc-client";
-import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+	isApiTransportError,
+	isUnauthorizedApiError,
+} from "@bittery/shared/api-client";
+import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
@@ -52,11 +52,17 @@ function handleUnauthorizedError() {
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
-			toast.error(error.message, {
+			// An answered request carries the API's own problem detail, which is
+			// written to be read. A request that never arrived carries nothing but
+			// the engine's rejection, so the app supplies the copy instead.
+			const message = isApiTransportError(error)
+				? m.toast_api_unreachable()
+				: error.message;
+			toast.error(message, {
 				action: {
 					label: "retry",
 					onClick: () => {
@@ -68,7 +74,7 @@ export const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -82,48 +88,48 @@ async function getSyncClientIdHeader(): Promise<string | null> {
 	}
 
 	try {
-		return getOrCreateClientId(window.localStorage);
+		return getOrCreateClientId(window.sessionStorage);
 	} catch {
 		return null;
 	}
 }
 
-const rpcClient = createSessionRefreshingRpcClient({
+async function getApiClientId(): Promise<string> {
+	return (await getSyncClientIdHeader()) ?? crypto.randomUUID();
+}
+
+const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: getServerUrl(),
-	// Resolve at request time — prerender evaluates defaultServerUrl without `window`.
-	getServerUrl: async () => getServerUrl(),
-	getSessionSnapshot: async () => {
+	getAccountSnapshot: async (originAccountId) => {
 		await initializeStorage();
-		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(),
-			storage.getStoredSessionData(),
+		const accountId = originAccountId ?? (await storage.getActiveAccount());
+		if (!accountId) return null;
+		const [token, sessionData, serverUrl, account] = await Promise.all([
+			storage.getAuthToken(accountId),
+			storage.getStoredSessionData(accountId),
+			storage.getServerUrl(accountId),
+			storage.getAccountMetadata(accountId),
 		]);
 		return {
+			accountId,
+			serverUrl: serverUrl ?? getServerUrl(),
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
 			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
+			insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
 		};
 	},
-	getRefreshToken: async () => {
-		await initializeStorage();
-		return storage.getAuthToken();
-	},
-	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		await initializeStorage();
-		const accountId = await storage.getActiveAccount();
-		if (!accountId) {
-			return;
-		}
-		await storage.storeAuthToken(token, accountId);
-		await storage.updateStoredSessionMetadata(accountId, {
+	storeRefreshedSession: async (snapshot, { token, sessionId, expiresAt }) => {
+		await storage.storeAuthToken(token, snapshot.accountId);
+		await storage.updateStoredSessionMetadata(snapshot.accountId, {
 			sessionId,
 			expiresAt,
 		});
 	},
-	getClientId: getSyncClientIdHeader,
+	getClientId: getApiClientId,
+	clientPlatform: "web",
+	clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
 });
-
-const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
 
 export const getRouter = () => {
 	const router = createTanStackRouter({
@@ -132,17 +138,17 @@ export const getRouter = () => {
 		scrollToTopSelectors: ["#auth-scroll-area", "#app-scroll-area"],
 		defaultPreloadStaleTime: 0,
 		defaultPendingMinMs: 350,
-		context: { rpc, queryClient },
+		context: { api: apiClient, queryClient },
 		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
-					<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
+					<ApiProvider apiClient={apiClient}>
 						<SyncProvider queryClient={queryClient}>
 							<WebPlatformProvider>{children}</WebPlatformProvider>
 						</SyncProvider>
-					</RpcProvider>
+					</ApiProvider>
 				</QueryClientProvider>
 			</I18nProvider>
 		),

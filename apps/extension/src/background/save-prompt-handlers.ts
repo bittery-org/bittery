@@ -1,13 +1,10 @@
-import type { MessageResponse } from "./types";
+import type {
+	Acknowledgement,
+	PendingSavePrompt,
+	PendingSavePromptResponse,
+} from "./router/contract";
 
 const PENDING_SAVE_PROMPT_KEY = "bittery_pending_save_prompt";
-
-type PendingSavePrompt = {
-	username: string;
-	password: string;
-	url: string;
-	hostname: string;
-};
 
 function getStorageArea(): chrome.storage.StorageArea {
 	return chrome.storage.session ?? chrome.storage.local;
@@ -15,7 +12,7 @@ function getStorageArea(): chrome.storage.StorageArea {
 
 export async function handleSetPendingSavePrompt(
 	payload: PendingSavePrompt,
-): Promise<MessageResponse> {
+): Promise<Acknowledgement> {
 	const { username, password, url, hostname } = payload;
 
 	if (!username || !password || !url || !hostname) {
@@ -37,7 +34,7 @@ export async function handleSetPendingSavePrompt(
 	return { success: true };
 }
 
-export async function handleGetPendingSavePrompt(): Promise<MessageResponse> {
+export async function handleGetPendingSavePrompt(): Promise<PendingSavePromptResponse> {
 	const result = await getStorageArea().get(PENDING_SAVE_PROMPT_KEY);
 
 	return {
@@ -48,7 +45,7 @@ export async function handleGetPendingSavePrompt(): Promise<MessageResponse> {
 	};
 }
 
-export async function handleClearPendingSavePrompt(): Promise<MessageResponse> {
+export async function handleClearPendingSavePrompt(): Promise<Acknowledgement> {
 	await getStorageArea().remove(PENDING_SAVE_PROMPT_KEY);
 
 	return { success: true };

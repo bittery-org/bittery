@@ -1,7 +1,8 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
 
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -35,20 +36,20 @@ export const Route = createFileRoute("/_app/team/")({
 });
 
 function TeamPage() {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const { m } = useI18n();
 
-	const teamListQuery = useQuery(rpc.team.list.queryOptions());
+	const teamListQuery = useQuery(apiQueries.teams.current(api));
 	const teamId = teamListQuery.data?.id;
 	const billingEntitlementsQuery = useQuery(
-		rpc.billing.entitlements.queryOptions(),
+		apiQueries.billing.entitlements(api),
 	);
 	const registrationStatusQuery = useQuery(
-		rpc.auth.registrationStatus.queryOptions(),
+		apiQueries.auth.registrationStatus(api),
 	);
-	const meQuery = useQuery(rpc.auth.me.queryOptions());
+	const meQuery = useQuery(apiQueries.auth.me(api));
 	const teamQuery = useQuery({
-		...rpc.team.get.queryOptions({ teamId: teamId! }),
+		...apiQueries.teams.details(api, teamId!),
 		enabled: !!teamId,
 	});
 	const team = teamQuery.data;
@@ -58,11 +59,11 @@ function TeamPage() {
 			entitlements: billingEntitlementsQuery.data?.entitlements,
 		});
 	const membersQuery = useQuery({
-		...rpc.team.members.list.queryOptions({ teamId: teamId! }),
+		...apiQueries.teams.members(api, teamId!),
 		enabled: !!teamId,
 	});
 	const invitationsQuery = useQuery({
-		...rpc.team.invitations.list.queryOptions({ teamId: teamId! }),
+		...apiQueries.teams.invitations(api, teamId!),
 		enabled: !!teamId && canViewInvitations,
 	});
 
@@ -222,7 +223,7 @@ function TeamPage() {
 						) : teamId ? (
 							<MemberList
 								teamId={teamId}
-								members={membersQuery.data || []}
+								members={[...(membersQuery.data || [])]}
 								currentUserId={currentUserId}
 								canManageMembers={canManageTeam}
 								isSelfHostedMode={isSelfHostedMode}
@@ -249,8 +250,9 @@ function TeamPage() {
 								</div>
 							) : teamId ? (
 								<PendingInvitationsList
-									invitations={invitationsQuery.data || []}
+									invitations={[...(invitationsQuery.data || [])]}
 									canManage={canManageTeam}
+									teamId={teamId}
 								/>
 							) : null}
 						</div>

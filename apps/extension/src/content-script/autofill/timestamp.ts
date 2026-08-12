@@ -1,3 +1,5 @@
+import { sendMessage } from "../../lib/messaging";
+
 /**
  * Notify the background worker that an autofill just happened so it can keep
  * the vault unlocked.
@@ -7,7 +9,7 @@
  */
 export async function updateAutofillTimestamp(): Promise<void> {
 	try {
-		await chrome.runtime.sendMessage({ type: "UPDATE_AUTOFILL_TIMESTAMP" });
+		await sendMessage({ type: "UPDATE_AUTOFILL_TIMESTAMP" });
 	} catch (error) {
 		console.warn("Failed to update autofill timestamp:", error);
 	}

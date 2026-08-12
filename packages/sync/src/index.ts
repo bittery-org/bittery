@@ -1,18 +1,23 @@
 // Query invalidation helpers
 
 export type {
-	CatchUpClient,
+	CatchUpApiClient,
 	CatchUpPageResponse,
 	RunCatchUpOptions,
 	RunCatchUpResult,
 } from "./catch-up";
 export { runCatchUp } from "./catch-up";
 // Delta sync (platform-agnostic)
-export type { DeltaSyncClient } from "./delta-sync";
+export type { DeltaSyncApiClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";
 export {
+	createNativeItemSyncCommand,
+	type NativeEncryptedItemHandoff,
+} from "./native-command-handoff";
+export {
+	ItemSyncEngine,
 	OutboundQueue,
-	type OutboundQueueClient,
+	type OutboundQueueApiClient,
 	type PendingMutation,
 	type TempIdMapping,
 } from "./outbound-queue";
@@ -20,7 +25,6 @@ export type {
 	InvalidationContext,
 	QueryInvalidator,
 	QueryInvalidatorOptions,
-	QueryKeyHelpers,
 } from "./query-invalidation";
 export {
 	createQueryInvalidator,
@@ -30,10 +34,25 @@ export {
 // Core sync functionality
 export { createSyncManager, SyncManager } from "./sync-manager";
 export {
+	type SyncApiClient,
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
+export {
+	getNewTerminalCommandCount,
+	subscribeToNewTerminalCommands,
+} from "./terminal-command-status";
 export * from "./types";
 // React hooks
-export type { SyncEventContext, SyncSource, UseSyncOptions } from "./use-sync";
-export { generateClientId, getOrCreateClientId, useSync } from "./use-sync";
+export type {
+	SyncContextValue,
+	SyncEventContext,
+	SyncSource,
+	UseSyncOptions,
+} from "./use-sync";
+export {
+	buildDefaultSyncSourceId,
+	generateClientId,
+	getOrCreateClientId,
+	useSync,
+} from "./use-sync";

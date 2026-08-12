@@ -4,7 +4,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use ts_rs::TS;
 
 use crate::{
     error::AppError,
@@ -15,8 +14,8 @@ use crate::{
     services::team_admin::authorize_team_admin,
 };
 
-const DEFAULT_LIMIT: u32 = 50;
-const MAX_LIMIT: u32 = 100;
+pub(crate) const DEFAULT_LIMIT: u32 = 50;
+pub(crate) const MAX_LIMIT: u32 = 100;
 const MAX_SCAN_ROWS: i64 = 512;
 
 const AUTH_ACTIONS: &[&str] = &[
@@ -29,7 +28,7 @@ const AUTH_ACTIONS: &[&str] = &[
     "account_deleted",
 ];
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEventsInput {
     pub cursor: Option<String>,
@@ -42,7 +41,7 @@ pub struct TeamEventsInput {
     pub search: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuditActionGroupFilter {
     Auth,
@@ -54,7 +53,7 @@ pub enum AuditActionGroupFilter {
     All,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuditResultFilter {
     Success,
@@ -62,14 +61,14 @@ pub enum AuditResultFilter {
     All,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EventSource {
     AuditLog,
     ShareAccessLog,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuditActionGroup {
     Auth,
@@ -80,14 +79,14 @@ pub enum AuditActionGroup {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TeamEventResult {
     Success,
     Failure,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEventActor {
     pub user_id: Option<String>,
@@ -95,14 +94,14 @@ pub struct TeamEventActor {
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEventEntity {
     pub r#type: Option<String>,
     pub id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEventNetwork {
     pub masked_ip: Option<String>,
@@ -111,7 +110,7 @@ pub struct TeamEventNetwork {
     pub full_user_agent: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEvent {
     pub id: String,
@@ -126,7 +125,7 @@ pub struct TeamEvent {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamEventsResponse {
     pub events: Vec<TeamEvent>,

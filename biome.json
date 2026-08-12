@@ -32,6 +32,10 @@
 			"!**/.zed",
 			"!**/.vscode",
 			"!**/routeTree.gen.ts",
+			"!**/expo-env.d.ts",
+			"!packages/api-contract/openapi.v1.json",
+			"!packages/api-contract/src/generated",
+			"!apps/desktop/src/generated",
 			"!**/src-tauri",
 			"!**/.nuxt",
 			"!bts.jsonc",
@@ -81,8 +85,24 @@
 							"@bittery/core/hooks/utils": "Removed barrel over compatibility wrappers. Import the underlying service from \"@bittery/core/services/*\" instead.",
 							"@bittery/core/hooks/services": "Removed forwarder. Import from \"@bittery/core/hooks/services/autolock-web\" or \"@bittery/core/hooks/services/autolock-mobile\" instead.",
 							"@bittery/core/types": "Removed cross-package alias. Import from \"@bittery/types\" instead.",
-							"@bittery/core/core-context": "Removed subpath export. Import from the \"@bittery/core\" root entry instead."
-						}
+							"@bittery/core/core-context": "Removed subpath export. Import from the \"@bittery/core\" root entry instead.",
+							"@bittery/api-contract/src/generated/schema": "Import server types from @bittery/api-contract's public exports, never the generated schema directly.",
+							"@bittery/crypto-wasm": "Only @bittery/crypto-port may import generated crypto bindings.",
+							"@bittery/crypto-react-native": "Only @bittery/crypto-port may import generated crypto bindings."
+						},
+						"patterns": [
+							{
+								"group": ["@bittery/api-contract/src/generated/**"],
+								"message": "Import server types from @bittery/api-contract's public exports, never the generated schema directly."
+							},
+							{
+								"group": [
+									"@bittery/crypto-wasm/**",
+									"@bittery/crypto-react-native/**"
+								],
+								"message": "Only @bittery/crypto-port may import generated crypto bindings."
+							}
+						]
 					}
 				},
 				"noParameterAssign": "error",
@@ -107,5 +127,27 @@
 		"parser": {
 			"tailwindDirectives": true
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["apps/extension/src/background/desktop-protocol.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/crypto/port/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": "off"
+					}
+				}
+			}
+		}
+	]
 }

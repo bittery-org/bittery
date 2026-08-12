@@ -160,7 +160,7 @@ test("two concurrently restored contexts are two sync clients of one account", a
 	]);
 
 	const clientId = (page: Page) =>
-		page.evaluate(() => localStorage.getItem("bittery_sync_client_id"));
+		page.evaluate(() => sessionStorage.getItem("bittery_sync_client_id"));
 	await expect.poll(() => clientId(first)).toBeTruthy();
 	await expect.poll(() => clientId(second)).toBeTruthy();
 	// Restoring must not clone the sync identity; `sync.spec.ts` depends on a

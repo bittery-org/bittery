@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import type { KeyRef } from "@bittery/crypto-port";
+import type { EncryptedData, KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
 	type InMemoryCryptoPort,
 } from "@bittery/crypto-port/testing";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
-import type { EncryptedData, KdfProfile } from "@bittery/types";
 import {
+	buildStoredItemEncryptionContext,
 	createVaultCrypto,
+	type ItemWriteScope,
 	isOwnerWrappedVaultKey,
+	type StoredItemCiphertext,
 	VAULT_KEY_WRAP_PURPOSE,
 	type VaultCrypto,
 	type VaultCryptoStore,
@@ -17,10 +19,71 @@ import {
 const VAULT_ID = "vault_1";
 const OTHER_VAULT_ID = "vault_2";
 const USER_ID = "user_1";
+const ITEM_ID = "item_1";
 const ACCOUNT_ID = "acc_1";
 const EMAIL = "alice@example.com";
 const PASSWORD = "correct horse battery staple";
 const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+
+/** The write scope a caller states when sealing a new revision of an item. */
+function writeScope(overrides: Partial<ItemWriteScope> = {}): ItemWriteScope {
+	return {
+		vaultId: VAULT_ID,
+		itemId: ITEM_ID,
+		version: 1,
+		userId: USER_ID,
+		...overrides,
+	};
+}
+
+/** The record as the cache holds it once that ciphertext has been stored. */
+function storedItem(
+	encrypted: EncryptedData,
+	overrides: Partial<StoredItemCiphertext> = {},
+): StoredItemCiphertext {
+	return {
+		id: ITEM_ID,
+		vaultId: VAULT_ID,
+		encryptedData: encrypted.ciphertext,
+		encryptionIv: encrypted.iv,
+		encryptionAlgorithm: encrypted.algorithm,
+		encryptionVersion: 1,
+		encryptedByUserId: USER_ID,
+		...overrides,
+	};
+}
+
+describe("stored Item encryption context", () => {
+	test("uses the ciphertext revision and author after metadata revision drift", () => {
+		expect(
+			buildStoredItemEncryptionContext({
+				id: ITEM_ID,
+				vaultId: VAULT_ID,
+				encryptionVersion: 3,
+				encryptedByUserId: "ciphertext_author",
+			}),
+		).toEqual({
+			vaultId: VAULT_ID,
+			entityId: ITEM_ID,
+			entityType: "item",
+			version: 3,
+			userId: "ciphertext_author",
+		});
+	});
+
+	test("floors a version below one, as the write builder does", () => {
+		// A record that reached the cache without a usable `encryptionVersion` must still
+		// rebuild the context the writer bound, and the writer floors too.
+		expect(
+			buildStoredItemEncryptionContext({
+				id: ITEM_ID,
+				vaultId: VAULT_ID,
+				encryptionVersion: 0,
+				encryptedByUserId: USER_ID,
+			}),
+		).toMatchObject({ version: 1 });
+	});
+});
 
 interface StoreState {
 	vaultKeys: Array<{ vaultId: string; encryptedVaultKey: string }> | null;
@@ -104,40 +167,6 @@ async function seedOwnerWrappedVault(
 		{ vaultId: options.vaultId ?? VAULT_ID, encryptedVaultKey },
 	];
 	return { vaultKey, encryptedVaultKey };
-}
-
-/**
- * A record in the pre-AAD format: sealed with no context at all, carrying the context as a
- * JSON envelope inside the plaintext. Written out literally rather than through a helper,
- * because the marker and the NUL-joined field order ARE the back-compat contract.
- */
-async function sealLegacyEnvelope(
-	crypto: InMemoryCryptoPort,
-	key: KeyRef,
-	plaintext: string,
-	context: {
-		vaultId: string;
-		entityId: string;
-		entityType: string;
-		version: number;
-		userId: string;
-	},
-): Promise<EncryptedData> {
-	return crypto.encrypt(
-		JSON.stringify({
-			marker: "bittery-context-envelope-v1",
-			context: [
-				context.vaultId,
-				context.entityId,
-				context.entityType,
-				String(context.version),
-				context.userId,
-			].join("\0"),
-			payload: plaintext,
-		}),
-		key,
-		null,
-	);
 }
 
 describe("wrapped vault key envelope", () => {
@@ -285,123 +314,7 @@ describe("wrap context binding", () => {
 	});
 });
 
-describe("the pre-AAD ciphertext fallback", () => {
-	test("opens a vault key written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const muk = await harness.crypto.generateEncryptionKey();
-		harness.state.masterUnlockKey = muk;
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const vaultKeyBase64 = await materialOf(harness.crypto, vaultKey);
-
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			muk,
-			vaultKeyBase64,
-			{
-				vaultId: VAULT_ID,
-				entityId: VAULT_KEY_WRAP_PURPOSE,
-				entityType: "vault_key",
-				version: 1,
-				userId: USER_ID,
-			},
-		);
-
-		const unwrapped = await harness.vaultCrypto.unwrapStoredVaultKey({
-			encryptedVaultKey: JSON.stringify({
-				...legacy,
-				context: {
-					vaultId: VAULT_ID,
-					userId: USER_ID,
-					keyVersion: 1,
-					purpose: VAULT_KEY_WRAP_PURPOSE,
-				},
-			}),
-			vaultId: VAULT_ID,
-			userId: USER_ID,
-		});
-
-		expect(await materialOf(harness.crypto, unwrapped)).toBe(vaultKeyBase64);
-	});
-
-	test("opens an item written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "item_1",
-			version: 2,
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(harness.crypto, vaultKey, "{}", {
-			vaultId: VAULT_ID,
-			entityId: "item_1",
-			entityType: "item",
-			version: 2,
-			userId: USER_ID,
-		});
-
-		expect(await harness.vaultCrypto.decryptItem(legacy, vaultKey, scope)).toBe(
-			"{}",
-		);
-	});
-
-	test("opens an attachment written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			attachmentKey: "attachment_1",
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"secret.txt",
-			{
-				vaultId: scope.vaultId,
-				entityId: scope.attachmentKey,
-				entityType: "attachment_name",
-				version: 1,
-				userId: scope.userId,
-			},
-		);
-
-		expect(
-			await harness.vaultCrypto.decryptAttachment(
-				legacy,
-				vaultKey,
-				scope,
-				"name",
-			),
-		).toBe("secret.txt");
-	});
-
-	test("still refuses a legacy envelope bound to another entity", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"secret",
-			{
-				vaultId: VAULT_ID,
-				entityId: "item_1",
-				entityType: "item",
-				version: 1,
-				userId: USER_ID,
-			},
-		);
-
-		await expect(
-			harness.vaultCrypto.decryptItem(legacy, vaultKey, {
-				vaultId: VAULT_ID,
-				itemId: "item_2",
-				version: 1,
-				userId: USER_ID,
-			}),
-		).rejects.toThrow("Encryption context mismatch");
-	});
-
+describe("item context binding", () => {
 	test("reports the plaintext is not an envelope when the key is simply wrong", async () => {
 		const harness = createHarness();
 		const vaultKey = await harness.crypto.generateEncryptionKey();
@@ -409,39 +322,84 @@ describe("the pre-AAD ciphertext fallback", () => {
 		const encrypted = await harness.crypto.encrypt("secret", vaultKey, null);
 
 		await expect(
-			harness.vaultCrypto.decryptItem(encrypted, otherKey, {
-				vaultId: VAULT_ID,
-				itemId: "item_1",
-				version: 1,
-				userId: USER_ID,
-			}),
+			harness.vaultCrypto.decryptStoredItem(storedItem(encrypted), otherKey),
 		).rejects.toThrow();
 	});
 
-	test("an item written with AAD does not go near the fallback", async () => {
+	test("a stored item round trips encrypt, store and decrypt", async () => {
 		const harness = createHarness();
 		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "item_1",
-			version: 1,
-			userId: USER_ID,
-		};
 
 		const encrypted = await harness.vaultCrypto.encryptItem(
 			'{"title":"example"}',
 			vaultKey,
-			scope,
+			writeScope(),
 		);
 
 		expect(
-			await harness.vaultCrypto.decryptItem(encrypted, vaultKey, scope),
+			await harness.vaultCrypto.decryptStoredItem(
+				storedItem(encrypted),
+				vaultKey,
+			),
 		).toBe('{"title":"example"}');
+	});
+
+	test("the stored record rebuilds the context the write path bound", async () => {
+		const harness = createHarness();
+		const vaultKey = await harness.crypto.generateEncryptionKey();
+		// The writer states the revision it is *about to* store, so the record that lands
+		// carries it as `encryptionVersion` — not as `version`, which is concurrency only.
+		const scope = writeScope({ version: 4, userId: "ciphertext_author" });
+
+		const encrypted = await harness.vaultCrypto.encryptItem(
+			"sealed at 4",
+			vaultKey,
+			scope,
+		);
+		const stored = storedItem(encrypted, {
+			encryptionVersion: scope.version,
+			encryptedByUserId: scope.userId,
+		});
+
+		expect(buildStoredItemEncryptionContext(stored)).toEqual({
+			vaultId: scope.vaultId,
+			entityId: scope.itemId,
+			entityType: "item",
+			version: scope.version,
+			userId: scope.userId,
+		});
+		expect(await harness.vaultCrypto.decryptStoredItem(stored, vaultKey)).toBe(
+			"sealed at 4",
+		);
+	});
+
+	test("refuses a ciphertext paired with another record's binding", async () => {
+		const harness = createHarness();
+		const vaultKey = await harness.crypto.generateEncryptionKey();
+		const encrypted = await harness.vaultCrypto.encryptItem(
+			'{"title":"example"}',
+			vaultKey,
+			writeScope(),
+		);
+		const stored = storedItem(encrypted);
+
 		await expect(
-			harness.vaultCrypto.decryptItem(encrypted, vaultKey, {
-				...scope,
-				itemId: "item_2",
-			}),
+			harness.vaultCrypto.decryptStoredItem(
+				{ ...stored, id: "item_2" },
+				vaultKey,
+			),
+		).rejects.toThrow();
+		await expect(
+			harness.vaultCrypto.decryptStoredItem(
+				{ ...stored, encryptionVersion: 2 },
+				vaultKey,
+			),
+		).rejects.toThrow();
+		await expect(
+			harness.vaultCrypto.decryptStoredItem(
+				{ ...stored, encryptedByUserId: "user_2" },
+				vaultKey,
+			),
 		).rejects.toThrow();
 	});
 });
@@ -450,27 +408,22 @@ describe("batch item decryption", () => {
 	test("preserves request order and reports a failed item in place", async () => {
 		const harness = createHarness();
 		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = (itemId: string) => ({
-			vaultId: VAULT_ID,
-			itemId,
-			version: 1,
-			userId: USER_ID,
-		});
 		const first = await harness.vaultCrypto.encryptItem(
 			"first",
 			vaultKey,
-			scope("item_1"),
+			writeScope({ itemId: "item_1" }),
 		);
 		const third = await harness.vaultCrypto.encryptItem(
 			"third",
 			vaultKey,
-			scope("item_3"),
+			writeScope({ itemId: "item_3" }),
 		);
 
-		const results = await harness.vaultCrypto.decryptItems([
-			{ id: "item_1", data: first, vaultKey, scope: scope("item_1") },
-			{ id: "item_2", data: first, vaultKey, scope: scope("item_2") },
-			{ id: "item_3", data: third, vaultKey, scope: scope("item_3") },
+		const results = await harness.vaultCrypto.decryptStoredItems([
+			{ item: storedItem(first, { id: "item_1" }), vaultKey },
+			// The same ciphertext filed under another id: the AAD refuses it.
+			{ item: storedItem(first, { id: "item_2" }), vaultKey },
+			{ item: storedItem(third, { id: "item_3" }), vaultKey },
 		]);
 
 		expect(results.map((result) => result.id)).toEqual([
@@ -483,53 +436,18 @@ describe("batch item decryption", () => {
 		expect(results[2]).toEqual({ id: "item_3", ok: true, plaintext: "third" });
 	});
 
-	test("opens a legacy item without failing the rest of the batch", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "legacy_item",
-			version: 2,
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"legacy",
-			{
-				vaultId: scope.vaultId,
-				entityId: scope.itemId,
-				entityType: "item",
-				version: scope.version,
-				userId: scope.userId,
-			},
-		);
-
-		expect(
-			await harness.vaultCrypto.decryptItems([
-				{ id: scope.itemId, data: legacy, vaultKey, scope },
-			]),
-		).toEqual([{ id: scope.itemId, ok: true, plaintext: "legacy" }]);
-	});
-
 	test("borrows every vault key ref in the batch", async () => {
 		const harness = createHarness();
 		const vaultKey = await harness.crypto.generateEncryptionKey();
 		const before = harness.crypto.liveKeyCount;
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "item_1",
-			version: 1,
-			userId: USER_ID,
-		};
 		const encrypted = await harness.vaultCrypto.encryptItem(
 			"secret",
 			vaultKey,
-			scope,
+			writeScope(),
 		);
 
-		await harness.vaultCrypto.decryptItems([
-			{ id: scope.itemId, data: encrypted, vaultKey, scope },
+		await harness.vaultCrypto.decryptStoredItems([
+			{ item: storedItem(encrypted), vaultKey },
 		]);
 
 		expect(harness.crypto.liveKeyCount).toBe(before);

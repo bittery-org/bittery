@@ -1,9 +1,10 @@
+import { apiQueries } from "@bittery/shared/api-query";
 import type { EntitlementKey } from "@bittery/shared/billing";
 import { redirect } from "@tanstack/react-router";
 import {
 	normalizeDeploymentMode,
 	normalizeEntitlements,
-} from "@/lib/rpc-normalizers";
+} from "@/lib/api-normalizers";
 import type { RouterAppContext } from "../routes/__root";
 
 export type DeploymentMode = "cloud" | "self-hosted";
@@ -67,7 +68,7 @@ interface GuardBeforeLoadInput {
 export function createRouteGuard(rules: RouteGuardRules) {
 	return async ({ context, location }: GuardBeforeLoadInput) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.rpc.billing.entitlements.queryOptions(),
+			apiQueries.billing.entitlements(context.api),
 		);
 
 		const redirectPath = evaluateRouteAccess({

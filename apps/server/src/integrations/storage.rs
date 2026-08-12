@@ -14,7 +14,6 @@ use reqwest::{
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use ts_rs::TS;
 use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -40,7 +39,7 @@ pub struct StorageConfig {
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresignedUploadResult {
     pub key: String,
@@ -48,7 +47,7 @@ pub struct PresignedUploadResult {
     pub public_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageObjectHead {
     pub size: i64,
@@ -63,9 +62,7 @@ pub fn public_asset_url(key: &str) -> Option<String> {
         return None;
     }
 
-    let base_url = env::var("BITTERY_STORAGE_CDN_URL")
-        .or_else(|_| env::var("BITTERY_STORAGE_PUBLIC_URL"))
-        .ok()?;
+    let base_url = env::var("BITTERY_STORAGE_CDN_URL").ok()?;
     let normalized_base = base_url.trim().trim_end_matches('/');
     if normalized_base.is_empty() {
         None
@@ -862,7 +859,6 @@ mod tests {
         "BITTERY_STORAGE_ACCESS_KEY_ID",
         "BITTERY_STORAGE_SECRET_ACCESS_KEY",
         "BITTERY_STORAGE_REGION",
-        "BITTERY_STORAGE_PUBLIC_URL",
         "BITTERY_STORAGE_CDN_URL",
         "BITTERY_ATTACHMENT_UPLOAD_SECRET",
         "JWT_SECRET",

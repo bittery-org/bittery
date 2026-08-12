@@ -15,12 +15,12 @@ import {
 	type ImportSourceVault,
 	type ImportSourceVaultNameCode,
 } from "@bittery/shared";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
-import { useClientId, useQueryInvalidator } from "@/providers/sync-provider";
+import { useQueryInvalidator } from "@/providers/sync-provider";
 
 const IMPORT_BATCH_SIZE = 200;
 const DEFAULT_CREATED_VAULT_ICON = "lock";
@@ -231,9 +231,8 @@ export function useVaultImport() {
 	const { m } = useI18n();
 	const core = useCoreContext();
 	const crypto = usePlatformCrypto();
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const invalidator = useQueryInvalidator();
-	const clientId = useClientId();
 	const { vaultKeys } = useAllVaultKeys();
 
 	const [providerId, setProviderId] = useState<ImportProviderId | null>(null);
@@ -506,10 +505,12 @@ export function useVaultImport() {
 						});
 					}
 
+					// No account scope: `useAllVaultKeys` only ever lists the active
+					// account's vaults, so `resolveAccountScopeId` resolving an omitted
+					// scope to the active account is exactly this vault's account.
 					resolvedTargets.set(sourceVault.id, {
 						vaultId: targetVault.vaultId,
 						vaultName: targetVault.vaultName,
-						accountEmail: targetVault.accountEmail,
 					});
 				}
 
@@ -556,7 +557,7 @@ export function useVaultImport() {
 							icon: DEFAULT_CREATED_VAULT_ICON,
 							accountId: defaultAccountId,
 						},
-						rpcClient,
+						apiClient,
 					);
 
 					const resolvedTarget: ResolvedTargetVault = {
@@ -573,7 +574,7 @@ export function useVaultImport() {
 				const refreshAccountId =
 					createdVaults[0]?.accountId ?? defaultAccountId;
 				if (createdVaults.length > 0 && refreshAccountId) {
-					await core.vaults.refreshVaultKeys(rpcClient, refreshAccountId);
+					await core.vaults.refreshVaultKeys(apiClient, refreshAccountId);
 					await invalidator.invalidateVaultKeys();
 				}
 
@@ -610,9 +611,9 @@ export function useVaultImport() {
 							storage,
 							resolvedTarget.accountEmail,
 						);
-						const vaultRpcClient = await getClientForAccount(
+						const vaultApiClient = await getClientForAccount(
 							storage,
-							rpcClient,
+							apiClient,
 							accountId,
 						);
 						const userId = await resolveUserIdForContext(accountId);
@@ -682,11 +683,10 @@ export function useVaultImport() {
 								index,
 								index + IMPORT_BATCH_SIZE,
 							);
-							const result = await vaultRpcClient.vault.bulkImportItems.mutate({
-								vaultId: resolvedTarget.vaultId,
-								clientId: clientId ?? null,
-								items: batch,
-							});
+							const { data: result } = await vaultApiClient.vaults.importItems(
+								resolvedTarget.vaultId,
+								{ items: batch },
+							);
 							importedItemsInVault += result.importedCount;
 							importedCount += result.importedCount;
 						}
@@ -788,9 +788,8 @@ export function useVaultImport() {
 			core.vaultCoordinator,
 			core.vaultCrypto,
 			crypto,
-			rpcClient,
+			apiClient,
 			invalidator,
-			clientId,
 		]);
 
 	return {

@@ -6,6 +6,11 @@ import type {
 	SyncStorage,
 } from "./types";
 
+interface StoredSyncBaseline {
+	initialized: true;
+	cursor: SyncCursor | null;
+}
+
 /**
  * Default in-memory storage implementation
  */
@@ -38,9 +43,8 @@ const STALE_CONNECTION_THRESHOLD = 35000;
 const STALE_CHECK_INTERVAL = 10000;
 
 export class SyncManager {
-	private serverUrl: string;
-	private getAuthToken: () => Promise<string | null>;
 	private clientId: string;
+	private openSyncEvents: (signal: AbortSignal) => Promise<Response>;
 	private storage: SyncStorage;
 	private onStatusChange?: (status: ConnectionStatus) => void;
 	private onSessionRevoked?: (
@@ -48,7 +52,6 @@ export class SyncManager {
 	) => void | Promise<void>;
 	private onSyncPing?: () => void | Promise<void>;
 
-	private fetchImpl: (url: string, init?: any) => Promise<Response>;
 	private abortController: AbortController | null = null;
 	private connectionStatus: ConnectionStatus = "disconnected";
 	private reconnectAttempt = 0;
@@ -61,16 +64,14 @@ export class SyncManager {
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 	constructor(options: SyncManagerOptions) {
-		this.serverUrl = options.serverUrl;
-		this.getAuthToken = options.getAuthToken;
 		this.clientId = options.clientId;
+		this.openSyncEvents = options.openSyncEvents;
 		this.storage = options.storage || new MemoryStorage();
 		this.onStatusChange = options.onStatusChange;
 		this.onSessionRevoked = options.onSessionRevoked;
 		this.onSyncPing = options.onSyncPing;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
-		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
 	}
 
 	/**
@@ -155,24 +156,10 @@ export class SyncManager {
 		this.setStatus("connecting");
 
 		try {
-			const token = await this.getAuthToken();
-			if (!token) {
-				this.setStatus("reconnecting");
-				this.scheduleReconnect();
-				return;
-			}
-
 			// Create abort controller for this connection
 			this.abortController = new AbortController();
 
-			const response = await this.fetchImpl(`${this.serverUrl}/sync/events`, {
-				method: "GET",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					Accept: "text/event-stream",
-				},
-				signal: this.abortController.signal,
-			});
+			const response = await this.openSyncEvents(this.abortController.signal);
 
 			if (!response.ok) {
 				throw new Error(`SSE connection failed: ${response.status}`);
@@ -246,7 +233,7 @@ export class SyncManager {
 	 * Process a single SSE event.
 	 *
 	 * The server sends lightweight pings:
-	 *   event: sync       → something changed, client should call getEventsSince
+	 *   event: sync       → something changed, client should fetch `/sync/changes`
 	 *   event: session_revoked → a session was revoked
 	 *   event: connected   → connection established
 	 *   event: limit_exceeded → plan connection limit reached
@@ -297,7 +284,7 @@ export class SyncManager {
 				return;
 			}
 
-			// Handle sync ping — server says something changed, fetch via getEventsSince
+			// A sync event is only a hint; durable changes come from `/sync/changes`.
 			if (eventType === "sync" && !event.id) {
 				void this.onSyncPing?.();
 				return;
@@ -369,7 +356,33 @@ export class SyncManager {
 	 * Persist an explicit sync cursor.
 	 */
 	async setStoredLastSyncCursor(cursor: SyncCursor): Promise<void> {
-		await this.storage.set("lastSyncCursor", cursor);
+		await Promise.all([
+			this.storage.set("lastSyncCursor", cursor),
+			this.setStoredSyncBaseline(cursor),
+		]);
+	}
+
+	async setStoredSyncBaseline(cursor: SyncCursor | null): Promise<void> {
+		await this.storage.set<StoredSyncBaseline>("syncBaselineV1", {
+			initialized: true,
+			cursor,
+		});
+	}
+
+	async getStoredSyncBaseline(): Promise<StoredSyncBaseline | null> {
+		const baseline =
+			await this.storage.get<StoredSyncBaseline>("syncBaselineV1");
+		if (
+			baseline?.initialized === true &&
+			(baseline.cursor === null ||
+				(typeof baseline.cursor === "object" &&
+					typeof baseline.cursor.id === "string" &&
+					baseline.cursor.id.length > 0))
+		) {
+			return baseline;
+		}
+
+		return null;
 	}
 
 	/**
@@ -381,10 +394,7 @@ export class SyncManager {
 		}
 	}
 
-	/**
-	 * Get stored sync cursor.
-	 * Supports invalidating legacy cursor formats that exposed server seq values.
-	 */
+	/** Get the stored sync cursor. */
 	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
 		const cursor = await this.storage.get<SyncCursor>("lastSyncCursor");
 		if (
@@ -401,20 +411,6 @@ export class SyncManager {
 			return null;
 		}
 
-		return null;
-	}
-
-	/**
-	 * Backward-compatible wrapper for legacy callers.
-	 */
-	async saveLastSyncTimestamp(): Promise<void> {
-		await this.saveLastSyncCursor();
-	}
-
-	/**
-	 * Backward-compatible wrapper for legacy callers.
-	 */
-	async getStoredLastSyncTimestamp(): Promise<number | null> {
 		return null;
 	}
 }

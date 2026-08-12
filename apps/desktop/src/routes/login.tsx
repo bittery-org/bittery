@@ -1,5 +1,6 @@
 import { useLogin } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	Button,
@@ -98,7 +99,10 @@ export function LoginPage() {
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
 	const [isPrefilled, setIsPrefilled] = useState(false);
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
 
 	const { data: biometricAvailable } = useQuery({
 		queryKey: ["biometry-available"],
@@ -208,12 +212,17 @@ export function LoginPage() {
 		if (!nextServerUrl) {
 			return;
 		}
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
+			return;
+		}
 
 		await loginMutation.mutateAsync({
 			email,
 			password,
 			secretKey,
 			serverUrl: nextServerUrl,
+			insecureTransportConfirmed,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};
@@ -333,6 +342,27 @@ export function LoginPage() {
 							</Label>
 						</div>
 					)}
+
+					{requiresInsecureTransportConfirmation ? (
+						<Label
+							htmlFor="insecure-http-confirmation"
+							className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+						>
+							<Checkbox
+								id="insecure-http-confirmation"
+								checked={insecureTransportConfirmed}
+								onCheckedChange={(checked) =>
+									setInsecureTransportConfirmed(checked === true)
+								}
+							/>
+							<span className="grid gap-0.5">
+								<span>{m.auth_insecure_http_confirmation_label()}</span>
+								<span className="text-muted-foreground text-xs">
+									{m.auth_insecure_http_confirmation_description()}
+								</span>
+							</span>
+						</Label>
+					) : null}
 
 					<Button
 						type="submit"

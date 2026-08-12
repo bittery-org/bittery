@@ -50,14 +50,14 @@ async function unlock(
 
 function makeTravelModeClient(hiddenVaultIds: string[] = []) {
 	return {
-		getTravelMode: {
-			query: mock(async () => ({
+		get: mock(async () => ({
+			data: {
 				enabled: hiddenVaultIds.length > 0,
 				hiddenVaultIds,
 				enabledAt: null,
 				updatedAt: new Date(0).toISOString(),
-			})),
-		},
+			},
+		})),
 	};
 }
 
@@ -73,17 +73,17 @@ function makeAccountInfo(
 		userId: `${accountId}-user`,
 		name: accountId,
 		serverUrl,
-		rpcClient: {
+		apiClient: {
 			sync: {
-				bootstrapItems: {
-					query: mock(async () => ({
+				bootstrap: mock(async () => ({
+					data: {
 						items: [],
 						hasMore: false,
 						nextCursor: null,
-					})),
-				},
+					},
+				})),
 			},
-			vault: { list: { query: mock(async () => []) } },
+			vaults: { list: mock(async () => ({ data: [] })) },
 			...(travelMode ? { travelMode } : {}),
 		} as never,
 	} as unknown as AccountInfo;
@@ -190,7 +190,13 @@ describe("VaultRepositoryCoordinator", () => {
 					updatedAt: new Date().toISOString(),
 					title: "Example",
 				} as never,
-				{ ciphertext: "c", iv: "i", algorithm: "a" },
+				{
+					ciphertext: "c",
+					iv: "i",
+					algorithm: "a",
+					encryptionVersion: 1,
+					encryptedByUserId: "user-b",
+				},
 			);
 
 			const located = coordinator.findAccountForItem("item-1");
@@ -262,7 +268,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 			await coordinator.hydrate([account]);
 
-			expect(travelMode.getTravelMode.query).toHaveBeenCalled();
+			expect(travelMode.get).toHaveBeenCalled();
 			expect(
 				getTravelModeEnforcer(storage, itemCache).isVerified("acc-reloaded"),
 			).toBe(true);
@@ -292,7 +298,116 @@ describe("VaultRepositoryCoordinator", () => {
 				coordinator.hydrate([account]),
 			]);
 
-			expect(travelMode.getTravelMode.query).toHaveBeenCalledTimes(1);
+			expect(travelMode.get).toHaveBeenCalledTimes(1);
+		});
+
+		it("shares one bootstrap between UI hydration and sync initialization", async () => {
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+			await unlock({ storage, crypto }, "acc-cold");
+			const travelMode = makeTravelModeClient();
+			const coordinator = new VaultRepositoryCoordinator(
+				crypto,
+				vaultCrypto,
+				storage,
+				itemCache,
+			);
+			const account = makeAccountInfo(
+				"acc-cold",
+				"cold@example.com",
+				"https://cold.example.com/",
+				travelMode,
+			);
+			account.apiClient.sync.bootstrap = mock(async () => ({
+				data: {
+					items: [],
+					hasMore: false,
+					nextCursor: null,
+					syncCursor: { id: "evt_bootstrap" },
+				},
+			})) as never;
+
+			const [, baseline] = await Promise.all([
+				coordinator.hydrate([account]),
+				coordinator.initializeSyncBaseline([account], account.accountId),
+			]);
+
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(1);
+			expect(baseline).toEqual({ id: "evt_bootstrap" });
+			expect(
+				(await itemCache.getItemCacheMetadata(account.accountId))?.syncBaseline,
+			).toEqual({
+				serverUrl: "https://cold.example.com",
+				cursorId: "evt_bootstrap",
+			});
+		});
+
+		it("keeps a later cursor only while its cache generation still exists", async () => {
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+			await unlock({ storage, crypto }, "acc-generation");
+			const coordinator = new VaultRepositoryCoordinator(
+				crypto,
+				vaultCrypto,
+				storage,
+				itemCache,
+			);
+			const account = makeAccountInfo(
+				"acc-generation",
+				"generation@example.com",
+				"https://generation.example.com",
+				makeTravelModeClient(),
+			);
+			let bootstrapCursor = "evt_bootstrap";
+			account.apiClient.sync.bootstrap = mock(async () => ({
+				data: {
+					items: [],
+					hasMore: false,
+					nextCursor: null,
+					syncCursor: { id: bootstrapCursor },
+				},
+			})) as never;
+
+			expect(
+				await coordinator.initializeSyncBaseline([account], account.accountId),
+			).toEqual({ id: "evt_bootstrap" });
+			expect(
+				await coordinator.initializeSyncBaseline([account], account.accountId, {
+					id: "evt_later",
+				}),
+			).toEqual({ id: "evt_later" });
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(1);
+
+			await itemCache.clearItemCache(account.accountId);
+			bootstrapCursor = "evt_after_fresh_login";
+			expect(
+				await coordinator.initializeSyncBaseline([account], account.accountId, {
+					id: "evt_later",
+				}),
+			).toEqual({ id: "evt_after_fresh_login" });
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(2);
+		});
+
+		it("does not initialize a cursor before a locked account commits bootstrap", async () => {
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+			const coordinator = new VaultRepositoryCoordinator(
+				crypto,
+				vaultCrypto,
+				storage,
+				itemCache,
+			);
+			const account = makeAccountInfo(
+				"acc-locked",
+				"locked@example.com",
+				"https://locked.example.com",
+				makeTravelModeClient(),
+			);
+
+			await expect(
+				coordinator.initializeSyncBaseline([account], account.accountId),
+			).rejects.toThrow("did not commit a sync baseline");
+			expect(account.apiClient.sync.bootstrap).not.toHaveBeenCalled();
+			expect(
+				(await itemCache.getItemCacheMetadata(account.accountId))?.syncBaseline,
+			).toBeUndefined();
 		});
 	});
 });

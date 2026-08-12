@@ -132,8 +132,13 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 	}
 }
 
+/**
+ * Never yields holes: every source here is a `MultiAccountItem[]`. The result
+ * is typed accordingly so callers (and the `GET_VAULT_ITEMS` route) do not have
+ * to defend against a null that cannot occur.
+ */
 export async function getDecryptedItemsForCurrentMode(): Promise<
-	Array<DecryptedItemWithContext | null>
+	DecryptedItemWithContext[]
 > {
 	const desktopReadAvailable = await isDesktopReadAvailable();
 

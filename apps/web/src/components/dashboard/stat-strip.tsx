@@ -1,4 +1,5 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { Skeleton } from "@bittery/ui";
 import {
 	IconKey as Key,
@@ -10,9 +11,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function StatStrip() {
-	const rpc = useRPC();
-	const statsQuery = useQuery(rpc.vault.stats.queryOptions());
-	const devicesQuery = useQuery(rpc.auth.listDevices.queryOptions());
+	const api = useApiClient();
+	const statsQuery = useQuery(apiQueries.vaults.stats(api));
+	const devicesQuery = useQuery(apiQueries.auth.sessions(api));
 	const { m } = useI18n();
 	const isLoading = statsQuery.isLoading || devicesQuery.isLoading;
 

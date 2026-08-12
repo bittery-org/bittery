@@ -173,8 +173,6 @@ extern "C" {
         data: u::RustBuffer,
         wrapping_key: u64,
         context: u::RustBuffer,
-        legacy_marker: u::RustBuffer,
-        legacy_context: u::RustBuffer,
     ) -> u64;
     fn uniffi_bittery_crypto_api_fn_func_validate_recovery_key(
         recovery_key: u::RustBuffer,
@@ -878,15 +876,11 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(
     data: js::ForeignBytes,
     wrapping_key: js::Handle,
     context: js::ForeignBytes,
-    legacy_marker: js::ForeignBytes,
-    legacy_context: js::ForeignBytes,
 ) -> js::Handle {
     uniffi_bittery_crypto_api_fn_func_unwrap_key(
             u::RustBuffer::into_rust(data),
             u64::into_rust(wrapping_key),
             u::RustBuffer::into_rust(context),
-            u::RustBuffer::into_rust(legacy_marker),
-            u::RustBuffer::into_rust(legacy_context),
         )
         .into_js()
 }

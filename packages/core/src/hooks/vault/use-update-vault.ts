@@ -4,7 +4,7 @@
  * Updates an existing vault's metadata.
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { useMutation } from "@tanstack/react-query";
 import { useCoreContext } from "../../context/platform-context";
 import { useRefreshAfterVaultMutation } from "./mutation-utils";
@@ -25,7 +25,7 @@ export interface UpdateVaultInput {
  * Hook for updating a vault's metadata.
  */
 export function useUpdateVault() {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const refreshAfterMutation = useRefreshAfterVaultMutation();
 

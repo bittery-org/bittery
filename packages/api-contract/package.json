@@ -1,0 +1,26 @@
+{
+	"name": "@bittery/api-contract",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"scripts": {
+		"generate": "openapi-typescript ./openapi.v1.json -o ./src/generated/schema.ts --immutable",
+		"check:generated": "openapi-typescript ./openapi.v1.json -o ./src/generated/schema.ts --immutable --check",
+		"check-types": "tsc --noEmit",
+		"test": "bun test src"
+	},
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"openapi-fetch": "0.17.0"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"openapi-typescript": "7.13.0",
+		"typescript": "^5.7.2"
+	}
+}

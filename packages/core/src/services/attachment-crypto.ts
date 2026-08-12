@@ -9,13 +9,12 @@
  * JSON envelope: `JSON.stringify({ ciphertext, iv, algorithm })`.
  *
  * This module extracts the "subtle" pieces (envelope encode/parse, base64
- * conversion, per-field context wiring and the content-type IV fallback) so the
+ * conversion and per-field context wiring) so the
  * `useItemAttachments` hook and `ItemService.moveItem` share ONE implementation
  * instead of duplicating crypto.
  */
 
-import type { KeyRef } from "@bittery/crypto-port";
-import type { EncryptedData } from "@bittery/types";
+import type { EncryptedData, KeyRef } from "@bittery/crypto-port";
 import type { VaultCrypto } from "./vault-crypto";
 
 /** Identifies the vault/account/attachment an encryption context is bound to. */
@@ -72,8 +71,8 @@ export interface EncryptedAttachmentMetadata {
 	encryptedContentType: string;
 	/** IV used for `encryptedName`. */
 	encryptionIv: string;
-	/** IV used for `encryptedContentType`. Falls back to `encryptionIv` for old rows. */
-	encryptedContentTypeIv: string | null;
+	/** IV used for `encryptedContentType`. */
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 }
 
@@ -109,28 +108,21 @@ export async function decryptAttachmentName(
 	return vaultCrypto.decryptAttachment(encrypted, vaultKey, scope, "name");
 }
 
-/**
- * Decrypt an attachment's content-type under `scope`. Preserves the
- * content-type IV fallback: rows created before the dedicated content-type IV
- * existed fall back to the name's `encryptionIv`.
- */
+/** Decrypt an attachment's content-type under `scope`. */
 export async function decryptAttachmentContentType(
 	vaultCrypto: VaultCrypto,
 	vaultKey: KeyRef,
 	scope: AttachmentCryptoScope,
 	encrypted: {
 		ciphertext: string;
-		/** IV used for `encryptedName`; fallback when `encryptedContentTypeIv` is absent. */
-		encryptionIv: string;
-		/** IV used for `encryptedContentType`. Falls back to `encryptionIv` for old rows. */
-		encryptedContentTypeIv: string | null;
+		encryptedContentTypeIv: string;
 		algorithm: string;
 	},
 ): Promise<string> {
 	return vaultCrypto.decryptAttachment(
 		{
 			ciphertext: encrypted.ciphertext,
-			iv: encrypted.encryptedContentTypeIv ?? encrypted.encryptionIv,
+			iv: encrypted.encryptedContentTypeIv,
 			algorithm: encrypted.algorithm,
 		},
 		vaultKey,
@@ -165,8 +157,7 @@ export async function decryptAttachmentMeta(
 /**
  * Decrypt an attachment's blob, name and content-type using its source scope.
  * Mirrors the decrypt paths in `useItemAttachments` (blob + name) and
- * `decryptAttachmentMeta` (name + content-type), including the content-type IV
- * fallback for attachments created before the dedicated IV existed.
+ * `decryptAttachmentMeta` (name + content-type).
  */
 export async function decryptAttachmentParts(
 	vaultCrypto: VaultCrypto,

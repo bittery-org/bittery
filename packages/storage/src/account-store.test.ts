@@ -11,7 +11,7 @@ import {
 	NATIVE_VIEW_VERSION,
 	type NativeHostView,
 } from "./account-store";
-import { accountKey, itemsCollection, vaultsCollection } from "./keys";
+import { accountKey, metaCollection } from "./keys";
 import {
 	createInMemoryPlatformPort,
 	type InMemoryPlatformPort,
@@ -43,12 +43,17 @@ interface Harness {
 async function makeStore(opts?: {
 	sessionSurvivesRestart?: boolean;
 	crypto?: InMemoryCryptoPort;
+	now?: () => number;
 }): Promise<Harness> {
 	const port = createInMemoryPlatformPort({
 		sessionSurvivesRestart: opts?.sessionSurvivesRestart ?? false,
 	});
 	const crypto = opts?.crypto ?? createInMemoryCryptoPort();
-	const store = createAccountStore({ port, crypto });
+	const store = createAccountStore({
+		port,
+		crypto,
+		now: opts?.now ?? Date.now,
+	});
 	await store.initialize();
 	return {
 		port,
@@ -70,6 +75,7 @@ function metadataFor(accountId: string): AccountMetadata {
 		addedAt: 1,
 		lastActiveAt: 1,
 		biometricEnabled: false,
+		insecureTransportConfirmed: false,
 	};
 }
 
@@ -929,8 +935,8 @@ describe("AccountStore — biometric", () => {
 // ============================================================================
 
 describe("AccountStore — master password re-entry", () => {
-	async function reentryHarness() {
-		const harness = await makeStore({ sessionSurvivesRestart: true });
+	async function reentryHarness(now = Date.now) {
+		const harness = await makeStore({ sessionSurvivesRestart: true, now });
 		harness.port.biometricState.hasHardware = true;
 		harness.port.biometricState.isEnrolled = true;
 		harness.port.biometricState.authenticates = true;
@@ -974,6 +980,21 @@ describe("AccountStore — master password re-entry", () => {
 
 		await store.storeMasterPasswordReentryPeriodMs(0);
 		await tick();
+
+		expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
+	});
+
+	it("is required at the exact moment the period is reached", async () => {
+		let currentTime = Date.now();
+		const { store } = await reentryHarness(() => currentTime);
+		await store.storeMasterPasswordReentryPeriodMs(60_000);
+
+		const session = await store.getStoredSessionData("a");
+		if (!session) {
+			throw new Error("Expected the re-entry harness to store a session");
+		}
+		currentTime =
+			(session.lastMasterPasswordEntry ?? session.createdAt) + 60_000;
 
 		expect(await store.isMasterPasswordReentryRequired("a")).toBe(true);
 	});
@@ -1235,13 +1256,12 @@ describe("AccountStore — native host projection", () => {
 		expect(durableAccount?.sessionData.store).toBe("secret");
 		expect(durableAccount?.vaultKeys.store).toBe("secret");
 		expect(durableAccount?.encryptedPrivateKey.store).toBe("secret");
-		// Published from the canonical helpers in keys.ts, so ItemCache and the native host
-		// cannot drift onto different collection names. Fully resolved with the port's own
-		// record key prefix, so the host prefix-scans and concatenates nothing.
-		expect(durableAccount?.itemsKeyPrefix).toBe(`${itemsCollection("a")}:`);
-		expect(durableAccount?.vaultsKeyPrefix).toBe(`${vaultsCollection("a")}:`);
-		expect(durableAccount?.itemsKeyPrefix).toBe("a:items:");
-		expect(durableAccount?.vaultsKeyPrefix).toBe("a:vaults:");
+		// AccountStore names only the fixed metadata record. ItemCache owns the active
+		// generation and publishes the opaque item/vault prefixes in that one record.
+		expect(durableAccount?.itemCacheState).toEqual({
+			key: `${metaCollection("a")}:meta`,
+			store: "plain",
+		});
 
 		// The port owns the record key prefix; the projection resolves it in. Desktop is the
 		// only platform where it is non-empty, and the only platform with a native reader.
@@ -1256,8 +1276,10 @@ describe("AccountStore — native host projection", () => {
 		await prefixedStore.initialize();
 		await seedAccount(prefixedStore, "a", { active: true });
 		const prefixedAccount = nativeView(prefixed).accounts[0];
-		expect(prefixedAccount?.itemsKeyPrefix).toBe("record:a:items:");
-		expect(prefixedAccount?.vaultsKeyPrefix).toBe("record:a:vaults:");
+		expect(prefixedAccount?.itemCacheState).toEqual({
+			key: "record:a:meta:meta",
+			store: "plain",
+		});
 
 		const ephemeral = await makeStore({ sessionSurvivesRestart: false });
 		await seedAccount(ephemeral.store, "a", { active: true });

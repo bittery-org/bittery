@@ -3,13 +3,11 @@ use std::{convert::Infallible, time::Duration};
 use async_stream::stream;
 use axum::{
     extract::State,
-    http::StatusCode,
     response::{
         sse::{Event, Sse},
         IntoResponse as AxumIntoResponse, Response as AxumResponse,
     },
-    routing::get,
-    Extension, Json, Router as AxumRouter,
+    Extension,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -17,6 +15,7 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::{
+    http::api::{error::ApiError, error_code::ErrorCode},
     services::connection_registry::{resolve_connection_limit, ConnectionGuard},
     services::session::VerifiedSession,
     services::session_control::load_session_revocation,
@@ -31,33 +30,19 @@ use crate::{
 /// Interval for refreshing the Redis connection TTL (60s).
 const CONN_TTL_REFRESH_INTERVAL_MS: u64 = 60_000;
 
-pub fn create_sync_http_router() -> AxumRouter<AppState> {
-    AxumRouter::new()
-        .route("/events", get(sync_events))
-        .route("/health", get(sync_health))
-}
-
-async fn sync_health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
-}
-
-async fn sync_events(
+pub(crate) async fn sync_events(
     State(state): State<AppState>,
     session: Option<Extension<VerifiedSession>>,
 ) -> AxumResponse {
     let Some(Extension(session)) = session else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Unauthorized" })),
-        )
-            .into_response();
+        return ApiError::unauthorized("A valid bearer session is required.").into_response();
     };
     let Some(ref pool) = state.db_pool else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "Sync unavailable" })),
+        return ApiError::service_unavailable(
+            ErrorCode::ServiceUnavailable,
+            "Sync is temporarily unavailable.",
         )
-            .into_response();
+        .into_response();
     };
 
     // Determine device identity for connection tracking
@@ -267,4 +252,73 @@ async fn sync_events(
     };
 
     Sse::new(stream).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::to_bytes,
+        extract::State,
+        http::{header::CONTENT_TYPE, StatusCode},
+        Extension,
+    };
+    use serde_json::Value;
+    use time::OffsetDateTime;
+
+    use crate::{services::session::VerifiedSession, AppState};
+
+    use super::sync_events;
+
+    async fn assert_problem(response: axum::response::Response, status: StatusCode, code: &str) {
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "application/problem+json"
+        );
+        let request_id = response
+            .headers()
+            .get("bittery-request-id")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("problem body should be readable"),
+        )
+        .expect("problem body should be JSON");
+        assert_eq!(body["status"], status.as_u16());
+        assert_eq!(body["code"], code);
+        assert_eq!(body["requestId"], request_id);
+    }
+
+    #[tokio::test]
+    async fn missing_session_uses_problem_details() {
+        let response = sync_events(State(AppState::default()), None).await;
+
+        assert_problem(response, StatusCode::UNAUTHORIZED, "UNAUTHORIZED").await;
+    }
+
+    #[tokio::test]
+    async fn unavailable_sync_service_uses_retryable_problem_details() {
+        let session = VerifiedSession {
+            token: "test-token".to_string(),
+            session_id: "test-session".to_string(),
+            user_id: "test-user".to_string(),
+            expires_at: OffsetDateTime::now_utc(),
+            platform: "test".to_string(),
+            client_id: None,
+        };
+
+        let response = sync_events(State(AppState::default()), Some(Extension(session))).await;
+
+        assert_eq!(response.headers().get("retry-after").unwrap(), "1");
+        assert_problem(
+            response,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SERVICE_UNAVAILABLE",
+        )
+        .await;
+    }
 }

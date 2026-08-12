@@ -1,12 +1,9 @@
 /**
  * Shared types for background service worker messages
+ *
+ * Runtime message payloads and responses live in `router/contract.ts`; this
+ * file is only for background-local shapes that never travel over the wire.
  */
-
-export interface MessageResponse {
-	success: boolean;
-	error?: string;
-	[key: string]: unknown;
-}
 
 export interface SessionData {
 	email: string;

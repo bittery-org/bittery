@@ -1,8 +1,8 @@
 use std::{env, net::SocketAddr};
 
 use bittery_server::{
-    build_rate_limiter, create_app, db, init_redis, load_edge_http_config, AppState, JobRunner,
-    SyncPubSub,
+    build_rate_limiter, create_app, db, init_redis, load_edge_http_config,
+    validate_sync_fanout_requirement, AppState, JobRunner, SyncPubSub,
 };
 use tokio::net::TcpListener;
 use tracing::info;
@@ -29,6 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bind_address = read_bind_address();
     let edge_http_config = load_edge_http_config().map_err(std::io::Error::other)?;
     let redis_pool = init_redis().await;
+    validate_sync_fanout_requirement(env::var("NODE_ENV").ok().as_deref(), redis_pool.is_some())
+        .map_err(std::io::Error::other)?;
     let mut app_state = match db::connect_from_env().await? {
         Some(pool) => {
             db::run_migrations(&pool).await?;
@@ -60,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = create_app(app_state, edge_http_config);
 
     let listener = TcpListener::bind(&bind_address).await?;
-    info!(address = %bind_address, "rust rpc server listening");
+    info!(address = %bind_address, "Bittery API server listening");
     if let Some(seeded_session) = seeded_session {
         let redacted_token = &seeded_session.token[..seeded_session.token.len().min(8)];
         info!(

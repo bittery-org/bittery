@@ -15,6 +15,7 @@
 		"./types": "./src/types.ts"
 	},
 	"dependencies": {
+		"@bittery/api-contract": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/types": "workspace:*"
 	},

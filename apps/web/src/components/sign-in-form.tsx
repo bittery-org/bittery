@@ -1,16 +1,16 @@
-import {
-	useCheckEmail,
-	usePlatformCrypto,
-	useSessionState,
-} from "@bittery/core/hooks";
+import { usePlatformCrypto, useSessionState } from "@bittery/core/hooks";
 import {
 	performSRPLogin,
 	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import {
+	createApiClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
+import { apiQueryKeys } from "@bittery/shared/api-query";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import { Button, Input, Label, toast } from "@bittery/ui";
+import { Button, Checkbox, Input, Label, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
 	IconEye as Eye,
@@ -20,7 +20,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
 	forgetActiveSession,
 	itemCache,
@@ -37,9 +37,19 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
-	const rpc = useRPC();
-
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
+	const ceremonyApiClient = useMemo(
+		() =>
+			createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+				clientPlatform: "web",
+			}),
+		[insecureTransportConfirmed, serverUrl],
+	);
 	const isQuickUnlock = Boolean(
 		sessionState?.canQuickUnlock && sessionState?.email,
 	);
@@ -48,9 +58,17 @@ export default function SignInForm({
 		enabled: isQuickUnlock && !!sessionState?.email,
 		queryFn: () => storage.getStoredSecretKey(),
 	});
-	const registrationStatusQuery = useQuery(
-		rpc.auth.registrationStatus.queryOptions(),
-	);
+	const registrationStatusQuery = useQuery({
+		queryKey: [
+			...apiQueryKeys.auth.registrationStatus,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.registrationStatus()).data,
+		enabled:
+			!requiresInsecureTransportConfirmation || insecureTransportConfirmed,
+	});
 	const isCloudMode = registrationStatusQuery.data?.mode !== "self-hosted";
 	const allowPublicSignup =
 		registrationStatusQuery.data?.allowPublicSignup ?? true;
@@ -112,6 +130,13 @@ export default function SignInForm({
 					isCloudMode={isCloudMode}
 					canShowSignup={canShowSignup}
 					hasInvitationRedirect={hasInvitationRedirect}
+					serverUrl={serverUrl}
+					requiresInsecureTransportConfirmation={
+						requiresInsecureTransportConfirmation
+					}
+					insecureTransportConfirmed={insecureTransportConfirmed}
+					setInsecureTransportConfirmed={setInsecureTransportConfirmed}
+					ceremonyApiClient={ceremonyApiClient}
 					onSwitchToSignUp={onSwitchToSignUp}
 					redirectTo={redirectTo}
 				/>
@@ -127,6 +152,11 @@ function SignInFormContent({
 	isCloudMode,
 	canShowSignup,
 	hasInvitationRedirect,
+	serverUrl,
+	requiresInsecureTransportConfirmation,
+	insecureTransportConfirmed,
+	setInsecureTransportConfirmed,
+	ceremonyApiClient,
 	onSwitchToSignUp,
 	redirectTo,
 }: {
@@ -136,17 +166,38 @@ function SignInFormContent({
 	isCloudMode: boolean;
 	canShowSignup: boolean;
 	hasInvitationRedirect: boolean;
+	serverUrl: string;
+	requiresInsecureTransportConfirmation: boolean;
+	insecureTransportConfirmed: boolean;
+	setInsecureTransportConfirmed: (confirmed: boolean) => void;
+	ceremonyApiClient: ReturnType<typeof createApiClientForServer>;
 	onSwitchToSignUp: () => void;
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const rpcClient = useRPCClient();
 	const crypto = usePlatformCrypto();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
-	const { data: emailCheck } = useCheckEmail(email);
+	const { data: emailCheck } = useQuery({
+		queryKey: [
+			"api",
+			"v1",
+			"auth",
+			"email-checks",
+			email,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.checkEmail({ email })).data,
+		enabled:
+			email.includes("@") &&
+			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
+		staleTime: 60 * 1000,
+		retry: false,
+	});
 
 	const loginMutation = useMutation({
 		mutationFn: async (input: {
@@ -155,10 +206,20 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			const normalizedEmail = input.email.trim().toLowerCase();
-			const serverUrl = getDefaultServerUrl();
+			if (
+				requiresInsecureTransportConfirmation &&
+				!insecureTransportConfirmed
+			) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
 			const result = await performSRPLogin(
-				{ ...input, email: normalizedEmail, serverUrl },
-				{ crypto, rpcClient, storage },
+				{
+					...input,
+					email: normalizedEmail,
+					serverUrl,
+					insecureTransportConfirmed,
+				},
+				{ crypto, apiClient: ceremonyApiClient, storage },
 			);
 			await storeLoginSessionOwned(
 				result,
@@ -167,7 +228,7 @@ function SignInFormContent({
 				itemCache,
 				crypto,
 				normalizedEmail,
-				{ serverUrl },
+				{ serverUrl, insecureTransportConfirmed },
 			);
 			// `storeLoginSession` sets the master unlock key before it moves the
 			// active-account pointer, so the unlock notification alone would publish the
@@ -357,6 +418,27 @@ function SignInFormContent({
 					)}
 				</form.Field>
 			</div>
+
+			{requiresInsecureTransportConfirmation ? (
+				<Label
+					htmlFor="insecure-http-confirmation"
+					className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+				>
+					<Checkbox
+						id="insecure-http-confirmation"
+						checked={insecureTransportConfirmed}
+						onCheckedChange={(checked) =>
+							setInsecureTransportConfirmed(checked === true)
+						}
+					/>
+					<span className="grid gap-0.5">
+						<span>{m.auth_insecure_http_confirmation_label()}</span>
+						<span className="text-muted-foreground text-xs">
+							{m.auth_insecure_http_confirmation_description()}
+						</span>
+					</span>
+				</Label>
+			) : null}
 
 			<Button
 				type="submit"

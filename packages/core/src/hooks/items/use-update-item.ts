@@ -49,16 +49,7 @@ export function useUpdateItem() {
 				},
 			);
 
-			await context.repo.upsertLocal(
-				{
-					...existing,
-					...mergedData,
-					updatedAt: new Date().toISOString(),
-				},
-				encrypted,
-			);
-
-			enqueueItemMutation(queue, context, {
+			await enqueueItemMutation(queue, context, {
 				type: "update",
 				entityId: input.itemId,
 				vaultId: existing.vaultId,

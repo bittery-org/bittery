@@ -3,6 +3,7 @@ import {
 	getAllInputs,
 	isFieldVisible,
 } from "../lib/field-detection";
+import { sendMessage } from "../lib/messaging";
 import { showSavePrompt } from "./save-prompt";
 import { contentState, FORM_SUBMISSION_DEBOUNCE_MS } from "./state";
 import type {
@@ -202,30 +203,7 @@ function captureCredentials(
 				return true;
 			}
 
-			// Legacy check for backwards compatibility
-			const name = input.name?.toLowerCase() || "";
-			const id = input.id?.toLowerCase() || "";
-			const autocomplete = input.autocomplete?.toLowerCase() || "";
-			const placeholder = input.placeholder?.toLowerCase() || "";
-
-			return (
-				input.type === "email" ||
-				autocomplete.includes("username") ||
-				autocomplete.includes("email") ||
-				name.includes("user") ||
-				name.includes("email") ||
-				name.includes("login") ||
-				name.includes("identifier") ||
-				name.includes("account") ||
-				id.includes("user") ||
-				id.includes("email") ||
-				id.includes("login") ||
-				id.includes("identifier") ||
-				id.includes("account") ||
-				placeholder.includes("user") ||
-				placeholder.includes("email") ||
-				placeholder.includes("login")
-			);
+			return false;
 		});
 
 		if (candidateFields.length > 0) {
@@ -291,11 +269,9 @@ async function shouldSaveCredentials(
 
 	// Check if extension is unlocked
 	try {
-		const authResponse = await chrome.runtime.sendMessage({
-			type: "CHECK_AUTH",
-		});
+		const authResponse = await sendMessage({ type: "CHECK_AUTH" });
 
-		if (!authResponse.unlocked) {
+		if (!(authResponse.success && authResponse.unlocked)) {
 			return {
 				shouldSave: false,
 				reason: "Extension is locked",

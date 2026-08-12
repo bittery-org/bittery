@@ -1,11 +1,13 @@
 {$DOMAIN} {
-	# API and RPC routes → server
-	handle /rpc {
-		reverse_proxy server:3000
+	# Disable proxy buffering for the realtime SSE hint stream.
+	handle /api/v1/sync/events {
+		reverse_proxy server:3000 {
+			flush_interval -1
+		}
 	}
 
-	# Real-time sync (SSE) → server
-	handle /sync/* {
+	# Versioned application API and protocol discovery → server
+	handle /api/* {
 		reverse_proxy server:3000
 	}
 

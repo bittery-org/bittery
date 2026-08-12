@@ -2,7 +2,7 @@ import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { AccountResolver } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
-import { type RpcVaultClient, refreshVaultKeys } from "./vault-service";
+import { type ApiVaultClient, refreshVaultKeys } from "./vault-service";
 
 export interface TravelModeSyncEvent {
 	type: string;
@@ -10,7 +10,7 @@ export interface TravelModeSyncEvent {
 }
 
 export interface TravelModeSyncRestoreOptions {
-	rpcClient: RpcVaultClient;
+	apiClient: ApiVaultClient;
 	accounts: AccountResolver;
 }
 
@@ -18,9 +18,9 @@ export async function restoreAfterTravelModeDisabled(
 	accountId: string,
 	storage: AccountStore,
 	coordinator: VaultRepositoryCoordinator,
-	{ rpcClient, accounts }: TravelModeSyncRestoreOptions,
+	{ apiClient, accounts }: TravelModeSyncRestoreOptions,
 ): Promise<void> {
-	await refreshVaultKeys(rpcClient, storage, accountId);
+	await refreshVaultKeys(apiClient, storage, accountId);
 
 	const vaultKeys = await storage.getVaultKeys(accountId);
 	if (vaultKeys) {

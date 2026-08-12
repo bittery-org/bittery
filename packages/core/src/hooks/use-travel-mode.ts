@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { AccountStore } from "@bittery/storage";
 import type { TravelModeConfig } from "@bittery/storage/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -8,34 +8,30 @@ import {
 	usePlatformStorage,
 } from "../context/platform-context";
 import {
-	type DefaultRpcClient,
+	type DefaultApiClient,
 	getClientForAccount,
 } from "../services/account-resolver";
-import {
-	deriveSrpLoginProof,
-	type IAuthClient,
-} from "../services/auth-service";
+import { deriveSrpLoginProof } from "../services/auth-service";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
-import type { TravelModeRpcClient } from "../services/travel-mode-service";
 import { restoreAfterTravelModeDisabled } from "../services/travel-mode-sync";
-import type { RpcVaultClient } from "../services/vault-service";
+import type { ApiVaultClient } from "../services/vault-service";
 
-async function resolveAccountRpcClient(
+async function resolveAccountApiClient(
 	storage: AccountStore,
-	defaultClient: DefaultRpcClient,
+	defaultClient: DefaultApiClient,
 	accountId: string,
-): Promise<{ accountId: string; rpcClient: TravelModeRpcClient }> {
-	const rpcClient = await getClientForAccount(
+): Promise<{ accountId: string; apiClient: DefaultApiClient }> {
+	const apiClient = await getClientForAccount(
 		storage,
 		defaultClient,
 		accountId,
 	);
-	return { accountId, rpcClient: rpcClient as TravelModeRpcClient };
+	return { accountId, apiClient };
 }
 
 export function useTravelMode(accountId?: string) {
 	const queryClient = useQueryClient();
-	const rpcClient = useRPCClient() as DefaultRpcClient;
+	const apiClient = useApiClient() as DefaultApiClient;
 	const storage = usePlatformStorage();
 	const crypto = usePlatformCrypto();
 	const { vaultCoordinator, accounts, itemCache } = useCoreContext();
@@ -47,8 +43,8 @@ export function useTravelMode(accountId?: string) {
 			if (!accountId) {
 				return null;
 			}
-			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
-				await resolveAccountRpcClient(storage, rpcClient, accountId);
+			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
+				await resolveAccountApiClient(storage, apiClient, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -56,13 +52,13 @@ export function useTravelMode(accountId?: string) {
 			);
 			const config = await enforcer.fetchFromServer(
 				resolvedAccountId,
-				accountRpcClient,
+				accountApiClient,
 			);
 			if (!config.enabled) {
 				const localKeys = await storage.getVaultKeys(resolvedAccountId);
-				const serverVaults = await (
-					accountRpcClient as unknown as RpcVaultClient
-				).vault.list.query();
+				const { data: serverVaults } = await (
+					accountApiClient as unknown as ApiVaultClient
+				).vaults.list();
 				const localVaultIds = new Set(
 					(localKeys ?? []).map((vaultKey) => vaultKey.vaultId),
 				);
@@ -76,7 +72,7 @@ export function useTravelMode(accountId?: string) {
 						storage,
 						vaultCoordinator,
 						{
-							rpcClient: accountRpcClient as unknown as RpcVaultClient,
+							apiClient: accountApiClient as unknown as ApiVaultClient,
 							accounts,
 						},
 					);
@@ -91,8 +87,8 @@ export function useTravelMode(accountId?: string) {
 			if (!accountId) {
 				throw new Error("No active account");
 			}
-			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
-				await resolveAccountRpcClient(storage, rpcClient, accountId);
+			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
+				await resolveAccountApiClient(storage, apiClient, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -101,7 +97,7 @@ export function useTravelMode(accountId?: string) {
 			return enforcer.setHiddenVaults(
 				resolvedAccountId,
 				hiddenVaultIds,
-				accountRpcClient,
+				accountApiClient,
 			);
 		},
 		onSuccess: async () => {
@@ -115,8 +111,8 @@ export function useTravelMode(accountId?: string) {
 			if (!accountId) {
 				throw new Error("No active account");
 			}
-			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
-				await resolveAccountRpcClient(storage, rpcClient, accountId);
+			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
+				await resolveAccountApiClient(storage, apiClient, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -125,7 +121,7 @@ export function useTravelMode(accountId?: string) {
 			return enforcer.enable(
 				resolvedAccountId,
 				hiddenVaultIds,
-				accountRpcClient,
+				accountApiClient,
 			);
 		},
 		onSuccess: async () => {
@@ -139,13 +135,13 @@ export function useTravelMode(accountId?: string) {
 			if (!accountId) {
 				throw new Error("No active account");
 			}
-			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
-				await resolveAccountRpcClient(storage, rpcClient, accountId);
+			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
+				await resolveAccountApiClient(storage, apiClient, accountId);
 			const proof = await deriveSrpLoginProof(
 				{ accountId: resolvedAccountId, password: input.password },
 				{
 					crypto,
-					rpcClient: accountRpcClient as unknown as IAuthClient,
+					apiClient: accountApiClient,
 					storage,
 				},
 			);
@@ -156,7 +152,7 @@ export function useTravelMode(accountId?: string) {
 			);
 			const config = await enforcer.disable(
 				resolvedAccountId,
-				accountRpcClient,
+				accountApiClient,
 				proof,
 			);
 			if (!config.enabled) {
@@ -165,7 +161,7 @@ export function useTravelMode(accountId?: string) {
 					storage,
 					vaultCoordinator,
 					{
-						rpcClient: accountRpcClient as unknown as RpcVaultClient,
+						apiClient: accountApiClient as unknown as ApiVaultClient,
 						accounts,
 					},
 				);

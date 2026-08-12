@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { CryptoPort } from "@bittery/crypto-port";
+import { cachedItem as buildCachedItem } from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { createItemCache } from "@bittery/storage";
 import { createInMemoryRecordPort } from "@bittery/storage/testing";
@@ -106,7 +107,7 @@ async function cachedItem(
 		{ vaultId, itemId: "item_1", version, userId: USER_ID },
 	);
 	await crypto.destroyKey(key);
-	return {
+	return buildCachedItem({
 		id: "item_1",
 		vaultId,
 		category: "login",
@@ -116,10 +117,12 @@ async function cachedItem(
 		encryptionAlgorithm: encrypted.algorithm,
 		version,
 		lastModifiedBy: USER_ID,
+		encryptionVersion: version,
+		encryptedByUserId: USER_ID,
 		createdAt: "2026-08-01T00:00:00.000Z",
 		updatedAt: "2026-08-01T00:00:00.000Z",
 		deletedAt: null,
-	} as CachedEncryptedItem;
+	});
 }
 
 describe("VaultRepository.moveItem", () => {
@@ -138,6 +141,8 @@ describe("VaultRepository.moveItem", () => {
 			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
+			encryptionVersion: 2,
+			encryptedByUserId: USER_ID,
 		};
 
 		await repo.moveItem("item_1", "vault_2", payload, { title: "Item" });
@@ -163,6 +168,8 @@ describe("VaultRepository.moveItem", () => {
 			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
+			encryptionVersion: 2,
+			encryptedByUserId: USER_ID,
 		};
 
 		await repo.upsertEncrypted(

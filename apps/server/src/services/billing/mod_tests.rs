@@ -1,4 +1,4 @@
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use std::future::Future;
@@ -9,10 +9,11 @@ use super::{
     is_stripe_api_configured, replace_stripe_mock_state, self_hosted_billing_status,
     stripe_mock_calls, web_app_url, StripeMockCall, StripeMockState, GB,
 };
+use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, with_rpc_test_app,
+    seed_item, seed_team, seed_user, seed_vault, with_api_test_app,
 };
 
 struct BillingTestEnv<'a> {
@@ -48,7 +49,6 @@ struct BillingRouterFixture {
     member_user_id: String,
     no_team_user_id: String,
     team_id: String,
-    other_team_id: String,
     vault_id: String,
     item_id: String,
 }
@@ -158,35 +158,38 @@ where
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 fn assert_invalid_params_error(body: &Value) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert!(
-        body["error"].is_object(),
+        body["code"].is_string(),
         "unexpected invalid params body: {body}"
     );
-    let message = body["error"]["message"]
+    let message = body["detail"]
         .as_str()
         .unwrap_or_default()
         .to_ascii_lowercase();
     assert!(
-        message.contains("invalid params"),
+        (body["code"] == json!("INVALID_REQUEST") || message.contains("invalid")),
         "unexpected invalid params body: {body}"
     );
 }
@@ -197,7 +200,6 @@ async fn build_billing_router_fixture(pool: &PgPool) -> BillingRouterFixture {
     let member_user_id = "user_billing_member".to_string();
     let no_team_user_id = "user_billing_no_team".to_string();
     let team_id = "team_billing_primary".to_string();
-    let other_team_id = "team_billing_other".to_string();
     let vault_id = "vault_billing_team".to_string();
     let item_id = "item_billing_team".to_string();
 
@@ -268,7 +270,6 @@ async fn build_billing_router_fixture(pool: &PgPool) -> BillingRouterFixture {
         member_user_id,
         no_team_user_id,
         team_id,
-        other_team_id,
         vault_id,
         item_id,
     }
@@ -351,14 +352,14 @@ fn self_hosted_status_matches_expected_snapshot() {
     let status = self_hosted_billing_status();
 
     assert!(!status.enabled);
-    assert_eq!(status.plan, "free");
-    assert_eq!(status.status, "none");
+    assert_eq!(status.plan, BillingPlan::Free);
+    assert_eq!(status.status, BillingStatus::None);
     assert!(!status.requires_payment);
 }
 
 #[test]
 fn free_cloud_plan_disables_paid_entitlements() {
-    let snapshot = get_billing_snapshot("cloud", "free", "none");
+    let snapshot = get_billing_snapshot("cloud", BillingPlan::Free, BillingStatus::None);
 
     assert!(!snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.share_links);
@@ -373,7 +374,7 @@ fn free_cloud_plan_disables_paid_entitlements() {
 
 #[test]
 fn inactive_paid_plan_keeps_only_billing_portal() {
-    let snapshot = get_billing_snapshot("cloud", "personal", "incomplete");
+    let snapshot = get_billing_snapshot("cloud", BillingPlan::Personal, BillingStatus::Incomplete);
 
     assert!(!snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.share_links);
@@ -386,7 +387,7 @@ fn inactive_paid_plan_keeps_only_billing_portal() {
 
 #[test]
 fn self_hosted_mode_enables_non_cloud_features() {
-    let snapshot = get_billing_snapshot("self-hosted", "team", "active");
+    let snapshot = get_billing_snapshot("self-hosted", BillingPlan::Team, BillingStatus::Active);
 
     assert!(snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.billing_portal);
@@ -400,16 +401,12 @@ fn self_hosted_mode_enables_non_cloud_features() {
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
+fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
     with_env_vars(None, None, None, || {
         assert_eq!(bittery_mode(), "cloud");
     });
 
-    with_env_vars(Some("self_hosted"), None, None, || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-
-    with_env_vars(Some("SELFHOSTED"), None, None, || {
+    with_env_vars(Some("SELF-HOSTED"), None, None, || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
 
@@ -459,29 +456,32 @@ fn cloud_billing_guard_rejects_self_hosted_and_missing_stripe_configuration() {
 
 #[tokio::test]
 async fn billing_handlers_require_authentication() {
-    with_rpc_test_app(
+    with_api_test_app(
         "billing_handlers_require_authentication",
         |app| async move {
             let protected_calls = vec![
-                ("billing.status", json!([])),
-                ("billing.entitlements", json!([])),
-                ("billing.attachmentUsage", json!([])),
-                ("billing.createCheckoutSession", json!([{}])),
-                ("billing.createPortalSession", json!([])),
-                ("billing.syncSeats", json!([{}])),
-                ("billing.previewAdditionalTeamSeat", json!([])),
+                (Method::GET, "/api/v1/billing/status", None),
+                (Method::GET, "/api/v1/billing/entitlements", None),
+                (Method::GET, "/api/v1/billing/attachment-usage", None),
+                (Method::POST, "/api/v1/billing/checkout-sessions", None),
+                (Method::POST, "/api/v1/billing/portal-sessions", None),
+                (
+                    Method::GET,
+                    "/api/v1/billing/team-seats/addition-preview",
+                    None,
+                ),
             ];
 
-            for (method, params) in protected_calls {
+            for (method, path, payload) in protected_calls {
                 let response = app
-                    .rpc_call(method, params, unauthenticated_json_headers())
+                    .api_json(method, path, payload, unauthenticated_json_headers())
                     .await;
-                assert_eq!(
-                    response.status,
-                    StatusCode::OK,
-                    "unexpected status for {method}"
+                response.assert_contract_status();
+                assert_transport_error(
+                    &response.body,
+                    "UNAUTHORIZED",
+                    "A valid bearer session is required.",
                 );
-                assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
             }
         },
     )
@@ -497,7 +497,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_query_handlers_success", |app| async move {
+            with_api_test_app("billing_query_handlers_success", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let period_end = datetime!(2026-05-22 12:00 UTC);
                 update_team_billing_state(
@@ -537,106 +537,77 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
-                assert_eq!(status_response.status, StatusCode::OK);
-                assert_eq!(status_response.body["result"]["Ok"]["enabled"], json!(true));
-                assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("team"));
+                status_response.assert_contract_status();
+                assert_eq!(status_response.body["enabled"], json!(true));
+                assert_eq!(status_response.body["plan"], json!("team"));
+                assert_eq!(status_response.body["status"], json!("active"));
+                assert_eq!(status_response.body["isActive"], json!(true));
+                assert_eq!(status_response.body["requiresPayment"], json!(true));
+                assert_eq!(status_response.body["isStripeConfigured"], json!(true));
                 assert_eq!(
-                    status_response.body["result"]["Ok"]["status"],
-                    json!("active")
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["isActive"],
-                    json!(true)
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["requiresPayment"],
-                    json!(true)
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["isStripeConfigured"],
-                    json!(true)
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["stripeCustomerId"],
+                    status_response.body["stripeCustomerId"],
                     json!("cus_team_123")
                 );
                 assert_eq!(
-                    status_response.body["result"]["Ok"]["stripeSubscriptionId"],
+                    status_response.body["stripeSubscriptionId"],
                     json!("sub_team_123")
                 );
                 assert_eq!(
-                    status_response.body["result"]["Ok"]["stripePriceId"],
+                    status_response.body["stripePriceId"],
                     json!("price_team_123")
                 );
                 assert_eq!(
-                    status_response.body["result"]["Ok"]["currentPeriodEnd"],
+                    status_response.body["currentPeriodEnd"],
                     json!(format_timestamp(period_end))
                 );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["cancelAtPeriodEnd"],
-                    json!(true)
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["seatsPurchased"],
-                    json!(3)
-                );
+                assert_eq!(status_response.body["cancelAtPeriodEnd"], json!(true));
+                assert_eq!(status_response.body["seatsPurchased"], json!(3));
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
-                assert_eq!(entitlements_response.status, StatusCode::OK);
+                entitlements_response.assert_contract_status();
+                assert_eq!(entitlements_response.body["mode"], json!("cloud"));
+                assert_eq!(entitlements_response.body["billingEnabled"], json!(true));
+                assert_eq!(entitlements_response.body["plan"], json!("team"));
+                assert_eq!(entitlements_response.body["status"], json!("active"));
+                assert_eq!(entitlements_response.body["isActive"], json!(true));
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["mode"],
-                    json!("cloud")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["billingEnabled"],
+                    entitlements_response.body["entitlements"]["teamManagement"],
                     json!(true)
                 );
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["plan"],
-                    json!("team")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["status"],
-                    json!("active")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["isActive"],
+                    entitlements_response.body["entitlements"]["attachments"],
                     json!(true)
                 );
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["entitlements"]["teamManagement"],
-                    json!(true)
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["entitlements"]["attachments"],
-                    json!(true)
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["limits"]["attachmentStorageBytes"],
-                    json!(2 * GB)
+                    entitlements_response.body["limits"]["attachmentStorageBytes"],
+                    json!((2 * GB).to_string())
                 );
 
                 let usage_response = app
-                    .rpc_call("billing.attachmentUsage", json!([]), headers)
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/attachment-usage",
+                        None,
+                        headers,
+                    )
                     .await;
-                assert_eq!(usage_response.status, StatusCode::OK);
-                assert_eq!(usage_response.body["result"]["Ok"]["mode"], json!("cloud"));
+                usage_response.assert_contract_status();
+                assert_eq!(usage_response.body["mode"], json!("cloud"));
+                assert_eq!(usage_response.body["attachmentsEnabled"], json!(true));
                 assert_eq!(
-                    usage_response.body["result"]["Ok"]["attachmentsEnabled"],
-                    json!(true)
+                    usage_response.body["quotaBytes"],
+                    json!((2 * GB).to_string())
                 );
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["quotaBytes"],
-                    json!(2 * GB)
-                );
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["committedStorageBytes"],
-                    json!(3072)
-                );
+                assert_eq!(usage_response.body["committedStorageBytes"], json!("3072"));
             })
             .await;
         },
@@ -653,7 +624,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_cloud_beta_disabled", |app| async move {
+            with_api_test_app("billing_cloud_beta_disabled", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 update_team_billing_state(
                     &app.pool,
@@ -674,60 +645,50 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
-                assert_eq!(status_response.status, StatusCode::OK);
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["enabled"],
-                    json!(false)
-                );
-                assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("free"));
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["status"],
-                    json!("none")
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["requiresPayment"],
-                    json!(false)
-                );
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["isStripeConfigured"],
-                    json!(false)
-                );
+                status_response.assert_contract_status();
+                assert_eq!(status_response.body["enabled"], json!(false));
+                assert_eq!(status_response.body["plan"], json!("free"));
+                assert_eq!(status_response.body["status"], json!("none"));
+                assert_eq!(status_response.body["requiresPayment"], json!(false));
+                assert_eq!(status_response.body["isStripeConfigured"], json!(false));
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
-                assert_eq!(entitlements_response.status, StatusCode::OK);
+                entitlements_response.assert_contract_status();
+                assert_eq!(entitlements_response.body["billingEnabled"], json!(false));
+                assert_eq!(entitlements_response.body["plan"], json!("free"));
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["billingEnabled"],
+                    entitlements_response.body["entitlements"]["billingPortal"],
                     json!(false)
                 );
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["plan"],
-                    json!("free")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["entitlements"]["billingPortal"],
-                    json!(false)
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["entitlements"]["teamManagement"],
+                    entitlements_response.body["entitlements"]["teamManagement"],
                     json!(false)
                 );
 
-                for (method, params) in [
-                    ("billing.createCheckoutSession", json!([{ "plan": "team" }])),
-                    ("billing.createPortalSession", json!([])),
-                    ("billing.syncSeats", json!([{}])),
-                    ("billing.previewAdditionalTeamSeat", json!([])),
+                for (method, path, payload) in [
+                    (
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
+                    ),
+                    (Method::POST, "/api/v1/billing/portal-sessions", None),
+                    (
+                        Method::GET,
+                        "/api/v1/billing/team-seats/addition-preview",
+                        None,
+                    ),
                 ] {
-                    let response = app.rpc_call(method, params, headers.clone()).await;
-                    assert_eq!(
-                        response.status,
-                        StatusCode::OK,
-                        "unexpected status for {method}"
-                    );
+                    let response = app.api_json(method, path, payload, headers.clone()).await;
+                    response.assert_contract_status();
                     assert_handler_error(
                         &response.body,
                         "FORBIDDEN",
@@ -743,7 +704,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
 
 #[tokio::test]
 async fn waitlist_endpoint_upserts_without_email_enumeration() {
-    with_rpc_test_app("waitlist_endpoint_upserts", |app| async move {
+    with_api_test_app("waitlist_endpoint_upserts", |app| async move {
         let first = app
             .post_public_json(
                 "/waitlist",
@@ -756,7 +717,7 @@ async fn waitlist_endpoint_upserts_without_email_enumeration() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(first.status, StatusCode::OK);
+        first.assert_contract_status();
         assert_eq!(first.body["success"], json!(true));
 
         let duplicate = app
@@ -771,7 +732,7 @@ async fn waitlist_endpoint_upserts_without_email_enumeration() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(duplicate.status, StatusCode::OK);
+        duplicate.assert_contract_status();
         assert_eq!(duplicate.body["success"], json!(true));
 
         let count = query_scalar::<_, i64>("SELECT COUNT(*) FROM beta_waitlist")
@@ -807,22 +768,18 @@ async fn waitlist_endpoint_upserts_without_email_enumeration() {
 #[tokio::test]
 async fn billing_cloud_queries_return_team_not_found_without_team() {
     with_billing_test_env_async(BillingTestEnv::default(), async {
-        with_rpc_test_app("billing_cloud_queries_team_not_found", |app| async move {
+        with_api_test_app("billing_cloud_queries_team_not_found", |app| async move {
             let fixture = build_billing_router_fixture(&app.pool).await;
             let session = app.issue_session(&fixture.no_team_user_id).await;
             let headers = authenticated_json_headers(&session.token);
 
-            for method in [
-                "billing.status",
-                "billing.entitlements",
-                "billing.attachmentUsage",
+            for path in [
+                "/api/v1/billing/status",
+                "/api/v1/billing/entitlements",
+                "/api/v1/billing/attachment-usage",
             ] {
-                let response = app.rpc_call(method, json!([]), headers.clone()).await;
-                assert_eq!(
-                    response.status,
-                    StatusCode::OK,
-                    "unexpected status for {method}"
-                );
+                let response = app.api_json(Method::GET, path, None, headers.clone()).await;
+                response.assert_contract_status();
                 assert_handler_error(&response.body, "NOT_FOUND", "Team not found");
             }
         })
@@ -839,70 +796,53 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_self_hosted_queries_defaults", |app| async move {
+            with_api_test_app("billing_self_hosted_queries_defaults", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.no_team_user_id).await;
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
-                assert_eq!(status_response.status, StatusCode::OK);
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["enabled"],
-                    json!(false)
-                );
-                assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("free"));
-                assert_eq!(
-                    status_response.body["result"]["Ok"]["status"],
-                    json!("none")
-                );
+                status_response.assert_contract_status();
+                assert_eq!(status_response.body["enabled"], json!(false));
+                assert_eq!(status_response.body["plan"], json!("free"));
+                assert_eq!(status_response.body["status"], json!("none"));
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
-                assert_eq!(entitlements_response.status, StatusCode::OK);
+                entitlements_response.assert_contract_status();
+                assert_eq!(entitlements_response.body["mode"], json!("self-hosted"));
+                assert_eq!(entitlements_response.body["plan"], json!("team"));
+                assert_eq!(entitlements_response.body["status"], json!("active"));
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["mode"],
-                    json!("self-hosted")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["plan"],
-                    json!("team")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["status"],
-                    json!("active")
-                );
-                assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["entitlements"]["billingPortal"],
+                    entitlements_response.body["entitlements"]["billingPortal"],
                     json!(false)
                 );
                 assert_eq!(
-                    entitlements_response.body["result"]["Ok"]["limits"]["attachmentStorageBytes"],
+                    entitlements_response.body["limits"]["attachmentStorageBytes"],
                     Value::Null
                 );
 
                 let usage_response = app
-                    .rpc_call("billing.attachmentUsage", json!([]), headers)
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/attachment-usage",
+                        None,
+                        headers,
+                    )
                     .await;
-                assert_eq!(usage_response.status, StatusCode::OK);
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["mode"],
-                    json!("self-hosted")
-                );
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["attachmentsEnabled"],
-                    json!(true)
-                );
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["quotaBytes"],
-                    Value::Null
-                );
-                assert_eq!(
-                    usage_response.body["result"]["Ok"]["committedStorageBytes"],
-                    json!(0)
-                );
+                usage_response.assert_contract_status();
+                assert_eq!(usage_response.body["mode"], json!("self-hosted"));
+                assert_eq!(usage_response.body["attachmentsEnabled"], json!(true));
+                assert_eq!(usage_response.body["quotaBytes"], Value::Null);
+                assert_eq!(usage_response.body["committedStorageBytes"], json!("0"));
             })
             .await;
         },
@@ -918,24 +858,27 @@ async fn billing_mutation_handlers_reject_self_hosted_mode() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_mutations_reject_self_hosted", |app| async move {
+            with_api_test_app("billing_mutations_reject_self_hosted", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
                 let headers = authenticated_json_headers(&session.token);
                 let mutation_calls = vec![
-                    ("billing.createCheckoutSession", json!([{}])),
-                    ("billing.createPortalSession", json!([])),
-                    ("billing.syncSeats", json!([{}])),
-                    ("billing.previewAdditionalTeamSeat", json!([])),
+                    (
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
+                    ),
+                    (Method::POST, "/api/v1/billing/portal-sessions", None),
+                    (
+                        Method::GET,
+                        "/api/v1/billing/team-seats/addition-preview",
+                        None,
+                    ),
                 ];
 
-                for (method, params) in mutation_calls {
-                    let response = app.rpc_call(method, params, headers.clone()).await;
-                    assert_eq!(
-                        response.status,
-                        StatusCode::OK,
-                        "unexpected status for {method}"
-                    );
+                for (method, path, payload) in mutation_calls {
+                    let response = app.api_json(method, path, payload, headers.clone()).await;
+                    response.assert_contract_status();
                     assert_handler_error(
                         &response.body,
                         "FORBIDDEN",
@@ -958,21 +901,22 @@ async fn billing_create_checkout_session_rejects_invalid_payload_shape() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_create_checkout_invalid_payload",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let response = app
-                        .rpc_call(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": 123 }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": 123 })),
                             authenticated_json_headers(&session.token),
                         )
                         .await;
 
-                    assert_eq!(response.status, StatusCode::OK);
+                    response.assert_contract_status();
                     assert_invalid_params_error(&response.body);
                 },
             )
@@ -991,19 +935,25 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_create_checkout_access_and_validation_v2",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let member_session = app.issue_session(&fixture.member_user_id).await;
                     let forbidden_response = app
-                        .rpc_call(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": "team" }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": "team" })),
                             authenticated_json_headers(&member_session.token),
                         )
                         .await;
-                    assert_eq!(forbidden_response.status, StatusCode::OK);
+                    assert_eq!(
+                        forbidden_response.status,
+                        StatusCode::FORBIDDEN,
+                        "unexpected checkout response: {}",
+                        forbidden_response.body
+                    );
                     assert_handler_error(
                         &forbidden_response.body,
                         "FORBIDDEN",
@@ -1026,18 +976,15 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
                     .await;
                     let owner_session = app.issue_session(&fixture.owner_user_id).await;
                     let bad_request_response = app
-                        .rpc_call(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": "free" }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": null })),
                             authenticated_json_headers(&owner_session.token),
                         )
                         .await;
-                    assert_eq!(bad_request_response.status, StatusCode::OK);
-                    assert_handler_error(
-                        &bad_request_response.body,
-                        "BAD_REQUEST",
-                        "Free plan does not require checkout",
-                    );
+                    bad_request_response.assert_contract_status();
+                    assert_eq!(bad_request_response.body["code"], json!("BAD_REQUEST"));
                 },
             )
             .await;
@@ -1057,27 +1004,25 @@ async fn billing_create_checkout_session_success_persists_incomplete_state_and_s
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_create_checkout_success", |app| async move {
+            with_api_test_app("billing_create_checkout_success", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let response = app
-                    .rpc_call(
-                        "billing.createCheckoutSession",
-                        json!([{ "plan": "team" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
                         authenticated_json_headers(&session.token),
                     )
                     .await;
 
-                assert_eq!(response.status, StatusCode::OK);
+                response.assert_contract_status();
                 assert_eq!(
-                    response.body["result"]["Ok"]["url"],
+                    response.body["url"],
                     json!("https://checkout.stripe.test/session/cs_test_123")
                 );
-                assert_eq!(
-                    response.body["result"]["Ok"]["sessionId"],
-                    json!("cs_test_123")
-                );
+                assert_eq!(response.body["sessionId"], json!("cs_test_123"));
 
                 let team_row = load_team_billing_row(&app.pool, &fixture.team_id).await;
                 assert_eq!(team_row.billing_plan, "team");
@@ -1126,18 +1071,19 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_create_portal_session_paths", |app| async move {
+            with_api_test_app("billing_create_portal_session_paths", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let missing_customer_response = app
-                    .rpc_call(
-                        "billing.createPortalSession",
-                        json!([]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/portal-sessions",
+                        None,
                         authenticated_json_headers(&session.token),
                     )
                     .await;
-                assert_eq!(missing_customer_response.status, StatusCode::OK);
+                missing_customer_response.assert_contract_status();
                 assert_handler_error(
                     &missing_customer_response.body,
                     "BAD_REQUEST",
@@ -1159,15 +1105,16 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
                 )
                 .await;
                 let success_response = app
-                    .rpc_call(
-                        "billing.createPortalSession",
-                        json!([]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/portal-sessions",
+                        None,
                         authenticated_json_headers(&session.token),
                     )
                     .await;
-                assert_eq!(success_response.status, StatusCode::OK);
+                success_response.assert_contract_status();
                 assert_eq!(
-                    success_response.body["result"]["Ok"]["url"],
+                    success_response.body["url"],
                     json!("https://billing.stripe.test/portal/session_123")
                 );
 
@@ -1186,75 +1133,6 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
 }
 
 #[tokio::test]
-async fn billing_sync_seats_rejects_other_team_and_updates_quantity() {
-    with_billing_test_env_async(
-        BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
-            stripe_mock: Some(StripeMockState::default()),
-            ..BillingTestEnv::default()
-        },
-        async {
-            with_rpc_test_app("billing_sync_seats_paths", |app| async move {
-                let fixture = build_billing_router_fixture(&app.pool).await;
-                update_team_billing_state(
-                    &app.pool,
-                    &fixture.team_id,
-                    "team",
-                    "active",
-                    Some("cus_team_123"),
-                    Some("sub_team_123"),
-                    Some("si_team_123"),
-                    Some("price_team_123"),
-                    Some(2),
-                    false,
-                    None,
-                )
-                .await;
-                let session = app.issue_session(&fixture.owner_user_id).await;
-
-                let forbidden_response = app
-                    .rpc_call(
-                        "billing.syncSeats",
-                        json!([{ "teamId": fixture.other_team_id }]),
-                        authenticated_json_headers(&session.token),
-                    )
-                    .await;
-                assert_eq!(forbidden_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &forbidden_response.body,
-                    "FORBIDDEN",
-                    "You can only sync seats for your own team",
-                );
-
-                let success_response = app
-                    .rpc_call(
-                        "billing.syncSeats",
-                        json!([{}]),
-                        authenticated_json_headers(&session.token),
-                    )
-                    .await;
-                assert_eq!(success_response.status, StatusCode::OK);
-                assert_eq!(success_response.body["result"]["Ok"]["synced"], json!(true));
-                assert_eq!(success_response.body["result"]["Ok"]["reason"], Value::Null);
-                assert_eq!(success_response.body["result"]["Ok"]["quantity"], json!(3));
-
-                let team_row = load_team_billing_row(&app.pool, &fixture.team_id).await;
-                assert_eq!(team_row.seats_purchased, Some(3));
-                assert_eq!(
-                    stripe_mock_calls(),
-                    vec![StripeMockCall::UpdateSubscriptionItemQuantity {
-                        subscription_item_id: "si_team_123".to_string(),
-                        quantity: 3,
-                    }],
-                );
-            })
-            .await;
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_response() {
     with_billing_test_env_async(
         BillingTestEnv {
@@ -1263,21 +1141,22 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_preview_additional_team_seat_paths",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let none_response = app
-                        .rpc_call(
-                            "billing.previewAdditionalTeamSeat",
-                            json!([]),
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/team-seats/addition-preview",
+                            None,
                             authenticated_json_headers(&session.token),
                         )
                         .await;
-                    assert_eq!(none_response.status, StatusCode::OK);
-                    assert_eq!(none_response.body["result"]["Ok"], Value::Null);
+                    none_response.assert_contract_status();
+                    assert_eq!(none_response.body, Value::Null);
 
                     update_team_billing_state(
                         &app.pool,
@@ -1294,62 +1173,51 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
                     )
                     .await;
                     let preview_response = app
-                        .rpc_call(
-                            "billing.previewAdditionalTeamSeat",
-                            json!([]),
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/team-seats/addition-preview",
+                            None,
                             authenticated_json_headers(&session.token),
                         )
                         .await;
-                    assert_eq!(preview_response.status, StatusCode::OK);
+                    preview_response.assert_contract_status();
+                    assert_eq!(preview_response.body["currency"], json!("usd"));
+                    assert_eq!(preview_response.body["currentQuantity"], json!("3"));
+                    assert_eq!(preview_response.body["nextQuantity"], json!("4"));
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["currency"],
-                        json!("usd")
+                        preview_response.body["estimatedNextPaymentCents"],
+                        json!("750")
                     );
+                    assert_eq!(preview_response.body["totalLineItemsCents"], json!("750"));
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["currentQuantity"],
-                        json!(3)
-                    );
-                    assert_eq!(
-                        preview_response.body["result"]["Ok"]["nextQuantity"],
-                        json!(4)
-                    );
-                    assert_eq!(
-                        preview_response.body["result"]["Ok"]["estimatedNextPaymentCents"],
-                        json!(750)
-                    );
-                    assert_eq!(
-                        preview_response.body["result"]["Ok"]["totalLineItemsCents"],
-                        json!(750)
-                    );
-                    assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["id"],
+                        preview_response.body["lines"][0]["id"],
                         json!("il_preview_123")
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["description"],
+                        preview_response.body["lines"][0]["description"],
                         json!("Additional team seat")
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["amountCents"],
-                        json!(750)
+                        preview_response.body["lines"][0]["amountCents"],
+                        json!("750")
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["unitAmountCents"],
-                        json!(750)
+                        preview_response.body["lines"][0]["unitAmountCents"],
+                        json!("750")
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["isProration"],
+                        preview_response.body["lines"][0]["isProration"],
                         json!(true)
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["periodStart"],
+                        preview_response.body["lines"][0]["periodStart"],
                         json!(format_timestamp(
                             OffsetDateTime::from_unix_timestamp(1_717_300_000)
                                 .expect("preview period start should be valid"),
                         )),
                     );
                     assert_eq!(
-                        preview_response.body["result"]["Ok"]["lines"][0]["periodEnd"],
+                        preview_response.body["lines"][0]["periodEnd"],
                         json!(format_timestamp(
                             OffsetDateTime::from_unix_timestamp(1_719_892_800)
                                 .expect("preview period end should be valid"),
@@ -1382,26 +1250,23 @@ async fn billing_create_portal_and_preview_require_billing_admin() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_admin_only_handlers", |app| async move {
+            with_api_test_app("billing_admin_only_handlers", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let member_session = app.issue_session(&fixture.member_user_id).await;
 
-                for method in [
-                    "billing.createPortalSession",
-                    "billing.previewAdditionalTeamSeat",
+                for (method, path) in [
+                    (Method::POST, "/api/v1/billing/portal-sessions"),
+                    (Method::GET, "/api/v1/billing/team-seats/addition-preview"),
                 ] {
                     let response = app
-                        .rpc_call(
+                        .api_json(
                             method,
-                            json!([]),
+                            path,
+                            None,
                             authenticated_json_headers(&member_session.token),
                         )
                         .await;
-                    assert_eq!(
-                        response.status,
-                        StatusCode::OK,
-                        "unexpected status for {method}"
-                    );
+                    response.assert_contract_status();
                     assert_handler_error(
                         &response.body,
                         "FORBIDDEN",

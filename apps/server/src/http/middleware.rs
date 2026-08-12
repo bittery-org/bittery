@@ -1,26 +1,24 @@
 use std::{any::Any, env, time::Duration};
 
 use axum::{
-    body::{to_bytes, Body},
-    extract::State,
+    body::Body,
+    extract::{MatchedPath, State},
     http::{
         header::{
             HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL,
-            CONTENT_TYPE, EXPIRES, ORIGIN, PRAGMA, VARY,
+            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL, EXPIRES,
+            ORIGIN, PRAGMA, VARY,
         },
-        Method, Request, StatusCode,
+        HeaderMap, Method, Request, StatusCode,
     },
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
-use serde_json::json;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use tracing::Span;
 use url::Url;
 
-use crate::http::rpc_tracing::RpcTraceRequest;
+use super::api::error::ApiError;
 
 type HttpTraceClassifier =
     tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
@@ -69,29 +67,45 @@ fn response_for_panic(panic: Box<dyn Any + Send + 'static>) -> Response {
         .unwrap_or("<non-string panic payload>");
     tracing::error!(panic = %details, "request handler panicked");
 
-    // The panic message stays server-side: it can carry internal state, and the
-    // client has no use for it.
-    json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
+    ApiError::internal().into_response()
 }
 
 fn make_http_trace_span(request: &Request<Body>) -> Span {
-    if request.uri().path() == "/rpc" {
-        tracing::debug_span!("request", route = "/rpc")
-    } else {
-        tracing::debug_span!(
-            "request",
-            method = %request.method(),
-            uri = %request.uri(),
-            version = ?request.version(),
-        )
-    }
+    let trace_context = trace_context(request.headers());
+    tracing::debug_span!(
+        "request",
+        method = %request.method(),
+        path = %trace_path_label(request),
+        version = ?request.version(),
+        trace_id = %trace_context.trace_id,
+        parent_span_id = %trace_context.parent_span_id,
+        trace_flags = %trace_context.trace_flags,
+        trace_source = trace_context.source,
+        tracestate_members = trace_context.tracestate_members,
+        request_id = tracing::field::Empty,
+    )
+}
+
+fn trace_path_label(request: &Request<Body>) -> &str {
+    request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("<unmatched>")
 }
 
 fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
     tracing::debug!(method = %request.method(), "started processing request");
 }
 
-fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &Span) {
+fn on_http_trace_response(response: &Response<Body>, latency: Duration, span: &Span) {
+    if let Some(request_id) = response
+        .headers()
+        .get("bittery-request-id")
+        .and_then(|value| value.to_str().ok())
+    {
+        span.record("request_id", request_id);
+    }
     tracing::debug!(
         latency = latency.as_millis(),
         status = %response.status(),
@@ -99,11 +113,100 @@ fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &
     );
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct TraceContext {
+    trace_id: String,
+    parent_span_id: String,
+    trace_flags: String,
+    source: &'static str,
+    tracestate_members: usize,
+}
+
+fn trace_context(headers: &HeaderMap) -> TraceContext {
+    parse_remote_trace_context(headers).unwrap_or_else(|| TraceContext {
+        trace_id: uuid::Uuid::new_v4().simple().to_string(),
+        parent_span_id: String::new(),
+        trace_flags: "00".to_string(),
+        source: "generated",
+        tracestate_members: 0,
+    })
+}
+
+fn parse_remote_trace_context(headers: &HeaderMap) -> Option<TraceContext> {
+    let traceparent = headers.get("traceparent")?.to_str().ok()?;
+    let mut parts = traceparent.split('-');
+    let version = parts.next()?;
+    let trace_id = parts.next()?;
+    let parent_span_id = parts.next()?;
+    let trace_flags = parts.next()?;
+    if parts.next().is_some()
+        || version.len() != 2
+        || version.eq_ignore_ascii_case("ff")
+        || !is_lower_hex(version)
+        || trace_id.len() != 32
+        || !is_lower_hex(trace_id)
+        || trace_id.bytes().all(|byte| byte == b'0')
+        || parent_span_id.len() != 16
+        || !is_lower_hex(parent_span_id)
+        || parent_span_id.bytes().all(|byte| byte == b'0')
+        || trace_flags.len() != 2
+        || !is_lower_hex(trace_flags)
+    {
+        return None;
+    }
+
+    let tracestate_members = match headers.get("tracestate") {
+        Some(value) => parse_tracestate_member_count(value.to_str().ok()?)?,
+        None => 0,
+    };
+
+    Some(TraceContext {
+        trace_id: trace_id.to_string(),
+        parent_span_id: parent_span_id.to_string(),
+        trace_flags: trace_flags.to_string(),
+        source: "remote",
+        tracestate_members,
+    })
+}
+
+fn is_lower_hex(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn parse_tracestate_member_count(value: &str) -> Option<usize> {
+    if value.is_empty() || value.len() > 512 {
+        return None;
+    }
+    let members = value.split(',').collect::<Vec<_>>();
+    if members.len() > 32 {
+        return None;
+    }
+    for member in &members {
+        let member = member.trim();
+        let (key, value) = member.split_once('=')?;
+        if key.is_empty()
+            || value.is_empty()
+            || !key.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'_' | b'-' | b'*' | b'/' | b'@')
+            })
+            || value
+                .bytes()
+                .any(|byte| !(0x20..=0x7e).contains(&byte) || matches!(byte, b',' | b'='))
+        {
+            return None;
+        }
+    }
+    Some(members.len())
+}
+
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
-const RPC_JSON_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
-const ALLOW_METHODS: &str = "GET, POST, OPTIONS";
-const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform";
-const EXPOSE_HEADERS: &str = "X-Session-Expires";
+const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+const ALLOW_HEADERS: &str = "Content-Type, Authorization, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
+const EXPOSE_HEADERS: &str = "Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After, Idempotency-Replayed";
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 const SECURITY_HEADERS: [(HeaderName, HeaderValue); 6] = [
     (
@@ -166,60 +269,6 @@ pub async fn edge_http_middleware(
     apply_cors_headers(&config, origin.as_deref(), &mut response);
     apply_public_asset_cors(&path, &mut response);
     response
-}
-
-pub async fn rpc_request_guard_middleware(request: Request<Body>, next: Next) -> Response {
-    if matches!(
-        request.method(),
-        &Method::GET | &Method::HEAD | &Method::OPTIONS
-    ) {
-        return next.run(request).await;
-    }
-
-    if !is_json_content_type(
-        request
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-    ) {
-        return json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Unsupported Media Type");
-    }
-
-    if let Some(content_length) = request
-        .headers()
-        .get(axum::http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-    {
-        if content_length > RPC_JSON_BODY_LIMIT_BYTES {
-            return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
-        }
-    }
-
-    let (parts, body) = request.into_parts();
-    let bytes = match to_bytes(body, RPC_JSON_BODY_LIMIT_BYTES + 1).await {
-        Ok(bytes) => bytes,
-        Err(_) => return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large"),
-    };
-
-    if bytes.len() > RPC_JSON_BODY_LIMIT_BYTES {
-        return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
-    }
-
-    let trace_request = RpcTraceRequest::from_body(&bytes);
-    let mut request = Request::from_parts(parts, Body::from(bytes));
-    request.extensions_mut().insert(trace_request);
-    next.run(request).await
-}
-
-fn json_error(status: StatusCode, message: &str) -> Response {
-    (status, Json(json!({ "error": message }))).into_response()
-}
-
-fn is_json_content_type(content_type: Option<&str>) -> bool {
-    content_type
-        .map(|value| value.to_ascii_lowercase().starts_with("application/json"))
-        .unwrap_or(false)
 }
 
 fn apply_security_headers(path: &str, response: &mut Response) {
@@ -305,8 +354,9 @@ fn is_public_asset_path(path: &str) -> bool {
 fn is_sensitive_path(path: &str) -> bool {
     path == "/"
         || path == "/healthz"
-        || path == "/rpc"
-        || path.starts_with("/rpc/")
+        || path == "/api/meta"
+        || path == "/api/v1"
+        || path.starts_with("/api/v1/")
         || path == "/sync"
         || path.starts_with("/sync/")
         || path == "/webhooks"
@@ -383,14 +433,196 @@ fn assert_valid_origin(value: &str) -> Result<String, String> {
 mod tests {
     use axum::{
         body::{to_bytes, Body},
-        http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue, Request, StatusCode},
+        http::{
+            header::{
+                ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+                ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL,
+                CONTENT_TYPE,
+            },
+            HeaderMap, HeaderValue, Request, StatusCode,
+        },
+        middleware::Next,
         response::Response,
         routing::get,
         Router,
     };
     use tower::util::ServiceExt;
 
-    use super::{apply_public_asset_cors, catch_panic_layer, parse_cors_origins};
+    use super::{
+        apply_cors_headers, apply_public_asset_cors, apply_security_headers, catch_panic_layer,
+        parse_cors_origins, trace_context, trace_path_label, EdgeHttpConfig,
+    };
+
+    async fn assert_matched_trace_path(request: Request<Body>, next: Next) -> Response {
+        assert_eq!(trace_path_label(&request), "/api/v1/share-links/{token}");
+        next.run(request).await
+    }
+
+    #[test]
+    fn api_meta_uses_no_store_to_avoid_stale_compatibility_decisions() {
+        let mut response = Response::new(Body::empty());
+
+        apply_security_headers("/api/meta", &mut response);
+
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, max-age=0"))
+        );
+    }
+
+    #[test]
+    fn valid_w3c_trace_context_is_bound_without_retaining_tracestate_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        );
+        headers.insert(
+            "tracestate",
+            HeaderValue::from_static("vendor=opaque,second=value"),
+        );
+
+        let context = trace_context(&headers);
+
+        assert_eq!(context.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(context.parent_span_id, "00f067aa0ba902b7");
+        assert_eq!(context.trace_flags, "01");
+        assert_eq!(context.source, "remote");
+        assert_eq!(context.tracestate_members, 2);
+        assert!(!format!("{context:?}").contains("opaque"));
+    }
+
+    #[test]
+    fn malformed_trace_headers_fall_back_without_retaining_their_contents() {
+        let secret = "Bearer-secret-that-must-not-be-logged";
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_str(&format!("00-{secret}-bad-01")).unwrap(),
+        );
+        headers.insert("tracestate", HeaderValue::from_str(secret).unwrap());
+
+        let context = trace_context(&headers);
+
+        assert_eq!(context.source, "generated");
+        assert_eq!(context.trace_id.len(), 32);
+        assert!(context.parent_span_id.is_empty());
+        assert_eq!(context.tracestate_members, 0);
+        assert!(!format!("{context:?}").contains(secret));
+    }
+
+    #[tokio::test]
+    async fn trace_paths_use_templates_and_never_raw_uri_values() {
+        let token = "share-token-that-must-not-reach-traces";
+        let router = Router::new()
+            .route(
+                "/api/v1/share-links/{token}",
+                get(|| async { StatusCode::NO_CONTENT }),
+            )
+            .layer(axum::middleware::from_fn(assert_matched_trace_path));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/share-links/{token}"))
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let request = Request::builder()
+            .uri(format!("/not-found/{token}"))
+            .body(Body::empty())
+            .expect("request should build");
+        assert_eq!(trace_path_label(&request), "<unmatched>");
+    }
+
+    #[test]
+    fn api_cors_preflight_allows_every_supported_method_and_header() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(&config, Some("https://app.example.com"), &mut response);
+
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_METHODS),
+            Some(&HeaderValue::from_static(
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            ))
+        );
+        let allowed_headers = response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_HEADERS)
+            .expect("allowlisted API origin should receive request header policy")
+            .to_str()
+            .expect("header policy should be ASCII");
+        for required in [
+            "Content-Type",
+            "Authorization",
+            "Bittery-Client-Id",
+            "Bittery-Client-Platform",
+            "Bittery-Client-Version",
+            "Idempotency-Key",
+            "Traceparent",
+            "Tracestate",
+            "If-Match",
+            "If-None-Match",
+        ] {
+            assert!(
+                allowed_headers.split(", ").any(|header| header == required),
+                "missing required CORS header {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn api_cors_exposes_idempotency_replay_status() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(&config, Some("https://app.example.com"), &mut response);
+
+        let exposed_headers = response
+            .headers()
+            .get(ACCESS_CONTROL_EXPOSE_HEADERS)
+            .expect("allowlisted API origin should receive exposed header policy")
+            .to_str()
+            .expect("header policy should be ASCII");
+        assert!(
+            exposed_headers
+                .split(", ")
+                .any(|header| header == "Idempotency-Replayed"),
+            "idempotency replays must be observable to browser clients"
+        );
+    }
+
+    #[test]
+    fn api_cors_does_not_echo_an_origin_outside_the_exact_allowlist() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(
+            &config,
+            Some("https://app.example.com.evil.test"),
+            &mut response,
+        );
+
+        assert!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "CORS allowlisting must compare complete origins"
+        );
+    }
 
     #[test]
     fn adds_wildcard_cors_for_favicon_responses() {
@@ -480,12 +712,26 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/problem+json"))
+        );
+        let request_id = response
+            .headers()
+            .get("bittery-request-id")
+            .expect("panic response should carry a request ID")
+            .to_str()
+            .unwrap()
+            .to_string();
+
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("error body should read");
-        let body = String::from_utf8(body.to_vec()).expect("error body should be utf-8");
-        assert!(body.contains("Internal Server Error"));
-        // The panic message stays in the logs, not in the response.
-        assert!(!body.contains("ThreadRng"));
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("panic problem should be JSON");
+        assert_eq!(body["status"], 500);
+        assert_eq!(body["code"], "INTERNAL_ERROR");
+        assert_eq!(body["requestId"], request_id);
+        assert!(!body.to_string().contains("ThreadRng"));
     }
 }

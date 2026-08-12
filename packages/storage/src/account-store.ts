@@ -18,12 +18,11 @@
  * `onUnlockStateChanged` once at startup and does its own `broadcast_unlock_event`.
  */
 
-import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import type { CryptoPort, KdfProfile, KeyRef } from "@bittery/crypto-port";
 import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
 } from "@bittery/shared/crypto";
-import type { KdfProfile } from "@bittery/types";
 import {
 	findAccountById,
 	findAccountByServerUser,
@@ -36,8 +35,7 @@ import {
 	accountKey,
 	type GlobalValueName,
 	globalKey,
-	itemsCollection,
-	vaultsCollection,
+	metaCollection,
 } from "./keys";
 import type { BiometricPortResult, PlatformPort } from "./platform-port";
 import {
@@ -69,7 +67,7 @@ import {
 // ============================================================================
 
 /** Schema version of {@link NativeHostView}. Bump when the shape changes. */
-export const NATIVE_VIEW_VERSION = 2 as const;
+export const NATIVE_VIEW_VERSION = 3 as const;
 
 /**
  * A key plus which store it lives in, so the native host never has to know the tier table.
@@ -130,16 +128,11 @@ export interface NativeHostView {
 		vaultKeys: NativeKeyRef;
 		encryptedPrivateKey: NativeKeyRef;
 		/**
-		 * Fully-resolved key prefixes under which this account's cached records live, in
-		 * whatever store the platform's `RecordPort` uses. Records are always plain.
-		 *
-		 * Resolved rather than logical on purpose: the native host does a pure prefix scan
-		 * and concatenates nothing, so it can never re-derive — and drift from — the record
-		 * key format. On desktop these read `record:{accountId}:items:` and
-		 * `record:{accountId}:vaults:`.
+		 * The single ItemCache metadata record. It contains the active generation's fully
+		 * resolved item and vault prefixes, so a native host follows an atomic promotion
+		 * without `AccountStore` reaching across its sibling boundary into `ItemCache`.
 		 */
-		itemsKeyPrefix: string;
-		vaultsKeyPrefix: string;
+		itemCacheState: NativeKeyRef;
 	}>;
 }
 
@@ -150,6 +143,7 @@ export interface NativeHostView {
 export interface AccountStoreOptions {
 	port: PlatformPort;
 	crypto: CryptoPort;
+	now?: () => number;
 }
 
 export interface AccountStore {
@@ -164,6 +158,10 @@ export interface AccountStore {
 	getAccountsList(): Promise<AccountMetadata[]>;
 	getAccountMetadata(accountId: string): Promise<AccountMetadata | null>;
 	addAccount(metadata: AccountMetadata): Promise<void>;
+	setInsecureTransportConfirmed(
+		accountId: string,
+		confirmed: boolean,
+	): Promise<void>;
 	removeAccount(accountId: string): Promise<void>;
 
 	// --- session ---
@@ -316,8 +314,11 @@ export interface AccountStore {
 // ============================================================================
 
 interface AccountsListDocument {
+	version?: number;
 	accounts: AccountMetadata[];
 }
+
+const ACCOUNTS_LIST_VERSION = 2;
 
 /**
  * The single session-expiry rule, moved out of `session.ts` so it lives with the only
@@ -430,6 +431,7 @@ function toBiometricAuthResult(
 export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	const { port } = options;
 	const cryptoPort = options.crypto;
+	const now = options.now ?? Date.now;
 
 	/**
 	 * The in-memory master-unlock-key cache. **Never persisted on any platform** — that is
@@ -538,8 +540,8 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	 * owns the collection name; concatenating them here is the only place the two meet, so
 	 * Rust never rebuilds either half.
 	 */
-	function recordKeyPrefixFor(collection: string): string {
-		return `${port.recordKeyPrefix}${collection}:`;
+	function recordKeyFor(collection: string, id: string): string {
+		return `${port.recordKeyPrefix}${collection}:${id}`;
 	}
 
 	// ------------------------------------------------------------------
@@ -684,10 +686,10 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 					"encrypted_private_key",
 					accountKey(account.accountId, "encrypted_private_key"),
 				),
-				itemsKeyPrefix: recordKeyPrefixFor(itemsCollection(account.accountId)),
-				vaultsKeyPrefix: recordKeyPrefixFor(
-					vaultsCollection(account.accountId),
-				),
+				itemCacheState: {
+					key: recordKeyFor(metaCollection(account.accountId), "meta"),
+					store: "plain",
+				},
 			});
 		}
 
@@ -759,14 +761,28 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const parsed = parseJson<AccountsListDocument>(
 			await readGlobal("accounts_list"),
 		);
-		return parsed?.accounts ?? [];
+		if (
+			!parsed ||
+			parsed.version !== ACCOUNTS_LIST_VERSION ||
+			parsed.accounts.some(
+				(account) =>
+					!account.serverUrl ||
+					typeof account.insecureTransportConfirmed !== "boolean",
+			)
+		) {
+			return [];
+		}
+		return parsed.accounts;
 	}
 
 	/** Every accounts-list write goes through here so the projection stays fresh. */
 	async function writeAccountsList(accounts: AccountMetadata[]): Promise<void> {
 		await writeGlobal(
 			"accounts_list",
-			JSON.stringify({ accounts } satisfies AccountsListDocument),
+			JSON.stringify({
+				version: ACCOUNTS_LIST_VERSION,
+				accounts,
+			} satisfies AccountsListDocument),
 		);
 		await refreshNativeView();
 	}
@@ -839,7 +855,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		if (!session || !token) {
 			return false;
 		}
-		return Date.now() < effectiveSessionExpiry(session);
+		return now() < effectiveSessionExpiry(session);
 	}
 
 	// ------------------------------------------------------------------
@@ -941,7 +957,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		if (lastAuth === null) {
 			return true;
 		}
-		return Date.now() - lastAuth > BIOMETRIC_GRACE_PERIOD_MS;
+		return now() - lastAuth > BIOMETRIC_GRACE_PERIOD_MS;
 	}
 
 	async function authenticateWithBiometric(
@@ -959,11 +975,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return false;
 			}
 
-			await writeAccount(
-				"last_biometric_auth",
-				resolved,
-				Date.now().toString(),
-			);
+			await writeAccount("last_biometric_auth", resolved, now().toString());
 			return true;
 		} catch (error) {
 			console.error("[account-store] biometric authentication failed:", error);
@@ -994,7 +1006,9 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return false;
 		}
 		const lastEntry = session.lastMasterPasswordEntry ?? session.createdAt;
-		return Date.now() - lastEntry > periodMs;
+		// Inclusive: the period has elapsed the moment it is reached, so a period of 0 demands
+		// re-entry on every unlock even when both reads land in the same millisecond.
+		return now() - lastEntry >= periodMs;
 	}
 
 	async function canBiometricUnlock(accountId?: string): Promise<boolean> {
@@ -1041,6 +1055,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return await cryptoPort.unwrapKey(
 				session.encryptedMasterUnlockKey,
 				deviceKey,
+				null,
 			);
 		} catch (error) {
 			console.error(
@@ -1100,7 +1115,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				const accounts = await readAccountsList();
 				const metadata = findAccountById(accounts, accountId);
 				if (metadata) {
-					metadata.lastActiveAt = Date.now();
+					metadata.lastActiveAt = now();
 					await writeAccountsList(accounts);
 				}
 			}
@@ -1157,7 +1172,12 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				);
 			}
 
-			const next: AccountMetadata = { ...withId, accountId, biometricEnabled };
+			const next: AccountMetadata = {
+				...withId,
+				accountId,
+				biometricEnabled,
+				insecureTransportConfirmed: withId.insecureTransportConfirmed,
+			};
 
 			if (existing) {
 				const index = accounts.findIndex((a) => a.accountId === accountId);
@@ -1166,6 +1186,24 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				accounts.push(next);
 			}
 
+			await writeAccountsList(accounts);
+		},
+
+		async setInsecureTransportConfirmed(
+			accountId: string,
+			confirmed: boolean,
+		): Promise<void> {
+			const accounts = await readAccountsList();
+			const index = accounts.findIndex(
+				(account) => account.accountId === accountId,
+			);
+			if (index < 0) {
+				throw new Error("Account not found");
+			}
+			accounts[index] = {
+				...accounts[index],
+				insecureTransportConfirmed: confirmed,
+			} as AccountMetadata;
 			await writeAccountsList(accounts);
 		},
 
@@ -1183,7 +1221,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		): Promise<void> {
 			const resolved = await requireAccountId(accountId);
 			const deviceKey = await getDeviceKey();
-			const now = Date.now();
+			const currentTime = now();
 
 			const encryptedMasterUnlockKey = await cryptoPort.wrapKey(muk, deviceKey);
 
@@ -1194,11 +1232,14 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				sessionId,
 				// Two expiries, one rule: the device-local lifetime and the server's opinion.
 				// `effectiveSessionExpiry` prefers the latter.
-				expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
-				serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
-				createdAt: now,
+				expiresAt: currentTime + DEFAULT_SESSION_EXPIRY_MS,
+				serverExpiresAt: resolveStoredSessionExpiryTimestamp(
+					expiresAt,
+					currentTime,
+				),
+				createdAt: currentTime,
 				biometricEnabled: await isBiometricEnabled(resolved),
-				lastMasterPasswordEntry: now,
+				lastMasterPasswordEntry: currentTime,
 			});
 		},
 
@@ -1281,7 +1322,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return false;
 			}
 			const session = await getStoredSessionData(accountId);
-			return session !== null && Date.now() < effectiveSessionExpiry(session);
+			return session !== null && now() < effectiveSessionExpiry(session);
 		},
 
 		/**
@@ -1511,7 +1552,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			}
 			await writeSessionData(resolved, {
 				...session,
-				lastMasterPasswordEntry: Date.now(),
+				lastMasterPasswordEntry: now(),
 			});
 		},
 
@@ -1547,11 +1588,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			if (!resolved) {
 				return;
 			}
-			await writeAccount(
-				"background_timestamp",
-				resolved,
-				Date.now().toString(),
-			);
+			await writeAccount("background_timestamp", resolved, now().toString());
 		},
 
 		async getBackgroundTimestamp(accountId?: string): Promise<number | null> {
@@ -1676,11 +1713,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 					return toBiometricAuthResult(result);
 				}
 
-				await writeAccount(
-					"last_biometric_auth",
-					resolved,
-					Date.now().toString(),
-				);
+				await writeAccount("last_biometric_auth", resolved, now().toString());
 				await deleteAccount("background_timestamp", resolved);
 				return { success: true };
 			} catch (error) {

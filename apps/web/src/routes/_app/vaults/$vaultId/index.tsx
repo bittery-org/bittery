@@ -8,7 +8,8 @@ import {
 	useVaultItems,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
@@ -66,7 +67,7 @@ function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 	const navigate = useNavigate();
-	const rpc = useRPC();
+	const api = useApiClient();
 	const { m } = useI18n();
 
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
@@ -93,9 +94,7 @@ function VaultDetailPage() {
 	const deleteItem = useDeleteItem();
 	const convertVaultType = useConvertVaultType();
 
-	const membersQuery = useQuery(
-		rpc.vault.members.list.queryOptions({ vaultId }),
-	);
+	const membersQuery = useQuery(apiQueries.vaults.members(api, vaultId));
 
 	const availableTags = useAvailableTags(decryptedItems);
 
@@ -437,7 +436,7 @@ function VaultDetailPage() {
 						) : (
 							<VaultMemberList
 								vaultId={vaultId}
-								members={membersQuery.data || []}
+								members={[...(membersQuery.data || [])]}
 								userRole={role ?? "member"}
 							/>
 						)}

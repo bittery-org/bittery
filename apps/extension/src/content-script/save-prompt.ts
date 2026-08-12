@@ -1,3 +1,8 @@
+import type {
+	ExistingCredential,
+	WritableVaultOption,
+} from "../background/router/contract";
+import { sendMessage } from "../lib/messaging";
 import {
 	appendNonceToIframeSrc,
 	cancelSaveMessageSchema,
@@ -21,36 +26,30 @@ type SavePromptOptions = {
 };
 
 function persistPendingSavePrompt(credentials: CapturedCredentials) {
-	chrome.runtime
-		.sendMessage({
-			type: "SET_PENDING_SAVE_PROMPT",
-			payload: {
-				username: credentials.username,
-				password: credentials.password,
-				url: credentials.url,
-				hostname: credentials.hostname,
-			},
-		})
-		.catch((error) => {
-			console.warn("Failed to persist save prompt:", error);
-		});
+	sendMessage({
+		type: "SET_PENDING_SAVE_PROMPT",
+		payload: {
+			username: credentials.username,
+			password: credentials.password,
+			url: credentials.url,
+			hostname: credentials.hostname,
+		},
+	}).catch((error) => {
+		console.warn("Failed to persist save prompt:", error);
+	});
 }
 
 function clearPendingSavePrompt() {
-	chrome.runtime
-		.sendMessage({ type: "CLEAR_PENDING_SAVE_PROMPT" })
-		.catch((error) => {
-			console.warn("Failed to clear save prompt:", error);
-		});
+	sendMessage({ type: "CLEAR_PENDING_SAVE_PROMPT" }).catch((error) => {
+		console.warn("Failed to clear save prompt:", error);
+	});
 }
 
 export async function restorePendingSavePrompt() {
 	try {
-		const response = await chrome.runtime.sendMessage({
-			type: "GET_PENDING_SAVE_PROMPT",
-		});
+		const response = await sendMessage({ type: "GET_PENDING_SAVE_PROMPT" });
 
-		if (response?.data) {
+		if (response.success && response.data) {
 			await showSavePrompt(response.data, { persist: false });
 		}
 	} catch (error) {
@@ -73,17 +72,11 @@ export async function showSavePrompt(
 	}
 
 	// Check for existing credentials before showing the prompt
-	interface ExistingCredential {
-		id: string;
-		vaultId: string;
-		username: string;
-		url: string;
-	}
 	let existingCredentials: ExistingCredential[] = [];
 	let hasDuplicates = false;
 	let hasChanges = true; // Default to true (show prompt if check fails)
 	try {
-		const duplicateCheckResponse = await chrome.runtime.sendMessage({
+		const duplicateCheckResponse = await sendMessage({
 			type: "CHECK_EXISTING_CREDENTIALS",
 			payload: {
 				url: credentials.url,
@@ -93,9 +86,9 @@ export async function showSavePrompt(
 		});
 
 		if (duplicateCheckResponse.success) {
-			existingCredentials = duplicateCheckResponse.existingCredentials || [];
-			hasDuplicates = duplicateCheckResponse.hasDuplicates || false;
-			hasChanges = duplicateCheckResponse.hasChanges ?? true; // Use ?? to handle undefined
+			existingCredentials = duplicateCheckResponse.existingCredentials;
+			hasDuplicates = duplicateCheckResponse.hasDuplicates;
+			hasChanges = duplicateCheckResponse.hasChanges;
 		}
 	} catch (error) {
 		console.error("Error checking for existing credentials:", error);
@@ -108,19 +101,11 @@ export async function showSavePrompt(
 	}
 
 	// Get writable vaults from background script
-	interface VaultOption {
-		id: string;
-		name: string;
-		type: "personal" | "team";
-		role: "owner" | "admin" | "member" | "read-only";
-	}
-	let vaults: VaultOption[] = [];
+	let vaults: WritableVaultOption[] = [];
 	try {
-		const vaultsResponse = await chrome.runtime.sendMessage({
-			type: "GET_WRITABLE_VAULTS",
-		});
+		const vaultsResponse = await sendMessage({ type: "GET_WRITABLE_VAULTS" });
 
-		if (vaultsResponse.vaults) {
+		if (vaultsResponse.success) {
 			vaults = vaultsResponse.vaults;
 		}
 	} catch (error) {
@@ -301,7 +286,7 @@ async function handleSaveCredential(
 ) {
 	try {
 		// Send save request to background script
-		const response = await chrome.runtime.sendMessage({
+		const response = await sendMessage({
 			type: "SAVE_NEW_CREDENTIAL",
 			payload: {
 				vaultId: data.vaultId,
@@ -317,8 +302,8 @@ async function handleSaveCredential(
 				type: "SAVE_RESULT",
 				nonce,
 				success: response.success,
-				error: response.error,
-				errorType: response.errorType,
+				error: response.success ? undefined : response.error,
+				errorType: response.success ? undefined : response.errorType,
 			},
 			iframeOrigin,
 		);
@@ -361,7 +346,7 @@ async function handleUpdateCredential(
 ) {
 	try {
 		// Send update request to background script
-		const response = await chrome.runtime.sendMessage({
+		const response = await sendMessage({
 			type: "UPDATE_EXISTING_CREDENTIAL",
 			payload: {
 				itemId: data.itemId,
@@ -378,8 +363,8 @@ async function handleUpdateCredential(
 				type: "SAVE_RESULT",
 				nonce,
 				success: response.success,
-				error: response.error,
-				errorType: response.errorType,
+				error: response.success ? undefined : response.error,
+				errorType: response.success ? undefined : response.errorType,
 			},
 			iframeOrigin,
 		);

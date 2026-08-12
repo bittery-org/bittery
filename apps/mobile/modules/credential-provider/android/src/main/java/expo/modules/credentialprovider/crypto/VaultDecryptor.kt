@@ -40,10 +40,7 @@ object VaultDecryptor {
      * @throws IllegalArgumentException if encryption algorithm is unsupported
      */
     fun decryptVaultKeyWithMuk(vaultKey: VaultKeyEntity, muk: ByteArray): ByteArray {
-        require(
-            vaultKey.encryptionAlgorithm == "AES-GCM-AAD-V1" ||
-            vaultKey.encryptionAlgorithm == "AES-GCM"
-        ) {
+		require(vaultKey.encryptionAlgorithm == "AES-GCM-AAD-V1") {
             "Unsupported encryption algorithm: ${vaultKey.encryptionAlgorithm}"
         }
 
@@ -53,21 +50,15 @@ object VaultDecryptor {
             algorithm = vaultKey.encryptionAlgorithm
         )
 
-        val decryptedBase64 = if (vaultKey.encryptionAlgorithm == "AES-GCM-AAD-V1") {
-            // New format: vault key wrapped with AAD context
-            AesGcmCrypto.decryptWithContext(
-                encryptedData,
-                muk,
-                vaultId = vaultKey.vaultId,
-                entityId = "vault-key-wrap",
-                entityType = "vault_key",
-                version = vaultKey.keyVersion.coerceAtLeast(1L),
-                userId = vaultKey.userId
-            )
-        } else {
-            // Legacy AES-GCM without AAD context
-            AesGcmCrypto.decrypt(encryptedData, muk)
-        }
+		val decryptedBase64 = AesGcmCrypto.decryptWithContext(
+			encryptedData,
+			muk,
+			vaultId = vaultKey.vaultId,
+			entityId = "vault-key-wrap",
+			entityType = "vault_key",
+			version = vaultKey.keyVersion,
+			userId = vaultKey.userId
+		)
 
         // The vault key is stored as Base64 when encrypted
         return Base64.decode(decryptedBase64, Base64.NO_WRAP)
@@ -117,9 +108,7 @@ object VaultDecryptor {
     /**
      * Decrypt an item's encrypted data using the vault key.
      *
-     * Tries to decrypt with the correct AES-GCM-AAD-V1 context using the stored
-     * version, falling back to lower version candidates (down to 1) to handle
-     * items that were re-encrypted after version bumps.
+     * Uses the exact stored AES-GCM-AAD-V1 context.
      *
      * @param item The item entity from database
      * @param vaultKey Decrypted vault key bytes (32 bytes)
@@ -132,27 +121,15 @@ object VaultDecryptor {
             algorithm = item.encryptionAlgorithm
         )
 
-        val storedVersion = item.version.coerceAtLeast(1L)
-        val decryptUserId = item.lastModifiedBy?.takeIf { it.isNotBlank() } ?: item.userId
-        var lastError: Exception? = null
-
-        for (version in storedVersion downTo 1L) {
-            try {
-                return AesGcmCrypto.decryptWithContext(
-                    encryptedData,
-                    vaultKey,
-                    vaultId = item.vaultId,
-                    entityId = item.id,
-                    entityType = "item",
-                    version = version,
-                    userId = decryptUserId
-                )
-            } catch (e: Exception) {
-                lastError = e
-            }
-        }
-
-        throw lastError ?: RuntimeException("Failed to decrypt item ${item.id}")
+		return AesGcmCrypto.decryptWithContext(
+			encryptedData,
+			vaultKey,
+			vaultId = item.vaultId,
+			entityId = item.id,
+			entityType = "item",
+			version = item.encryptionVersion,
+			userId = item.encryptedByUserId
+		)
     }
 
     /**

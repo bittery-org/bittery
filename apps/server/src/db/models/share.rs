@@ -1,13 +1,15 @@
 use sqlx::FromRow;
 use time::OffsetDateTime;
 
+use crate::db::enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole};
+
 #[derive(Clone, Debug, FromRow)]
 pub struct DbShareLinkRow {
     pub id: String,
     pub item_id: String,
     pub created_by_id: String,
-    pub status: String,
-    pub access_mode: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareLinkAccessMode,
     pub is_one_time_use: bool,
     pub access_count: i32,
     pub max_access_count: Option<i32>,
@@ -48,8 +50,8 @@ pub struct DbShareAccessLogRow {
 pub struct DbPublicShareLinkRow {
     pub id: String,
     pub created_by_id: String,
-    pub status: String,
-    pub access_mode: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareLinkAccessMode,
     pub is_one_time_use: bool,
     pub encrypted_item_data: String,
     pub encryption_iv: String,
@@ -77,5 +79,5 @@ pub struct DbShareEmailVerificationRow {
 pub struct DbScopedItemAccessRow {
     pub item_id: String,
     pub vault_id: String,
-    pub role: String,
+    pub role: VaultRole,
 }

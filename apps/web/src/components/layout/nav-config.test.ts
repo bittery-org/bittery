@@ -24,7 +24,7 @@ describe("Navigation visibility filter", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
 			billingEnabled: true,
-			entitlements: { sentinel: false, team_management: true },
+			entitlements: { sentinel: false, teamManagement: true },
 			plan: "team",
 			role: "owner",
 		});
@@ -38,7 +38,7 @@ describe("Navigation visibility filter", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "self-hosted",
 			billingEnabled: false,
-			entitlements: { sentinel: true, team_management: true },
+			entitlements: { sentinel: true, teamManagement: true },
 			plan: "free",
 			role: "owner",
 		});
@@ -54,7 +54,7 @@ describe("Navigation visibility filter", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
 			billingEnabled: true,
-			entitlements: { team_management: true },
+			entitlements: { teamManagement: true },
 			plan: "team",
 			role: "member",
 		});

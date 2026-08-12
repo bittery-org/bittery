@@ -7,17 +7,11 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
+	type DeleteVaultDialogProps,
 	toast,
 } from "@bittery/ui";
 import { useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
-
-interface DeleteVaultDialogProps {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	vault: { id: string; name: string } | null;
-	onConfirm: (vaultId: string) => Promise<void>;
-}
 
 export function DeleteVaultDialog({
 	open,

@@ -7,7 +7,8 @@ export const Route = createFileRoute("/")({
 		// Check for accounts
 		const accountsList = await storage.getAccountsList();
 
-		if (accountsList.length === 0) {
+		const [firstAccount] = accountsList;
+		if (!firstAccount) {
 			// No accounts, go to login
 			throw redirect({ to: "/login" });
 		}
@@ -17,8 +18,8 @@ export const Route = createFileRoute("/")({
 
 		if (!activeAccount) {
 			// Has accounts but none active, set first as active
-			await storage.setActiveAccount(accountsList[0].accountId);
-			activeAccount = accountsList[0].accountId;
+			await storage.setActiveAccount(firstAccount.accountId);
+			activeAccount = firstAccount.accountId;
 		}
 
 		// Single account mode: check if active account has valid session

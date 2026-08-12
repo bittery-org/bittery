@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
+import { sendMessage } from "@/lib/messaging";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -21,11 +22,11 @@ export function ItemDetailPage() {
 	const { data: item, isLoading } = useQuery<DecryptedItem | null>({
 		queryKey: ["vault-item", itemId],
 		queryFn: async () => {
-			const response = await chrome.runtime.sendMessage({
+			const response = await sendMessage({
 				type: "GET_VAULT_ITEM",
 				payload: { itemId },
 			});
-			return response.item;
+			return response.success ? response.item : null;
 		},
 	});
 

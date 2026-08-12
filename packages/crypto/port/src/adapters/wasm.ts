@@ -48,6 +48,7 @@ const FORWARDED_MEMBERS = [
 	"generatePasskeyCredentialId",
 	"buildPasskeyAttestationObject",
 	"signPasskeyAssertion",
+	"generateTotp",
 	"generateUuid",
 ] as const satisfies readonly (keyof CryptoPort)[];
 

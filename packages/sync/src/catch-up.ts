@@ -1,4 +1,5 @@
-import type { SyncCursor, SyncEvent } from "./types";
+import type { AppApiClient } from "@bittery/shared/api-client";
+import { type SyncCursor, type SyncEvent, toClientTimestamp } from "./types";
 
 export interface CatchUpPageResponse {
 	events: SyncEvent[];
@@ -7,19 +8,10 @@ export interface CatchUpPageResponse {
 	cursor: SyncCursor | null;
 }
 
-export interface CatchUpClient {
-	sync: {
-		getEventsSince: {
-			query: (input: {
-				sinceId?: string | null;
-				limit?: number;
-			}) => Promise<CatchUpPageResponse>;
-		};
-	};
-}
+export type CatchUpApiClient = Pick<AppApiClient, "sync">;
 
 export interface RunCatchUpOptions {
-	client: CatchUpClient;
+	client: CatchUpApiClient;
 	initialCursor: SyncCursor;
 	limit?: number;
 	shouldProcessEvent?: (event: SyncEvent) => boolean | Promise<boolean>;
@@ -47,10 +39,25 @@ export async function runCatchUp({
 
 	while (true) {
 		const previousId = cursor.id;
-		const page = await client.sync.getEventsSince.query({
-			sinceId: cursor.id || null,
+		const { data: apiPage } = await client.sync.changes({
+			sinceId: cursor.id || undefined,
 			limit,
 		});
+		const page: CatchUpPageResponse = {
+			// The only wire→client conversion for an event, and the only place it happens.
+			// `type` and `entityType` need no cast: they are the generated unions on both
+			// sides now.
+			events: apiPage.events.map((event) => ({
+				...event,
+				vaultId: event.vaultId ?? null,
+				clientId: event.clientId ?? null,
+				timestamp: toClientTimestamp(event.timestamp),
+				metadata: event.metadata as SyncEvent["metadata"],
+			})),
+			hasMore: apiPage.hasMore,
+			requiresFullRefresh: apiPage.requiresFullRefresh,
+			cursor: apiPage.cursor ?? null,
+		};
 
 		if (page.requiresFullRefresh) {
 			requiresFullRefresh = true;
@@ -61,7 +68,7 @@ export async function runCatchUp({
 			break;
 		}
 
-		for (const event of deduplicateByEntity(page.events)) {
+		for (const event of page.events) {
 			const shouldProcess = shouldProcessEvent
 				? await shouldProcessEvent(event)
 				: true;
@@ -95,18 +102,4 @@ export async function runCatchUp({
 		processedCount,
 		requiresFullRefresh,
 	};
-}
-
-function deduplicateByEntity(events: SyncEvent[]): SyncEvent[] {
-	const seen = new Set<string>();
-	const result: SyncEvent[] = [];
-	for (let i = events.length - 1; i >= 0; i--) {
-		const event = events.at(i);
-		if (event === undefined) continue;
-		if (!seen.has(event.entityId)) {
-			seen.add(event.entityId);
-			result.unshift(event);
-		}
-	}
-	return result;
 }

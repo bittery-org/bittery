@@ -1,18 +1,19 @@
 use std::{collections::HashMap, future::Future};
 
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::json;
 use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::*;
 use crate::config::bittery_mode;
+use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
 
 fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
@@ -282,19 +283,19 @@ fn mask_user_agent_handles_common_browsers_and_fallbacks() {
 fn team_management_enabled_respects_billing_state_and_mode() {
     // The console gate resolves entitlement on the team plan; these assertions pin
     // the billing states it accepts. The gate itself lives in `services::team_admin`.
-    let console_gate = |billing_status: Option<&str>| {
-        team_management_enabled(bittery_mode(), Some("team"), billing_status)
+    let console_gate = |billing_status: Option<BillingStatus>| {
+        team_management_enabled(bittery_mode(), Some(BillingPlan::Team), billing_status)
     };
 
     with_bittery_mode(None, || {
         assert!(!console_gate(None));
-        assert!(!console_gate(Some("past_due")));
-        assert!(console_gate(Some("active")));
-        assert!(console_gate(Some("trialing")));
+        assert!(!console_gate(Some(BillingStatus::PastDue)));
+        assert!(console_gate(Some(BillingStatus::Active)));
+        assert!(console_gate(Some(BillingStatus::Trialing)));
         assert_eq!(bittery_mode(), "cloud");
     });
 
-    with_bittery_mode(Some("self_hosted"), || {
+    with_bittery_mode(Some("self-hosted"), || {
         assert!(console_gate(None));
         assert_eq!(bittery_mode(), "self-hosted");
     });
@@ -452,19 +453,24 @@ fn to_audit_event_drops_non_object_metadata() {
 
 #[tokio::test]
 async fn team_events_requires_authentication() {
-    with_rpc_test_app(
+    with_api_test_app(
         "audit_team_events_requires_authentication",
         |app| async move {
             let response = app
-                .rpc_call(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
 
-            assert_eq!(response.status, StatusCode::OK);
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            response.assert_contract_status();
+            assert_transport_error(
+                &response.body,
+                "UNAUTHORIZED",
+                "A valid bearer session is required.",
+            );
         },
     )
     .await;
@@ -472,19 +478,20 @@ async fn team_events_requires_authentication() {
 
 #[tokio::test]
 async fn team_events_enforce_access_control_and_team_not_found_paths() {
-    with_rpc_test_app("audit_team_events_access_control", |app| async move {
+    with_api_test_app("audit_team_events_access_control", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             let fixture = build_audit_router_fixture(&app.pool).await;
 
             let member_session = app.issue_session(&fixture.member_user_id).await;
             let member_response = app
-                .rpc_call(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&member_session.token),
                 )
                 .await;
-            assert_eq!(member_response.status, StatusCode::OK);
+            member_response.assert_contract_status();
             assert_handler_error(
                 &member_response.body,
                 "FORBIDDEN",
@@ -493,13 +500,14 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
             let personal_response = app
-                .rpc_call(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&personal_session.token),
                 )
                 .await;
-            assert_eq!(personal_response.status, StatusCode::OK);
+            personal_response.assert_contract_status();
             assert_handler_error(
                 &personal_response.body,
                 "FORBIDDEN",
@@ -508,13 +516,14 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
             let inactive_response = app
-                .rpc_call(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&inactive_session.token),
                 )
                 .await;
-            assert_eq!(inactive_response.status, StatusCode::OK);
+            inactive_response.assert_contract_status();
             assert_handler_error(
                 &inactive_response.body,
                 "FORBIDDEN",
@@ -523,13 +532,14 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
             let no_team_response = app
-                .rpc_call(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&no_team_session.token),
                 )
                 .await;
-            assert_eq!(no_team_response.status, StatusCode::OK);
+            no_team_response.assert_contract_status();
             assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
         })
         .await;
@@ -539,22 +549,23 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
 #[tokio::test]
 async fn team_events_allow_self_hosted_admins_without_team_plan() {
-    with_rpc_test_app("audit_team_events_self_hosted", |app| async move {
+    with_api_test_app("audit_team_events_self_hosted", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.personal_owner_user_id).await;
         let response = with_bittery_mode_async(
-            Some("self_hosted"),
-            app.rpc_call(
-                "audit.teamEvents",
-                json!([{ "limit": 1 }]),
+            Some("self-hosted"),
+            app.api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?limit={}", 1),
+                None,
                 authenticated_json_headers(&session.token),
             ),
         )
         .await;
 
-        assert_eq!(response.status, StatusCode::OK);
+        response.assert_contract_status();
         assert!(
-            response.body["result"]["Ok"]["events"].is_array(),
+            response.body["events"].is_array(),
             "expected team events payload, got {:?}",
             response.body
         );
@@ -564,22 +575,23 @@ async fn team_events_allow_self_hosted_admins_without_team_plan() {
 
 #[tokio::test]
 async fn team_events_reject_malformed_request_input() {
-    with_rpc_test_app("audit_team_events_malformed_request", |app| async move {
+    with_api_test_app("audit_team_events_malformed_request", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
 
         let date_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{
-                    "from": "2025-05-03T00:00:00Z",
-                    "to": "2025-05-02T00:00:00Z"
-                }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/audit-events?from={}&to={}",
+                    "2025-05-03T00:00:00Z", "2025-05-02T00:00:00Z"
+                ),
+                None,
                 headers.clone(),
             )
             .await;
-        assert_eq!(date_response.status, StatusCode::OK);
+        date_response.assert_contract_status();
         assert_handler_error(
             &date_response.body,
             "BAD_REQUEST",
@@ -587,13 +599,14 @@ async fn team_events_reject_malformed_request_input() {
         );
 
         let cursor_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "cursor": "not-base64" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?cursor={}", "not-base64"),
+                None,
                 headers,
             )
             .await;
-        assert_eq!(cursor_response.status, StatusCode::OK);
+        cursor_response.assert_contract_status();
         assert_handler_error(
             &cursor_response.body,
             "BAD_REQUEST",
@@ -605,7 +618,7 @@ async fn team_events_reject_malformed_request_input() {
 
 #[tokio::test]
 async fn team_events_return_paginated_merged_results_with_cursor() {
-    with_rpc_test_app("audit_team_events_success_pagination", |app| async move {
+    with_api_test_app("audit_team_events_success_pagination", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         seed_audit_event(
             &app.pool,
@@ -648,77 +661,64 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
 
         let session = app.issue_session(&fixture.owner_user_id).await;
         let first_page = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "limit": 2 }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?limit={}", 2),
+                None,
                 authenticated_json_headers(&session.token),
             )
             .await;
 
-        assert_eq!(first_page.status, StatusCode::OK);
+        first_page.assert_contract_status();
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"]
+            first_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             2
         );
+        assert_eq!(first_page.body["events"][0]["id"], json!("audit_newest"));
+        assert_eq!(first_page.body["events"][1]["id"], json!("audit_same_time"));
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["id"],
-            json!("audit_newest")
-        );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][1]["id"],
-            json!("audit_same_time")
-        );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["network"]["maskedIp"],
+            first_page.body["events"][0]["network"]["maskedIp"],
             json!("10.20.x.x")
         );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][1]["actionGroup"],
-            json!("auth")
-        );
-        let next_cursor = first_page.body["result"]["Ok"]["nextCursor"]
+        assert_eq!(first_page.body["events"][1]["actionGroup"], json!("auth"));
+        let next_cursor = first_page.body["nextCursor"]
             .as_str()
             .expect("next cursor should be present")
             .to_string();
 
         let second_page = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "cursor": next_cursor }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?cursor={}", next_cursor),
+                None,
                 authenticated_json_headers(&session.token),
             )
             .await;
 
-        assert_eq!(second_page.status, StatusCode::OK);
+        second_page.assert_contract_status();
         assert_eq!(
-            second_page.body["result"]["Ok"]["events"]
+            second_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
+        assert_eq!(second_page.body["events"][0]["id"], json!("share_success"));
         assert_eq!(
-            second_page.body["result"]["Ok"]["events"][0]["id"],
-            json!("share_success")
-        );
-        assert_eq!(
-            second_page.body["result"]["Ok"]["events"][0]["source"],
+            second_page.body["events"][0]["source"],
             json!("share_access_log")
         );
-        assert_eq!(
-            second_page.body["result"]["Ok"]["nextCursor"],
-            serde_json::Value::Null
-        );
+        assert_eq!(second_page.body["nextCursor"], serde_json::Value::Null);
     })
     .await;
 }
 
 #[tokio::test]
 async fn team_events_apply_share_other_and_actor_filters() {
-    with_rpc_test_app("audit_team_events_filtering", |app| async move {
+    with_api_test_app("audit_team_events_filtering", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         seed_audit_event(
             &app.pool,
@@ -775,70 +775,73 @@ async fn team_events_apply_share_other_and_actor_filters() {
         let headers = authenticated_json_headers(&session.token);
 
         let share_failure_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "actionGroup": "share", "result": "failure" }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/audit-events?actionGroup={}&result={}",
+                    "share", "failure"
+                ),
+                None,
                 headers.clone(),
             )
             .await;
-        assert_eq!(share_failure_response.status, StatusCode::OK);
+        share_failure_response.assert_contract_status();
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"]
+            share_failure_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"][0]["id"],
+            share_failure_response.body["events"][0]["id"],
             json!("share_failed")
         );
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"][0]["result"],
+            share_failure_response.body["events"][0]["result"],
             json!("failure")
         );
 
         let other_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "actionGroup": "other" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?actionGroup={}", "other"),
+                None,
                 headers.clone(),
             )
             .await;
-        assert_eq!(other_response.status, StatusCode::OK);
+        other_response.assert_contract_status();
         assert_eq!(
-            other_response.body["result"]["Ok"]["events"]
+            other_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
+        assert_eq!(other_response.body["events"][0]["id"], json!("audit_other"));
         assert_eq!(
-            other_response.body["result"]["Ok"]["events"][0]["id"],
-            json!("audit_other")
-        );
-        assert_eq!(
-            other_response.body["result"]["Ok"]["events"][0]["actionGroup"],
+            other_response.body["events"][0]["actionGroup"],
             json!("other")
         );
 
         let unknown_actor_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{ "actorUserId": "missing_member" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?actorUserId={}", "missing_member"),
+                None,
                 headers,
             )
             .await;
-        assert_eq!(unknown_actor_response.status, StatusCode::OK);
+        unknown_actor_response.assert_contract_status();
         assert_eq!(
-            unknown_actor_response.body["result"]["Ok"]["events"]
+            unknown_actor_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             0
         );
         assert_eq!(
-            unknown_actor_response.body["result"]["Ok"]["nextCursor"],
+            unknown_actor_response.body["nextCursor"],
             serde_json::Value::Null
         );
     })
@@ -858,21 +861,25 @@ struct AuditRouterFixture {
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
-fn assert_rpc_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 async fn build_audit_router_fixture(pool: &PgPool) -> AuditRouterFixture {

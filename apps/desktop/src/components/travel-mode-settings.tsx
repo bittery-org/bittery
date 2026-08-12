@@ -40,7 +40,7 @@ function TravelModeAccountSettings({
 	const vaultListQuery = useQuery({
 		queryKey: ["travel-mode-vault-picker", account.accountId],
 		queryFn: async () => {
-			const vaults = await account.rpcClient.vault.list.query();
+			const { data: vaults } = await account.apiClient.vaults.list();
 			return vaults.map((vault) => ({
 				vaultId: vault.id,
 				vaultName: vault.name,

@@ -11,7 +11,6 @@ import type {
 	CredentialMirror,
 	LifecycleDeps,
 } from "@bittery/core/services/account-lifecycle";
-import { clearAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { Platform } from "react-native";
 import CredentialProvider from "../../modules/credential-provider";
 import { itemCache, storage } from "./storage";
@@ -22,19 +21,12 @@ import { itemCache, storage } from "./storage";
  * JS side. Leaving it behind lets another app keep filling credentials while the UI
  * says locked, so it is purged before `AccountStore` drops its own copy.
  */
-const nativeMukAndRpcClientMirror: CredentialMirror = {
-	async purge(refs) {
+const nativeMukMirror: CredentialMirror = {
+	async purge() {
 		// `clearAllMasterUnlockKeys` is device-wide, not per-account. The port allows
 		// dropping more than asked — never less — so over-purging is correct here.
 		if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 			CredentialProvider.clearAllMasterUnlockKeys();
-		}
-
-		for (const ref of refs) {
-			if (!ref.authToken) {
-				continue;
-			}
-			clearAccountRpcClient(ref.authToken, ref.serverUrl);
 		}
 	},
 };
@@ -42,5 +34,5 @@ const nativeMukAndRpcClientMirror: CredentialMirror = {
 export const lifecycleDeps: LifecycleDeps = {
 	storage,
 	itemCache,
-	credentialMirror: nativeMukAndRpcClientMirror,
+	credentialMirror: nativeMukMirror,
 };

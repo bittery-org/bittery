@@ -6,7 +6,8 @@ use tokio::sync::RwLock;
 use tracing::warn;
 
 use crate::config::is_self_hosted_mode;
-use crate::services::team_billing::{billing_is_active, load_team_billing_entitlement};
+use crate::db::enums::{BillingPlan, BillingStatus};
+use crate::services::team_billing::load_team_billing_entitlement;
 
 /// TTL for connection registry entries in seconds (90s).
 const CONN_TTL_SECONDS: i64 = 90;
@@ -179,14 +180,16 @@ pub(crate) async fn resolve_connection_limit(
     .await
     {
         Ok(Some(row)) => {
-            let plan = row.billing_plan.as_deref().unwrap_or("free");
-            let status = row.billing_status.as_deref().unwrap_or("none");
-            let is_active = billing_is_active(status);
+            let plan = row.billing_plan.unwrap_or(BillingPlan::Free);
+            let is_active = row
+                .billing_status
+                .unwrap_or(BillingStatus::None)
+                .is_active();
 
             match plan {
-                "personal" if is_active => 2,
-                "family" if is_active => 3,
-                "team" if is_active => i64::MAX,
+                BillingPlan::Personal if is_active => 2,
+                BillingPlan::Family if is_active => 3,
+                BillingPlan::Team if is_active => i64::MAX,
                 _ => 1,
             }
         }

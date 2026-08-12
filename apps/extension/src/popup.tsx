@@ -1,7 +1,7 @@
 import "./index.css";
-import { RpcProvider } from "@bittery/shared/rpc";
-import { createAppRpcClient } from "@bittery/shared/rpc-client";
-import { buildRpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { ApiProvider } from "@bittery/shared/api";
+import { createAppApiClient } from "@bittery/shared/api-client";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -12,7 +12,7 @@ import {
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { subscribeBackgroundPushes } from "./lib/background-events";
-import { storage } from "./lib/storage";
+import { sendMessage } from "./lib/messaging";
 import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
@@ -36,30 +36,44 @@ const queryClient = new QueryClient({
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
-// Create RPC client that communicates via background worker.
-const rpcClient = createAppRpcClient({
+async function resolveServerRequest(request: Request): Promise<Response> {
+	const snapshot = await sendMessage({ type: "GET_AUTH_TOKEN" });
+	const token = snapshot.success ? snapshot.token : null;
+	const serverUrl = normalizeServerUrl(
+		(snapshot.success ? snapshot.serverUrl : null) ?? fallbackServerUrl,
+	);
+	if (!serverUrl) {
+		throw new TypeError(
+			"Account server URL is invalid or remote HTTP transport is not authorized.",
+		);
+	}
+	const server = new URL(serverUrl);
+	const target = new URL(request.url);
+	const serverPath = server.pathname.replace(/\/$/, "");
+	target.protocol = server.protocol;
+	target.host = server.host;
+	target.pathname = `${serverPath}${target.pathname}`;
+	const headers = new Headers(request.headers);
+	if (token) {
+		headers.set("Authorization", `Bearer ${token}`);
+	} else {
+		headers.delete("Authorization");
+	}
+	return fetch(new Request(target, request), { headers });
+}
+
+const apiClient = createAppApiClient({
 	serverUrl: fallbackServerUrl,
-	async headers() {
-		// Get auth token and sync client id from background.
-		const [authResponse, clientIdResponse] = await Promise.all([
-			chrome.runtime.sendMessage({
-				type: "GET_AUTH_TOKEN",
-			}),
-			chrome.runtime.sendMessage({
-				type: "GET_SYNC_CLIENT_ID",
-			}),
-		]);
+	supportedApiMajors: [1],
+	getClientMetadata: async () => {
+		const response = await sendMessage({ type: "GET_SYNC_CLIENT_ID" });
 		return {
-			authorization: authResponse.token ? `Bearer ${authResponse.token}` : "",
-			"X-Client-Id": clientIdResponse.clientId || "",
+			id: (response.success ? response.clientId : "") || "extension_popup",
+			platform: "extension",
+			version: chrome.runtime.getManifest().version,
 		};
 	},
-	async fetch(url, options) {
-		const storedServerUrl = await storage.getServerUrl();
-		const serverUrl = storedServerUrl ?? fallbackServerUrl;
-		const resolvedUrl = buildRpcUrl(serverUrl, url as string);
-		return fetch(resolvedUrl, options);
-	},
+	fetch: resolveServerRequest,
 });
 
 // Create router with memory history (no URL bar in popup)
@@ -85,8 +99,8 @@ subscribeBackgroundPushes(queryClient, router);
 
 function Popup() {
 	return (
-		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
-			<QueryClientProvider client={queryClient}>
+		<QueryClientProvider client={queryClient}>
+			<ApiProvider apiClient={apiClient}>
 				<I18nProvider>
 					<ThemeProvider>
 						<ExtensionSyncProvider queryClient={queryClient}>
@@ -97,8 +111,8 @@ function Popup() {
 						</ExtensionSyncProvider>
 					</ThemeProvider>
 				</I18nProvider>
-			</QueryClientProvider>
-		</RpcProvider>
+			</ApiProvider>
+		</QueryClientProvider>
 	);
 }
 

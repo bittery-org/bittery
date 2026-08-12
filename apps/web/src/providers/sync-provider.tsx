@@ -1,26 +1,9 @@
-import type {
-	OutboundQueue,
-	QueryInvalidator,
-	SyncStatus,
-} from "@bittery/sync";
+import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useSyncClientId, useWebSync } from "../hooks/use-web-sync";
 
-/**
- * Context for sync state
- */
-interface SyncContextValue {
-	status: SyncStatus;
-	clientId: string;
-	isConnected: boolean;
-	isOnline: boolean;
-	reconnect: () => Promise<void>;
-	disconnect: () => void;
-	invalidator: QueryInvalidator;
-	outboundQueue: OutboundQueue;
-}
-
+/** Web adds nothing to what `useSync` publishes; the shape lives in `@bittery/sync`. */
 const SyncContext = createContext<SyncContextValue | null>(null);
 
 /**

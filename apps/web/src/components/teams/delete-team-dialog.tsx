@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -29,13 +29,13 @@ interface DeleteTeamDialogProps {
 export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [confirmText, setConfirmText] = useState("");
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const { m } = useI18n();
 
 	const deleteMutation = useMutation({
-		mutationFn: () => rpcClient.team.delete.mutate({ teamId }),
+		mutationFn: () => api.teams.remove(teamId),
 		onSuccess: async () => {
 			toast.success(m.team_delete_dialog_toast_deleted());
 			await invalidator.invalidateTeam();

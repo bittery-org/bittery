@@ -46,7 +46,7 @@ export interface ResolveShareAccessStageInput {
 	linkInfo: ShareLinkPublicInfo | null | undefined;
 	/** Whether the URL fragment supplied a decryption key. */
 	hasShareKey: boolean;
-	/** Whether a consuming RPC is currently in flight. */
+	/** Whether a consuming API request is currently in flight. */
 	revealPending: boolean;
 	hasDecryptedItem: boolean;
 	hasFailure: boolean;
@@ -54,7 +54,7 @@ export interface ResolveShareAccessStageInput {
 
 /**
  * Resolves which screen to render. The ordering guarantees that no screen
- * capable of triggering a consuming RPC is reachable while the link is
+ * capable of triggering a consuming API request is reachable while the link is
  * unusable (invalid, or missing its decryption key) — burning a link only to
  * then fail decryption is unrecoverable.
  */

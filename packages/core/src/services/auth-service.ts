@@ -4,16 +4,23 @@
  * extensions, or any other runtime.
  */
 
-import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import type { FinishLoginResponse, LoginAttempt } from "@bittery/api-contract";
+import type {
+	CryptoPort,
+	EncryptedData,
+	KdfProfile,
+	KeyRef,
+} from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
+import type { AppApiClient } from "@bittery/shared/api-client";
+import {
+	createAccountApiClient,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
-import {
-	type ServerVaultListEntry,
-	toVaultKeyEntry,
+	type ServerAuthVaultKeyEntry,
+	toAuthVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache, VaultKeyData } from "@bittery/storage";
 import {
@@ -22,27 +29,27 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { EncryptedData, KdfProfile } from "@bittery/types";
 import { peekAccountSessionManager } from "./account-session-manager";
-import { createStoredAccountRpcClient } from "./rpc-client";
+import { createStoredAccountApiClient } from "./api-client";
 import {
 	getTravelModeEnforcer,
 	TravelModeVerificationError,
 } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { TravelModeApiClient } from "./travel-mode-service";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 
 export interface StoreAuthSessionOptions {
-	travelModeRpcClient?: TravelModeRpcClient;
+	travelModeApiClient?: TravelModeApiClient;
 	/**
 	 * Builds the travel mode client from the token the flow just obtained.
 	 * Overridable for tests; defaults to a plain account-scoped client.
 	 */
-	createTravelModeRpcClient?: (
+	createTravelModeApiClient?: (
 		token: string,
 		serverUrl: string,
-	) => TravelModeRpcClient;
+	) => TravelModeApiClient;
 	serverUrl?: string;
+	insecureTransportConfirmed?: boolean;
 	/**
 	 * Whether this session should claim the active account. Defaults to `true`;
 	 * multi-account loops pass `false` so the last account unlocked cannot
@@ -67,11 +74,11 @@ async function prepareTravelModeForSession(
 	accountId: string,
 	storage: AccountStore,
 	itemCache: ItemCache,
-	travelModeRpcClient?: TravelModeRpcClient,
+	travelModeApiClient?: TravelModeApiClient,
 ): Promise<void> {
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
 	try {
-		await travelMode.verifyForUnlock(accountId, travelModeRpcClient);
+		await travelMode.verifyForUnlock(accountId, travelModeApiClient);
 	} catch (error) {
 		throw new TravelModeVerificationError(
 			m.auth_error_travel_mode_verify_failed(),
@@ -85,22 +92,21 @@ async function prepareTravelModeForSession(
  * a client that reads its token from storage would still be unauthenticated
  * here. Build the client from the token this flow just obtained instead.
  */
-function resolveTravelModeRpcClientForToken(
+function resolveTravelModeApiClientForToken(
 	token: string,
 	serverUrl: string,
 	options?: StoreAuthSessionOptions,
-): TravelModeRpcClient {
-	if (options?.travelModeRpcClient) {
-		return options.travelModeRpcClient;
+): TravelModeApiClient {
+	if (options?.travelModeApiClient) {
+		return options.travelModeApiClient;
 	}
-	const factory = options?.createTravelModeRpcClient;
+	const factory = options?.createTravelModeApiClient;
 	if (factory) {
 		return factory(token, serverUrl);
 	}
-	return createAccountRpcClient(
-		token,
-		serverUrl,
-	) as unknown as TravelModeRpcClient;
+	return createAccountApiClient(token, serverUrl, undefined, undefined, {
+		insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
+	}) as unknown as TravelModeApiClient;
 }
 
 /**
@@ -111,6 +117,7 @@ export interface SRPLoginInput {
 	password: string;
 	secretKey: string;
 	serverUrl: string;
+	insecureTransportConfirmed?: boolean;
 }
 
 /**
@@ -127,21 +134,6 @@ export interface SrpLoginProof {
 	clientProof: string;
 }
 
-/**
- * User data returned from login
- */
-export interface LoginUserData {
-	id: string;
-	email: string;
-	name?: string;
-	teamName?: string;
-	teamAvatarUrl?: string | null;
-	encryptedPrivateKey?: string;
-}
-
-/**
- * Result from successful login
- */
 export interface LoginResult {
 	token: string;
 	sessionId?: string;
@@ -174,14 +166,6 @@ export interface UnlockResult {
 }
 
 /**
- * Result from email check
- */
-export interface CheckEmailResult {
-	exists: boolean;
-	secretKeyHint?: string | null;
-}
-
-/**
  * Session state information
  */
 export interface SessionState {
@@ -201,82 +185,86 @@ export interface SessionState {
 	expiresAt: number | null;
 }
 
-/**
- * Start login response (SRP challenge)
- */
-export interface StartLoginResponse {
-	attemptId: string;
-	salt: string;
-	serverPublicKey: string;
-	kdfParams: {
-		schemaVersion: number;
-		algorithm: string;
-		iterations: number;
-	};
-}
+/** The React-free auth surface needed by login and unlock ceremonies. */
+type AuthClientMethods = Pick<
+	AppApiClient["auth"],
+	"checkEmail" | "startLogin" | "finishLogin" | "drainVaultKeys"
+>;
 
-/**
- * Finish login response (session data)
- */
-export interface FinishLoginResponse {
-	token: string;
-	serverProof: string;
-	user: LoginUserData;
-	sessionId?: string;
-	expiresAt: string | Date;
-}
+type ApiResponse<T> = { data: T };
 
-type VaultListEntry = ServerVaultListEntry;
-
-/**
- * RPC client interface for auth operations.
- * This is the minimal interface needed by auth utilities.
- */
 export interface IAuthClient {
 	auth: {
-		checkEmail: {
-			query(input: { email: string }): Promise<CheckEmailResult>;
-		};
-		startLogin: {
-			mutate(input: {
-				email: string;
-				clientPublicKey: string;
-			}): Promise<StartLoginResponse>;
-		};
-		finishLogin: {
-			mutate(input: {
-				attemptId: string;
-				clientPublicKey: string;
-				clientProof: string;
-			}): Promise<FinishLoginResponse>;
-		};
-		logout: {
-			mutate(): Promise<{ success: boolean }>;
-		};
-		refreshSession: {
-			mutate(): Promise<{
-				token: string;
-				sessionId: string;
-				expiresAt: string | Date;
-			}>;
-		};
-	};
-	vault: {
-		list: {
-			query(): Promise<VaultListEntry[]>;
-		};
+		checkEmail(
+			input: Parameters<AuthClientMethods["checkEmail"]>[0],
+		): Promise<ApiResponse<CheckEmailResult>>;
+		startLogin(
+			input: Parameters<AuthClientMethods["startLogin"]>[0],
+		): Promise<ApiResponse<LoginAttempt>>;
+		finishLogin(
+			attemptId: Parameters<AuthClientMethods["finishLogin"]>[0],
+			input: Parameters<AuthClientMethods["finishLogin"]>[1],
+		): Promise<ApiResponse<FinishLoginResponse>>;
+		drainVaultKeys(
+			accessToken: Parameters<AuthClientMethods["drainVaultKeys"]>[0],
+			initialPage: FinishLoginResponse["vaultKeys"],
+			requestOrigin: Parameters<AuthClientMethods["drainVaultKeys"]>[2],
+		): Promise<ApiResponse<readonly ServerAuthVaultKeyEntry[]>>;
 	};
 }
+
+/** Result from email check. */
+export interface CheckEmailResult {
+	exists: boolean;
+	secretKeyHint?: string | null;
+}
+
+/**
+ * The user as a *ceremony result* carries them, which is not what any one endpoint sends.
+ * A fresh login fills it from `FinishLoginResponse["user"]`, a local unlock from stored
+ * account metadata, and signup from `SignupResponse["user"]` — so `name`, `teamName` and
+ * `teamAvatarUrl` are optional because a source may not report them, not because a user may
+ * lack a team. Every user has one; a stored account that predates the badge simply has none
+ * recorded yet, which is why the unlock path merges rather than overwrites.
+ */
+export interface LoginUserData {
+	id: string;
+	email: string;
+	name?: string;
+	teamName?: string;
+	teamAvatarUrl?: string | null;
+	encryptedPrivateKey?: string;
+}
+
+/**
+ * The wire spells an absent team name `null`; account metadata spells it `undefined`, and
+ * `storeUnlockSession` reads that difference as "not reported" so it can keep a stored badge
+ * instead of blanking it. Normalize once here rather than at each write.
+ */
+function toLoginUserData(user: FinishLoginResponse["user"]): LoginUserData {
+	return {
+		id: user.id,
+		email: user.email,
+		name: user.name,
+		teamName: user.teamName ?? undefined,
+		teamAvatarUrl: user.teamAvatarUrl,
+		encryptedPrivateKey: user.encryptedPrivateKey,
+	};
+}
+
+type StartLoginApiClient = {
+	auth: Pick<IAuthClient["auth"], "startLogin">;
+};
+
+type AuthRequestOrigin = Parameters<AuthClientMethods["drainVaultKeys"]>[2];
 
 /**
  * Dependencies required for SRP login.
  */
 export interface SRPLoginDeps {
 	crypto: CryptoPort;
-	authClient?: IAuthClient;
-	rpcClient?: IAuthClient;
+	apiClient: IAuthClient;
 	storage: AccountStore;
-	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
 }
 
 /**
@@ -284,33 +272,34 @@ export interface SRPLoginDeps {
  */
 export interface SRPUnlockDeps {
 	crypto: CryptoPort;
-	authClient?: IAuthClient;
-	rpcClient?: IAuthClient;
+	apiClient: IAuthClient;
 	storage: AccountStore;
-	createAuthClientForAccount?: (accountId: string) => Promise<IAuthClient>;
-	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
+}
+
+export interface SrpLoginProofDeps {
+	crypto: CryptoPort;
+	apiClient: StartLoginApiClient;
+	storage: AccountStore;
 }
 
 async function resolveAccountAuthClient(
 	accountId: string,
 	deps: SRPUnlockDeps,
 ): Promise<IAuthClient> {
-	if (deps.createAuthClientForAccount) {
-		return deps.createAuthClientForAccount(accountId);
-	}
-	return ((await createStoredAccountRpcClient(deps.storage, accountId)) ??
-		resolveAuthClient(deps)) as IAuthClient;
+	return (
+		(await createStoredAccountApiClient(deps.storage, accountId)) ??
+		deps.apiClient
+	);
 }
 
-function resolveAuthClient(deps: {
-	authClient?: IAuthClient;
-	rpcClient?: IAuthClient;
-}): IAuthClient {
-	const client = deps.authClient ?? deps.rpcClient;
-	if (!client) {
-		throw new Error("Auth client is required");
-	}
-	return client;
+async function resolveStartLoginApiClient(
+	accountId: string,
+	deps: SrpLoginProofDeps,
+): Promise<StartLoginApiClient> {
+	return (
+		(await createStoredAccountApiClient(deps.storage, accountId)) ??
+		deps.apiClient
+	);
 }
 
 function parseEncryptedData(serialized: string | null): EncryptedData | null {
@@ -325,11 +314,18 @@ function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	}
 }
 
-async function fetchVaultKeys(
-	authClient: IAuthClient,
+async function fetchIssuedVaultKeys(
+	apiClient: IAuthClient,
+	accessToken: string,
+	initialPage: FinishLoginResponse["vaultKeys"],
+	requestOrigin: AuthRequestOrigin,
 ): Promise<VaultKeyData[]> {
-	const vaults = await authClient.vault.list.query();
-	return vaults.map(toVaultKeyEntry);
+	const { data } = await apiClient.auth.drainVaultKeys(
+		accessToken,
+		initialPage,
+		requestOrigin,
+	);
+	return data.map(toAuthVaultKeyEntry);
 }
 
 /**
@@ -364,7 +360,7 @@ async function validateDerivedUnlockKey(input: {
  */
 async function validateKdfProfileForAccount(
 	accountId: string | undefined,
-	serverProfile: StartLoginResponse["kdfParams"],
+	serverProfile: LoginAttempt["kdfParams"],
 	storage: AccountStore,
 ): Promise<KdfProfile> {
 	const pinnedProfile = accountId
@@ -401,7 +397,7 @@ export async function performSRPLogin(
 	const serverUrl = normalizeAccountServerUrl(input.serverUrl);
 	const { crypto } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage: deps.storage });
-	const authClient = resolveAuthClient(deps);
+	const { apiClient } = deps;
 
 	const isValid = await crypto.validateSecretKey(secretKey);
 	if (!isValid) {
@@ -410,7 +406,7 @@ export async function performSRPLogin(
 
 	const clientEphemeral = await crypto.generateClientEphemeral();
 
-	const startResult = await authClient.auth.startLogin.mutate({
+	const { data: startResult } = await apiClient.auth.startLogin({
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
@@ -443,16 +439,17 @@ export async function performSRPLogin(
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);
 
-		const finishResult = await authClient.auth.finishLogin.mutate({
-			attemptId: startResult.attemptId,
-			clientPublicKey: clientEphemeral.publicKey,
-			clientProof: clientSession.proof,
-		});
+		const { data: finishResult } = await apiClient.auth.finishLogin(
+			startResult.attemptId,
+			{
+				clientPublicKey: clientEphemeral.publicKey,
+				clientProof: clientSession.proof,
+			},
+		);
 
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
@@ -460,19 +457,22 @@ export async function performSRPLogin(
 			finishResult.serverProof,
 		);
 
-		const authenticatedClient = deps.createAuthenticatedClient
-			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
-			: (createAccountRpcClient(
-					finishResult.token,
-					serverUrl,
-				) as unknown as IAuthClient);
-		const vaultKeys = await fetchVaultKeys(authenticatedClient);
+		const vaultKeys = await fetchIssuedVaultKeys(
+			apiClient,
+			finishResult.token,
+			finishResult.vaultKeys,
+			{
+				kind: "authCeremony",
+				serverUrl,
+				insecureTransportConfirmed: input.insecureTransportConfirmed === true,
+			},
+		);
 
 		return {
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
-			user: finishResult.user,
+			user: toLoginUserData(finishResult.user),
 			vaultKeys,
 			masterUnlockKey,
 			kdfParams: validatedProfile,
@@ -517,7 +517,7 @@ export async function storeLoginSession(
 		accountId,
 		storage,
 		itemCache,
-		resolveTravelModeRpcClientForToken(result.token, serverUrl, options),
+		resolveTravelModeApiClientForToken(result.token, serverUrl, options),
 	);
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
@@ -562,6 +562,7 @@ export async function storeLoginSession(
 		lastActiveAt: Date.now(),
 		secretKeyHint: `${secretKey.slice(0, 4)}••••`,
 		biometricEnabled: await storage.isBiometricEnabled(accountId),
+		insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
 	});
 
 	await storage.setActiveAccount(accountId);
@@ -661,15 +662,15 @@ async function deriveSrpPasswordForAccount(
  */
 export async function deriveSrpLoginProof(
 	input: SRPUnlockInput,
-	deps: SRPUnlockDeps,
+	deps: SrpLoginProofDeps,
 ): Promise<SrpLoginProof> {
 	const { accountId, password } = input;
 	const { crypto, storage } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
-	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const apiClient = await resolveStartLoginApiClient(accountId, deps);
 	const clientEphemeral = await crypto.generateClientEphemeral();
-	const startResult = await authClient.auth.startLogin.mutate({
+	const { data: startResult } = await apiClient.auth.startLogin({
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
@@ -695,7 +696,6 @@ export async function deriveSrpLoginProof(
 		{
 			salt: startResult.salt,
 			serverPublicKey: startResult.serverPublicKey,
-			kdfParams: validatedProfile,
 		},
 		srpPassword,
 	);
@@ -718,7 +718,7 @@ export async function performSRPUnlock(
 	const { crypto, storage } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
-	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const apiClient = await resolveAccountAuthClient(accountId, deps);
 
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
@@ -753,21 +753,25 @@ export async function performSRPUnlock(
 			masterUnlockKey,
 		});
 
-		const [storedSessionData, storedToken, storedVaultKeys, storedPrivateKey] =
-			await Promise.all([
-				storage.getStoredSessionData(accountId),
-				storage.getAuthToken(accountId),
-				storage.getVaultKeys(accountId),
-				storage.getEncryptedPrivateKey(accountId),
-			]);
+		const [
+			storedSessionData,
+			storedToken,
+			storedVaultKeys,
+			storedPrivateKey,
+			accountMetadata,
+		] = await Promise.all([
+			storage.getStoredSessionData(accountId),
+			storage.getAuthToken(accountId),
+			storage.getVaultKeys(accountId),
+			storage.getEncryptedPrivateKey(accountId),
+			storage.getAccountMetadata(accountId),
+		]);
 
 		if (
 			storedSessionData &&
 			storedToken &&
 			(await storage.isSessionValid(accountId))
 		) {
-			const accountMetadata = await storage.getAccountMetadata(accountId);
-
 			return {
 				mode: "local",
 				token: storedToken,
@@ -788,7 +792,7 @@ export async function performSRPUnlock(
 
 		const clientEphemeral = await crypto.generateClientEphemeral();
 
-		const startResult = await authClient.auth.startLogin.mutate({
+		const { data: startResult } = await apiClient.auth.startLogin({
 			email,
 			clientPublicKey: clientEphemeral.publicKey,
 		});
@@ -804,16 +808,17 @@ export async function performSRPUnlock(
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);
 
-		const finishResult = await authClient.auth.finishLogin.mutate({
-			attemptId: startResult.attemptId,
-			clientPublicKey: clientEphemeral.publicKey,
-			clientProof: clientSession.proof,
-		});
+		const { data: finishResult } = await apiClient.auth.finishLogin(
+			startResult.attemptId,
+			{
+				clientPublicKey: clientEphemeral.publicKey,
+				clientProof: clientSession.proof,
+			},
+		);
 
 		const serverUrl =
 			(await deps.storage.getServerUrl(accountId)) ?? getDefaultServerUrl();
@@ -823,20 +828,19 @@ export async function performSRPUnlock(
 			finishResult.serverProof,
 		);
 
-		const authenticatedClient = deps.createAuthenticatedClient
-			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
-			: (createAccountRpcClient(
-					finishResult.token,
-					serverUrl,
-				) as unknown as IAuthClient);
-		const vaultKeys = await fetchVaultKeys(authenticatedClient);
+		const vaultKeys = await fetchIssuedVaultKeys(
+			apiClient,
+			finishResult.token,
+			finishResult.vaultKeys,
+			{ kind: "persistedAccount", accountId, serverUrl },
+		);
 
 		return {
 			mode: "reauth",
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
-			user: finishResult.user,
+			user: toLoginUserData(finishResult.user),
 			vaultKeys,
 			masterUnlockKey,
 			kdfParams: validatedProfile,
@@ -867,7 +871,7 @@ export async function storeUnlockSession(
 		accountId,
 		storage,
 		itemCache,
-		options?.travelModeRpcClient,
+		options?.travelModeApiClient,
 	);
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
@@ -1027,8 +1031,8 @@ export async function getBiometricUnlockAvailability(
  * Check if an email has an existing account on the server.
  */
 export async function checkEmailExists(
-	authClient: Pick<IAuthClient, "auth">,
+	apiClient: Pick<IAuthClient, "auth">,
 	email: string,
 ): Promise<CheckEmailResult> {
-	return authClient.auth.checkEmail.query({ email });
+	return (await apiClient.auth.checkEmail({ email })).data;
 }

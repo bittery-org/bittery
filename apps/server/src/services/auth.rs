@@ -9,7 +9,6 @@ use bittery_crypto_core::{
     srp6a::{HashAlgorithm, PrimeGroup, SrpServer},
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use qubit::{Extensions, FromRequestExtensions, RpcError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -19,14 +18,16 @@ use std::net::SocketAddr;
 use std::sync::LazyLock;
 use time::{Duration, OffsetDateTime};
 use tracing::info;
-use ts_rs::TS;
 
 use crate::{
     config::{
         self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool,
         TrustProxyMode,
     },
-    db::models::*,
+    db::{
+        enums::{BillingPlan, BillingStatus, TeamRole, TeamType, VaultRole, VaultType},
+        models::*,
+    },
     error::AppError,
     integrations::storage,
     repo::common::{generate_resource_id, hash_token, insert_audit_event},
@@ -42,6 +43,7 @@ use crate::{
         SessionIdInput, VerifiedSession,
     },
     services::session_control::record_session_revocations,
+    services::vault_key::validate_encrypted_vault_key,
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
@@ -49,9 +51,9 @@ use crate::{
 };
 
 const AUTHORIZATION_HEADER: &str = "authorization";
-const CLIENT_ID_HEADER: &str = "x-client-id";
-const APP_PLATFORM_HEADER: &str = "x-app-platform";
-const SESSION_EXPIRY_HEADER: &str = "x-session-expires";
+const CLIENT_ID_HEADER: &str = "bittery-client-id";
+const CLIENT_PLATFORM_HEADER: &str = "bittery-client-platform";
+const SESSION_EXPIRY_HEADER: &str = "bittery-session-expires";
 const JWT_ISSUER: &str = "bittery";
 const SIGNUP_VERIFICATION_JWT_AUDIENCE: &str = "bittery-signup-verification";
 const RECOVERY_JWT_AUDIENCE: &str = "bittery-recovery";
@@ -68,24 +70,7 @@ const FAKE_SRP_VERIFIER: &str = concat!(
     "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 );
 
-pub struct RefreshSessionContext {
-    pub app_state: AppState,
-    pub session: VerifiedSession,
-    pub request: RequestMetadata,
-}
-
-#[derive(Clone)]
-pub struct AppContext {
-    pub app_state: AppState,
-}
-
-#[derive(Clone)]
-pub struct PublicAuthContext {
-    pub app_state: AppState,
-    pub request: RequestMetadata,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationStatusResponse {
     pub mode: String,
@@ -100,15 +85,15 @@ struct DbSignupInvitationRow {
     id: String,
     team_id: String,
     team_name: String,
-    team_type: String,
+    team_type: TeamType,
     team_image_key: Option<String>,
     email: String,
-    role: String,
+    role: TeamRole,
     invited_by_id: String,
     expires_at: OffsetDateTime,
     member_limit: Option<i32>,
-    billing_plan: String,
-    billing_status: String,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
     pending_vault_keys: Option<String>,
 }
 
@@ -116,11 +101,20 @@ struct DbSignupInvitationRow {
 struct DbAuthVaultKeyRow {
     vault_id: String,
     vault_name: String,
-    vault_type: String,
+    vault_type: VaultType,
     vault_icon: Option<String>,
     vault_image_key: Option<String>,
     encrypted_vault_key: String,
-    role: String,
+    role: VaultRole,
+    created_at: OffsetDateTime,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct AuthVaultKeyPageWeight {
+    vault_id: String,
+    position: i64,
+    candidate_count: i64,
+    cumulative_bytes: i64,
 }
 
 #[allow(dead_code)]
@@ -147,6 +141,13 @@ struct DbLoginUserRow {
     kdf_algorithm: String,
     kdf_iterations: i32,
     kdf_schema_version: i32,
+    // The team badge the client stores in account metadata. Only the post-proof load joins
+    // `team` for it: `start_login` answers an unauthenticated challenge and must keep the
+    // decoy path's SELECT exactly as narrow as it already is.
+    #[sqlx(default)]
+    team_name: Option<String>,
+    #[sqlx(default)]
+    team_image_key: Option<String>,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -165,13 +166,13 @@ struct DbRecoveryVaultKeyRow {
     created_by_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckEmailInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestSignupVerificationInput {
@@ -179,7 +180,7 @@ pub struct RequestSignupVerificationInput {
     pub invitation_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifySignupVerificationInput {
@@ -188,14 +189,14 @@ pub struct VerifySignupVerificationInput {
     pub invitation_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckEmailResponse {
     pub exists: bool,
     pub secret_key_hint: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
     pub id: String,
@@ -203,9 +204,9 @@ pub struct MeResponse {
     pub name: String,
     pub team_id: Option<String>,
     pub team_name: Option<String>,
-    pub team_type: Option<String>,
+    pub team_type: Option<TeamType>,
     pub team_avatar_url: Option<String>,
-    pub role: String,
+    pub role: TeamRole,
     pub secret_key_hint: Option<String>,
     pub public_key: String,
     pub encrypted_private_key: String,
@@ -213,12 +214,12 @@ pub struct MeResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LogoutResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifySignupVerificationResponse {
     pub success: bool,
@@ -229,8 +230,8 @@ pub struct VerifySignupVerificationResponse {
 ///
 /// The salt is transported separately as `srp_salt`; these fields describe the
 /// algorithm/work factor so login can be reproduced and so verifier-producing
-/// RPCs can enforce the exact current server profile.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+/// API requests can enforce the exact current server profile.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct KdfParamsInput {
@@ -239,7 +240,7 @@ pub struct KdfParamsInput {
     pub iterations: u32,
 }
 
-/// A client profile accepted for persistence by a verifier-producing RPC.
+/// A client profile accepted for persistence by a verifier-producing request.
 ///
 /// This is deliberately stricter than the client-side profile window: while
 /// clients may validate a bounded future work factor, the server persists one
@@ -272,7 +273,7 @@ impl TryFrom<&KdfParamsInput> for ValidatedKdfProfile {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SignupInput {
@@ -294,7 +295,7 @@ pub struct SignupInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SignupWithInvitationInput {
@@ -315,7 +316,7 @@ pub struct SignupWithInvitationInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthSessionUserResponse {
     pub id: String,
@@ -326,24 +327,33 @@ pub struct AuthSessionUserResponse {
     pub encrypted_private_key: String,
     pub team_id: Option<String>,
     pub team_name: Option<String>,
-    pub team_type: Option<String>,
+    pub team_type: Option<TeamType>,
     pub team_avatar_url: Option<String>,
-    pub role: String,
+    pub role: TeamRole,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthVaultKeyResponse {
     pub vault_id: String,
     pub vault_name: String,
-    pub vault_type: String,
+    pub vault_type: VaultType,
     pub vault_icon: Option<String>,
     pub vault_image_url: Option<String>,
     pub encrypted_vault_key: String,
-    pub role: String,
+    pub role: VaultRole,
+    #[serde(skip)]
+    pub created_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthVaultKeyPage {
+    pub items: Vec<AuthVaultKeyResponse>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignupResponse {
     pub success: bool,
@@ -352,10 +362,10 @@ pub struct SignupResponse {
     pub session_id: String,
     pub expires_at: String,
     pub user: AuthSessionUserResponse,
-    pub vault_keys: Vec<AuthVaultKeyResponse>,
+    pub vault_keys: AuthVaultKeyPage,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct StartLoginInput {
@@ -363,7 +373,7 @@ pub struct StartLoginInput {
     pub client_public_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct FinishLoginInput {
@@ -372,7 +382,7 @@ pub struct FinishLoginInput {
     pub client_proof: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginKdfParamsResponse {
     pub schema_version: u32,
@@ -380,7 +390,7 @@ pub struct LoginKdfParamsResponse {
     pub iterations: u32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartLoginResponse {
     pub attempt_id: String,
@@ -389,7 +399,7 @@ pub struct StartLoginResponse {
     pub kdf_params: LoginKdfParamsResponse,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginUserResponse {
     pub id: String,
@@ -398,9 +408,13 @@ pub struct LoginUserResponse {
     pub secret_key_hint: String,
     pub public_key: String,
     pub encrypted_private_key: String,
+    /// The badge account metadata is written from. Every user has a team, so this is absent
+    /// only for a row with no team at all — never as a function of the team's billing plan.
+    pub team_name: Option<String>,
+    pub team_avatar_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishLoginResponse {
     pub token: String,
@@ -408,16 +422,17 @@ pub struct FinishLoginResponse {
     pub expires_at: String,
     pub server_proof: String,
     pub user: LoginUserResponse,
+    pub vault_keys: AuthVaultKeyPage,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestRecoveryVerificationInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifyRecoveryCodeInput {
@@ -425,21 +440,21 @@ pub struct VerifyRecoveryCodeInput {
     pub code: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyRecoveryCodeResponse {
     pub success: bool,
     pub recovery_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetRecoveryDataInput {
     pub recovery_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryVaultKeyResponse {
     pub vault_id: String,
@@ -447,7 +462,7 @@ pub struct RecoveryVaultKeyResponse {
     pub created_by_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetRecoveryDataResponse {
     pub user_id: String,
@@ -458,14 +473,14 @@ pub struct GetRecoveryDataResponse {
     pub vault_keys: Vec<RecoveryVaultKeyResponse>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedVaultKeyInput {
     pub vault_id: String,
     pub encrypted_vault_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ResetPasswordInput {
@@ -480,7 +495,7 @@ pub struct ResetPasswordInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetPasswordResponse {
     pub token: String,
@@ -489,7 +504,7 @@ pub struct ResetPasswordResponse {
     pub user_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateEmailInput {
@@ -501,7 +516,7 @@ pub struct UpdateEmailInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ChangePasswordInput {
@@ -512,7 +527,7 @@ pub struct ChangePasswordInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RegenerateSecretKeyInput {
@@ -524,7 +539,7 @@ pub struct RegenerateSecretKeyInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct StoreRecoveryKeyInput {
@@ -532,7 +547,7 @@ pub struct StoreRecoveryKeyInput {
     pub recovery_key_hint: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct DeleteAccountInput {
@@ -551,9 +566,9 @@ struct DbMeRow {
     name: String,
     team_id: Option<String>,
     team_name: Option<String>,
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
     team_image_key: Option<String>,
-    role: String,
+    role: TeamRole,
     secret_key_hint: Option<String>,
     public_key: String,
     encrypted_private_key: String,
@@ -567,7 +582,7 @@ struct DbAccountMutationUserRow {
     encrypted_master_key: Option<String>,
     team_id: Option<String>,
     team_owner_id: Option<String>,
-    team_type: Option<String>,
+    team_type: Option<TeamType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -602,52 +617,6 @@ pub(crate) struct PendingVaultKeyEntry {
     pub(crate) vault_id: String,
     #[serde(rename = "encryptedVaultKey")]
     pub(crate) encrypted_vault_key: String,
-}
-
-impl FromRequestExtensions<AppState> for RefreshSessionContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        let request = extensions
-            .get::<RequestMetadata>()
-            .cloned()
-            .unwrap_or_default();
-        let session = extensions
-            .get::<VerifiedSession>()
-            .cloned()
-            .ok_or_else(|| unauthorized_error("Authentication required"))?;
-
-        Ok(Self {
-            app_state: ctx,
-            session,
-            request,
-        })
-    }
-}
-
-impl FromRequestExtensions<AppState> for AppContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        _extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        Ok(Self { app_state: ctx })
-    }
-}
-
-impl FromRequestExtensions<AppState> for PublicAuthContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        Ok(Self {
-            app_state: ctx,
-            request: extensions
-                .get::<RequestMetadata>()
-                .cloned()
-                .unwrap_or_default(),
-        })
-    }
 }
 
 pub(crate) async fn request_signup_verification(
@@ -828,12 +797,12 @@ pub(crate) async fn signup(
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
     let selected_plan = if self_hosted_mode || !cloud_billing_enabled() {
-        "free"
+        BillingPlan::Free
     } else {
         normalize_signup_plan(input.plan.as_deref())?
     };
     let team_type = if self_hosted_mode {
-        "organization"
+        TeamType::Organization
     } else {
         map_plan_to_team_type(selected_plan)
     };
@@ -847,10 +816,10 @@ pub(crate) async fn signup(
     } else {
         plan_member_limit(selected_plan)
     };
-    let billing_status = if selected_plan == "free" {
-        "none"
+    let billing_status = if selected_plan.is_paid() {
+        BillingStatus::Incomplete
     } else {
-        "incomplete"
+        BillingStatus::None
     };
     let user_id = input
         .user_id
@@ -919,7 +888,7 @@ pub(crate) async fn signup(
     })?;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
 
     Ok(SignupResponse {
         success: true,
@@ -936,9 +905,9 @@ pub(crate) async fn signup(
             encrypted_private_key: input.encrypted_private_key,
             team_id: Some(team_id),
             team_name: Some(team_name),
-            team_type: Some(team_type.to_string()),
+            team_type: Some(team_type),
             team_avatar_url: None,
-            role: "owner".to_string(),
+            role: TeamRole::Owner,
         },
         vault_keys,
     })
@@ -1005,11 +974,7 @@ pub(crate) async fn signup_with_invitation(
         .vault_id
         .clone()
         .unwrap_or_else(|| generate_resource_id("vault"));
-    let vault_role = if invitation.role == "admin" {
-        "admin"
-    } else {
-        "member"
-    };
+    let vault_role = invitation.role.vault_role();
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start invited signup transaction");
@@ -1036,7 +1001,7 @@ pub(crate) async fn signup_with_invitation(
     .await?;
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
         .bind(&invitation.team_id)
-        .bind(&invitation.role)
+        .bind(invitation.role)
         .bind(&user_id)
         .execute(transaction.as_mut())
         .await
@@ -1053,6 +1018,7 @@ pub(crate) async fn signup_with_invitation(
     .await?;
 
     for pending_key in &pending_keys {
+        validate_encrypted_vault_key(&pending_key.encrypted_vault_key)?;
         query(
 			"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role) VALUES ($1, $2, $3, $4, $5::vault_role)",
 		)
@@ -1081,10 +1047,10 @@ pub(crate) async fn signup_with_invitation(
         AppError::internal("Failed to commit invited signup")
     })?;
 
-    sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
+    sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
 
     Ok(SignupResponse {
         success: true,
@@ -1239,7 +1205,7 @@ async fn verify_login_proof_and_get_user(
         return Err(AppError::unauthorized("Invalid credentials"));
     };
     let user = query_as::<_, DbLoginUserRow>(
-		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1 LIMIT 1",
+		"SELECT u.id, u.email, u.name, u.secret_key_hint, u.srp_salt, u.srp_verifier, u.public_key, u.encrypted_private_key, u.kdf_algorithm, u.kdf_iterations, u.kdf_schema_version, t.name AS team_name, t.image_key AS team_image_key FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(user_id)
 	.fetch_optional(pool)
@@ -1295,6 +1261,7 @@ pub(crate) async fn finish_login(
         .sessions
         .create_session(&verified.user.id, request)
         .await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &verified.user.id, None, 101).await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
@@ -1308,7 +1275,14 @@ pub(crate) async fn finish_login(
             secret_key_hint: verified.user.secret_key_hint.unwrap_or_default(),
             public_key: verified.user.public_key,
             encrypted_private_key: verified.user.encrypted_private_key,
+            team_name: verified.user.team_name,
+            team_avatar_url: verified
+                .user
+                .team_image_key
+                .as_deref()
+                .and_then(storage::public_asset_url),
         },
+        vault_keys,
     })
 }
 
@@ -1489,6 +1463,7 @@ pub(crate) async fn reset_password(
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
+    validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
     let pool = db_pool(app_state)?;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
@@ -1758,7 +1733,7 @@ pub(crate) async fn delete_account(
         return Err(bad_request_handler_error("Email does not match"));
     }
     if user.team_owner_id.as_deref() == Some(session.user_id.as_str())
-        && user.team_type.as_deref() != Some("personal")
+        && user.team_type != Some(TeamType::Personal)
     {
         if let Some(team_id) = user.team_id.as_deref() {
             let remaining_members =
@@ -2020,71 +1995,6 @@ pub(crate) async fn rename_device(
     Ok(LogoutResponse { success: true })
 }
 
-pub(crate) async fn do_heartbeat(
-    app_state: &AppState,
-    session: &VerifiedSession,
-) -> Result<LogoutResponse, AppError> {
-    app_state.sessions.heartbeat(&session.session_id).await?;
-    Ok(LogoutResponse { success: true })
-}
-
-pub(crate) async fn do_logout(
-    app_state: &AppState,
-    session: &VerifiedSession,
-) -> Result<LogoutResponse, AppError> {
-    let revoked_session_ids = app_state
-        .sessions
-        .delete_session(&session.session_id)
-        .await?;
-    if let Some(pool) = app_state.db_pool.as_ref() {
-        record_session_revocations(pool, &session.user_id, &revoked_session_ids, "logout")
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record session revocations");
-                AppError::internal("Failed to record session revocations")
-            })?;
-    }
-    Ok(LogoutResponse { success: true })
-}
-
-pub(crate) async fn do_logout_all(
-    app_state: &AppState,
-    session: &VerifiedSession,
-) -> Result<LogoutResponse, AppError> {
-    let revoked_session_ids = app_state
-        .sessions
-        .delete_all_user_sessions(&session.user_id)
-        .await?;
-
-    if let Some(pool) = app_state.db_pool.as_ref() {
-        record_session_revocations(pool, &session.user_id, &revoked_session_ids, "logout_all")
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record session revocations");
-                AppError::internal("Failed to record session revocations")
-            })?;
-        insert_audit_event(
-            pool,
-            &format!(
-                "audit_{}",
-                &hash_token(&generate_opaque_session_token())[..16]
-            ),
-            &session.user_id,
-            "logout_all",
-            "session",
-            &session.session_id,
-            None,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to record logout audit event");
-            AppError::internal("Failed to record logout audit event")
-        })?;
-    }
-
-    Ok(LogoutResponse { success: true })
-}
-
 pub(crate) async fn do_refresh_session(
     app_state: &AppState,
     session: &VerifiedSession,
@@ -2092,7 +2002,7 @@ pub(crate) async fn do_refresh_session(
     app_state.sessions.refresh_session(session).await
 }
 
-pub async fn rpc_request_context_middleware(
+pub async fn request_context_middleware(
     State(state): State<AppState>,
     mut request: Request<axum::body::Body>,
     next: Next,
@@ -2100,7 +2010,7 @@ pub async fn rpc_request_context_middleware(
     let metadata = RequestMetadata {
         auth_token: parse_bearer_token(&request),
         client_id: header_value(&request, CLIENT_ID_HEADER),
-        app_platform: header_value(&request, APP_PLATFORM_HEADER),
+        app_platform: header_value(&request, CLIENT_PLATFORM_HEADER),
         user_agent: header_value(&request, "user-agent"),
         ip_address: client_ip_address(&request),
     };
@@ -2393,8 +2303,8 @@ async fn get_pending_invitation_for_signup(
 
     if !team_management_enabled(
         bittery_mode() == "self-hosted",
-        &invitation.billing_plan,
-        &invitation.billing_status,
+        invitation.billing_plan,
+        invitation.billing_status,
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -2524,6 +2434,7 @@ async fn reset_user_password_with_recovery(
     })?;
 
     for vault_key in &input.encrypted_vault_keys {
+        validate_encrypted_vault_key(&vault_key.encrypted_vault_key)?;
         query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
             .bind(&vault_key.encrypted_vault_key)
             .bind(&vault_key.vault_id)
@@ -2564,9 +2475,7 @@ fn validate_encrypted_vault_keys(
 ) -> Result<(), AppError> {
     for entry in encrypted_vault_keys {
         validate_resource_id(&entry.vault_id)?;
-        if entry.encrypted_vault_key.trim().is_empty() {
-            return Err(bad_request_handler_error("Invalid encrypted vault key"));
-        }
+        validate_encrypted_vault_key(&entry.encrypted_vault_key)?;
     }
     Ok(())
 }
@@ -2712,6 +2621,7 @@ async fn apply_encrypted_vault_key_updates(
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
 ) -> Result<(), AppError> {
     for vault_key in encrypted_vault_keys {
+        validate_encrypted_vault_key(&vault_key.encrypted_vault_key)?;
         query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
             .bind(&vault_key.encrypted_vault_key)
             .bind(&vault_key.vault_id)
@@ -2778,8 +2688,8 @@ async fn get_pending_signup_invitation(
 
     if !team_management_enabled(
         bittery_mode() == "self-hosted",
-        &invitation.billing_plan,
-        &invitation.billing_status,
+        invitation.billing_plan,
+        invitation.billing_status,
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -2848,10 +2758,10 @@ async fn insert_team(
     team_id: &str,
     team_name: &str,
     owner_id: &str,
-    team_type: &str,
+    team_type: TeamType,
     member_limit: Option<i32>,
-    billing_plan: &str,
-    billing_status: &str,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
 ) -> Result<(), AppError> {
     query(
         "INSERT INTO team (id, name, owner_id, type, member_limit, billing_plan, billing_status) VALUES ($1, $2, $3, $4::team_type, $5, $6::billing_plan, $7::billing_status)",
@@ -2879,6 +2789,7 @@ async fn insert_personal_vault(
     user_id: &str,
     encrypted_vault_key: &str,
 ) -> Result<(), AppError> {
+    validate_encrypted_vault_key(encrypted_vault_key)?;
     query(
         "INSERT INTO vault (id, name, type, icon, created_by_id) VALUES ($1, 'Personal', 'personal'::vault_type, 'lock', $2)",
     )
@@ -2907,14 +2818,66 @@ async fn insert_personal_vault(
     Ok(())
 }
 
-async fn load_auth_vault_keys(
+pub(crate) async fn load_auth_vault_keys_page(
     pool: &PgPool,
     user_id: &str,
-) -> Result<Vec<AuthVaultKeyResponse>, AppError> {
-    let rows = query_as::<_, DbAuthVaultKeyRow>(
-        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.user_id = $1 ORDER BY v.created_at ASC",
+    cursor: Option<(OffsetDateTime, String)>,
+    limit: i64,
+) -> Result<AuthVaultKeyPage, AppError> {
+    const PAGE_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
+    let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
+    let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
+    let weights = query_as::<_, AuthVaultKeyPageWeight>(
+        r#"WITH candidates AS (
+            SELECT vk.vault_id,
+                   ROW_NUMBER() OVER (ORDER BY v.created_at, vk.vault_id)::bigint AS position,
+                   (8192 + octet_length(vk.vault_id) + octet_length(v.name)
+                    + octet_length(v.type::text) + coalesce(octet_length(v.icon), 0)
+                    + coalesce(octet_length(v.image_key), 0) + octet_length(vk.encrypted_vault_key)
+                    + octet_length(vk.role::text))::bigint AS estimated_bytes
+            FROM vault_key vk JOIN vault v ON v.id = vk.vault_id
+            WHERE vk.user_id = $1
+              AND ($2::timestamptz IS NULL OR (v.created_at, vk.vault_id) > ($2, $3))
+            ORDER BY v.created_at, vk.vault_id LIMIT $4
+        ), weighted AS (
+            SELECT vault_id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT vault_id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
     .bind(user_id)
+    .bind(cursor_timestamp)
+    .bind(cursor_id)
+    .bind(limit)
+    .bind(PAGE_BYTES)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to size vault key page");
+        AppError::internal("Failed to load vault keys")
+    })?;
+    let Some(first) = weights.first() else {
+        return Ok(AuthVaultKeyPage {
+            items: Vec::new(),
+            has_more: false,
+        });
+    };
+    if first.cumulative_bytes > PAGE_BYTES {
+        return Err(AppError::payload_too_large(
+            "A single vault key exceeds the response page byte budget.",
+        ));
+    }
+    let has_more = weights
+        .last()
+        .is_some_and(|last| last.position < last.candidate_count);
+    let vault_ids: Vec<String> = weights.into_iter().map(|row| row.vault_id).collect();
+    let rows = query_as::<_, DbAuthVaultKeyRow>(
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role, v.created_at FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
+    )
+    .bind(user_id)
+    .bind(&vault_ids)
     .fetch_all(pool)
     .await
     .map_err(|e| {
@@ -2922,7 +2885,7 @@ async fn load_auth_vault_keys(
         AppError::internal("Failed to load vault keys")
     })?;
 
-    Ok(rows
+    let items = rows
         .into_iter()
         .map(|row| AuthVaultKeyResponse {
             vault_id: row.vault_id,
@@ -2935,41 +2898,43 @@ async fn load_auth_vault_keys(
                 .and_then(storage::public_asset_url),
             encrypted_vault_key: row.encrypted_vault_key,
             role: row.role,
+            created_at: row.created_at,
         })
-        .collect())
+        .collect();
+    Ok(AuthVaultKeyPage { items, has_more })
 }
 
-fn normalize_signup_plan(plan: Option<&str>) -> Result<&'static str, AppError> {
-    match plan.map(|value| value.trim().to_ascii_lowercase()) {
-        None => Ok("personal"),
-        Some(value) if value == "free" => Ok("free"),
-        Some(value) if value == "personal" => Ok("personal"),
-        Some(value) if value == "family" => Ok("family"),
-        Some(value) if value == "team" => Ok("team"),
-        _ => Err(AppError::bad_request("Invalid plan")),
+/// Signup keeps accepting the plan as free text, trimmed and case-folded, so a client that
+/// sends `" Personal "` still works. The value is closed from here on.
+fn normalize_signup_plan(plan: Option<&str>) -> Result<BillingPlan, AppError> {
+    let Some(plan) = plan else {
+        return Ok(BillingPlan::Personal);
+    };
+    plan.trim()
+        .to_ascii_lowercase()
+        .parse()
+        .map_err(|_| AppError::bad_request("Invalid plan"))
+}
+
+fn map_plan_to_team_type(plan: BillingPlan) -> TeamType {
+    match plan {
+        BillingPlan::Family => TeamType::Family,
+        BillingPlan::Team => TeamType::Organization,
+        BillingPlan::Free | BillingPlan::Personal => TeamType::Personal,
     }
 }
 
-fn map_plan_to_team_type(plan: &str) -> &'static str {
+fn plan_member_limit(plan: BillingPlan) -> Option<i32> {
     match plan {
-        "family" => "family",
-        "team" => "organization",
-        _ => "personal",
-    }
-}
-
-fn plan_member_limit(plan: &str) -> Option<i32> {
-    match plan {
-        "free" | "personal" => Some(1),
-        "family" => Some(6),
-        "team" => None,
-        _ => Some(1),
+        BillingPlan::Free | BillingPlan::Personal => Some(1),
+        BillingPlan::Family => Some(6),
+        BillingPlan::Team => None,
     }
 }
 
 fn signup_team_name(
     self_hosted_mode: bool,
-    team_type: &str,
+    team_type: TeamType,
     organization_name: Option<&str>,
 ) -> String {
     let provided = organization_name
@@ -2981,7 +2946,7 @@ fn signup_team_name(
     if let Some(name) = provided {
         return name.to_string();
     }
-    if team_type == "family" {
+    if team_type == TeamType::Family {
         "My Family".to_string()
     } else {
         "My Team".to_string()
@@ -2997,6 +2962,7 @@ fn validate_signup_input(input: &SignupInput) -> Result<ValidatedKdfProfile, App
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_encrypted_vault_key(&input.encrypted_vault_key)?;
     ValidatedKdfProfile::try_from(&input.kdf_params)
 }
 
@@ -3012,6 +2978,7 @@ fn validate_signup_with_invitation_input(
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_encrypted_vault_key(&input.encrypted_vault_key)?;
     ValidatedKdfProfile::try_from(&input.kdf_params)
 }
 
@@ -3075,7 +3042,9 @@ fn parse_pending_vault_keys(
         .map_err(|_| bad_request_handler_error("Invalid pendingVaultKeys payload"))?;
     let mut seen_vault_ids = std::collections::HashSet::with_capacity(parsed.len());
     for (index, entry) in parsed.iter().enumerate() {
-        if entry.vault_id.trim().is_empty() || entry.encrypted_vault_key.trim().is_empty() {
+        if entry.vault_id.trim().is_empty()
+            || validate_encrypted_vault_key(&entry.encrypted_vault_key).is_err()
+        {
             return Err(bad_request_handler_error(&format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));
@@ -3137,7 +3106,7 @@ async fn assert_pending_vault_keys_authorized(
     })?;
     let authorized_vault_ids: std::collections::HashSet<String> = authorized_roles
         .into_iter()
-        .filter(|record| record.role == "owner" || record.role == "admin")
+        .filter(|record| record.role.can_manage())
         .map(|record| record.vault_id)
         .collect();
     if authorized_vault_ids.len() != vault_ids.len() {
@@ -3159,11 +3128,14 @@ async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {
     Ok(user_id.is_some())
 }
 
-fn team_management_enabled(is_self_hosted: bool, billing_plan: &str, billing_status: &str) -> bool {
-    if is_self_hosted {
-        return true;
-    }
-    matches!(billing_plan, "family" | "team") && matches!(billing_status, "active" | "trialing")
+fn team_management_enabled(
+    is_self_hosted: bool,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
+) -> bool {
+    is_self_hosted
+        || (matches!(billing_plan, BillingPlan::Family | BillingPlan::Team)
+            && billing_status.is_active())
 }
 
 fn emails_match(invitation_email: &str, normalized_email: &str) -> bool {
@@ -3172,10 +3144,6 @@ fn emails_match(invitation_email: &str, normalized_email: &str) -> bool {
 
 fn requires_signup_email_verification() -> bool {
     bittery_mode() != "self-hosted"
-}
-
-fn unauthorized_error(message: &str) -> RpcError {
-    AppError::unauthorized(message).into()
 }
 
 fn unauthorized_handler_error(message: &str) -> AppError {

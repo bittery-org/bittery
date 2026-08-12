@@ -1,4 +1,5 @@
 import { useLogin } from "@bittery/core/hooks";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	Button,
@@ -74,6 +75,15 @@ function AddAccountDialogForm({
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
+	const normalizedCandidate = normalizeServerUrl(serverUrl, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
+	const requiresInsecureTransportConfirmation = normalizedCandidate
+		? isRemoteHttpServer(normalizedCandidate)
+		: false;
 
 	const { data: biometricAvailable } = useQuery({
 		queryKey: ["biometry-available"],
@@ -105,7 +115,7 @@ function AddAccountDialogForm({
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 
-		const normalizedServerUrl = normalizeServerUrl(serverUrl);
+		const normalizedServerUrl = normalizedCandidate;
 		if (!normalizedServerUrl) {
 			toast.error(m.toast_auth_server_invalid_url());
 			return;
@@ -113,12 +123,17 @@ function AddAccountDialogForm({
 		if (normalizedServerUrl !== serverUrl) {
 			setServerUrl(normalizedServerUrl);
 		}
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
+			return;
+		}
 
 		await loginMutation.mutateAsync({
 			email,
 			password,
 			secretKey,
 			serverUrl: normalizedServerUrl,
+			insecureTransportConfirmed,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};
@@ -241,6 +256,27 @@ function AddAccountDialogForm({
 						/>
 					</Label>
 				)}
+
+				{requiresInsecureTransportConfirmation ? (
+					<Label
+						htmlFor="add-insecure-http-confirmation"
+						className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+					>
+						<Checkbox
+							id="add-insecure-http-confirmation"
+							checked={insecureTransportConfirmed}
+							onCheckedChange={(checked) =>
+								setInsecureTransportConfirmed(checked === true)
+							}
+						/>
+						<span className="grid gap-0.5">
+							<span>{m.auth_insecure_http_confirmation_label()}</span>
+							<span className="text-muted-foreground text-xs">
+								{m.auth_insecure_http_confirmation_description()}
+							</span>
+						</span>
+					</Label>
+				) : null}
 
 				<Button
 					type="submit"

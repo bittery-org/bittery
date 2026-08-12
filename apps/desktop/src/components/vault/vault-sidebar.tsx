@@ -1,12 +1,14 @@
-import type { VaultItemCounts } from "@bittery/core/hooks";
+import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
 import {
 	Button,
 	cn,
+	type DragItemData,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	type DropVaultData,
 	getTagColorFromName,
 	SidebarCount,
 	SidebarSection,
@@ -21,28 +23,22 @@ import {
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-	type DragItemData,
-	type DropVaultData,
-	useVaultDnd,
-} from "../../providers/dnd-provider";
+import { useVaultDnd } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
 
-interface VaultInfo {
-	vaultId: string;
-	vaultName: string;
-	vaultType: string;
-	vaultIcon?: string | null;
-	vaultImageUrl?: string | null;
-	role: string;
-	accountEmail?: string;
-	accountName?: string;
-	accountTeamName?: string;
-}
+/**
+ * What one sidebar row renders: the vault fields of a held vault key, and nothing else.
+ * Narrowed from the canonical `VaultKeyWithAccount` so the sidebar never asks for the
+ * wrapped key material or the account metadata it does not group by.
+ */
+type SidebarVault = Pick<
+	VaultKeyWithAccount,
+	"vaultId" | "vaultName" | "vaultType" | "vaultIcon" | "vaultImageUrl" | "role"
+>;
 
 interface VaultSidebarProps {
-	vaults: VaultInfo[];
+	vaults: readonly SidebarVault[];
 	tags: string[];
 	/** Omitted while items load, so counts appear only once they are real. */
 	itemCounts?: VaultItemCounts;
@@ -58,7 +54,7 @@ interface VaultSidebarProps {
 }
 
 interface DroppableVaultEntryProps {
-	vault: VaultInfo;
+	vault: SidebarVault;
 	isActive: boolean;
 	count?: number;
 	onEditVault: (vault: {
@@ -245,39 +241,7 @@ export function VaultSidebar({
 		? decodeURIComponent(pathname.split("/vault/tag/")[1]?.split("/")[0] || "")
 		: null;
 
-	// Check if we're in multi-account mode (vaults have accountEmail)
-	const isMultiAccountMode = vaults.length > 0 && vaults[0].accountEmail;
-
-	// Group vaults by account if in multi-account mode
-	const vaultsByAccount = isMultiAccountMode
-		? vaults.reduce(
-				(acc, vault) => {
-					const email = vault.accountEmail;
-					if (!email) return acc;
-					if (!acc[email]) {
-						acc[email] = {
-							accountEmail: email,
-							accountName: vault.accountName || email.split("@")[0],
-							accountTeamName: vault.accountTeamName,
-							vaults: [],
-						};
-					}
-					acc[email].vaults.push(vault);
-					return acc;
-				},
-				{} as Record<
-					string,
-					{
-						accountEmail: string;
-						accountName: string;
-						accountTeamName?: string;
-						vaults: VaultInfo[];
-					}
-				>,
-			)
-		: null;
-
-	const renderVaultEntry = (vault: VaultInfo) => (
+	const renderVaultEntry = (vault: SidebarVault) => (
 		<DroppableVaultEntry
 			key={vault.vaultId}
 			vault={vault}
@@ -379,30 +343,14 @@ export function VaultSidebar({
 
 				{/* Vaults Section */}
 				<div className="mt-2">
-					{isMultiAccountMode && vaultsByAccount ? (
-						// Multi-account mode: Group vaults by account
-						Object.values(vaultsByAccount).map((accountGroup) => (
-							<SidebarSection
-								key={accountGroup.accountEmail}
-								title={accountGroup.accountTeamName || accountGroup.accountName}
-								storageKey={`account-${accountGroup.accountEmail}`}
-								defaultOpen={true}
-								onAdd={onNewVault}
-							>
-								{accountGroup.vaults.map(renderVaultEntry)}
-							</SidebarSection>
-						))
-					) : (
-						// Single account mode: Show vaults in one section
-						<SidebarSection
-							title={m.nav_item_vaults()}
-							storageKey="vaults"
-							defaultOpen={true}
-							onAdd={onNewVault}
-						>
-							{vaults.map(renderVaultEntry)}
-						</SidebarSection>
-					)}
+					<SidebarSection
+						title={m.nav_item_vaults()}
+						storageKey="vaults"
+						defaultOpen={true}
+						onAdd={onNewVault}
+					>
+						{vaults.map(renderVaultEntry)}
+					</SidebarSection>
 				</div>
 
 				{/* Tags Section */}

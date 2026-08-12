@@ -23,7 +23,6 @@ export interface SearchResult {
 		type: "personal" | "team";
 		icon: string | null;
 		imageUrl: string | null;
-		teamName?: string;
 	}>;
 	items: Array<{
 		id: string;
@@ -87,7 +86,6 @@ export function useVaultSearch(query: string): SearchResult {
 				type: v.vaultType,
 				icon: v.vaultIcon || null,
 				imageUrl: v.vaultImageUrl || null,
-				teamName: v.accountTeamName,
 			}));
 
 		// Search through decrypted items

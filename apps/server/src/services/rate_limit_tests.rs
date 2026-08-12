@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use super::*;
-use crate::test_support::with_rpc_test_app;
+use crate::test_support::with_api_test_app;
 
 const SHORT_WINDOW: Duration = Duration::from_secs(60);
 
 #[tokio::test]
 async fn postgres_check_and_increment_allows_up_to_limit_then_blocks() {
-    with_rpc_test_app("rate_limit_pg_counter", |app| async move {
+    with_api_test_app("rate_limit_pg_counter", |app| async move {
         let limiter = PostgresRateLimiter::new(app.pool.clone());
         let scope = "test_counter";
         let key = "subject-a";
@@ -43,7 +43,7 @@ async fn postgres_check_and_increment_allows_up_to_limit_then_blocks() {
 
 #[tokio::test]
 async fn postgres_record_failure_locks_and_clear_resets() {
-    with_rpc_test_app("rate_limit_pg_lockout", |app| async move {
+    with_api_test_app("rate_limit_pg_lockout", |app| async move {
         let limiter = PostgresRateLimiter::new(app.pool.clone());
         let scope = "test_lockout";
         let key = "account-a";

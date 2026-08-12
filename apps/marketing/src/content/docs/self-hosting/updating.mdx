@@ -12,9 +12,10 @@ Bittery publishes new Docker images to `ghcr.io/bittery-org` with every release.
 ## Docker Compose
 
 <Steps>
-<Step title="Pull the latest images">
+<Step title="Choose the target release">
 ```bash
 cd ~/bittery
+sed -i 's/^BITTERY_RELEASE=.*/BITTERY_RELEASE=0.5.1/' .env
 docker compose pull
 ```
 </Step>
@@ -44,24 +45,26 @@ docker compose pull && COMPOSE_PROFILES=builtin-db docker compose up -d
 ## Railway
 
 1. Go to your Railway project dashboard
-2. Click **Redeploy** on the server and web services
-3. Railway pulls the latest images automatically
+2. Set the server and web image tags to the same exact release
+3. Redeploy both services together
 
 ## Rollback
 
 If something goes wrong after an update, you can roll back to a specific version:
 
 ```bash
-# Pin a specific version in docker-compose.yml or use:
-docker compose down
-docker compose pull ghcr.io/bittery-org/bittery-server:v1.2.3
-docker compose pull ghcr.io/bittery-org/bittery-web:v1.2.3
+# Set the previous exact release for both images, then recreate the pair:
+sed -i 's/^BITTERY_RELEASE=.*/BITTERY_RELEASE=0.5.0/' .env
+docker compose pull
 docker compose up -d
 ```
 
 <Callout type="warning">
 Database migrations are forward-only. If you roll back to an older server version, ensure the database schema is still compatible. For major version upgrades, always back up your database first.
 </Callout>
+
+Never mix server and web releases during an update or rollback. Rollback means deploying the
+previous compatible `/api/v1` server and web pair.
 
 ## Monitoring
 

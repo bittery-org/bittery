@@ -66,5 +66,5 @@ data class VaultKeyEntity(
      * Matches the `keyVersion` field in the VaultKeyWrapContext stored alongside
      * the ciphertext on the server.
      */
-    val keyVersion: Long = 1L
+    val keyVersion: Long
 )

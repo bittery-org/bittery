@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 use crate::{
     config::{bittery_mode, format_timestamp},
+    db::enums::{
+        BillingPlan, BillingStatus, InvitationStatus, SyncEntityType, SyncEventType, TeamRole,
+        TeamType,
+    },
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -15,6 +18,15 @@ use crate::{
     services::billing::sync_team_seats_best_effort,
     services::session_control::{load_user_session_ids, record_session_revocations},
     services::team_billing::team_management_enabled as shared_team_management_enabled,
+    services::vault_key::validate_encrypted_vault_key,
+    shapes::{
+        rotation_data_shape, rotation_item_shape, rotation_member_shape, rotation_vault_shape,
+        team_details_shape, team_summary_shape,
+    },
+};
+
+pub use crate::services::vault_key::{
+    RotationMemberKeyInput, RotationReEncryptedItemInput, VaultKeyRotationInput,
 };
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
@@ -25,19 +37,19 @@ const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
 struct DbTeamMembershipActorRow {
     id: String,
     team_id: Option<String>,
-    role: String,
-    billing_plan: Option<String>,
-    billing_status: Option<String>,
+    role: TeamRole,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TokenInput {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TeamIdInput {
@@ -45,15 +57,15 @@ pub struct TeamIdInput {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateTeamInput {
     pub name: String,
-    pub team_type: Option<String>,
+    pub team_type: Option<TeamType>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateTeamInput {
@@ -62,7 +74,7 @@ pub struct UpdateTeamInput {
     pub image_key: Option<Option<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateImageUploadInput {
@@ -71,37 +83,19 @@ pub struct CreateImageUploadInput {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamSummaryResponse {
-    pub id: String,
-    pub name: String,
-    pub team_type: String,
-    pub owner_id: String,
-    pub role: String,
-    pub member_count: i64,
-    pub member_limit: Option<i32>,
-    pub image_url: Option<String>,
-    pub created_at: String,
-}
+team_summary_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TeamSummaryResponse
+}, count = i64);
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamDetailsResponse {
-    pub id: String,
-    pub name: String,
-    pub team_type: String,
-    pub owner_id: String,
-    pub owner_name: String,
-    pub user_role: String,
-    pub member_count: i64,
-    pub member_limit: Option<i32>,
-    pub image_url: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
+team_details_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TeamDetailsResponse
+}, count = i64);
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamVaultResponse {
     pub id: String,
@@ -109,96 +103,84 @@ pub struct TeamVaultResponse {
     pub encrypted_vault_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamMemberResponse {
     pub user_id: String,
     pub name: String,
     pub email: String,
-    pub role: String,
+    pub role: TeamRole,
     pub joined_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RotationMemberResponse {
-    pub user_id: String,
-    pub public_key: String,
-    pub role: String,
+rotation_member_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RotationMemberResponse
+});
+
+rotation_item_shape! {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RotationItemResponse {}
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RotationItemResponse {
-    pub id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    /// The client rebuilds this item's AAD from these; rotation does not change either.
-    pub version: i32,
-    pub last_modified_by: Option<String>,
-}
+rotation_vault_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RotationVaultResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RotationVaultResponse {
-    pub vault_id: String,
-    pub vault_name: String,
-    pub key_version: i32,
-    pub members: Vec<RotationMemberResponse>,
-    pub items: Vec<RotationItemResponse>,
-}
+rotation_data_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RotationDataResponse
+});
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RotationDataResponse {
-    pub vaults: Vec<RotationVaultResponse>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct InvitationIdInput {
     pub invitation_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SendInvitationInput {
     pub team_id: String,
     pub email: String,
     #[serde(default = "default_invitation_role")]
-    pub role: String,
+    pub role: TeamRole,
     pub pending_vault_keys: Option<Vec<PendingVaultKeyEntry>>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamInvitationDetailsResponse {
     pub id: String,
     pub email: String,
     pub team_id: String,
     pub team_name: String,
-    pub role: String,
-    pub status: String,
+    pub role: TeamRole,
+    pub status: InvitationStatus,
     pub invited_by_name: String,
     pub expires_at: String,
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingTeamInvitationResponse {
     pub id: String,
     pub team_id: String,
     pub team_name: String,
-    pub role: String,
+    pub role: TeamRole,
     pub invited_by: String,
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendInvitationResponse {
     pub invitation_id: String,
@@ -209,39 +191,27 @@ pub struct SendInvitationResponse {
 /// Resending rotates the invite token, so the caller receives a brand new raw
 /// token exactly like `SendInvitationResponse` does. Only the digest is stored,
 /// which means the previous link stops working the moment this returns.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendInvitationResponse {
     pub invitation_id: String,
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptInvitationResponse {
     pub team_id: String,
     pub team_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(rename = "TeamSuccessResponse")]
 pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-#[ts(rename = "TeamDeleteAccountInput")]
-pub struct DeleteAccountInput {
-    pub team_id: String,
-    pub user_id: String,
-    pub confirmation: String,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TeamRotationInput {
@@ -253,35 +223,7 @@ const MAX_ROTATION_VAULTS: usize = 100;
 const MAX_ROTATION_MEMBER_KEYS: usize = 100;
 const MAX_ROTATION_REENCRYPTED_ITEMS: usize = 100;
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-#[ts(rename = "TeamRotationMemberKeyInput")]
-pub struct RotationMemberKeyInput {
-    pub user_id: String,
-    pub encrypted_vault_key: String,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-#[ts(rename = "TeamRotationReEncryptedItemInput")]
-pub struct RotationReEncryptedItemInput {
-    pub item_id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-#[ts(rename = "TeamVaultKeyRotationInput")]
-pub struct VaultKeyRotationInput {
-    pub member_keys: Vec<RotationMemberKeyInput>,
-    pub re_encrypted_items: Vec<RotationReEncryptedItemInput>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RotationVaultInput {
@@ -289,7 +231,7 @@ pub struct RotationVaultInput {
     pub key_rotation: VaultKeyRotationInput,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct LeaveTeamInput {
@@ -298,7 +240,7 @@ pub struct LeaveTeamInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RemoveTeamMemberInput {
@@ -308,7 +250,7 @@ pub struct RemoveTeamMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamVaultRotationResult {
     pub vault_id: String,
@@ -316,14 +258,14 @@ pub struct TeamVaultRotationResult {
     pub new_key_version: i32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveTeamMemberResponse {
     pub success: bool,
     pub vault_rotations: Vec<TeamVaultRotationResult>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PendingVaultKeyEntry {
@@ -347,7 +289,7 @@ pub(crate) async fn get_invitation_by_token(
 	.ok_or_else(|| AppError::not_found("Invitation not found"))?;
 
     let invitation_status = if invitation.expires_at < OffsetDateTime::now_utc() {
-        "expired".to_string()
+        InvitationStatus::Expired
     } else {
         invitation.status
     };
@@ -500,11 +442,8 @@ pub(crate) async fn get_team_vaults(
     }
 
     let actor = actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-    ensure_team_admin(&actor.role)?;
-    assert_optional_team_management_entitlement(
-        actor.billing_plan.as_deref(),
-        actor.billing_status.as_deref(),
-    )?;
+    ensure_team_admin(actor.role)?;
+    assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
 
     let team_vaults = query_as::<_, DbTeamVaultRow>(
         "SELECT id, name FROM vault WHERE team_id = $1 ORDER BY created_at ASC",
@@ -581,7 +520,7 @@ pub(crate) async fn update_team(
 
     let current_user =
         current_user.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-    ensure_team_admin(&current_user.role)?;
+    ensure_team_admin(current_user.role)?;
 
     let updated_at = OffsetDateTime::now_utc();
     match (input.name.as_ref(), input.image_key.as_ref()) {
@@ -667,7 +606,7 @@ pub(crate) async fn create_team_image_upload(
 
     let current_user =
         current_user.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-    ensure_team_admin(&current_user.role)?;
+    ensure_team_admin(current_user.role)?;
 
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
     storage::create_presigned_upload(&key, &input.content_type, None, None)
@@ -702,12 +641,12 @@ pub(crate) async fn delete_team(
     if actor.team_id != input.team_id {
         return Err(AppError::forbidden("You are not a member of this team"));
     }
-    if actor.role != "owner" {
+    if actor.role != TeamRole::Owner {
         return Err(AppError::forbidden(
             "Only the team owner can delete the team",
         ));
     }
-    if actor.team_type == "personal" {
+    if actor.team_type == TeamType::Personal {
         return Err(AppError::bad_request(
             "Personal teams cannot be deleted. To close your account, use Account Settings.",
         ));
@@ -730,7 +669,10 @@ pub(crate) async fn delete_team(
             "Only the team owner can delete the team",
         ));
     };
-    if actor.team_id != input.team_id || actor.role != "owner" || actor.team_type == "personal" {
+    if actor.team_id != input.team_id
+        || actor.role != TeamRole::Owner
+        || actor.team_type == TeamType::Personal
+    {
         return Err(AppError::forbidden(
             "Only the team owner can delete the team",
         ));
@@ -811,12 +753,12 @@ pub(crate) async fn leave_team(
     if actor.team_id != input.team_id {
         return Err(AppError::forbidden("You are not a member of this team"));
     }
-    if actor.role == "owner" {
+    if actor.role == TeamRole::Owner {
         return Err(AppError::bad_request(
             "The team owner cannot leave. Transfer ownership first.",
         ));
     }
-    if actor.team_type == "personal" {
+    if actor.team_type == TeamType::Personal {
         return Err(AppError::bad_request("You cannot leave a personal team."));
     }
     let team_vaults = load_team_vaults_with_user_access(pool, &input.team_id, user_id).await?;
@@ -847,9 +789,7 @@ pub(crate) async fn leave_team(
     let member_actor = load_team_membership_actor(pool, user_id)
         .await?
         .ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-    let billing_plan = member_actor
-        .billing_plan
-        .unwrap_or_else(|| "free".to_string());
+    let billing_plan = member_actor.billing_plan.unwrap_or(BillingPlan::Free);
 
     let result = async {
         let mut transaction = pool.begin().await.map_err(|e| {
@@ -911,7 +851,7 @@ pub(crate) async fn leave_team(
         }),
     )
     .await?;
-    sync_team_seats_best_effort(pool, &input.team_id, &billing_plan).await;
+    sync_team_seats_best_effort(pool, &input.team_id, billing_plan).await;
 
     Ok(SuccessResponse { success: true })
 }
@@ -963,7 +903,7 @@ pub(crate) async fn send_invitation(
     }
 
     let actor = actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-    ensure_team_admin(&actor.role)?;
+    ensure_team_admin(actor.role)?;
 
     let team = query_as::<_, DbTeamInvitationSendTeamRow>(
 		"SELECT id, member_limit, billing_plan::text AS billing_plan, billing_status::text AS billing_status FROM team WHERE id = $1 LIMIT 1",
@@ -973,7 +913,7 @@ pub(crate) async fn send_invitation(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); AppError::internal("Failed to load team") })?
 	.ok_or_else(|| AppError::not_found("Team not found"))?;
-    assert_team_management_entitlement(&team.billing_plan, &team.billing_status)?;
+    assert_team_management_entitlement(team.billing_plan, team.billing_status)?;
 
     if let Some(member_limit) = team.member_limit {
         let current_members =
@@ -1056,7 +996,7 @@ pub(crate) async fn send_invitation(
 	.bind(&invitation_id)
 	.bind(&input.team_id)
 	.bind(&input.email)
-	.bind(&input.role)
+	.bind(input.role)
 	.bind(user_id)
 	.bind(hash_token(&token))
 	.bind(serialized_pending_vault_keys)
@@ -1146,7 +1086,7 @@ async fn accept_loaded_invitation(
         return Err(AppError::bad_request("Invitation has expired"));
     }
 
-    assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
+    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
 
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
@@ -1177,11 +1117,7 @@ async fn accept_loaded_invitation(
     )
     .await?;
 
-    let vault_role = if invitation.role == "admin" {
-        "admin"
-    } else {
-        "member"
-    };
+    let vault_role = invitation.role.vault_role();
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start transaction");
@@ -1190,7 +1126,7 @@ async fn accept_loaded_invitation(
 
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
         .bind(&invitation.team_id)
-        .bind(&invitation.role)
+        .bind(invitation.role)
         .bind(user_id)
         .execute(&mut *transaction)
         .await
@@ -1200,6 +1136,7 @@ async fn accept_loaded_invitation(
         })?;
 
     for pending_key in pending_keys {
+        validate_encrypted_vault_key(&pending_key.encrypted_vault_key)?;
         let existing_key = query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id = $1 AND user_id = $2)",
         )
@@ -1242,7 +1179,7 @@ async fn accept_loaded_invitation(
         AppError::internal("Failed to commit invitation acceptance")
     })?;
 
-    sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
+    sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
 
     Ok(AcceptInvitationResponse {
         team_id: invitation.team_id,
@@ -1322,15 +1259,14 @@ pub(crate) async fn cancel_invitation(
     let is_admin_or_owner = actor
         .as_ref()
         .map(|value| {
-            value.team_id.as_deref() == Some(invitation.team_id.as_str())
-                && matches!(value.role.as_str(), "owner" | "admin")
+            value.team_id.as_deref() == Some(invitation.team_id.as_str()) && value.role.can_manage()
         })
         .unwrap_or(false);
     if !is_admin_or_owner {
         return Err(AppError::forbidden("Insufficient permissions"));
     }
 
-    assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
+    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
 
     query("DELETE FROM team_invitation WHERE id = $1")
         .bind(&input.invitation_id)
@@ -1369,15 +1305,14 @@ pub(crate) async fn resend_invitation(
     let is_admin_or_owner = actor
         .as_ref()
         .map(|value| {
-            value.team_id.as_deref() == Some(invitation.team_id.as_str())
-                && matches!(value.role.as_str(), "owner" | "admin")
+            value.team_id.as_deref() == Some(invitation.team_id.as_str()) && value.role.can_manage()
         })
         .unwrap_or(false);
     if !is_admin_or_owner {
         return Err(AppError::forbidden("Insufficient permissions"));
     }
 
-    assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
+    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
 
     let token = generate_secure_token();
     query(
@@ -1457,15 +1392,12 @@ pub(crate) mod member_handlers {
 
         let actor =
             actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-        if !matches!(actor.role.as_str(), "owner" | "admin") {
+        if !actor.role.can_manage() {
             return Err(AppError::forbidden(
                 "Only owner or admin can perform key rotation",
             ));
         }
-        assert_optional_team_management_entitlement(
-            actor.billing_plan.as_deref(),
-            actor.billing_status.as_deref(),
-        )?;
+        assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
 
         let removal_scope =
             load_team_removal_scope(pool, &input.team_id, user_id, &input.exclude_user_id).await?;
@@ -1497,13 +1429,10 @@ pub(crate) mod member_handlers {
         }
         let actor =
             actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-        if !matches!(actor.role.as_str(), "owner" | "admin") {
+        if !actor.role.can_manage() {
             return Err(AppError::forbidden("Insufficient permissions"));
         }
-        assert_optional_team_management_entitlement(
-            actor.billing_plan.as_deref(),
-            actor.billing_status.as_deref(),
-        )?;
+        assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
         if user_id == input.user_id {
             return Err(AppError::bad_request(
                 "You cannot remove yourself from the team",
@@ -1523,7 +1452,7 @@ pub(crate) mod member_handlers {
         if target_user.team_id.as_deref() != Some(input.team_id.as_str()) {
             return Err(AppError::not_found("Team member not found"));
         }
-        if target_user.role == "owner" {
+        if target_user.role == TeamRole::Owner {
             return Err(AppError::forbidden("The team owner cannot be removed"));
         }
         let target_user_name =
@@ -1572,7 +1501,7 @@ pub(crate) mod member_handlers {
                 .cloned()
                 .map(|record| (record.vault_id.clone(), record))
                 .collect();
-        let billing_plan = actor.billing_plan.unwrap_or_else(|| "free".to_string());
+        let billing_plan = actor.billing_plan.unwrap_or(BillingPlan::Free);
         let result = async {
             let mut transaction = pool.begin().await.map_err(|e| {
                 tracing::error!(error = %e, "Failed to start team member removal transaction");
@@ -1641,7 +1570,7 @@ pub(crate) mod member_handlers {
             }),
         )
         .await?;
-        sync_team_seats_best_effort(pool, &input.team_id, &billing_plan).await;
+        sync_team_seats_best_effort(pool, &input.team_id, billing_plan).await;
         Ok(RemoveTeamMemberResponse {
             success: true,
             vault_rotations: rotation_records
@@ -1654,32 +1583,18 @@ pub(crate) mod member_handlers {
                 .collect(),
         })
     }
-
-    pub(crate) async fn delete_team_account(
-        _pool: &PgPool,
-        _user_id: &str,
-        input: DeleteAccountInput,
-    ) -> Result<SuccessResponse, AppError> {
-        if input.confirmation != "DELETE" {
-            return Err(AppError::bad_request("Invalid params"));
-        }
-
-        Err(AppError::bad_request(
-			"Account deletion by team admins is no longer supported. Use 'Remove member' instead. The removed user can delete their own account.",
-		))
-    }
 }
 
 pub(crate) mod invitation_handlers {
     use super::*;
 
-    #[derive(Debug, Clone, Serialize, TS)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct TeamInvitationListEntry {
         pub id: String,
         pub email: String,
-        pub role: String,
-        pub status: String,
+        pub role: TeamRole,
+        pub status: InvitationStatus,
         pub invited_by: String,
         pub created_at: String,
         pub expires_at: String,
@@ -1702,11 +1617,8 @@ pub(crate) mod invitation_handlers {
 
         let actor =
             actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
-        ensure_team_admin(&actor.role)?;
-        assert_optional_team_management_entitlement(
-            actor.billing_plan.as_deref(),
-            actor.billing_status.as_deref(),
-        )?;
+        ensure_team_admin(actor.role)?;
+        assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
 
         let invitations = query_as::<_, DbTeamInvitationListRow>(
 			"SELECT ti.id, ti.email, ti.role::text AS role, ti.status::text AS status, invited_by.name AS invited_by_name, ti.created_at, ti.expires_at FROM team_invitation ti INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.team_id = $1 AND ti.status = 'pending' ORDER BY ti.created_at DESC",
@@ -1732,8 +1644,8 @@ pub(crate) mod invitation_handlers {
 }
 
 fn assert_team_management_entitlement(
-    billing_plan: &str,
-    billing_status: &str,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
 ) -> Result<(), AppError> {
     if shared_team_management_enabled(bittery_mode(), Some(billing_plan), Some(billing_status)) {
         Ok(())
@@ -1743,16 +1655,16 @@ fn assert_team_management_entitlement(
 }
 
 fn assert_optional_team_management_entitlement(
-    billing_plan: Option<&str>,
-    billing_status: Option<&str>,
+    billing_plan: Option<BillingPlan>,
+    billing_status: Option<BillingStatus>,
 ) -> Result<(), AppError> {
     let plan = billing_plan.ok_or_else(|| AppError::not_found("Team not found"))?;
     let status = billing_status.ok_or_else(|| AppError::not_found("Team not found"))?;
     assert_team_management_entitlement(plan, status)
 }
 
-fn default_invitation_role() -> String {
-    "member".to_string()
+fn default_invitation_role() -> TeamRole {
+    TeamRole::Member
 }
 
 fn validate_token(token: &str) -> Result<(), AppError> {
@@ -1782,6 +1694,9 @@ fn validate_rotation_vault_inputs(vault_rotations: &[RotationVaultInput]) -> Res
             return Err(AppError::bad_request(
                 "Too many re-encrypted items provided for a vault.",
             ));
+        }
+        for member_key in &vault_rotation.key_rotation.member_keys {
+            validate_encrypted_vault_key(&member_key.encrypted_vault_key)?;
         }
     }
 
@@ -1830,7 +1745,7 @@ fn normalize_pending_vault_keys(
     for (index, entry) in entries.into_iter().enumerate() {
         let vault_id = entry.vault_id.trim().to_string();
         let encrypted_vault_key = entry.encrypted_vault_key.trim().to_string();
-        if vault_id.is_empty() || encrypted_vault_key.is_empty() {
+        if vault_id.is_empty() || validate_encrypted_vault_key(&encrypted_vault_key).is_err() {
             return Err(AppError::bad_request(format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));
@@ -1908,7 +1823,7 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
 
     let authorized_vault_ids: HashSet<String> = authorized_vault_roles
         .into_iter()
-        .filter(|record| record.role == "owner" || record.role == "admin")
+        .filter(|record| record.role.can_manage())
         .map(|record| record.vault_id)
         .collect();
     if authorized_vault_ids.len() != vault_ids.len() {
@@ -2007,7 +1922,7 @@ async fn load_team_removal_scope(
 
     let actor_admin_vault_ids: HashSet<String> = actor_vault_keys
         .into_iter()
-        .filter(|record| matches!(record.role.as_str(), "owner" | "admin"))
+        .filter(|record| record.role.can_manage())
         .map(|record| record.vault_id)
         .collect();
     let target_vault_ids: HashSet<String> = target_vault_keys
@@ -2047,13 +1962,16 @@ async fn load_rotation_vault_data(
 		.fetch_all(pool)
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
-        let items = query_as::<_, DbRotationItemRow>(
-			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
-		)
-		.bind(&vault.id)
-		.fetch_all(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation items"); AppError::internal("Failed to load rotation items") })?;
+        let items = query_as::<_, DbRotationItemRow>(&format!(
+            "SELECT {ROTATION_ITEM_COLUMNS} FROM item WHERE vault_id = $1 ORDER BY created_at ASC"
+        ))
+        .bind(&vault.id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load rotation items");
+            AppError::internal("Failed to load rotation items")
+        })?;
 
         rotation_vaults.push(RotationVaultResponse {
             vault_id: vault.id,
@@ -2069,14 +1987,7 @@ async fn load_rotation_vault_data(
                 .collect(),
             items: items
                 .into_iter()
-                .map(|item| RotationItemResponse {
-                    id: item.id,
-                    encrypted_data: item.encrypted_data,
-                    encryption_iv: item.encryption_iv,
-                    encryption_algorithm: item.encryption_algorithm,
-                    version: item.version,
-                    last_modified_by: item.last_modified_by,
-                })
+                .map(|item| RotationItemResponse::compose(item.into()))
                 .collect(),
         });
     }
@@ -2189,11 +2100,15 @@ async fn apply_team_vault_rotations(
             }
         }
         for item in &vault_rotation.key_rotation.re_encrypted_items {
+            // Rotation re-seals the ciphertext under the context the item already carried, so
+            // `encryption_version`/`encrypted_by_user_id` must not move — they describe the AAD
+            // binding, and rewriting them would make every rotated item undecryptable.
             let updated_rows = query(
-				"UPDATE item SET encrypted_data = $1, encryption_iv = $2, updated_at = $3 WHERE id = $4 AND vault_id = $5",
+				"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
 			)
 			.bind(&item.encrypted_data)
 			.bind(&item.encryption_iv)
+			.bind(actor_user_id)
 			.bind(OffsetDateTime::now_utc())
 			.bind(&item.item_id)
 			.bind(&vault_rotation.vault_id)
@@ -2268,9 +2183,9 @@ async fn insert_team_vault_access_revoked_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_access_revoked",
+        SyncEventType::VaultAccessRevoked,
         vault_id,
-        "vault",
+        SyncEntityType::Vault,
         vault_id,
         user_id,
         version,
@@ -2291,9 +2206,9 @@ async fn insert_team_vault_member_removed_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_member_removed",
+        SyncEventType::VaultMemberRemoved,
         entity_id,
-        "vault_member",
+        SyncEntityType::VaultMember,
         vault_id,
         user_id,
         version,
@@ -2313,9 +2228,9 @@ async fn insert_team_vault_key_rotated_sync_event(
 ) -> Result<(), AppError> {
     insert_sync_event(
         &mut **transaction,
-        "vault_key_rotated",
+        SyncEventType::VaultKeyRotated,
         vault_id,
-        "vault_key",
+        SyncEntityType::VaultKey,
         vault_id,
         user_id,
         version,
@@ -2372,8 +2287,8 @@ async fn create_personal_team_for_user(
     Ok(team_id)
 }
 
-fn ensure_team_admin(role: &str) -> Result<(), AppError> {
-    if matches!(role, "owner" | "admin") {
+fn ensure_team_admin(role: TeamRole) -> Result<(), AppError> {
+    if role.can_manage() {
         Ok(())
     } else {
         Err(AppError::forbidden("Insufficient permissions"))

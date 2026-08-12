@@ -1,5 +1,4 @@
 import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
-import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Avatar,
 	AvatarFallback,
@@ -15,6 +14,7 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
+	type MoveItemDialogProps,
 	toast,
 	VaultAvatar,
 } from "@bittery/ui";
@@ -23,26 +23,10 @@ import {
 	IconLoaderCircle,
 	IconTriangleAlert,
 } from "@bittery/ui/icons";
-import { cn } from "@bittery/ui/lib/utils";
+import { cn, getInitials } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
-
-function getInitials(name: string): string {
-	if (!name) return "??";
-	const parts = name.trim().split(/\s+/);
-	if (parts.length >= 2) {
-		return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-	}
-	return name.slice(0, 2).toUpperCase();
-}
-
-interface MoveItemDialogProps {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	item: DecryptedItem;
-	currentVaultId: string;
-}
 
 export function MoveItemDialog({
 	open,
@@ -132,8 +116,8 @@ export function MoveItemDialog({
 			});
 
 			if (result.crossAccount) {
-				toast.success(
-					m.vaults_detail_items_move_dialog_toast_cross_account_success(),
+				toast.info(
+					m.vaults_detail_items_move_dialog_toast_cross_account_pending(),
 				);
 			} else {
 				toast.success(m.vaults_detail_items_move_dialog_toast_success());
@@ -141,12 +125,12 @@ export function MoveItemDialog({
 
 			onOpenChange(false);
 
-			// Navigate to the item in the target vault
-			// For cross-account transfers, use the new item ID
-			const targetItemId = result.newItemId || item.id;
+			if (result.crossAccount) {
+				return;
+			}
 			navigate({
 				to: "/vault/$id/$itemId",
-				params: { id: selectedVaultId, itemId: targetItemId },
+				params: { id: selectedVaultId, itemId: item.id },
 			});
 		} catch (error) {
 			const errorMessage =
@@ -201,15 +185,16 @@ export function MoveItemDialog({
 							/* Move targets are always account-grouped so cross-account
 							   targets are surfaced regardless of active-account view. */
 							Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
-								if (vaults.length === 0) return null;
+								const [firstVault] = vaults;
+								if (!firstVault) return null;
 
 								const accountName =
-									vaults[0].accountTeamName ||
-									vaults[0].accountName ||
+									firstVault.accountTeamName ||
+									firstVault.accountName ||
 									(accountEmail === "__unknown__"
 										? m.vaults_detail_items_move_dialog_account_unknown()
 										: accountEmail);
-								const accountTeamAvatarUrl = vaults[0].accountTeamAvatarUrl;
+								const accountTeamAvatarUrl = firstVault.accountTeamAvatarUrl;
 
 								return (
 									<CommandGroup key={accountEmail} className="p-0 pb-1">

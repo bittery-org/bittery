@@ -1,6 +1,7 @@
+import type { TeamMember } from "@bittery/api-contract";
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -25,17 +26,9 @@ import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { TeamRotationError } from "./team-rotation-error";
 
-interface Member {
-	userId: string;
-	name: string;
-	email: string;
-	role: string;
-	joinedAt: string | null;
-}
-
 interface MemberListProps {
 	teamId: string;
-	members: Member[];
+	members: readonly TeamMember[];
 	currentUserId?: string;
 	canManageMembers: boolean;
 	isSelfHostedMode?: boolean;
@@ -48,7 +41,7 @@ export function MemberList({
 	canManageMembers,
 	isSelfHostedMode = false,
 }: MemberListProps) {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -83,11 +76,9 @@ export function MemberList({
 			}
 
 			// Step 2: Fetch team rotation data from server
-			const teamRotationData =
-				await rpcClient.team.members.getTeamRotationData.query({
-					teamId,
-					excludeUserId: userId,
-				});
+			const teamRotationData = (
+				await api.teams.members.removalRotationData(teamId, userId)
+			).data;
 
 			// Step 3: Perform key rotation for each team vault
 			const vaultRotations: Array<{
@@ -128,11 +119,9 @@ export function MemberList({
 							encryptedData: item.encryptedData,
 							encryptionIv: item.encryptionIv,
 							encryptionAlgorithm: item.encryptionAlgorithm,
-							context: buildItemEncryptionContext({
+							context: buildStoredItemEncryptionContext({
+								...item,
 								vaultId: vaultData.vaultId,
-								itemId: item.id,
-								version: item.version,
-								userId: item.lastModifiedBy ?? currentUserId,
 							}),
 						})),
 						vaultData.vaultId,
@@ -156,12 +145,16 @@ export function MemberList({
 			}
 
 			// Step 4: Submit to server
-			const result = await rpcClient.team.members.remove.mutate({
-				teamId,
-				userId,
-				vaultRotations,
-				clientId: null,
-			});
+			const result = (
+				await api.teams.members.remove(
+					teamId,
+					userId,
+					{
+						vaultRotations,
+					},
+					{},
+				)
+			).data;
 
 			// Step 5: Update local vault keys in storage
 			const vaultKeys = await storage.getVaultKeys();
@@ -256,7 +249,7 @@ export function MemberList({
 			.toUpperCase()
 			.slice(0, 2);
 
-	const getRoleLabel = (role: Member["role"]) => {
+	const getRoleLabel = (role: TeamMember["role"]) => {
 		if (isSelfHostedMode && role === "owner") {
 			return m.team_members_role_owner_self_hosted();
 		}
@@ -270,7 +263,7 @@ export function MemberList({
 		}
 	};
 
-	const getRoleBadgeVariant = (role: Member["role"]) => {
+	const getRoleBadgeVariant = (role: TeamMember["role"]) => {
 		if (role === "owner") return "default" as const;
 		if (role === "admin") return "secondary" as const;
 		return "outline" as const;

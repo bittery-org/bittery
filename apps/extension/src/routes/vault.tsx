@@ -1,4 +1,5 @@
 import { createRoute, redirect } from "@tanstack/react-router";
+import { sendMessage } from "../lib/messaging";
 import { VaultPage } from "../pages/vault";
 import { Route as RootRoute } from "./__root";
 
@@ -8,18 +9,15 @@ export const Route = createRoute({
 	component: VaultPage,
 	beforeLoad: async () => {
 		// Check if still authenticated and unlocked
-		const authResponse = await chrome.runtime.sendMessage({
-			type: "CHECK_AUTH",
-		});
+		const authResponse = await sendMessage({ type: "CHECK_AUTH" });
 
-		if (authResponse.unlocked) {
+		if (authResponse.success && authResponse.unlocked) {
 			return;
 		}
 
 		// In desktop mode we can proceed even if extension-local unlock state is not restored yet.
-		const desktopStatus = await chrome.runtime.sendMessage({
-			type: "CHECK_DESKTOP_STATUS",
-		});
+		const desktopStatus = await sendMessage({ type: "CHECK_DESKTOP_STATUS" });
+		const desktopAvailable = desktopStatus.success && desktopStatus.available;
 		const desktopUnlocked =
 			desktopStatus.success &&
 			desktopStatus.available &&
@@ -31,15 +29,13 @@ export const Route = createRoute({
 		}
 
 		// Check if we have a session that can be unlocked
-		const canQuickUnlock = await chrome.runtime.sendMessage({
-			type: "CAN_QUICK_UNLOCK",
-		});
+		const canQuickUnlock = await sendMessage({ type: "CAN_QUICK_UNLOCK" });
 
-		if (canQuickUnlock.canQuickUnlock) {
+		if (canQuickUnlock.success && canQuickUnlock.canQuickUnlock) {
 			throw redirect({ to: "/unlock" });
 		}
 
-		if (desktopStatus.success && desktopStatus.available) {
+		if (desktopAvailable) {
 			// Desktop is available but currently locked.
 			throw redirect({ to: "/unlock" });
 		}

@@ -1,31 +1,19 @@
-import type { SyncStorage } from "./types";
+import {
+	ApiError,
+	type AppApiClient,
+	isApiErrorStatus,
+	isApiTransportError,
+} from "@bittery/shared/api-client";
+import { toCachedItem } from "@bittery/shared/item-mapping";
+import type {
+	CachedEncryptedItem,
+	ItemSyncAcknowledgement,
+	ItemSyncCommand,
+	ItemSyncReconciler,
+} from "@bittery/types";
+import type { SyncCommandSummary, SyncStorage } from "./types";
 
-export interface PendingMutation {
-	accountId: string;
-	id: string;
-	type:
-		| "create"
-		| "update"
-		| "delete"
-		| "permanent_delete"
-		| "restore"
-		| "move"
-		| "toggle_favorite";
-	entityId: string;
-	vaultId: string;
-	targetVaultId?: string;
-	category?: string;
-	encryptedPayload?: {
-		encryptedData: string;
-		encryptionIv: string;
-		encryptionAlgorithm: string;
-	};
-	favorite?: boolean;
-	baseVersion: number;
-	accountEmail?: string;
-	timestamp: number;
-	retryCount: number;
-}
+export type PendingMutation = ItemSyncCommand;
 
 export interface TempIdMapping {
 	tempId: string;
@@ -34,154 +22,396 @@ export interface TempIdMapping {
 	accountEmail?: string;
 }
 
-export interface OutboundQueueClient {
-	vault: {
-		createItem: {
-			mutate: (input: {
-				itemId?: string;
-				vaultId: string;
-				category: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm: string;
-			}) => Promise<{ itemId?: string; id?: string }>;
-		};
-		updateItem: {
-			mutate: (input: {
-				itemId: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm?: string;
-			}) => Promise<unknown>;
-		};
-		deleteItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		permanentlyDeleteItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		restoreItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		moveItem: {
-			mutate: (input: {
-				itemId: string;
-				sourceVaultId: string;
-				targetVaultId: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm?: string;
-			}) => Promise<unknown>;
-		};
-		toggleFavorite: {
-			mutate: (input: {
-				itemId: string;
-				favorite: boolean;
-			}) => Promise<unknown>;
-		};
-	};
-}
+export type ItemCommandAcknowledgement = ItemSyncAcknowledgement;
+export type { ItemSyncReconciler };
 
-const QUEUE_INDEX_KEY = "bittery_pending_mutation_account_ids_v2";
-const LEGACY_QUEUE_INDEX_KEY = "bittery_pending_mutation_accounts";
+export type OutboundQueueApiClient = Pick<AppApiClient, "items">;
 
-function normalizeEmail(email: string): string {
-	return email.toLowerCase();
-}
+const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 
-function sanitizeEmailLegacy(email: string): string {
-	return normalizeEmail(email).replace(/[^a-z0-9]/g, "_");
-}
-
-function getQueueKeyForEmail(email: string): string {
-	return `bittery_pending_mutations_${encodeURIComponent(normalizeEmail(email))}`;
-}
-
-function getQueueKeyForAccountId(accountId: string): string {
-	return `bittery_pending_mutations_v2_${encodeURIComponent(accountId)}`;
-}
-
-function getLegacyQueueKeyForEmail(email: string): string {
-	return `bittery_pending_mutations_${sanitizeEmailLegacy(email)}`;
-}
-
-function getHttpStatus(error: unknown): number | null {
-	if (!error || typeof error !== "object") {
-		return null;
-	}
-
-	const maybeStatus = (error as { status?: unknown }).status;
-	if (typeof maybeStatus === "number") {
-		return maybeStatus;
-	}
-
-	const maybeDataStatus = (error as { data?: { httpStatus?: unknown } }).data
-		?.httpStatus;
-	if (typeof maybeDataStatus === "number") {
-		return maybeDataStatus;
-	}
-
-	return null;
-}
+type QueueDocument = Record<string, PendingMutation[]>;
 
 function isNetworkError(error: unknown): boolean {
-	const status = getHttpStatus(error);
-	if (status !== null) {
-		return status >= 500;
+	// A request that never reached the server: retryable, and no longer identifiable
+	// by the engine's rejection message once the transport has normalized it.
+	if (isApiTransportError(error)) {
+		return true;
+	}
+
+	if (error instanceof ApiError) {
+		return error.status >= 500;
 	}
 
 	const message = error instanceof Error ? error.message : String(error ?? "");
 	return /network|fetch|offline|timeout|connection|abort/i.test(message);
 }
 
-function findLastIndexByEntityAndType(
-	queue: PendingMutation[],
-	entityId: string,
-	type: PendingMutation["type"],
-): number {
-	for (let i = queue.length - 1; i >= 0; i--) {
-		const entry = queue[i];
-		if (!entry) {
-			continue;
-		}
-		if (entry.entityId === entityId && entry.type === type) {
-			return i;
-		}
-	}
-	return -1;
+function writeOptions(mutation: PendingMutation): {
+	etag: string;
+	idempotencyKey: string;
+} {
+	return {
+		etag: `"${mutation.baseVersion}"`,
+		idempotencyKey: mutation.attemptId ?? mutation.id,
+	};
 }
 
-export class OutboundQueue {
+function strongNumericEtag(
+	etag: string | null | undefined,
+): number | undefined {
+	const match = /^"(\d+)"$/.exec(etag ?? "");
+	if (!match?.[1]) return undefined;
+	const version = Number(match[1]);
+	return Number.isSafeInteger(version) ? version : undefined;
+}
+
+function normalizeMutation(mutation: PendingMutation): PendingMutation {
+	return {
+		...mutation,
+		operationId: mutation.operationId ?? mutation.id,
+		attemptId: mutation.attemptId ?? mutation.id,
+		status: mutation.status ?? "pending",
+	};
+}
+
+function isActiveMutation(mutation: PendingMutation): boolean {
+	return (
+		mutation.status === undefined ||
+		mutation.status === "staged" ||
+		mutation.status === "applying" ||
+		mutation.status === "pending" ||
+		mutation.status === "retrying"
+	);
+}
+
+function isReadyMutation(mutation: PendingMutation, now: number): boolean {
+	return (
+		(mutation.status === undefined ||
+			mutation.status === "pending" ||
+			mutation.status === "retrying") &&
+		(mutation.nextAttemptAt === undefined || mutation.nextAttemptAt <= now)
+	);
+}
+
+function newAttemptId(mutation: PendingMutation): string {
+	const suffix =
+		globalThis.crypto?.randomUUID?.() ??
+		`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	return `${mutation.operationId ?? mutation.id}:attempt:${suffix}`;
+}
+
+/**
+ * Whether the command carries ciphertext already sealed against a specific revision. The GCM AAD
+ * binds `version`, and the server derives the stored `encryption_version` from the revision its
+ * CAS-guarded write lands on — so moving `baseVersion` under such a command makes the two diverge
+ * and the Item becomes permanently undecryptable. Metadata-only commands carry no ciphertext and
+ * rebase freely.
+ */
+function carriesSealedCiphertext(mutation: PendingMutation): boolean {
+	return (
+		mutation.type === "create" ||
+		mutation.type === "update" ||
+		mutation.type === "move" ||
+		mutation.type === "cross_account_move"
+	);
+}
+
+function newConflictCopyId(): string {
+	return (
+		globalThis.crypto?.randomUUID?.() ??
+		`conflict-${Date.now()}-${Math.random().toString(36).slice(2)}`
+	);
+}
+
+const MAX_RETRY_COUNT = 5;
+const BASE_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 60_000;
+
+export class ItemSyncEngine {
 	private readonly queuesByAccountId = new Map<string, PendingMutation[]>();
-	private readonly unresolvedLegacyEmails = new Set<string>();
 	private readonly listeners = new Set<() => void>();
 	private latestMappings: TempIdMapping[] = [];
 	private draining = false;
 	private drainRequested = false;
+	private persistenceTail: Promise<void> = Promise.resolve();
+	private readonly persistedOperationIds = new Map<string, Set<string>>();
+	private readonly persistedCommandSignatures = new Map<
+		string,
+		Map<string, string>
+	>();
 
 	constructor(
 		private readonly storage: SyncStorage,
 		private readonly clientId: string,
-		private readonly resolveLegacyAccountId?: (
-			email: string,
-		) => string | undefined | Promise<string | undefined>,
+		private readonly reconciler?: ItemSyncReconciler,
+		private readonly now: () => number = Date.now,
 	) {}
 
-	private async persistIndex(): Promise<void> {
-		const accountIds = Array.from(this.queuesByAccountId.keys());
-		await this.storage.set(QUEUE_INDEX_KEY, accountIds);
+	private markRetrying(mutation: PendingMutation, error: unknown): void {
+		mutation.retryCount += 1;
+		if (mutation.type === "cross_account_move") {
+			mutation.attemptId = newAttemptId(mutation);
+		}
+		this.scheduleRetry(mutation, error);
 	}
 
-	private async persistQueue(accountId: string): Promise<void> {
-		const queue = this.queuesByAccountId.get(accountId) ?? [];
-		const queueKey = getQueueKeyForAccountId(accountId);
-		if (queue.length === 0) {
-			await this.storage.remove(queueKey);
-			this.queuesByAccountId.delete(accountId);
+	private scheduleRetry(mutation: PendingMutation, error: unknown): void {
+		if (mutation.retryCount >= MAX_RETRY_COUNT) {
+			mutation.status = "failed";
+			mutation.nextAttemptAt = undefined;
 		} else {
-			await this.storage.set(queueKey, queue);
+			mutation.status = "retrying";
+			mutation.nextAttemptAt =
+				this.now() +
+				Math.min(
+					BASE_RETRY_DELAY_MS * 2 ** (mutation.retryCount - 1),
+					MAX_RETRY_DELAY_MS,
+				);
 		}
-		await this.persistIndex();
+		mutation.lastError = error instanceof Error ? error.message : String(error);
+	}
+
+	private markEncryptedConflict(
+		mutation: PendingMutation,
+		error: unknown,
+	): void {
+		mutation.status = "conflicted";
+		mutation.nextAttemptAt = undefined;
+		mutation.lastError = error instanceof Error ? error.message : String(error);
+		mutation.conflictCopyId ??= newConflictCopyId();
+	}
+
+	/**
+	 * Points a command that trailed an acknowledged one at the revision the server just landed on.
+	 * A command whose ciphertext is already sealed cannot follow: it conflicts instead, so the
+	 * edit is preserved as a copy rather than written under an AAD binding it never had.
+	 */
+	private rebaseChainedCommand(
+		chained: PendingMutation,
+		serverVersion: number,
+	): void {
+		if (chained.baseVersion === serverVersion) return;
+		if (carriesSealedCiphertext(chained)) {
+			this.markEncryptedConflict(
+				chained,
+				new Error("The Item changed before this edit was sent"),
+			);
+			return;
+		}
+		chained.baseVersion = serverVersion;
+		chained.attemptId = newAttemptId(chained);
+		chained.status = "pending";
+		chained.nextAttemptAt = undefined;
+	}
+
+	private async preserveConflict(mutation: PendingMutation): Promise<void> {
+		try {
+			const copy = await this.reconciler?.preserveConflict?.(mutation);
+			if (copy) await this.enqueue(copy);
+		} catch (error) {
+			mutation.lastError = `Conflict copy failed: ${error instanceof Error ? error.message : String(error)}`;
+			await this.schedulePersistence(mutation.accountId);
+			this.emit();
+		}
+	}
+
+	private commandSignature(command: PendingMutation): string {
+		return JSON.stringify(command);
+	}
+
+	private rememberPersistedCommands(
+		accountId: string,
+		commands: PendingMutation[],
+	): void {
+		this.persistedOperationIds.set(
+			accountId,
+			new Set(commands.map((command) => command.operationId ?? command.id)),
+		);
+		this.persistedCommandSignatures.set(
+			accountId,
+			new Map(
+				commands.map((command) => [
+					command.operationId ?? command.id,
+					this.commandSignature(command),
+				]),
+			),
+		);
+	}
+
+	private toAuthoritativeItem(
+		mutation: PendingMutation,
+		item: Awaited<ReturnType<OutboundQueueApiClient["items"]["get"]>>["data"],
+	): CachedEncryptedItem {
+		return toCachedItem(item, {
+			accountId: mutation.accountId,
+			accountEmail: mutation.accountEmail,
+		});
+	}
+
+	/**
+	 * Writes are chained rather than fired in parallel: two overlapping writes of
+	 * the same queue can land out of order and persist a stale snapshot.
+	 */
+	private persistQueue(accountId: string): Promise<void> {
+		const persistence = this.persistenceTail
+			.catch(() => undefined)
+			.then(() => this.writeQueue(accountId));
+		this.persistenceTail = persistence.catch(() => undefined);
+		return persistence;
+	}
+
+	/**
+	 * Resolves once every queued write has hit storage. A reader in another
+	 * process (the extension's background worker) restores from storage, so it
+	 * must not be told to drain before the mutation is durable.
+	 */
+	async whenPersisted(): Promise<void> {
+		await this.persistenceTail;
+	}
+
+	private async writeQueue(accountId: string): Promise<void> {
+		const queue = this.queuesByAccountId.get(accountId) ?? [];
+		if (this.storage.update) {
+			const desiredById = new Map(
+				queue.map((command) => [command.operationId ?? command.id, command]),
+			);
+			const knownIds = this.persistedOperationIds.get(accountId) ?? new Set();
+			const knownSignatures =
+				this.persistedCommandSignatures.get(accountId) ?? new Map();
+			const acknowledgedElsewhere: PendingMutation[] = [];
+			const document = await this.storage.update<QueueDocument>(
+				QUEUE_DOCUMENT_KEY,
+				(current) => {
+					const nextDocument = { ...(current ?? {}) };
+					const mergedById = new Map(
+						(nextDocument[accountId] ?? []).map((command) => [
+							command.operationId ?? command.id,
+							command,
+						]),
+					);
+					for (const knownId of knownIds) {
+						if (!desiredById.has(knownId)) {
+							mergedById.delete(knownId);
+						}
+					}
+					for (const [operationId, command] of desiredById) {
+						if (knownIds.has(operationId) && !mergedById.has(operationId)) {
+							acknowledgedElsewhere.push(command);
+							continue;
+						}
+						const currentCommand = mergedById.get(operationId);
+						const knownSignature = knownSignatures.get(operationId);
+						if (
+							currentCommand &&
+							knownSignature &&
+							this.commandSignature(currentCommand) !== knownSignature
+						) {
+							continue;
+						}
+						mergedById.set(operationId, command);
+					}
+					const next = Array.from(mergedById.values()).sort(
+						(a, b) => a.timestamp - b.timestamp,
+					);
+					if (next.length > 0) {
+						nextDocument[accountId] = next;
+					} else {
+						delete nextDocument[accountId];
+					}
+					return Object.keys(nextDocument).length > 0 ? nextDocument : null;
+				},
+			);
+			for (const command of acknowledgedElsewhere) {
+				await this.reconciler?.discardAcknowledgedElsewhere?.(command);
+			}
+			const reconciled = document?.[accountId] ?? [];
+			if (
+				reconciled.some(
+					(command) => !desiredById.has(command.operationId ?? command.id),
+				)
+			) {
+				this.drainRequested = true;
+			}
+			if (reconciled.length === 0) {
+				this.queuesByAccountId.delete(accountId);
+			} else {
+				this.queuesByAccountId.set(accountId, reconciled);
+			}
+			this.rememberPersistedCommands(accountId, reconciled);
+			return;
+		}
+		if (queue.length === 0) this.queuesByAccountId.delete(accountId);
+		await this.storage.set(
+			QUEUE_DOCUMENT_KEY,
+			Object.fromEntries(this.queuesByAccountId),
+		);
+	}
+
+	private schedulePersistence(accountId: string): Promise<void> {
+		return this.persistQueue(accountId);
+	}
+
+	/** Resolves with the chained command the acknowledgement pushed into conflict, if any. */
+	private persistAcknowledgement(
+		accountId: string,
+		mutation: PendingMutation,
+		serverVersion: number | undefined,
+	): Promise<PendingMutation | undefined> {
+		const persistence = this.persistenceTail
+			.catch(() => undefined)
+			.then(async () => {
+				const operationId = mutation.operationId ?? mutation.id;
+				let conflictedOperationId: string | undefined;
+				const document =
+					(await this.storage.update?.<QueueDocument>(
+						QUEUE_DOCUMENT_KEY,
+						(current) => {
+							const nextDocument = { ...(current ?? {}) };
+							const next = (nextDocument[accountId] ?? []).filter(
+								(command) =>
+									(command.operationId ?? command.id) !== operationId,
+							);
+							const chained =
+								serverVersion === undefined
+									? undefined
+									: next.find(
+											(command) =>
+												command.entityId === mutation.entityId &&
+												isActiveMutation(command),
+										);
+							if (chained && serverVersion !== undefined) {
+								this.rebaseChainedCommand(chained, serverVersion);
+								if (chained.status === "conflicted") {
+									conflictedOperationId = chained.operationId ?? chained.id;
+								}
+							}
+							if (next.length > 0) {
+								nextDocument[accountId] = next;
+							} else {
+								delete nextDocument[accountId];
+							}
+							return Object.keys(nextDocument).length > 0 ? nextDocument : null;
+						},
+					)) ?? {};
+				const reconciled = document[accountId] ?? [];
+				if (reconciled.length === 0) {
+					this.queuesByAccountId.delete(accountId);
+				} else {
+					this.queuesByAccountId.set(accountId, reconciled);
+				}
+				this.rememberPersistedCommands(accountId, reconciled);
+				return conflictedOperationId === undefined
+					? undefined
+					: reconciled.find(
+							(command) =>
+								(command.operationId ?? command.id) === conflictedOperationId,
+						);
+			});
+		this.persistenceTail = persistence.then(
+			() => undefined,
+			() => undefined,
+		);
+		return persistence;
 	}
 
 	private emit(): void {
@@ -201,82 +431,249 @@ export class OutboundQueue {
 		return this.clientId;
 	}
 
-	enqueue(mutation: PendingMutation): void {
+	async enqueue(
+		mutation: PendingMutation,
+		applyOptimistic?: () => Promise<void>,
+	): Promise<void> {
 		const queue = this.queuesByAccountId.get(mutation.accountId) ?? [];
-		queue.push({ ...mutation });
+		const hasProjection = !!applyOptimistic || !!this.reconciler;
+		const terminalStatus =
+			mutation.status === "conflicted" || mutation.status === "failed"
+				? mutation.status
+				: undefined;
+		const normalized = normalizeMutation({
+			...mutation,
+			status: terminalStatus ?? (hasProjection ? "applying" : "pending"),
+		});
+		const operationId = normalized.operationId ?? normalized.id;
+		if (
+			queue.some(
+				(command) => (command.operationId ?? command.id) === operationId,
+			)
+		) {
+			return;
+		}
+		queue.push(normalized);
 		queue.sort((a, b) => a.timestamp - b.timestamp);
 		this.queuesByAccountId.set(mutation.accountId, queue);
-		void this.persistQueue(mutation.accountId);
+		await this.schedulePersistence(mutation.accountId);
+		const durableCommand = this.queuesByAccountId
+			.get(mutation.accountId)
+			?.find((command) => (command.operationId ?? command.id) === operationId);
+		if (!durableCommand) return;
+		if (
+			durableCommand.status === "conflicted" ||
+			durableCommand.status === "failed"
+		) {
+			this.emit();
+			return;
+		}
+		try {
+			if (applyOptimistic) {
+				await applyOptimistic();
+			} else if (this.reconciler) {
+				await this.reconciler.apply(durableCommand);
+			}
+			durableCommand.status = "pending";
+			durableCommand.lastError = undefined;
+			await this.schedulePersistence(mutation.accountId);
+			this.emit();
+		} catch (error) {
+			durableCommand.status = "failed";
+			durableCommand.lastError =
+				error instanceof Error ? error.message : String(error);
+			await this.schedulePersistence(mutation.accountId);
+			this.emit();
+			throw error;
+		}
+	}
+
+	async stage(
+		mutation: PendingMutation,
+		claim?: { id: string; expiresAt: number },
+	): Promise<boolean> {
+		const queue = this.queuesByAccountId.get(mutation.accountId) ?? [];
+		const normalized = normalizeMutation({
+			...mutation,
+			status: "staged",
+			projectionClaimId: claim?.id,
+			projectionClaimExpiresAt: claim?.expiresAt,
+		});
+		const operationId = normalized.operationId ?? normalized.id;
+		if (
+			queue.some(
+				(command) => (command.operationId ?? command.id) === operationId,
+			)
+		) {
+			return false;
+		}
+		queue.push(normalized);
+		queue.sort((a, b) => a.timestamp - b.timestamp);
+		this.queuesByAccountId.set(mutation.accountId, queue);
+		await this.schedulePersistence(mutation.accountId);
 		this.emit();
+		return true;
+	}
+
+	async claimStaged(
+		claimId: string,
+		leaseMs: number,
+	): Promise<PendingMutation[]> {
+		const expiresAt = this.now() + leaseMs;
+		const claimed: PendingMutation[] = [];
+		for (const [accountId, queue] of this.queuesByAccountId) {
+			let changed = false;
+			for (const command of queue) {
+				if (
+					command.status !== "staged" ||
+					(command.projectionClaimId &&
+						(command.projectionClaimExpiresAt ?? Number.POSITIVE_INFINITY) >
+							this.now())
+				) {
+					continue;
+				}
+				command.projectionClaimId = claimId;
+				command.projectionClaimExpiresAt = expiresAt;
+				claimed.push({ ...command });
+				changed = true;
+			}
+			if (changed) await this.schedulePersistence(accountId);
+		}
+		if (claimed.length > 0) this.emit();
+		return claimed;
+	}
+
+	async activate(
+		accountId: string,
+		operationId: string,
+		claimId: string,
+	): Promise<boolean> {
+		const command = this.queuesByAccountId
+			.get(accountId)
+			?.find(
+				(candidate) => (candidate.operationId ?? candidate.id) === operationId,
+			);
+		if (
+			!command ||
+			command.status !== "staged" ||
+			command.projectionClaimId !== claimId
+		) {
+			return false;
+		}
+		try {
+			await this.reconciler?.apply(command);
+			command.status = "pending";
+			command.lastError = undefined;
+			command.projectionClaimId = undefined;
+			command.projectionClaimExpiresAt = undefined;
+			await this.schedulePersistence(accountId);
+			this.emit();
+			return true;
+		} catch (error) {
+			command.status = "failed";
+			command.lastError =
+				error instanceof Error ? error.message : String(error);
+			await this.schedulePersistence(accountId);
+			this.emit();
+			throw error;
+		}
+	}
+
+	async cancel(
+		accountId: string,
+		operationId: string,
+		claimId: string,
+	): Promise<boolean> {
+		const queue = this.queuesByAccountId.get(accountId);
+		if (!queue) return false;
+		const commandIndex = queue.findIndex(
+			(command) => (command.operationId ?? command.id) === operationId,
+		);
+		if (
+			commandIndex < 0 ||
+			queue[commandIndex]?.status !== "staged" ||
+			queue[commandIndex]?.projectionClaimId !== claimId
+		) {
+			return false;
+		}
+		queue.splice(commandIndex, 1);
+		await this.schedulePersistence(accountId);
+		this.emit();
+		return true;
+	}
+
+	getStagedCommands(): PendingMutation[] {
+		return this.getCommands().filter((command) => command.status === "staged");
+	}
+
+	getNextStagedClaimAt(): number | undefined {
+		let next: number | undefined;
+		for (const command of this.getStagedCommands()) {
+			const expiresAt = command.projectionClaimExpiresAt;
+			if (expiresAt === undefined || expiresAt <= this.now()) continue;
+			next = next === undefined ? expiresAt : Math.min(next, expiresAt);
+		}
+		return next;
 	}
 
 	async restore(): Promise<void> {
+		await this.whenPersisted();
 		this.queuesByAccountId.clear();
-		this.unresolvedLegacyEmails.clear();
+		this.persistedOperationIds.clear();
+		this.persistedCommandSignatures.clear();
 
-		const accountIds =
-			(await this.storage.get<string[]>(QUEUE_INDEX_KEY)) ?? [];
-		for (const accountId of accountIds) {
-			const queue =
-				(await this.storage.get<PendingMutation[]>(
-					getQueueKeyForAccountId(accountId),
-				)) ?? [];
-			if (queue.length > 0) {
-				this.queuesByAccountId.set(
-					accountId,
-					queue
-						.map((entry) => ({ ...entry, accountId }))
-						.sort((a, b) => a.timestamp - b.timestamp),
-				);
+		const document =
+			(await this.storage.get<QueueDocument>(QUEUE_DOCUMENT_KEY)) ?? {};
+		for (const [accountId, queue] of Object.entries(document)) {
+			if (queue.length === 0) continue;
+			const normalized = queue
+				.map((entry) => normalizeMutation({ ...entry, accountId }))
+				.sort((a, b) => a.timestamp - b.timestamp);
+			if (normalized.length > 0) {
+				this.queuesByAccountId.set(accountId, normalized);
 			}
+			this.rememberPersistedCommands(accountId, queue);
 		}
 
-		const emails =
-			(await this.storage.get<string[]>(LEGACY_QUEUE_INDEX_KEY))?.map(
-				normalizeEmail,
-			) ?? [];
-		for (const email of emails) {
-			const queueKey = getQueueKeyForEmail(email);
-			const legacyQueueKey = getLegacyQueueKeyForEmail(email);
-			let queue = (await this.storage.get<PendingMutation[]>(queueKey)) ?? [];
-			if (queue.length === 0 && legacyQueueKey !== queueKey) {
-				const legacyQueue =
-					(await this.storage.get<PendingMutation[]>(legacyQueueKey)) ?? [];
-				if (legacyQueue.length > 0) {
-					queue = legacyQueue;
+		if (this.reconciler) {
+			const conflicts: PendingMutation[] = [];
+			for (const [accountId, queue] of this.queuesByAccountId) {
+				let changed = false;
+				for (const command of queue) {
+					if (
+						command.status === "staged" ||
+						command.status === "conflicted" ||
+						command.status === "failed"
+					) {
+						continue;
+					}
+					try {
+						await this.reconciler.apply(command);
+						if ((command as PendingMutation).status === "conflicted") {
+							command.conflictCopyId ??= newConflictCopyId();
+							conflicts.push(command);
+							changed = true;
+						}
+						if (command.status === "applying") {
+							command.status = "pending";
+							command.lastError = undefined;
+							changed = true;
+						}
+					} catch (error) {
+						command.status = "failed";
+						command.lastError =
+							error instanceof Error ? error.message : String(error);
+						changed = true;
+					}
+				}
+				if (changed) {
+					await this.persistQueue(accountId);
 				}
 			}
-			if (queue.length > 0) {
-				let accountId: string | undefined;
-				try {
-					accountId = await this.resolveLegacyAccountId?.(email);
-				} catch {
-					accountId = undefined;
-				}
-				if (!accountId) {
-					this.unresolvedLegacyEmails.add(email);
-					continue;
-				}
-				const migrated = queue.map((entry) => ({
-					...entry,
-					accountId,
-					accountEmail: entry.accountEmail ?? email,
-				}));
-				const existing = this.queuesByAccountId.get(accountId) ?? [];
-				this.queuesByAccountId.set(
-					accountId,
-					[...existing, ...migrated].sort((a, b) => a.timestamp - b.timestamp),
-				);
-				await this.persistQueue(accountId);
-				await this.storage.remove(queueKey);
-				if (legacyQueueKey !== queueKey)
-					await this.storage.remove(legacyQueueKey);
+			for (const conflict of conflicts) {
+				await this.preserveConflict(conflict);
 			}
 		}
-		await this.storage.set(
-			LEGACY_QUEUE_INDEX_KEY,
-			Array.from(this.unresolvedLegacyEmails),
-		);
 
 		this.emit();
 	}
@@ -287,6 +684,31 @@ export class OutboundQueue {
 			count += queue.length;
 		}
 		return count;
+	}
+
+	getCommandSummary(): SyncCommandSummary {
+		const summary: SyncCommandSummary = {
+			pending: 0,
+			retrying: 0,
+			conflicted: 0,
+			failed: 0,
+		};
+		for (const command of this.getCommands()) {
+			switch (command.status) {
+				case "retrying":
+					summary.retrying += 1;
+					break;
+				case "conflicted":
+					summary.conflicted += 1;
+					break;
+				case "failed":
+					summary.failed += 1;
+					break;
+				default:
+					summary.pending += 1;
+			}
+		}
+		return summary;
 	}
 
 	hasPendingForItem(itemId: string): boolean {
@@ -308,7 +730,34 @@ export class OutboundQueue {
 		return undefined;
 	}
 
-	rewritePendingIds(tempId: string, realId: string): void {
+	getCommands(accountId?: string): PendingMutation[] {
+		const queues = accountId
+			? [this.queuesByAccountId.get(accountId) ?? []]
+			: Array.from(this.queuesByAccountId.values());
+		return queues.flat().map((mutation) => ({ ...mutation }));
+	}
+
+	getNextRetryAt(): number | undefined {
+		let next: number | undefined;
+		for (const queue of this.queuesByAccountId.values()) {
+			for (const command of queue) {
+				if (
+					command.status !== "retrying" ||
+					command.nextAttemptAt === undefined
+				) {
+					continue;
+				}
+				next =
+					next === undefined
+						? command.nextAttemptAt
+						: Math.min(next, command.nextAttemptAt);
+			}
+		}
+		return next;
+	}
+
+	async rewritePendingIds(tempId: string, realId: string): Promise<void> {
+		const writes: Promise<void>[] = [];
 		for (const [accountId, queue] of this.queuesByAccountId.entries()) {
 			let touched = false;
 			for (const mutation of queue) {
@@ -318,16 +767,17 @@ export class OutboundQueue {
 				}
 			}
 			if (touched) {
-				void this.persistQueue(accountId);
+				writes.push(this.schedulePersistence(accountId));
 			}
 		}
+		await Promise.all(writes);
 		this.emit();
 	}
 
 	private async processMutation(
-		client: OutboundQueueClient,
+		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
-	): Promise<void> {
+	): Promise<{ etag: string | null }> {
 		switch (mutation.type) {
 			case "create": {
 				const payload = mutation.encryptedPayload;
@@ -336,14 +786,18 @@ export class OutboundQueue {
 						`Invalid create mutation payload for ${mutation.entityId}`,
 					);
 				}
-				const result = await client.vault.createItem.mutate({
-					itemId: mutation.entityId,
-					vaultId: mutation.vaultId,
-					category: mutation.category,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
+				const response = await client.items.create(
+					mutation.vaultId,
+					mutation.entityId,
+					{
+						category: mutation.category,
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					{ idempotencyKey: mutation.attemptId ?? mutation.id },
+				);
+				const result = response.data;
 
 				const fallbackId =
 					result.id && result.id !== mutation.vaultId ? result.id : undefined;
@@ -355,9 +809,9 @@ export class OutboundQueue {
 						accountId: mutation.accountId,
 						accountEmail: mutation.accountEmail,
 					});
-					this.rewritePendingIds(mutation.entityId, realId);
+					await this.rewritePendingIds(mutation.entityId, realId);
 				}
-				break;
+				return { etag: response.etag };
 			}
 			case "update": {
 				const payload = mutation.encryptedPayload;
@@ -366,60 +820,117 @@ export class OutboundQueue {
 						`Invalid update mutation payload for ${mutation.entityId}`,
 					);
 				}
-				await client.vault.updateItem.mutate({
-					itemId: mutation.entityId,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
-				break;
+				const response = await client.items.update(
+					mutation.entityId,
+					{
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					writeOptions(mutation),
+				);
+				return { etag: response.etag };
 			}
-			case "delete":
-				await client.vault.deleteItem.mutate({ itemId: mutation.entityId });
-				break;
+			case "delete": {
+				const response = await client.items.trash(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
+				return { etag: response.etag };
+			}
 			case "permanent_delete":
-				await client.vault.permanentlyDeleteItem.mutate({
-					itemId: mutation.entityId,
-				});
-				break;
+				return client.items
+					.deletePermanently(mutation.entityId, writeOptions(mutation))
+					.then((response) => ({ etag: response.etag }));
 			case "restore":
-				await client.vault.restoreItem.mutate({ itemId: mutation.entityId });
-				break;
+				return client.items
+					.restore(mutation.entityId, writeOptions(mutation))
+					.then((response) => ({ etag: response.etag }));
 			case "move": {
 				const payload = mutation.encryptedPayload;
 				if (!payload || !mutation.targetVaultId) {
 					throw new Error(`Invalid move payload for ${mutation.entityId}`);
 				}
-				await client.vault.moveItem.mutate({
-					itemId: mutation.entityId,
-					sourceVaultId: mutation.vaultId,
-					targetVaultId: mutation.targetVaultId,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
-				break;
+				const response = await client.items.move(
+					mutation.entityId,
+					{
+						sourceVaultId: mutation.vaultId,
+						targetVaultId: mutation.targetVaultId,
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					writeOptions(mutation),
+				);
+				return { etag: response.etag };
 			}
-			case "toggle_favorite":
-				await client.vault.toggleFavorite.mutate({
-					itemId: mutation.entityId,
-					favorite: mutation.favorite ?? false,
-				});
-				break;
+			case "cross_account_move":
+				throw new Error(
+					`Cross-account move ${mutation.operationId ?? mutation.id} requires a semantic executor`,
+				);
+			case "toggle_favorite": {
+				const response = await client.items.setFavorite(
+					mutation.entityId,
+					{ favorite: mutation.favorite ?? false },
+					writeOptions(mutation),
+				);
+				return { etag: response.etag };
+			}
 		}
 	}
 
-	private async forcePushMutation(
-		client: OutboundQueueClient,
+	private async rebaseMetadataMutation(
+		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
-	): Promise<void> {
-		await this.processMutation(client, mutation);
+	): Promise<boolean> {
+		try {
+			const current = await client.items.get(mutation.entityId);
+			await this.reconciler?.reconcileAuthoritative?.(
+				mutation,
+				this.toAuthoritativeItem(mutation, current.data),
+			);
+			if (carriesSealedCiphertext(mutation)) {
+				this.markEncryptedConflict(
+					mutation,
+					new Error("The Item changed on another device"),
+				);
+				return false;
+			}
+
+			mutation.retryCount += 1;
+			if (mutation.retryCount >= MAX_RETRY_COUNT) {
+				mutation.status = "failed";
+				mutation.nextAttemptAt = undefined;
+				mutation.lastError = "Conflict retry limit reached";
+				return false;
+			}
+			const version =
+				strongNumericEtag(current.etag) ??
+				(typeof current.data.version === "number"
+					? current.data.version
+					: undefined);
+			if (version === undefined) {
+				mutation.status = "failed";
+				mutation.lastError = "Server returned no authoritative Item revision";
+				return false;
+			}
+			mutation.baseVersion = version;
+			mutation.attemptId = newAttemptId(mutation);
+			mutation.status = "retrying";
+			mutation.nextAttemptAt = undefined;
+			mutation.lastError = undefined;
+			return true;
+		} catch (error) {
+			mutation.retryCount += 1;
+			this.scheduleRetry(mutation, error);
+			return false;
+		}
 	}
 
 	async drain(
 		getClient: (
 			accountId: string,
-		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+		) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>,
 	): Promise<void> {
 		// Serialize drains across all callers (multiple sync sources may share
 		// this queue). A drain triggered while another is in flight is coalesced
@@ -444,78 +955,151 @@ export class OutboundQueue {
 	private async drainOnce(
 		getClient: (
 			accountId: string,
-		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+		) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>,
 	): Promise<void> {
-		if (this.unresolvedLegacyEmails.size > 0) {
-			throw new Error(
-				`Cannot drain ambiguous legacy queues: ${Array.from(this.unresolvedLegacyEmails).join(", ")}`,
-			);
-		}
-
 		const accountEntries = Array.from(this.queuesByAccountId.entries()).sort(
 			(a, b) => a[0].localeCompare(b[0]),
 		);
 
 		for (const [accountId, queue] of accountEntries) {
+			const attemptedOperationIds = new Set<string>();
+			const findRunnableMutationIndex = () =>
+				queue.findIndex(
+					(candidate, index) =>
+						isReadyMutation(candidate, this.now()) &&
+						!attemptedOperationIds.has(candidate.operationId ?? candidate.id) &&
+						!queue
+							.slice(0, index)
+							.some(
+								(earlier) =>
+									earlier.entityId === candidate.entityId &&
+									isActiveMutation(earlier),
+							),
+				);
+			const firstRunnableIndex = findRunnableMutationIndex();
+			if (firstRunnableIndex < 0) {
+				continue;
+			}
+			let client: OutboundQueueApiClient;
+			try {
+				client = await getClient(accountId);
+			} catch (error) {
+				const mutation = queue[firstRunnableIndex];
+				if (mutation) {
+					this.markRetrying(mutation, error);
+					await this.schedulePersistence(accountId);
+					this.emit();
+				}
+				continue;
+			}
 			while (queue.length > 0) {
-				const mutation = queue[0];
+				const mutationIndex = findRunnableMutationIndex();
+				if (mutationIndex < 0) break;
+				const mutation = queue[mutationIndex];
 				if (!mutation) {
 					break;
 				}
-				const client = await getClient(accountId);
 
 				try {
-					await this.processMutation(client, mutation);
-					queue.shift();
-					await this.persistQueue(accountId);
-					this.emit();
-				} catch (error) {
-					const status = getHttpStatus(error);
-
-					if (status === 409) {
-						try {
-							await this.forcePushMutation(client, mutation);
-							queue.shift();
-							await this.persistQueue(accountId);
-							this.emit();
-							continue;
-						} catch (forceError) {
-							console.error(
-								"[OutboundQueue] force-push retry failed:",
-								forceError,
-							);
-							mutation.retryCount += 1;
-							await this.persistQueue(accountId);
-							this.emit();
-							break;
+					const semanticAcknowledgement =
+						mutation.type === "cross_account_move"
+							? await this.reconciler?.executeSemanticCommand?.(mutation)
+							: undefined;
+					if (
+						mutation.type === "cross_account_move" &&
+						!semanticAcknowledgement
+					) {
+						throw new Error(
+							`Cross-account move ${mutation.operationId ?? mutation.id} requires a semantic executor`,
+						);
+					}
+					const result = semanticAcknowledgement
+						? { etag: semanticAcknowledgement.etag }
+						: await this.processMutation(client, mutation);
+					const serverVersion =
+						semanticAcknowledgement?.version ?? strongNumericEtag(result.etag);
+					await this.reconciler?.acknowledge(mutation, {
+						entityId: semanticAcknowledgement?.entityId ?? mutation.entityId,
+						etag: result.etag,
+						version: serverVersion,
+					});
+					queue.splice(mutationIndex, 1);
+					if (this.storage.update) {
+						const conflicted = await this.persistAcknowledgement(
+							accountId,
+							mutation,
+							serverVersion,
+						);
+						if (conflicted) await this.preserveConflict(conflicted);
+					} else {
+						const next =
+							serverVersion === undefined
+								? undefined
+								: queue.find(
+										(candidate) =>
+											candidate.entityId === mutation.entityId &&
+											isActiveMutation(candidate),
+									);
+						if (serverVersion !== undefined && next) {
+							this.rebaseChainedCommand(next, serverVersion);
+						}
+						await this.schedulePersistence(accountId);
+						if (next?.status === "conflicted") {
+							await this.preserveConflict(next);
 						}
 					}
-
-					if (status === 400 || status === 404) {
-						console.warn(
-							`[OutboundQueue] Discarding mutation ${mutation.id} (${mutation.type}) due to ${status}`,
+					this.emit();
+				} catch (error) {
+					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
+						const retryImmediately = await this.rebaseMetadataMutation(
+							client,
+							mutation,
 						);
-						queue.shift();
-						await this.persistQueue(accountId);
+						await this.schedulePersistence(accountId);
 						this.emit();
+						if (mutation.status === "conflicted") {
+							await this.preserveConflict(mutation);
+						}
+						if (retryImmediately) continue;
+						continue;
+					}
+
+					if (isApiErrorStatus(error, 400) || isApiErrorStatus(error, 404)) {
+						if (
+							isApiErrorStatus(error, 404) &&
+							(mutation.type === "update" ||
+								mutation.type === "move" ||
+								mutation.type === "cross_account_move")
+						) {
+							this.markEncryptedConflict(mutation, error);
+						} else {
+							mutation.status = "failed";
+							mutation.lastError = error.message;
+						}
+						await this.schedulePersistence(accountId);
+						this.emit();
+						if (mutation.status === "conflicted") {
+							await this.preserveConflict(mutation);
+						}
 						continue;
 					}
 
 					if (isNetworkError(error)) {
-						mutation.retryCount += 1;
-						await this.persistQueue(accountId);
+						attemptedOperationIds.add(mutation.operationId ?? mutation.id);
+						this.markRetrying(mutation, error);
+						await this.schedulePersistence(accountId);
 						this.emit();
-						break;
+						continue;
 					}
 
 					console.error(
 						`[OutboundQueue] Unexpected error for mutation ${mutation.id}:`,
 						error,
 					);
-					mutation.retryCount += 1;
-					await this.persistQueue(accountId);
+					attemptedOperationIds.add(mutation.operationId ?? mutation.id);
+					this.markRetrying(mutation, error);
+					await this.schedulePersistence(accountId);
 					this.emit();
-					break;
 				}
 			}
 		}
@@ -528,101 +1112,29 @@ export class OutboundQueue {
 	}
 
 	compact(): void {
-		for (const [accountId, sourceQueue] of this.queuesByAccountId.entries()) {
-			const sourceWithIndex = sourceQueue.map((mutation, index) => ({
-				mutation,
-				index,
-			}));
-			let compacted = [...sourceWithIndex];
-
-			// Drop updates/moves/favorite toggles for items that are subsequently deleted.
-			for (const { mutation, index: mutationIndex } of sourceWithIndex) {
-				if (
-					mutation.type !== "delete" &&
-					mutation.type !== "permanent_delete"
-				) {
-					continue;
-				}
-				compacted = compacted.filter((candidate) => {
-					if (candidate.mutation.entityId !== mutation.entityId) {
-						return true;
-					}
-					if (candidate.mutation.id === mutation.id) {
-						return true;
-					}
-					if (candidate.index > mutationIndex) {
-						return true;
-					}
-					return !(
-						candidate.mutation.type === "update" ||
-						candidate.mutation.type === "toggle_favorite" ||
-						candidate.mutation.type === "move"
-					);
-				});
-			}
-
-			// Collapse sequential updates/toggles/moves for the same item, keep latest.
-			const result: PendingMutation[] = [];
-			for (const { mutation } of compacted) {
-				if (
-					mutation.type === "update" ||
-					mutation.type === "toggle_favorite" ||
-					mutation.type === "move"
-				) {
-					const previousIndex = findLastIndexByEntityAndType(
-						result,
-						mutation.entityId,
-						mutation.type,
-					);
-					if (previousIndex >= 0) {
-						result.splice(previousIndex, 1, mutation);
-					} else {
-						result.push(mutation);
-					}
-					continue;
-				}
-
-				if (mutation.type === "permanent_delete") {
-					// delete + permanent_delete => keep only permanent_delete
-					for (let i = result.length - 1; i >= 0; i--) {
-						const candidate = result[i];
-						if (!candidate) {
-							continue;
-						}
-						if (
-							candidate.entityId === mutation.entityId &&
-							candidate.type === "delete"
-						) {
-							result.splice(i, 1);
-						}
-					}
-				}
-
-				result.push(mutation);
-			}
-
-			result.sort((a, b) => a.timestamp - b.timestamp);
-			this.queuesByAccountId.set(accountId, result);
-			void this.persistQueue(accountId);
-		}
-
-		this.emit();
+		// Semantic commands are retained until an equivalence-preserving compactor exists.
 	}
 
-	clear(accountId?: string): void {
+	async clear(accountId?: string): Promise<void> {
 		if (accountId) {
 			this.queuesByAccountId.delete(accountId);
-			void this.persistQueue(accountId);
+			await this.schedulePersistence(accountId);
 			this.emit();
 			return;
 		}
 
-		const accountIds = Array.from(this.queuesByAccountId.keys());
 		this.queuesByAccountId.clear();
-		for (const queuedAccountId of accountIds) {
-			void this.storage.remove(getQueueKeyForAccountId(queuedAccountId));
-		}
-		void this.storage.remove(QUEUE_INDEX_KEY);
+		this.persistedOperationIds.clear();
+		this.persistedCommandSignatures.clear();
+		const persistence = this.persistenceTail
+			.catch(() => undefined)
+			.then(async () => {
+				await this.storage.remove(QUEUE_DOCUMENT_KEY);
+			});
+		this.persistenceTail = persistence.catch(() => undefined);
+		await persistence;
 		this.emit();
 	}
 }
+
+export { ItemSyncEngine as OutboundQueue };
