@@ -368,13 +368,13 @@ pub(crate) async fn finalize_locked_plan(
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::MemberSet).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::MemberSet));
     }
-    let item_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='item') m FULL JOIN item i ON i.id=m.entity_id AND i.vault_id=$2 WHERE i.id IS NULL OR m.entity_id IS NULL OR i.version<>m.expected_version)")
+    let item_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='item') m FULL JOIN (SELECT id, version FROM item WHERE vault_id=$2) i ON i.id=m.entity_id WHERE i.id IS NULL OR m.entity_id IS NULL OR i.version<>m.expected_version)")
         .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
     if item_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::ItemState).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::ItemState));
     }
-    let attachment_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='attachment') m FULL JOIN item_attachment a ON a.id=m.entity_id AND a.vault_id=$2 WHERE a.id IS NULL OR m.entity_id IS NULL OR a.envelope_version<>m.expected_version)")
+    let attachment_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='attachment') m FULL JOIN (SELECT id, envelope_version FROM item_attachment WHERE vault_id=$2) a ON a.id=m.entity_id WHERE a.id IS NULL OR m.entity_id IS NULL OR a.envelope_version<>m.expected_version)")
         .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
     if attachment_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::AttachmentState).await?;
