@@ -6,11 +6,10 @@ on:
   push:
     branches:
       - main
-  # A RustSec advisory can be published against a lockfile nobody has touched,
-  # so the `cargo-deny` job below must also run on unchanged code. Every other
-  # job is gated off `schedule` (see `if:` on each one) — the weekly run is a
-  # vulnerability-database sweep, not a full CI re-run. Monday, matching the
-  # weekly Dependabot cadence in .github/dependabot.yml.
+  # Weekly dependency checks catch upstream breakage on unchanged code, while
+  # Web E2E also runs to detect browser-harness rot. This is still deliberately
+  # narrower than a full CI re-run. Monday, matching the weekly Dependabot
+  # cadence in .github/dependabot.yml.
   schedule:
     - cron: "17 6 * * 1"
 
@@ -88,20 +87,11 @@ jobs:
 
   crypto-bindings:
     name: crypto-bindings-${{ matrix.binding }}
-    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - binding: wasm
-            runs-on: ubuntu-latest
-            targets: wasm32-unknown-unknown
-          - binding: android
-            runs-on: ubuntu-latest
-            targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-          - binding: ios
-            runs-on: macos-15
-            targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      # Weekly E2E only needs the WASM artifact; native bindings remain covered
+      # by change-driven CI rather than making the harness-rot check wait for them.
+      matrix: ${{ fromJSON(github.event_name == 'schedule' && '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"}]}' || '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"},{"binding":"android","runs-on":"ubuntu-latest","targets":"aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android"},{"binding":"ios","runs-on":"macos-15","targets":"aarch64-apple-ios,aarch64-apple-ios-sim"}]}') }}
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v7
@@ -593,9 +583,25 @@ jobs:
   # Takes the crypto WASM artifact from crypto-bindings like js-static / js-types / js-tests:
   # the web app does not resolve without it, and rebuilding it here would mean a
   # another copy of the pinned ubrn build for no gain.
-  web-e2e:
-    if: github.event_name != 'schedule'
+  web-e2e-run:
+    name: web-e2e-run (${{ matrix.name }})
     needs: crypto-bindings
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cloud 1/2
+            project: cloud
+            shard: --shard=1/2
+            artifact: cloud-1-of-2
+          - name: cloud 2/2
+            project: cloud
+            shard: --shard=2/2
+            artifact: cloud-2-of-2
+          - name: self-hosted
+            project: self-hosted
+            shard: ""
+            artifact: self-hosted
     runs-on: ubuntu-latest
     # A cache-cold debug build of the server is many minutes before a single
     # spec runs, and CI runs 2 workers with 2 retries, so a bad-luck run can be
@@ -637,7 +643,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/server
-          key: e2e
+          key: e2e-${{ matrix.artifact }}
 
       - uses: pnpm/action-setup@v6
         with:
@@ -723,28 +729,89 @@ jobs:
 
       - name: Web E2E tests
         shell: bash
+        env:
+          E2E_SERVER_BINARIES_READY: "1"
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          pnpm --filter web test:e2e
+          pnpm --filter web exec playwright test \
+            --project=${{ matrix.project }} \
+            ${{ matrix.shard }} \
+            --reporter=blob
           elapsed="$(( $(date +%s) - start ))"
-          echo "web E2E: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "web E2E (${{ matrix.name }}): ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
-      # Only on failure: `test-results/` carries a video and a trace per failed
-      # attempt, so a green run would upload tens of megabytes nobody opens.
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: always()
         with:
-          name: playwright-report
-          path: |
-            apps/web/playwright-report/
-            apps/web/test-results/
+          name: playwright-blob-${{ matrix.artifact }}
+          path: apps/web/blob-report/
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: error
 
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+  # Blob reports preserve traces, videos and screenshots from every shard and
+  # let Playwright render one report with the complete suite result. Keep this
+  # separate from the stable required check below so its implementation can
+  # change without changing the branch-protection context.
+  web-e2e-report:
+    if: always() && needs.web-e2e-run.result != 'skipped' && needs.web-e2e-run.result != 'cancelled'
+    needs: web-e2e-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: playwright-blob-*
+          path: blob-report
+          merge-multiple: true
+
+      - name: Merge Playwright reports
+        run: pnpm --filter web test:e2e:merge-reports -- "$GITHUB_WORKSPACE/blob-report"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+          if-no-files-found: error
+
+  # Stable branch-protection context: matrix leg names may change as the suite
+  # grows, while this check remains exactly `web-e2e`.
+  web-e2e:
+    if: always()
+    needs:
+      - web-e2e-run
+      - web-e2e-report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Web E2E suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_result="${{ needs.web-e2e-run.result }}"
+          report_result="${{ needs.web-e2e-report.result }}"
+          if [ "$run_result" != "success" ] || [ "$report_result" != "success" ]; then
+            echo "web-e2e-run: $run_result"
+            echo "web-e2e-report: $report_result"
+            exit 1
+          fi
 
   # Nothing in CI built a container image; the release workflow was the first
   # thing to try, which is how an unreachable HEALTHCHECK probe and a corepack
@@ -851,9 +918,8 @@ jobs:
   # deny.toml — a gate that only covered the server would be most of the problem
   # left in place.
   #
-  # Deliberately has no `if: github.event_name != 'schedule'` guard: it is the
-  # one job that must also run on the weekly cron, because a new advisory can be
-  # published against code that has not changed.
+  # Deliberately has no `if: github.event_name != 'schedule'` guard: a new
+  # advisory can be published against code that has not changed.
   #
   # Exceptions (currently the `rsa` Marvin advisory and the two `quick-xml`
   # advisories pinned by Tauri) live in deny.toml with a dated, written reason.
