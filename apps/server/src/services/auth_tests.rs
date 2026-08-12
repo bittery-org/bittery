@@ -2705,6 +2705,156 @@ async fn start_login_unknown_email_returns_stable_default_kdf_params() {
     .await;
 }
 
+// ---------------------------------------------------------------------------
+// Login response team badge
+// ---------------------------------------------------------------------------
+
+const TEST_CDN_URL: &str = "https://cdn.example.invalid/assets";
+
+async fn with_storage_cdn_env_async<T, F>(future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let _guard = crate::test_support::acquire_env_lock_async().await;
+    let previous = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
+    unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", TEST_CDN_URL) };
+
+    let result = future.await;
+
+    match previous {
+        Some(value) => unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", value) },
+        None => unsafe { std::env::remove_var("BITTERY_STORAGE_CDN_URL") },
+    }
+    result
+}
+
+async fn set_team_image_key(pool: &PgPool, team_id: &str, image_key: &str) {
+    query("UPDATE team SET image_key = $1 WHERE id = $2")
+        .bind(image_key)
+        .bind(team_id)
+        .execute(pool)
+        .await
+        .expect("team image key should update");
+}
+
+/// Runs the whole SRP ceremony and returns the finish-login body.
+async fn finish_login_ok(
+    app: &ApiTestApp,
+    email: &str,
+    crypto: &AuthCryptoFixture,
+) -> serde_json::Value {
+    let ephemeral = build_login_ephemeral_fixture();
+    let start = app
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/login-attempts",
+            Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
+            unauthenticated_json_headers(),
+        )
+        .await;
+    start.assert_contract_status();
+    let client_proof = derive_login_proof(
+        &ephemeral,
+        start.body["salt"]
+            .as_str()
+            .expect("salt should be returned"),
+        start.body["serverPublicKey"]
+            .as_str()
+            .expect("server public key should be returned"),
+        &crypto.auth_password,
+        TEST_SRP_ITERATIONS,
+    );
+    let attempt_id = start.body["attemptId"]
+        .as_str()
+        .expect("login attempt ID should be returned");
+
+    let finish = app
+        .api_json(
+            Method::POST,
+            &format!("/api/v1/auth/login-attempts/{attempt_id}/finish"),
+            Some(json!({
+                "clientPublicKey": ephemeral.public_key,
+                "clientProof": client_proof,
+            })),
+            unauthenticated_json_headers(),
+        )
+        .await;
+    finish.assert_contract_status();
+    finish.body.clone()
+}
+
+/// The login response is the only source the client has for the team badge it writes into
+/// account metadata: a local unlock reads that metadata back, so a field login omits stays
+/// blank until something else refills it. A personal team on the free plan proves the badge
+/// is a property of *having a team*, which every user does, and never of paying for one.
+#[tokio::test]
+async fn finish_login_returns_the_team_badge_a_solo_account_shows() {
+    with_storage_cdn_env_async(async {
+        with_api_test_app("finish_login_team_badge", |app| async move {
+            let crypto = build_auth_crypto_fixture("login-badge", "login-badge-password");
+            insert_kdf_login_user(
+                &app.pool,
+                "login_badge_user",
+                "login-badge@example.com",
+                &crypto,
+                CURRENT_KDF_ITERATIONS as i32,
+            )
+            .await;
+            seed_team(
+                &app.pool,
+                "login_badge_team",
+                "Solo Team",
+                "login_badge_user",
+                "personal",
+                "free",
+                "none",
+            )
+            .await;
+            set_team_image_key(
+                &app.pool,
+                "login_badge_team",
+                "teams/login_badge_team/avatar.png",
+            )
+            .await;
+            assign_user_to_team(&app.pool, "login_badge_user", "login_badge_team", "owner").await;
+
+            let body = finish_login_ok(&app, "login-badge@example.com", &crypto).await;
+
+            assert_eq!(body["user"]["teamName"], json!("Solo Team"));
+            assert_eq!(
+                body["user"]["teamAvatarUrl"],
+                json!(format!("{TEST_CDN_URL}/teams/login_badge_team/avatar.png"))
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// A user with no team row must not turn the badge into a fabricated one; the fields are
+/// simply absent, which is what `skip_serializing_if` promises the contract.
+#[tokio::test]
+async fn finish_login_omits_the_team_badge_when_there_is_no_team() {
+    with_api_test_app("finish_login_no_team_badge", |app| async move {
+        let crypto = build_auth_crypto_fixture("login-teamless", "login-teamless-password");
+        insert_kdf_login_user(
+            &app.pool,
+            "login_teamless_user",
+            "login-teamless@example.com",
+            &crypto,
+            CURRENT_KDF_ITERATIONS as i32,
+        )
+        .await;
+
+        let body = finish_login_ok(&app, "login-teamless@example.com", &crypto).await;
+
+        assert_eq!(body["user"]["email"], json!("login-teamless@example.com"));
+        assert_eq!(body["user"]["teamName"], json!(null));
+        assert_eq!(body["user"]["teamAvatarUrl"], json!(null));
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn signup_persists_only_the_exact_current_kdf_profile() {
     with_auth_test_env_async(Some("cloud"), async {

@@ -15470,6 +15470,18 @@
           },
           "secretKeyHint": {
             "type": "string"
+          },
+          "teamAvatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "teamName": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

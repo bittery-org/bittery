@@ -38,10 +38,12 @@ const MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
 const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
 const SERVER_PROOF = "server-proof";
 
+const TEAM_NAME = "Solo Team";
+const TEAM_AVATAR_URL = "https://cdn.example/teams/solo/avatar.png";
+
 /**
- * The `user` a real finish-login carries. `LoginUserResponse` has no team fields — the
- * login endpoint does not send them — so a fixture that invented them would be testing a
- * server that does not exist.
+ * The `user` a real finish-login carries. Every user has a team, so the badge is always
+ * part of it — a fixture without one would be testing a server that does not exist.
  */
 function loginUser(id: string, email: string): FinishLoginResponse["user"] {
 	return {
@@ -51,6 +53,8 @@ function loginUser(id: string, email: string): FinishLoginResponse["user"] {
 		secretKeyHint: "A3-A••••",
 		publicKey: "public-key",
 		encryptedPrivateKey: "encrypted-private-key",
+		teamName: TEAM_NAME,
+		teamAvatarUrl: TEAM_AVATAR_URL,
 	};
 }
 
@@ -675,6 +679,41 @@ describe("storeLoginSession travel mode verification", () => {
 			kdfParams,
 			expect.any(String),
 		);
+	});
+
+	// A full sign-in is the only moment account metadata is written from the server: a local
+	// unlock reads the badge straight back out of it, so whatever login omits stays blank on
+	// every avatar, account switcher and sidebar until something else refills it.
+	it("writes the team badge a fresh login reports into account metadata", async () => {
+		resetTravelModeEnforcerForTests();
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const seenTokens: (string | null)[] = [];
+
+		const result = await performSRPLogin(
+			{
+				email: "same@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "https://cloud.example",
+			},
+			{ crypto, apiClient: createAuthClient([]), storage },
+		);
+		const accountId = await storeLoginSession(
+			result,
+			SECRET_KEY,
+			storage,
+			(await createTestItemCache()).cache,
+			undefined,
+			{
+				createTravelModeApiClient: (token: string | null) =>
+					travelModeClientForToken(token, seenTokens),
+			},
+		);
+
+		const metadata = await storage.getAccountMetadata(accountId);
+		expect(metadata?.teamName).toBe(TEAM_NAME);
+		expect(metadata?.teamAvatarUrl).toBe(TEAM_AVATAR_URL);
 	});
 
 	// A reused accountId is the normal case, not an edge case:

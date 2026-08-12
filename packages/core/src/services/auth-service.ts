@@ -223,13 +223,9 @@ export interface CheckEmailResult {
  * The user as a *ceremony result* carries them, which is not what any one endpoint sends.
  * A fresh login fills it from `FinishLoginResponse["user"]`, a local unlock from stored
  * account metadata, and signup from `SignupResponse["user"]` — so `name`, `teamName` and
- * `teamAvatarUrl` are optional because only some of those three sources have them.
- *
- * NOTE: the login endpoint is one of the sources that does not. `LoginUserResponse` carries
- * no team fields, so `teamName`/`teamAvatarUrl` are always `undefined` after a fresh login
- * or a re-auth unlock, and `storeLoginSession` writes them to account metadata as such.
- * Populating them needs a `GET /auth/me` on the login path — a behaviour change, not a
- * typing one, so it is left alone here.
+ * `teamAvatarUrl` are optional because a source may not report them, not because a user may
+ * lack a team. Every user has one; a stored account that predates the badge simply has none
+ * recorded yet, which is why the unlock path merges rather than overwrites.
  */
 export interface LoginUserData {
 	id: string;
@@ -238,6 +234,22 @@ export interface LoginUserData {
 	teamName?: string;
 	teamAvatarUrl?: string | null;
 	encryptedPrivateKey?: string;
+}
+
+/**
+ * The wire spells an absent team name `null`; account metadata spells it `undefined`, and
+ * `storeUnlockSession` reads that difference as "not reported" so it can keep a stored badge
+ * instead of blanking it. Normalize once here rather than at each write.
+ */
+function toLoginUserData(user: FinishLoginResponse["user"]): LoginUserData {
+	return {
+		id: user.id,
+		email: user.email,
+		name: user.name,
+		teamName: user.teamName ?? undefined,
+		teamAvatarUrl: user.teamAvatarUrl,
+		encryptedPrivateKey: user.encryptedPrivateKey,
+	};
 }
 
 type StartLoginApiClient = {
@@ -460,7 +472,7 @@ export async function performSRPLogin(
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
-			user: finishResult.user,
+			user: toLoginUserData(finishResult.user),
 			vaultKeys,
 			masterUnlockKey,
 			kdfParams: validatedProfile,
@@ -828,7 +840,7 @@ export async function performSRPUnlock(
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
-			user: finishResult.user,
+			user: toLoginUserData(finishResult.user),
 			vaultKeys,
 			masterUnlockKey,
 			kdfParams: validatedProfile,

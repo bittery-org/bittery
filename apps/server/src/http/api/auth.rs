@@ -187,6 +187,10 @@ response_dto!(LoginUserResponse {
     secret_key_hint: String,
     public_key: String,
     encrypted_private_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_avatar_url: Option<String>,
 });
 response_dto!(FinishLoginResponse {
     token: String,
@@ -908,6 +912,8 @@ fn map_finish_login_response(
             secret_key_hint: value.user.secret_key_hint,
             public_key: value.user.public_key,
             encrypted_private_key: value.user.encrypted_private_key,
+            team_name: value.user.team_name,
+            team_avatar_url: value.user.team_avatar_url,
         },
         vault_keys: initial_vault_key_page(value.vault_keys, &user_id)?,
     })

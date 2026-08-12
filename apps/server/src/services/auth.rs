@@ -141,6 +141,13 @@ struct DbLoginUserRow {
     kdf_algorithm: String,
     kdf_iterations: i32,
     kdf_schema_version: i32,
+    // The team badge the client stores in account metadata. Only the post-proof load joins
+    // `team` for it: `start_login` answers an unauthenticated challenge and must keep the
+    // decoy path's SELECT exactly as narrow as it already is.
+    #[sqlx(default)]
+    team_name: Option<String>,
+    #[sqlx(default)]
+    team_image_key: Option<String>,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -401,6 +408,10 @@ pub struct LoginUserResponse {
     pub secret_key_hint: String,
     pub public_key: String,
     pub encrypted_private_key: String,
+    /// The badge account metadata is written from. Every user has a team, so this is absent
+    /// only for a row with no team at all — never as a function of the team's billing plan.
+    pub team_name: Option<String>,
+    pub team_avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1194,7 +1205,7 @@ async fn verify_login_proof_and_get_user(
         return Err(AppError::unauthorized("Invalid credentials"));
     };
     let user = query_as::<_, DbLoginUserRow>(
-		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1 LIMIT 1",
+		"SELECT u.id, u.email, u.name, u.secret_key_hint, u.srp_salt, u.srp_verifier, u.public_key, u.encrypted_private_key, u.kdf_algorithm, u.kdf_iterations, u.kdf_schema_version, t.name AS team_name, t.image_key AS team_image_key FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(user_id)
 	.fetch_optional(pool)
@@ -1264,6 +1275,12 @@ pub(crate) async fn finish_login(
             secret_key_hint: verified.user.secret_key_hint.unwrap_or_default(),
             public_key: verified.user.public_key,
             encrypted_private_key: verified.user.encrypted_private_key,
+            team_name: verified.user.team_name,
+            team_avatar_url: verified
+                .user
+                .team_image_key
+                .as_deref()
+                .and_then(storage::public_asset_url),
         },
         vault_keys,
     })

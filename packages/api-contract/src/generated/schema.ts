@@ -2053,6 +2053,8 @@ export interface components {
             readonly name: string;
             readonly publicKey: string;
             readonly secretKeyHint: string;
+            readonly teamAvatarUrl?: string | null;
+            readonly teamName?: string | null;
         };
         readonly MeResponse: {
             readonly createdAt: string;

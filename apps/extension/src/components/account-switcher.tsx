@@ -1,6 +1,5 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import {
 	AccountSwitcher,
 	Avatar,
@@ -12,7 +11,7 @@ import {
 import { IconChevronDown } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { lockVaultThroughWorker } from "@/lib/lock-vault";
 import { sendMessage } from "@/lib/messaging";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
@@ -29,7 +28,6 @@ export function ExtensionAccountSwitcher() {
 		accounts,
 		activeAccount: activeSelection,
 		unlockedAccountIds,
-		refresh,
 		switchAccount,
 	} = useAccountSwitcher();
 	const navigate = useNavigate();
@@ -73,56 +71,6 @@ export function ExtensionAccountSwitcher() {
 	);
 
 	const activeAccountId = activeSelection ?? null;
-	// Update team names for accounts that don't have them
-	useEffect(() => {
-		const updateMissingTeamNames = async () => {
-			for (const account of accountsData) {
-				// Skip if account already has team name
-				if (account.teamName) continue;
-
-				try {
-					// Get auth token for this account
-					const authToken = await storage.getAuthToken(account.accountId);
-					if (!authToken) continue;
-
-					const serverUrl =
-						(await storage.getServerUrl(account.accountId)) ||
-						"http://localhost:3000";
-					const client = createAccountApiClient(
-						authToken,
-						serverUrl,
-						undefined,
-						undefined,
-						{
-							insecureTransportConfirmed:
-								account.insecureTransportConfirmed === true,
-						},
-					);
-
-					const { data: userData } = await client.auth.me();
-
-					// Update account with team name and avatar
-					await storage.addAccount({
-						...account,
-						teamName: userData.teamName ?? undefined,
-						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
-					});
-
-					// Refresh accounts list
-					await refresh();
-				} catch (error) {
-					console.error(
-						`[account-switcher] Failed to fetch team name for ${account.email}:`,
-						error,
-					);
-				}
-			}
-		};
-
-		if (accountsData.length > 0) {
-			updateMissingTeamNames();
-		}
-	}, [accountsData, refresh]);
 
 	const handleSwitchAccount = async (accountId: string) => {
 		if (accountId === activeAccountId) return;
