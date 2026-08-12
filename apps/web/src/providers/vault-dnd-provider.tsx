@@ -170,7 +170,6 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 						<ItemDragPreview
 							item={activeItem}
 							defaultServerUrl={getServerUrl()}
-							shadowClassName="shadow-lg"
 						/>
 					)}
 				</DragOverlay>
