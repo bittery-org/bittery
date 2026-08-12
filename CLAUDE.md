@@ -32,13 +32,15 @@ it for `tests/e2e` changes.
 - `pnpm exec biome check --write <changed files>`; `check:fix` is repo-wide `--unsafe`.
 - Clippy only runs in CI, so local `cargo check` proves little.
 - New server route: `write-openapi`, `@bittery/api-contract generate`, bump the `assert_eq!` counts.
+- Rust-defined type? Generate it, never re-type it — ADR 0012. Closed sets live in `db/enums.rs`.
 - Migrations: `pnpm run db:create -- <name>`, and frozen once merged.
 - `react`, `zod`, `hono`, `@types/react*` come from the `catalog:`.
 
 ## Style
 
 `DESIGN.md` for UI (tokens, the `@bittery/ui/icons` barrel, semantic colours). `CONTEXT.md` for
-vocabulary. `docs/adr/` for settled decisions — ADR 0002: server services own their SQL.
+vocabulary. `docs/adr/` for settled decisions — ADR 0002: server services own their SQL, ADR 0012:
+one generated definition per cross-language type.
 
 Avoid `useEffect`. Comments say *why*, briefly. A dev server is always running; skip builds unless
 asked. `RELEASING.md` for versions, `packages/crypto/core/DEVELOPMENT.md` for crypto.
