@@ -402,7 +402,9 @@ pub(crate) async fn finalize_locked_plan(
         .await?;
     query("INSERT INTO sync_event (id, event_type, vault_id, entity_id, entity_type, version, user_id, metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || vk.user_id), 'vault_key_rotated', $2, $2, 'vault_key', $3, vk.user_id, json_build_object('rotationId', $1)::text FROM vault_key vk WHERE vk.vault_id=$2")
         .bind(&rotation_id).bind(&plan.1).bind(key_version).execute(&mut **tx).await?;
-    query("INSERT INTO sync_event (id,event_type,vault_id,entity_id,entity_type,version,user_id,metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || excluded_user_id),'vault_access_revoked',vault_id,excluded_user_id,'vault_member',$2,excluded_user_id,json_build_object('rotationId',$1)::text FROM vault_key_rotation_plan WHERE id=$3 AND excluded_user_id IS NOT NULL")
+    query("INSERT INTO sync_event (id,event_type,vault_id,entity_id,entity_type,version,user_id,metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || vk.user_id || 'member_removed'),'vault_member_removed',p.vault_id,p.excluded_user_id,'vault_member',$2,vk.user_id,json_build_object('rotationId',$1,'removedUserId',p.excluded_user_id)::text FROM vault_key_rotation_plan p JOIN vault_key vk ON vk.vault_id=p.vault_id WHERE p.id=$3 AND p.reason='member_removed' AND p.excluded_user_id IS NOT NULL")
+        .bind(&rotation_id).bind(key_version).bind(plan_id).execute(&mut **tx).await?;
+    query("INSERT INTO sync_event (id,event_type,vault_id,entity_id,entity_type,version,user_id,metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || excluded_user_id),'vault_access_revoked',vault_id,vault_id,'vault',$2,excluded_user_id,json_build_object('rotationId',$1)::text FROM vault_key_rotation_plan WHERE id=$3 AND excluded_user_id IS NOT NULL")
         .bind(&rotation_id).bind(key_version).bind(plan_id).execute(&mut **tx).await?;
     Ok(RotationResult {
         plan_id: plan_id.to_owned(),
@@ -561,6 +563,87 @@ mod tests {
 		)
 		.await
 		.expect("item output should stage");
+    }
+
+    #[tokio::test]
+    async fn member_removal_emits_cache_eviction_and_membership_events() {
+        with_api_test_app("rotation_member_removal_events", |app| async move {
+            seed_rotation_fixture(&app.pool).await;
+            seed_user(
+                &app.pool,
+                "rotation_removed_user",
+                "Removed User",
+                "removed@rotation.example.com",
+            )
+            .await;
+            seed_vault_key(
+                &app.pool,
+                "rotation_removed_key",
+                "rotation_vault",
+                "rotation_removed_user",
+                "removed-wrapped-key",
+                "member",
+            )
+            .await;
+            let plan = create_plan(
+                &app.pool,
+                CreateRotationPlanInput {
+                    vault_id: "rotation_vault".to_owned(),
+                    initiator_user_id: "rotation_user".to_owned(),
+                    reason: KeyRotationReason::MemberRemoved,
+                    authorization_context: "test-removal".to_owned(),
+                    excluded_user_id: Some("rotation_removed_user".to_owned()),
+                },
+            )
+            .await
+            .expect("removal plan should be created");
+            stage_test_plan(&app.pool, &plan.id).await;
+            let mut tx = app.pool.begin().await.expect("transaction should start");
+
+            finalize_locked_plan(&mut tx, &plan.id, "rotation_user")
+                .await
+                .expect("removal should finalize");
+            tx.commit().await.expect("rotation should commit");
+
+            let revoked: (String, String, String, String) = query_as(
+                "SELECT event_type::text,entity_id,entity_type::text,user_id FROM sync_event WHERE event_type='vault_access_revoked' AND user_id='rotation_removed_user'",
+            )
+            .fetch_one(&app.pool)
+            .await
+            .expect("revocation event should exist");
+            assert_eq!(
+                revoked,
+                (
+                    "vault_access_revoked".to_owned(),
+                    "rotation_vault".to_owned(),
+                    "vault".to_owned(),
+                    "rotation_removed_user".to_owned(),
+                )
+            );
+
+            let remaining_member_events: Vec<(String, String, String)> = query_as(
+                "SELECT event_type::text,entity_id,entity_type::text FROM sync_event WHERE user_id='rotation_user' AND event_type IN ('vault_key_rotated','vault_member_removed') ORDER BY event_type",
+            )
+            .fetch_all(&app.pool)
+            .await
+            .expect("remaining Member events should load");
+            assert_eq!(
+                remaining_member_events,
+                vec![
+                    (
+                        "vault_key_rotated".to_owned(),
+                        "rotation_vault".to_owned(),
+                        "vault_key".to_owned(),
+                    ),
+                    (
+                        "vault_member_removed".to_owned(),
+                        "rotation_removed_user".to_owned(),
+                        "vault_member".to_owned(),
+                    ),
+                ]
+            );
+        })
+        .await;
     }
 
     #[tokio::test]

@@ -8,10 +8,12 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use uuid::Uuid;
 
 use crate::{
-    db::enums::{BillingPlan, KeyRotationReason, TeamRole, TeamType},
+    config::bittery_mode,
+    db::enums::{BillingPlan, BillingStatus, KeyRotationReason, TeamRole, TeamType},
     error::AppError,
     services::{
         billing::sync_team_seats_best_effort,
+        team_billing::team_management_enabled,
         vault_key_rotation::{
             self, CreateRotationPlanInput, FinalizeError, RotationPlanSummary, RotationResult,
         },
@@ -19,6 +21,8 @@ use crate::{
 };
 
 const REASON: &str = "member_removed";
+const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
+    "Team management is only available on Family or Team plans with active billing.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Intent {
@@ -88,6 +92,20 @@ fn authorize(
     }
 }
 
+fn authorize_entitlement(
+    intent: Intent,
+    billing_plan: BillingPlan,
+    billing_status: BillingStatus,
+) -> Result<(), AppError> {
+    if intent == Intent::Voluntary
+        || team_management_enabled(bittery_mode(), Some(billing_plan), Some(billing_status))
+    {
+        Ok(())
+    } else {
+        Err(AppError::forbidden(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
+    }
+}
+
 async fn create_plans(
     pool: &PgPool,
     team_id: &str,
@@ -95,8 +113,14 @@ async fn create_plans(
     target_id: &str,
     intent: Intent,
 ) -> Result<DeparturePlanSet, AppError> {
-    let (actor_role, target_role, team_type): (TeamRole, TeamRole, TeamType) = query_as(
-        "SELECT actor.role,target.role,t.type FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3",
+    let (actor_role, target_role, team_type, billing_plan, billing_status): (
+        TeamRole,
+        TeamRole,
+        TeamType,
+        BillingPlan,
+        BillingStatus,
+    ) = query_as(
+        "SELECT actor.role,target.role,t.type,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3",
     ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(pool).await.map_err(database)?
       .ok_or_else(|| AppError::not_found("Team member not found"))?;
     authorize(
@@ -106,6 +130,7 @@ async fn create_plans(
         actor_id == target_id,
         team_type,
     )?;
+    authorize_entitlement(intent, billing_plan, billing_status)?;
     if intent == Intent::Administrative {
         let has_unmanaged_vault: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 LEFT JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND (actor_key.role IS NULL OR actor_key.role NOT IN ('owner','admin')))")
             .bind(team_id).bind(target_id).bind(actor_id).fetch_one(pool).await.map_err(database)?;
@@ -187,11 +212,19 @@ async fn finalize(
         .execute(&mut *tx)
         .await
         .map_err(database)?;
-    let member: (TeamRole, TeamRole, TeamType, String, BillingPlan) = query_as(
-        "SELECT actor.role,target.role,t.type,target.name,t.billing_plan FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3 FOR UPDATE OF actor,target,t",
+    let member: (
+        TeamRole,
+        TeamRole,
+        TeamType,
+        String,
+        BillingPlan,
+        BillingStatus,
+    ) = query_as(
+        "SELECT actor.role,target.role,t.type,target.name,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3 FOR UPDATE OF actor,target,t",
     ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut *tx).await.map_err(database)?
       .ok_or_else(|| AppError::conflict("Team membership changed while departure was prepared"))?;
     authorize(intent, member.0, member.1, actor_id == target_id, member.2)?;
+    authorize_entitlement(intent, member.4, member.5)?;
     let expected: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2")
         .bind(team_id).bind(target_id).fetch_all(&mut *tx).await.map_err(database)?.into_iter().collect();
     if intent == Intent::Administrative {
@@ -338,8 +371,8 @@ mod tests {
         db::enums::{VaultKeyRotationManifestKind, VaultKeyRotationStaleReason},
         services::vault_key_rotation::StagedOutput,
         test_support::{
-            assign_user_to_team, seed_item, seed_team, seed_user, seed_vault, seed_vault_key,
-            with_api_test_app,
+            acquire_env_lock_async, assign_user_to_team, seed_item, seed_team, seed_user,
+            seed_vault, seed_vault_key, with_api_test_app, EnvVarGuard,
         },
     };
     #[test]
@@ -408,6 +441,106 @@ mod tests {
             ]
         )
         .is_err());
+    }
+
+    #[tokio::test]
+    async fn administrative_departure_rechecks_team_management_entitlement() {
+        let _env_lock = acquire_env_lock_async().await;
+        let _env = EnvVarGuard::set(&[("BITTERY_MODE", "cloud")]);
+        with_api_test_app("member_departure_entitlement", |app| async move {
+            let pool = &app.pool;
+            seed_user(
+                pool,
+                "inactive_owner",
+                "Inactive Owner",
+                "inactive-owner@test.invalid",
+            )
+            .await;
+            seed_user(
+                pool,
+                "inactive_member",
+                "Inactive Member",
+                "inactive-member@test.invalid",
+            )
+            .await;
+            seed_team(
+                pool,
+                "inactive_team",
+                "Inactive Team",
+                "inactive_owner",
+                "organization",
+                "team",
+                "past_due",
+            )
+            .await;
+            assign_user_to_team(pool, "inactive_owner", "inactive_team", "owner").await;
+            assign_user_to_team(pool, "inactive_member", "inactive_team", "member").await;
+
+            let preparation_error = create_administrative_plans(
+                pool,
+                "inactive_team",
+                "inactive_owner",
+                "inactive_member",
+            )
+            .await
+            .expect_err("inactive billing must block administrative preparation");
+            assert_eq!(
+                preparation_error.code,
+                crate::error::AppErrorCode::Forbidden
+            );
+
+            seed_user(
+                pool,
+                "lapsed_owner",
+                "Lapsed Owner",
+                "lapsed-owner@test.invalid",
+            )
+            .await;
+            seed_user(
+                pool,
+                "lapsed_member",
+                "Lapsed Member",
+                "lapsed-member@test.invalid",
+            )
+            .await;
+            seed_team(
+                pool,
+                "lapsed_team",
+                "Lapsed Team",
+                "lapsed_owner",
+                "organization",
+                "team",
+                "active",
+            )
+            .await;
+            assign_user_to_team(pool, "lapsed_owner", "lapsed_team", "owner").await;
+            assign_user_to_team(pool, "lapsed_member", "lapsed_team", "member").await;
+            let plans =
+                create_administrative_plans(pool, "lapsed_team", "lapsed_owner", "lapsed_member")
+                    .await
+                    .expect("active billing should allow preparation");
+            assert!(plans.plans.is_empty());
+            query("UPDATE team SET billing_status='past_due' WHERE id='lapsed_team'")
+                .execute(pool)
+                .await
+                .expect("billing should lapse");
+
+            let finalization_error =
+                finalize_administrative(pool, "lapsed_team", "lapsed_owner", "lapsed_member", &[])
+                    .await
+                    .expect_err("lapsed billing must block administrative finalization");
+            assert_eq!(
+                finalization_error.code,
+                crate::error::AppErrorCode::Forbidden
+            );
+            let team_id: Option<String> =
+                query_scalar("SELECT team_id FROM \"user\" WHERE id='lapsed_member'")
+                    .fetch_one(pool)
+                    .await
+                    .expect("Member Team should load");
+            assert_eq!(team_id.as_deref(), Some("lapsed_team"));
+        })
+        .await;
     }
 
     #[tokio::test]
