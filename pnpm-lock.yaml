@@ -746,6 +746,9 @@ importers:
       '@bittery/storage':
         specifier: workspace:*
         version: link:../storage
+      '@bittery/sync':
+        specifier: workspace:*
+        version: link:../sync
       '@bittery/types':
         specifier: workspace:*
         version: link:../types

@@ -15,6 +15,7 @@
 		"./hooks/services/autolock-web": "./src/services/autolock-web.ts",
 		"./hooks/services/autolock-mobile": "./src/services/autolock-mobile.ts",
 		"./services/account-lifecycle": "./src/services/account-lifecycle.ts",
+		"./services/account-sync": "./src/services/account-sync.ts",
 		"./services/account-resolver": "./src/services/account-resolver.ts",
 		"./services/api-client": "./src/services/api-client.ts",
 		"./services/auth-service": "./src/services/auth-service.ts",
@@ -38,6 +39,7 @@
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",
+		"@bittery/sync": "workspace:*",
 		"@bittery/types": "workspace:*",
 		"@tanstack/react-query": "^5.101.4",
 		"zxcvbn": "^4.4.2"

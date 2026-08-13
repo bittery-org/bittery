@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	buildDefaultSyncSourceId,
-	getOrCreateClientId,
 	type SyncSource,
 	selectScopedSyncSources,
-} from "../use-sync";
+} from "../source";
+import { getOrCreateClientId } from "../use-sync";
 
 class MemoryStorage implements Storage {
 	private readonly values = new Map<string, string>();

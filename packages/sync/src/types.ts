@@ -172,13 +172,17 @@ export interface SyncCommandSummary {
 export type { PendingMutation } from "./outbound-queue";
 
 /**
- * Storage interface for platform-specific implementations
+ * Storage seam for platform-specific implementations.
+ *
+ * `update` must serialize overlapping read-modify-write calls for the same key across every
+ * execution context that can mutate that document. The outbound queue relies on this invariant
+ * when one context enqueues while another acknowledges or drains commands.
  */
 export interface SyncStorage {
 	get<T>(key: string): Promise<T | null>;
 	set<T>(key: string, value: T): Promise<void>;
 	remove(key: string): Promise<void>;
-	update?<T>(
+	update<T>(
 		key: string,
 		updater: (current: T | null) => T | null,
 	): Promise<T | null>;

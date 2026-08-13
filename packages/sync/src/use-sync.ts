@@ -8,6 +8,13 @@ import {
 	type QueryInvalidator,
 } from "./query-invalidation";
 import {
+	buildDefaultSyncSourceId,
+	type SyncEventContext,
+	type SyncSource,
+	selectScopedSyncSources,
+} from "./source";
+import { MemorySyncStorage, NamespacedSyncStorage } from "./storage";
+import {
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
@@ -20,82 +27,6 @@ import type {
 	SyncStatus,
 	SyncStorage,
 } from "./types";
-
-class MemorySyncStorage implements SyncStorage {
-	private readonly data = new Map<string, unknown>();
-
-	async get<T>(key: string): Promise<T | null> {
-		return (this.data.get(key) as T | undefined) ?? null;
-	}
-
-	async set<T>(key: string, value: T): Promise<void> {
-		this.data.set(key, value);
-	}
-
-	async remove(key: string): Promise<void> {
-		this.data.delete(key);
-	}
-}
-
-class NamespacedSyncStorage implements SyncStorage {
-	constructor(
-		private readonly storage: SyncStorage,
-		private readonly namespace: string,
-	) {}
-
-	private key(key: string): string {
-		return `${this.namespace}:${key}`;
-	}
-
-	get<T>(key: string): Promise<T | null> {
-		return this.storage.get<T>(this.key(key));
-	}
-
-	set<T>(key: string, value: T): Promise<void> {
-		return this.storage.set(this.key(key), value);
-	}
-
-	remove(key: string): Promise<void> {
-		return this.storage.remove(this.key(key));
-	}
-
-	update<T>(
-		key: string,
-		updater: (current: T | null) => T | null,
-	): Promise<T | null> {
-		if (!this.storage.update) {
-			return this.storage.get<T>(this.key(key)).then(async (current) => {
-				const next = updater(current);
-				if (next === null) {
-					await this.storage.remove(this.key(key));
-				} else {
-					await this.storage.set(this.key(key), next);
-				}
-				return next;
-			});
-		}
-		return this.storage.update(this.key(key), updater);
-	}
-}
-
-export interface SyncSource {
-	id: string;
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
-	apiClient: SyncOrchestratorOptions["apiClient"];
-	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
-	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
-	itemCacheAccountId?: string | null;
-	itemCacheAccountEmail?: string | null;
-	itemCacheServerUrl?: string | null;
-}
-
-export interface SyncEventContext {
-	sourceId: string;
-	accountId?: string | null;
-	accountEmail?: string | null;
-	serverUrl?: string | null;
-}
 
 function aggregateStatuses(
 	statuses: Iterable<SyncStatus>,
@@ -141,30 +72,6 @@ function aggregateStatuses(
 		commandSummary,
 		error: list.find((status) => status.error)?.error ?? null,
 	};
-}
-
-/**
- * `SyncOrchestrator.getDeltaSyncAccountScope()` throws without an accountId, so a source
- * that has not resolved one yet can only produce an orchestrator that fails on connect.
- */
-export function selectScopedSyncSources(sources: SyncSource[]): SyncSource[] {
-	return sources.filter((source) => !!source.itemCacheAccountId);
-}
-
-export function buildDefaultSyncSourceId(
-	serverUrl: string,
-	accountId: string | null | undefined,
-): string {
-	if (!accountId) {
-		return "unscoped";
-	}
-	let normalizedServerUrl = serverUrl.trim().replace(/\/+$/, "");
-	try {
-		normalizedServerUrl = new URL(serverUrl).toString().replace(/\/+$/, "");
-	} catch {
-		// A malformed URL still gets a deterministic isolated scope.
-	}
-	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(normalizedServerUrl)}`;
 }
 
 /**

@@ -34,6 +34,7 @@ function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
 
 class MemoryStorage implements SyncStorage {
 	protected readonly data = new Map<string, unknown>();
+	private updateTail: Promise<void> = Promise.resolve();
 
 	async get<T>(key: string): Promise<T | null> {
 		return (this.data.get(key) as T | undefined) ?? null;
@@ -46,28 +47,6 @@ class MemoryStorage implements SyncStorage {
 	async remove(key: string): Promise<void> {
 		this.data.delete(key);
 	}
-}
-
-class GatedStorage extends MemoryStorage {
-	private releaseWrite: (() => void) | undefined;
-	readonly writeStarted = new Promise<void>((resolve) => {
-		this.releaseWrite = resolve;
-	});
-	private readonly writeGate = Promise.withResolvers<void>();
-
-	override async set<T>(key: string, value: T): Promise<void> {
-		this.releaseWrite?.();
-		await this.writeGate.promise;
-		await super.set(key, structuredClone(value));
-	}
-
-	release(): void {
-		this.writeGate.resolve();
-	}
-}
-
-class AtomicMemoryStorage extends MemoryStorage {
-	private updateTail: Promise<void> = Promise.resolve();
 
 	async update<T>(
 		key: string,
@@ -84,6 +63,50 @@ class AtomicMemoryStorage extends MemoryStorage {
 			}
 		});
 		this.updateTail = update.catch(() => undefined);
+		await update;
+		return structuredClone(result);
+	}
+}
+
+class GatedStorage extends MemoryStorage {
+	private releaseWrite: (() => void) | undefined;
+	readonly writeStarted = new Promise<void>((resolve) => {
+		this.releaseWrite = resolve;
+	});
+	private readonly writeGate = Promise.withResolvers<void>();
+
+	override async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		this.releaseWrite?.();
+		await this.writeGate.promise;
+		return super.update(key, updater);
+	}
+
+	release(): void {
+		this.writeGate.resolve();
+	}
+}
+
+class AtomicMemoryStorage extends MemoryStorage {
+	private atomicUpdateTail: Promise<void> = Promise.resolve();
+
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		let result: T | null = null;
+		const update = this.atomicUpdateTail.then(() => {
+			const current = (this.data.get(key) as T | undefined) ?? null;
+			result = updater(structuredClone(current));
+			if (result === null) {
+				this.data.delete(key);
+			} else {
+				this.data.set(key, structuredClone(result));
+			}
+		});
+		this.atomicUpdateTail = update.catch(() => undefined);
 		await update;
 		return structuredClone(result);
 	}
@@ -1186,6 +1209,16 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(restarted.getPendingForItem("item_a")?.status).toBe("pending");
 	});
 
+	test("removes the queue document after acknowledging its last account command", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+
+		await queue.drain(() => outboundApiClient());
+
+		expect(await storage.get("bittery_pending_mutation_queues_v3")).toBeNull();
+	});
+
 	test("resumes a durable cross-account move through the semantic executor", async () => {
 		const storage = new AtomicMemoryStorage();
 		const writer = new OutboundQueue(storage, "tab_a");
@@ -1680,7 +1713,7 @@ describe("outbound queue multi-account drain isolation", () => {
 
 	for (const [storageKind, createStorage] of [
 		["atomic update", () => new AtomicMemoryStorage()],
-		["set", () => new MemoryStorage()],
+		["memory update", () => new MemoryStorage()],
 	] as const) {
 		for (const terminalStatus of ["conflicted", "failed"] as const) {
 			test(`ACK chaining with ${storageKind} preserves later ${terminalStatus} history`, async () => {
@@ -1729,7 +1762,7 @@ describe("outbound queue multi-account drain isolation", () => {
 	 */
 	for (const [storageKind, createStorage] of [
 		["atomic update", () => new AtomicMemoryStorage()],
-		["set", () => new MemoryStorage()],
+		["memory update", () => new MemoryStorage()],
 	] as const) {
 		test(`does not rebase a chained ciphertext command onto a metadata ACK (${storageKind})`, async () => {
 			const queue = new OutboundQueue(createStorage(), "self_client", {

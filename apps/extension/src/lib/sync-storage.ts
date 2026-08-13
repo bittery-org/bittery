@@ -18,4 +18,22 @@ export class ChromeSyncStorage implements SyncStorage {
 	async remove(key: string): Promise<void> {
 		await chrome.storage.local.remove(key);
 	}
+
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		// Web Locks coordinate the popup and extension service worker, the two contexts that
+		// can mutate the outbound queue document.
+		return navigator.locks.request(`bittery-sync:${key}`, async () => {
+			const current = await this.get<T>(key);
+			const next = updater(current);
+			if (next === null) {
+				await this.remove(key);
+			} else {
+				await this.set(key, next);
+			}
+			return next;
+		});
+	}
 }

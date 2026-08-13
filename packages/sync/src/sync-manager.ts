@@ -1,3 +1,4 @@
+import { MemorySyncStorage } from "./storage";
 import type {
 	ConnectionStatus,
 	SessionRevokedControlPayload,
@@ -9,25 +10,6 @@ import type {
 interface StoredSyncBaseline {
 	initialized: true;
 	cursor: SyncCursor | null;
-}
-
-/**
- * Default in-memory storage implementation
- */
-class MemoryStorage implements SyncStorage {
-	private data = new Map<string, unknown>();
-
-	async get<T>(key: string): Promise<T | null> {
-		return (this.data.get(key) as T) || null;
-	}
-
-	async set<T>(key: string, value: T): Promise<void> {
-		this.data.set(key, value);
-	}
-
-	async remove(key: string): Promise<void> {
-		this.data.delete(key);
-	}
 }
 
 /**
@@ -66,7 +48,7 @@ export class SyncManager {
 	constructor(options: SyncManagerOptions) {
 		this.clientId = options.clientId;
 		this.openSyncEvents = options.openSyncEvents;
-		this.storage = options.storage || new MemoryStorage();
+		this.storage = options.storage || new MemorySyncStorage();
 		this.onStatusChange = options.onStatusChange;
 		this.onSessionRevoked = options.onSessionRevoked;
 		this.onSyncPing = options.onSyncPing;

@@ -1,30 +1,17 @@
-import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
-import {
-	createInitialSyncBootstrap,
-	createStagedFullRefresh,
-} from "@bittery/core/services/staged-full-refresh";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import {
-	getOrCreateClientId,
-	type OutboundQueueApiClient,
-	type SyncStorage,
-	useSync,
-} from "@bittery/sync";
+import { createAccountSync } from "@bittery/core/services/account-sync";
+import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
-import type { QueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { getServerUrl } from "@/lib/auth-server";
 import { crypto } from "@/lib/crypto";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import {
-	forgetActiveSession,
 	getActiveAccountIdSnapshot,
-	initializeStorage,
-	itemCache,
-	storage,
 	subscribeActiveAccountId,
 } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
+
+const NO_AUTH_TOKEN = async (): Promise<null> => null;
 
 /**
  * Get or create a unique client ID for this browser session
@@ -81,6 +68,8 @@ class WebSyncStorage implements SyncStorage {
 			return updater(null);
 		}
 		const storageKey = this.getStorageKey(key);
+		// Web Locks span every same-origin tab, which are all the contexts that can enqueue
+		// or acknowledge this browser's queue document.
 		return navigator.locks.request(`bittery-sync:${storageKey}`, async () => {
 			const stored = window.localStorage.getItem(storageKey);
 			let current: T | null = null;
@@ -107,17 +96,10 @@ class WebSyncStorage implements SyncStorage {
  */
 export function useWebSync(queryClient: QueryClient, enabled = true) {
 	const { m } = useI18n();
-	const serverUrl = getServerUrl();
 	const clientId = useMemo(() => getClientId(), []);
 	const syncStorage = useMemo(() => new WebSyncStorage(), []);
-	const vaultCoordinator = useMemo(
-		() =>
-			getOrCreateVaultRepositoryCoordinator(
-				crypto,
-				createVaultCrypto({ crypto, storage }),
-				storage,
-				itemCache,
-			),
+	const accountSync = useMemo(
+		() => createAccountSync({ crypto, lifecycle: lifecycleDeps }),
 		[],
 	);
 
@@ -132,50 +114,30 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		getActiveAccountIdSnapshot,
 		getActiveAccountIdSnapshot,
 	);
-
-	const getAuthTokenAsync = useCallback(async () => {
-		await initializeStorage();
-		return (await storage.getAuthToken()) || null;
-	}, []);
-
-	const onSessionRevoked = useCallback(async () => {
-		// Server-side revocation is a sign-out, not a lock: the quick-unlock prompt must
-		// not reappear for a session the server has already killed.
-		await forgetActiveSession();
-		queryClient.clear();
-
-		if (
-			typeof window !== "undefined" &&
-			window.location.pathname !== "/login"
-		) {
-			window.location.href = "/login";
-		}
-	}, [queryClient]);
-	// A queued mutation carries the account that produced it, so the drain must
-	// authenticate as that account rather than as whichever one is active now.
-	const getClientForAccount = useCallback(
-		async (accountId: string): Promise<OutboundQueueApiClient> => {
-			await initializeStorage();
-			const client = await createStoredAccountApiClient(
-				storage,
-				accountId,
+	const { data: assembly = null, isFetched } = useQuery({
+		queryKey: ["account-sync-assembly", clientId, syncAccountId],
+		queryFn: () =>
+			accountSync.assemble({
 				clientId,
-			);
-			if (!client) {
-				throw new Error(`No API client for account ${accountId}`);
-			}
-			return client;
-		},
-		[clientId],
-	);
+				activeAccountId: syncAccountId,
+			}),
+	});
 
-	const refreshFromServer = useMemo(
-		() => createStagedFullRefresh(storage, vaultCoordinator),
-		[vaultCoordinator],
-	);
-	const initializeFromServer = useMemo(
-		() => createInitialSyncBootstrap(storage, vaultCoordinator),
-		[vaultCoordinator],
+	const onSessionRevoked = useCallback(
+		async (payload: { sessionId: string }) => {
+			// Server-side revocation is a sign-out, not a lock: the quick-unlock prompt must
+			// not reappear for a session the server has already killed.
+			await accountSync.invalidateSession(payload);
+			queryClient.clear();
+
+			if (
+				typeof window !== "undefined" &&
+				window.location.pathname !== "/login"
+			) {
+				window.location.href = "/login";
+			}
+		},
+		[accountSync, queryClient],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.error(m.sync_command_terminal_error(), {
@@ -184,17 +146,16 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 	}, [m]);
 
 	return useSync({
-		serverUrl,
-		getAuthToken: getAuthTokenAsync,
+		serverUrl: assembly?.serverUrl ?? "",
+		getAuthToken: assembly?.getAuthToken ?? NO_AUTH_TOKEN,
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled,
-		itemCacheAdapter: vaultCoordinator,
-		itemCacheAccountId: syncAccountId,
-		getClientForAccount,
-		refreshFromServer,
-		initializeFromServer,
+		enabled: enabled && isFetched && assembly !== null,
+		itemCacheAdapter: assembly?.itemCacheAdapter,
+		sources: assembly?.sources,
+		getClientForAccount: assembly?.getClientForAccount,
+		onEventProcessed: assembly?.onEventProcessed,
 		onSessionRevoked,
 		onTerminalCommandFailure,
 	});

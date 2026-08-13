@@ -1,15 +1,7 @@
 import {
-	AccountResolver,
-	createStoredAccountApiClient,
-} from "@bittery/core/services/account-resolver";
-import {
-	createInitialSyncBootstrap,
-	createStagedFullRefresh,
-} from "@bittery/core/services/staged-full-refresh";
-import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import { createAccountApiClient } from "@bittery/shared/api-client-factory";
+	type AccountSyncAssembly,
+	createAccountSync,
+} from "@bittery/core/services/account-sync";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
@@ -22,19 +14,9 @@ import {
 	getOrCreateMobileSyncClientId,
 } from "../lib/sync-client-id";
 import { useI18n } from "../providers/i18n-provider";
-import { itemCache, storage } from "../services/storage";
+import { lifecycleDeps } from "../services/lifecycle";
 
-/**
- * `accountId` is deliberately non-nullable.
- *
- * It becomes `SyncSource.itemCacheAccountId`, and every `ItemCache` method now requires an
- * `accountId` argument — there is no account-less collection to fall back to. Sync is simply
- * not enabled until a real account is resolved.
- */
-interface SyncConnectionContext {
-	accountId: string;
-	serverUrl: string;
-}
+const NO_AUTH_TOKEN = async (): Promise<null> => null;
 
 /**
  * React Native-compatible sync storage implementation using SQLite
@@ -65,42 +47,42 @@ class ReactNativeSyncStorage implements SyncStorage {
 		const db = await getMobileSyncDb();
 		await db.runAsync("DELETE FROM sync_storage WHERE key = ?", [key]);
 	}
-}
 
-/**
- * Resolve the best available account-scoped sync context.
- * In multi-account mode we prefer the active single account first, then fall
- * back to other known accounts.
- */
-async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null> {
-	const [activeAccount, accounts] = await Promise.all([
-		storage.getActiveAccount(),
-		storage.getAccountsList(),
-	]);
-
-	const candidateIds: string[] = [];
-	if (activeAccount) {
-		candidateIds.push(activeAccount);
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		const db = await getMobileSyncDb();
+		let result: T | null = null;
+		// The exclusive SQLite transaction owns coordination for every connection to this
+		// database, not just calls made by this React hook instance.
+		await db.withExclusiveTransactionAsync(async (transaction) => {
+			const stored = await transaction.getFirstAsync<{ value: string }>(
+				"SELECT value FROM sync_storage WHERE key = ?",
+				[key],
+			);
+			let current: T | null = null;
+			if (stored) {
+				try {
+					current = JSON.parse(stored.value) as T;
+				} catch {
+					current = null;
+				}
+			}
+			result = updater(current);
+			if (result === null) {
+				await transaction.runAsync("DELETE FROM sync_storage WHERE key = ?", [
+					key,
+				]);
+			} else {
+				await transaction.runAsync(
+					"INSERT OR REPLACE INTO sync_storage (key, value) VALUES (?, ?)",
+					[key, JSON.stringify(result)],
+				);
+			}
+		});
+		return result;
 	}
-	for (const account of accounts) {
-		if (!candidateIds.includes(account.accountId)) {
-			candidateIds.push(account.accountId);
-		}
-	}
-
-	for (const accountId of candidateIds) {
-		const [token, url] = await Promise.all([
-			storage.getAuthToken(accountId),
-			storage.getServerUrl(accountId),
-		]);
-		if (token && url) {
-			return { accountId, serverUrl: url };
-		}
-	}
-
-	// No account-less fallback: a context without an accountId could not name an
-	// item-cache collection anyway.
-	return null;
 }
 
 /**
@@ -110,9 +92,12 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	const { m } = useI18n();
 	const { toast } = useToast();
 	const [clientId, setClientId] = useState<string>("");
-	const [serverUrl, setServerUrl] = useState<string>("");
-	const [syncAccountId, setSyncAccountId] = useState<string | null>(null);
+	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
+	const accountSync = useMemo(
+		() => createAccountSync({ crypto, lifecycle: lifecycleDeps }),
+		[],
+	);
 
 	// Initialize and keep sync connection context fresh.
 	useEffect(() => {
@@ -125,16 +110,13 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			}
 			resolving = true;
 			try {
-				const [id, context] = await Promise.all([
-					getOrCreateMobileSyncClientId(),
-					resolveMobileSyncContext(),
-				]);
+				const id = await getOrCreateMobileSyncClientId();
+				const resolved = await accountSync.assemble({ clientId: id });
 				if (!mounted) {
 					return;
 				}
 				setClientId(id);
-				setServerUrl(context?.serverUrl ?? "");
-				setSyncAccountId(context?.accountId ?? null);
+				setAssembly((current) => (current === resolved ? current : resolved));
 				setIsInitialized(true);
 			} finally {
 				resolving = false;
@@ -163,81 +145,20 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			appStateSubscription.remove();
 			clearInterval(interval);
 		};
-	}, []);
+	}, [accountSync]);
 
-	const getAuthToken = useCallback(async () => {
-		return storage.getAuthToken(syncAccountId ?? undefined);
-	}, [syncAccountId]);
-	const getClientForAccount = useCallback(
-		async (accountId: string) => {
-			const client = await createStoredAccountApiClient(
-				storage,
-				accountId,
-				clientId,
-			);
-			if (!client) throw new Error(`No API client for account ${accountId}`);
-			return client;
-		},
-		[clientId],
-	);
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
-	const vaultCoordinator = useMemo(
-		() =>
-			getOrCreateVaultRepositoryCoordinator(
-				crypto,
-				createVaultCrypto({ crypto, storage }),
-				storage,
-				itemCache,
-			),
-		[],
-	);
-
-	const refreshFromServer = useMemo(
-		() => createStagedFullRefresh(storage, vaultCoordinator),
-		[vaultCoordinator],
-	);
-	const initializeFromServer = useMemo(
-		() => createInitialSyncBootstrap(storage, vaultCoordinator),
-		[vaultCoordinator],
-	);
-
-	const onTravelModeEvent = useCallback(
-		async (event: { type: string; metadata?: Record<string, unknown> }) => {
-			if (!syncAccountId || event.type !== "travel_mode_updated") {
+	const onSessionRevoked = useCallback(
+		async (payload: { sessionId: string }) => {
+			const outcome = await accountSync.invalidateSession(payload);
+			if (outcome.affected.length === 0) {
 				return;
 			}
-			const [token, accountServerUrl, account] = await Promise.all([
-				storage.getAuthToken(syncAccountId),
-				storage.getServerUrl(syncAccountId),
-				storage.getAccountMetadata(syncAccountId),
-			]);
-			if (!token) {
-				return;
-			}
-			const apiClient = createAccountApiClient(
-				token,
-				accountServerUrl || serverUrl || "http://localhost:3000",
-				undefined,
-				undefined,
-				{
-					insecureTransportConfirmed:
-						account?.insecureTransportConfirmed === true,
-				},
-			);
-			const accounts = new AccountResolver(storage);
-			await handleTravelModeSyncEvent(
-				event,
-				syncAccountId,
-				storage,
-				itemCache,
-				vaultCoordinator,
-				{
-					apiClient,
-					accounts,
-				},
-			);
+			await queryClient.cancelQueries();
+			queryClient.clear();
+			setAssembly(null);
 		},
-		[serverUrl, syncAccountId, vaultCoordinator],
+		[accountSync, queryClient],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.show({
@@ -249,21 +170,18 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	}, [m, toast]);
 
 	const syncState = useSync({
-		serverUrl,
-		getAuthToken,
+		serverUrl: assembly?.serverUrl ?? "",
+		getAuthToken: assembly?.getAuthToken ?? NO_AUTH_TOKEN,
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled:
-			enabled && isInitialized && !!serverUrl && !!clientId && !!syncAccountId,
+		enabled: enabled && isInitialized && !!clientId && assembly !== null,
 		realtimeEnabled: true,
-		itemCacheAdapter: vaultCoordinator,
-		itemCacheAccountId: syncAccountId,
-		itemCacheServerUrl: syncAccountId ? serverUrl : null,
-		getClientForAccount,
-		refreshFromServer,
-		initializeFromServer,
-		onEventProcessed: onTravelModeEvent,
+		itemCacheAdapter: assembly?.itemCacheAdapter,
+		sources: assembly?.sources,
+		getClientForAccount: assembly?.getClientForAccount,
+		onSessionRevoked,
+		onEventProcessed: assembly?.onEventProcessed,
 		onTerminalCommandFailure,
 	});
 
