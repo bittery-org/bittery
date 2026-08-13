@@ -729,16 +729,16 @@ export function ubrn_uniffi_bittery_crypto_api_checksum_func_initialize() {
 /**
  * @returns {number}
  */
-export function ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation() {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation();
+export function ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() {
+    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item();
     return ret;
 }
 
 /**
  * @returns {number}
  */
-export function ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item();
+export function ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key() {
+    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key();
     return ret;
 }
 
@@ -779,14 +779,6 @@ export function ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key() {
  */
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() {
     const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key();
-    return ret;
-}
-
-/**
- * @returns {number}
- */
-export function ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data() {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data();
     return ret;
 }
 
@@ -1297,29 +1289,6 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_initialize() {
 }
 
 /**
- * @param {bigint} old_vault_key
- * @param {Uint8Array} members
- * @param {Uint8Array} items
- * @param {Uint8Array} vault_id
- * @param {bigint} key_version
- * @param {Uint8Array} current_user_id
- * @param {bigint} master_unlock_key
- * @returns {bigint}
- */
-export function ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(old_vault_key, members, items, vault_id, key_version, current_user_id, master_unlock_key) {
-    const ptr0 = passArray8ToWasm0(members, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(items, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(vault_id, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(current_user_id, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(old_vault_key, ptr0, len0, ptr1, len1, ptr2, len2, key_version, ptr3, len3, master_unlock_key);
-    return BigInt.asUintN(64, ret);
-}
-
-/**
  * @param {Uint8Array} item
  * @param {bigint} old_vault_key
  * @param {bigint} new_vault_key
@@ -1329,6 +1298,25 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(item, old
     const ptr0 = passArray8ToWasm0(item, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(ptr0, len0, old_vault_key, new_vault_key);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * @param {Uint8Array} encrypted_attachment_key
+ * @param {bigint} old_vault_key
+ * @param {bigint} new_vault_key
+ * @param {Uint8Array} old_context
+ * @param {Uint8Array} new_context
+ * @returns {bigint}
+ */
+export function ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(encrypted_attachment_key, old_vault_key, new_vault_key, old_context, new_context) {
+    const ptr0 = passArray8ToWasm0(encrypted_attachment_key, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(old_context, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(new_context, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(ptr0, len0, old_vault_key, new_vault_key, ptr1, len1, ptr2, len2);
     return BigInt.asUintN(64, ret);
 }
 
@@ -1405,17 +1393,6 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(rec
 }
 
 /**
- * @param {Uint8Array} members
- * @returns {bigint}
- */
-export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(members) {
-    const ptr0 = passArray8ToWasm0(members, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(ptr0, len0);
-    return BigInt.asUintN(64, ret);
-}
-
-/**
  * @param {Uint8Array} secret_key
  * @returns {bigint}
  */
@@ -1446,10 +1423,13 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session(cli
 /**
  * @param {bigint} key
  * @param {bigint} wrapping_key
+ * @param {Uint8Array} context
  * @returns {bigint}
  */
-export function ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key) {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key);
+export function ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key, context) {
+    const ptr0 = passArray8ToWasm0(context, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key, ptr0, len0);
     return BigInt.asUintN(64, ret);
 }
 

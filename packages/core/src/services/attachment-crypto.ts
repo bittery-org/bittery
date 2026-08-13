@@ -1,11 +1,9 @@
 /**
  * Shared, platform-agnostic attachment crypto helpers.
  *
- * Attachments are encrypted client-side with the VAULT KEY (the same key used
- * for the item body). Each attachment has THREE independent ciphertexts — blob,
- * name and content-type — each bound to its own encryption context (AAD) built
- * from `vaultId`, `entityId = attachmentKey (= storageKey)`, `userId` and a
- * per-field `entityType`. The blob ciphertext is stored in object storage as a
+ * Each Attachment has a random key wrapped under its Vault key. Its blob, name
+ * and content type are encrypted under that Attachment key, each bound to an
+ * AAD context built from its Vault and Attachment identities. The blob ciphertext is stored in object storage as a
  * JSON envelope: `JSON.stringify({ ciphertext, iv, algorithm })`.
  *
  * This module extracts the "subtle" pieces (envelope encode/parse, base64
@@ -17,12 +15,71 @@
 import type { EncryptedData, KeyRef } from "@bittery/crypto-port";
 import type { VaultCrypto } from "./vault-crypto";
 
+export const ATTACHMENT_ENVELOPE_VERSION = 1;
+
 /** Identifies the vault/account/attachment an encryption context is bound to. */
 export interface AttachmentCryptoScope {
 	vaultId: string;
-	/** The attachment storage key (server-minted, HMAC-signed). */
-	attachmentKey: string;
+	attachmentId: string;
 	userId: string;
+	envelopeVersion: number;
+}
+
+/** The authenticated Attachment-key envelope persisted with an Attachment. */
+export interface AttachmentKeyEnvelope {
+	encryptedAttachmentKey: string;
+	attachmentKeyIv: string;
+	attachmentKeyAlgorithm: string;
+	envelopeVersion: number;
+}
+
+/** A fresh Attachment key and its Vault-key envelope. The caller owns `key`. */
+export async function createAttachmentKeyEnvelope(
+	vaultCrypto: VaultCrypto,
+	vaultKey: KeyRef,
+	scope: AttachmentCryptoScope,
+): Promise<{ key: KeyRef; encryptedAttachmentKey: AttachmentKeyEnvelope }> {
+	const attachmentKey = await vaultCrypto.generateAttachmentKey();
+	try {
+		const encrypted = await vaultCrypto.wrapAttachmentKey(
+			attachmentKey,
+			vaultKey,
+			scope,
+		);
+		return {
+			key: attachmentKey,
+			encryptedAttachmentKey: {
+				encryptedAttachmentKey: encrypted.ciphertext,
+				attachmentKeyIv: encrypted.iv,
+				attachmentKeyAlgorithm: encrypted.algorithm,
+				envelopeVersion: scope.envelopeVersion,
+			},
+		};
+	} catch (error) {
+		await vaultCrypto.destroyAttachmentKey(attachmentKey);
+		throw error;
+	}
+}
+
+/** Opens the stored Attachment-key envelope. The caller owns the returned key. */
+export async function unwrapAttachmentKey(
+	vaultCrypto: VaultCrypto,
+	vaultKey: KeyRef,
+	scope: AttachmentCryptoScope,
+	envelope: AttachmentKeyEnvelope,
+): Promise<KeyRef> {
+	if (envelope.envelopeVersion !== scope.envelopeVersion) {
+		throw new Error("Attachment-key envelope version mismatch");
+	}
+	return vaultCrypto.unwrapAttachmentKey(
+		{
+			ciphertext: envelope.encryptedAttachmentKey,
+			iv: envelope.attachmentKeyIv,
+			algorithm: envelope.attachmentKeyAlgorithm,
+		},
+		vaultKey,
+		scope,
+	);
 }
 
 /**

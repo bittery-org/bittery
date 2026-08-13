@@ -136,7 +136,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		const vaultKey = await port.importKey(new Uint8Array(32).fill(7));
 		const sealed = await port.encrypt("secret", vaultKey, null);
 		await port.decrypt(sealed, vaultKey, null);
-		const wrapped = await port.wrapKey(vaultKey, derived.masterUnlockKey);
+		const wrapped = await port.wrapKey(vaultKey, derived.masterUnlockKey, null);
 		await port.unwrapKey(wrapped, derived.masterUnlockKey, null);
 		await port.encryptVaultKeyWithMuk(
 			vaultKey,

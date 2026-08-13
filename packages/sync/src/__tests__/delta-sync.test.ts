@@ -145,6 +145,38 @@ describe("performDeltaSync vault mapping", () => {
 
 		expect(vaultKeys[0]?.vaultType).toBe("team");
 	});
+
+	it("hydrates existing Items and Attachments when Vault access is granted", async () => {
+		const attachment = {
+			id: "attachment_1",
+			itemId: "item_1",
+			vaultId: "vault_1",
+			storageKey: "attachments/item_1/file.enc",
+			encryptedAttachmentKey: "wrapped-key",
+			attachmentKeyIv: "key-iv",
+			attachmentKeyAlgorithm: "AES-GCM-AAD-V1",
+			envelopeVersion: 1,
+			encryptedName: "encrypted-name",
+			encryptedContentType: "encrypted-type",
+			encryptionIv: "name-iv",
+			encryptedContentTypeIv: "type-iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+			fileSize: 42,
+			uploadedBy: "member_1",
+			createdAt: "2026-08-01T00:00:00.000Z",
+		};
+		const api = client();
+		api.items.listInVault = async () =>
+			({
+				data: [{ ...serverItem(), attachments: [attachment] }],
+			}) as never;
+		const { cache, items, vaultKeys } = recordingCache();
+
+		await performDeltaSync(api, cache, event(), "acc_1");
+
+		expect(vaultKeys).toHaveLength(1);
+		expect(items[0]?.attachments).toEqual([attachment]);
+	});
 });
 
 describe("performDeltaSync Item encryption context", () => {
@@ -244,5 +276,21 @@ describe("performDeltaSync Item encryption context", () => {
 
 		expect(items[0]?.encryptionVersion).toBe(2);
 		expect(items[0]?.encryptedByUserId).toBe("member_1");
+	});
+
+	it("refreshes re-encrypted items after a Vault key rotation", async () => {
+		const api = client();
+		api.items.listInVault = async () => ({ data: [serverItem()] }) as never;
+		const { cache, items, vaultKeys } = recordingCache();
+
+		await performDeltaSync(
+			api,
+			cache,
+			event({ type: "vault_key_rotated", entityType: "vault_key" }),
+			"acc_1",
+		);
+
+		expect(vaultKeys).toHaveLength(1);
+		expect(items[0]?.encryptedData).toBe(serverItem().encryptedData);
 	});
 });

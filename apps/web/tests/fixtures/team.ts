@@ -8,7 +8,7 @@
  * has a `team_id`, and every ordinary signup creates a team of one.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
-import { type TestUser, waitForAppReady } from "./auth";
+import { readSecretKey, type TestUser, waitForAppReady } from "./auth";
 import { mailOutboxNow, waitForCode } from "./mail-outbox";
 import { uiText } from "./messages";
 import { cssAttributeValue, gotoRoute, VAULT_READY_TIMEOUT_MS } from "./vault";
@@ -106,7 +106,7 @@ export async function signUpFromInvite(
 	page: Page,
 	inviteUrl: string,
 	invitee: TestUser,
-): Promise<void> {
+): Promise<TestUser> {
 	const form = page.getByTestId("signup-form");
 	await openInviteLink(page, inviteUrl, form);
 	await expect(form.locator("#email")).toHaveValue(invitee.email);
@@ -135,4 +135,5 @@ export async function signUpFromInvite(
 	// on the team page rather than back on the invitation.
 	await page.waitForURL("**/team", { timeout: VAULT_READY_TIMEOUT_MS });
 	await waitForAppReady(page);
+	return { ...invitee, secretKey: await readSecretKey(page) };
 }

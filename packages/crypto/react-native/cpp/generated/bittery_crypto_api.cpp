@@ -289,19 +289,17 @@ extern "C" {
     );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_initialize(
     );
-    /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_perform_key_rotation(
-        /*handle*/ uint64_t old_vault_key, 
-        RustBuffer members, 
-        RustBuffer items, 
-        RustBuffer vault_id, 
-        uint64_t key_version, 
-        RustBuffer current_user_id, 
-        /*handle*/ uint64_t master_unlock_key
-    );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_re_encrypt_item(
         RustBuffer item, 
         /*handle*/ uint64_t old_vault_key, 
         /*handle*/ uint64_t new_vault_key
+    );
+    /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(
+        RustBuffer encrypted_attachment_key, 
+        /*handle*/ uint64_t old_vault_key, 
+        /*handle*/ uint64_t new_vault_key, 
+        RustBuffer old_context, 
+        RustBuffer new_context
     );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_rsa_decrypt(
         RustBuffer ciphertext, 
@@ -325,9 +323,6 @@ extern "C" {
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_validate_recovery_key(
         RustBuffer recovery_key
     );
-    /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_validate_rotation_data(
-        RustBuffer members
-    );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_validate_secret_key(
         RustBuffer secret_key
     );
@@ -338,7 +333,8 @@ extern "C" {
     );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_func_wrap_key(
         /*handle*/ uint64_t key, 
-        /*handle*/ uint64_t wrapping_key
+        /*handle*/ uint64_t wrapping_key, 
+        RustBuffer context
     );
     RustBuffer ffi_bittery_crypto_api_rustbuffer_alloc(
         uint64_t size, 
@@ -597,9 +593,9 @@ extern "C" {
     );
     uint16_t uniffi_bittery_crypto_api_checksum_func_initialize(
     );
-    uint16_t uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(
-    );
     uint16_t uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(
+    );
+    uint16_t uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(
     );
     uint16_t uniffi_bittery_crypto_api_checksum_func_rsa_decrypt(
     );
@@ -610,8 +606,6 @@ extern "C" {
     uint16_t uniffi_bittery_crypto_api_checksum_func_unwrap_key(
     );
     uint16_t uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(
-    );
-    uint16_t uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(
     );
     uint16_t uniffi_bittery_crypto_api_checksum_func_validate_secret_key(
     );
@@ -2427,20 +2421,20 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
             return this->cpp_uniffi_bittery_crypto_api_fn_func_initialize(rt, thisVal, args, count);
         }
     );
-    props["ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation"),
-        7,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(rt, thisVal, args, count);
-        }
-    );
     props["ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item"),
         3,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(rt, thisVal, args, count);
+        }
+    );
+    props["ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key"),
+        5,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(rt, thisVal, args, count);
         }
     );
     props["ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt"] = jsi::Function::createFromHostFunction(
@@ -2483,14 +2477,6 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
             return this->cpp_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(rt, thisVal, args, count);
         }
     );
-    props["ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data"),
-        1,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(rt, thisVal, args, count);
-        }
-    );
     props["ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key"),
@@ -2510,7 +2496,7 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
     props["ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key"),
-        2,
+        3,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_bittery_crypto_api_fn_func_wrap_key(rt, thisVal, args, count);
         }
@@ -3139,20 +3125,20 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
             return this->cpp_uniffi_bittery_crypto_api_checksum_func_initialize(rt, thisVal, args, count);
         }
     );
-    props["ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation"),
-        0,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(rt, thisVal, args, count);
-        }
-    );
     props["ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item"),
         0,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(rt, thisVal, args, count);
+        }
+    );
+    props["ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key"),
+        0,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(rt, thisVal, args, count);
         }
     );
     props["ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_decrypt"] = jsi::Function::createFromHostFunction(
@@ -3193,14 +3179,6 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
         0,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(rt, thisVal, args, count);
-        }
-    );
-    props["ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data"),
-        0,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(rt, thisVal, args, count);
         }
     );
     props["ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key"] = jsi::Function::createFromHostFunction(
@@ -3790,15 +3768,15 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_initial
         
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_func_perform_key_rotation(uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[0]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[1]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[2]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[3]), uniffi_jsi::Bridging<uint64_t>::fromJs(rt, callInvoker, args[4]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[5]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[6])
+jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_bittery_crypto_api_fn_func_re_encrypt_item(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[2])
         );
 
         
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_func_re_encrypt_item(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[2])
+jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[2]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[3]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[4])
         );
 
         
@@ -3839,13 +3817,6 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_validat
         
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_func_validate_rotation_data(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0])
-        );
-
-        
-        return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
-}
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_validate_secret_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         auto value = uniffi_bittery_crypto_api_fn_func_validate_secret_key(uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0])
         );
@@ -3861,7 +3832,7 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_verify_
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_func_wrap_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_func_wrap_key(uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1])
+        auto value = uniffi_bittery_crypto_api_fn_func_wrap_key(uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[0]), uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[1]), uniffi::bittery_crypto_api::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[2])
         );
 
         
@@ -4449,15 +4420,15 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_i
         
         return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
 }
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(
+jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(
         );
 
         
         return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
 }
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(
+jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(
         );
 
         
@@ -4493,13 +4464,6 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_u
 }
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         auto value = uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(
-        );
-
-        
-        return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
-}
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(
         );
 
         

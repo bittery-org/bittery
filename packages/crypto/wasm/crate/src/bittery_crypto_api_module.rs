@@ -141,19 +141,17 @@ extern "C" {
     fn uniffi_bittery_crypto_api_fn_func_generate_uuid() -> u64;
     fn uniffi_bittery_crypto_api_fn_func_import_key(key: u::RustBuffer) -> u64;
     fn uniffi_bittery_crypto_api_fn_func_initialize() -> u64;
-    fn uniffi_bittery_crypto_api_fn_func_perform_key_rotation(
-        old_vault_key: u64,
-        members: u::RustBuffer,
-        items: u::RustBuffer,
-        vault_id: u::RustBuffer,
-        key_version: u64,
-        current_user_id: u::RustBuffer,
-        master_unlock_key: u64,
-    ) -> u64;
     fn uniffi_bittery_crypto_api_fn_func_re_encrypt_item(
         item: u::RustBuffer,
         old_vault_key: u64,
         new_vault_key: u64,
+    ) -> u64;
+    fn uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(
+        encrypted_attachment_key: u::RustBuffer,
+        old_vault_key: u64,
+        new_vault_key: u64,
+        old_context: u::RustBuffer,
+        new_context: u::RustBuffer,
     ) -> u64;
     fn uniffi_bittery_crypto_api_fn_func_rsa_decrypt(
         ciphertext: u::RustBuffer,
@@ -177,9 +175,6 @@ extern "C" {
     fn uniffi_bittery_crypto_api_fn_func_validate_recovery_key(
         recovery_key: u::RustBuffer,
     ) -> u64;
-    fn uniffi_bittery_crypto_api_fn_func_validate_rotation_data(
-        members: u::RustBuffer,
-    ) -> u64;
     fn uniffi_bittery_crypto_api_fn_func_validate_secret_key(
         secret_key: u::RustBuffer,
     ) -> u64;
@@ -188,7 +183,11 @@ extern "C" {
         session: u::RustBuffer,
         server_session_proof: u::RustBuffer,
     ) -> u64;
-    fn uniffi_bittery_crypto_api_fn_func_wrap_key(key: u64, wrapping_key: u64) -> u64;
+    fn uniffi_bittery_crypto_api_fn_func_wrap_key(
+        key: u64,
+        wrapping_key: u64,
+        context: u::RustBuffer,
+    ) -> u64;
     fn ffi_bittery_crypto_api_rust_future_poll_u8(
         handle: u64,
         callback: rust_future_continuation_callback::FnSig,
@@ -351,14 +350,13 @@ extern "C" {
     fn uniffi_bittery_crypto_api_checksum_func_generate_uuid() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_import_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_initialize() -> u16;
-    fn uniffi_bittery_crypto_api_checksum_func_perform_key_rotation() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() -> u16;
+    fn uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_rsa_decrypt() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_rsa_encrypt() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_unwrap_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() -> u16;
-    fn uniffi_bittery_crypto_api_checksum_func_validate_rotation_data() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_validate_secret_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_verify_server_session() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_wrap_key() -> u16;
@@ -801,27 +799,6 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_initialize() -> js::Handle 
     uniffi_bittery_crypto_api_fn_func_initialize().into_js()
 }
 #[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(
-    old_vault_key: js::Handle,
-    members: js::ForeignBytes,
-    items: js::ForeignBytes,
-    vault_id: js::ForeignBytes,
-    key_version: js::UInt64,
-    current_user_id: js::ForeignBytes,
-    master_unlock_key: js::Handle,
-) -> js::Handle {
-    uniffi_bittery_crypto_api_fn_func_perform_key_rotation(
-            u64::into_rust(old_vault_key),
-            u::RustBuffer::into_rust(members),
-            u::RustBuffer::into_rust(items),
-            u::RustBuffer::into_rust(vault_id),
-            u64::into_rust(key_version),
-            u::RustBuffer::into_rust(current_user_id),
-            u64::into_rust(master_unlock_key),
-        )
-        .into_js()
-}
-#[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(
     item: js::ForeignBytes,
     old_vault_key: js::Handle,
@@ -831,6 +808,23 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(
             u::RustBuffer::into_rust(item),
             u64::into_rust(old_vault_key),
             u64::into_rust(new_vault_key),
+        )
+        .into_js()
+}
+#[wasm_bindgen]
+pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(
+    encrypted_attachment_key: js::ForeignBytes,
+    old_vault_key: js::Handle,
+    new_vault_key: js::Handle,
+    old_context: js::ForeignBytes,
+    new_context: js::ForeignBytes,
+) -> js::Handle {
+    uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(
+            u::RustBuffer::into_rust(encrypted_attachment_key),
+            u64::into_rust(old_vault_key),
+            u64::into_rust(new_vault_key),
+            u::RustBuffer::into_rust(old_context),
+            u::RustBuffer::into_rust(new_context),
         )
         .into_js()
 }
@@ -894,15 +888,6 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(
         .into_js()
 }
 #[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(
-    members: js::ForeignBytes,
-) -> js::Handle {
-    uniffi_bittery_crypto_api_fn_func_validate_rotation_data(
-            u::RustBuffer::into_rust(members),
-        )
-        .into_js()
-}
-#[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key(
     secret_key: js::ForeignBytes,
 ) -> js::Handle {
@@ -928,10 +913,12 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session(
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(
     key: js::Handle,
     wrapping_key: js::Handle,
+    context: js::ForeignBytes,
 ) -> js::Handle {
     uniffi_bittery_crypto_api_fn_func_wrap_key(
             u64::into_rust(key),
             u64::into_rust(wrapping_key),
+            u::RustBuffer::into_rust(context),
         )
         .into_js()
 }
@@ -1479,12 +1466,12 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_initialize() -> js::U
     uniffi_bittery_crypto_api_checksum_func_initialize().into_js()
 }
 #[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation() -> js::UInt16 {
-    uniffi_bittery_crypto_api_checksum_func_perform_key_rotation().into_js()
-}
-#[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() -> js::UInt16 {
     uniffi_bittery_crypto_api_checksum_func_re_encrypt_item().into_js()
+}
+#[wasm_bindgen]
+pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key() -> js::UInt16 {
+    uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key().into_js()
 }
 #[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_decrypt() -> js::UInt16 {
@@ -1505,10 +1492,6 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key() -> js::U
 #[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() -> js::UInt16 {
     uniffi_bittery_crypto_api_checksum_func_validate_recovery_key().into_js()
-}
-#[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data() -> js::UInt16 {
-    uniffi_bittery_crypto_api_checksum_func_validate_rotation_data().into_js()
 }
 #[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key() -> js::UInt16 {

@@ -93,6 +93,35 @@ fn closed_sets_keep_their_wire_strings() {
         ItemCategory,
         ["login", "secure-note", "credit-card", "identity", "totp"]
     );
+    assert_wire_labels!(
+        KeyRotationReason,
+        ["member_removed", "scheduled", "security_breach", "manual"]
+    );
+    assert_wire_labels!(
+        VaultKeyRotationPlanState,
+        [
+            "preparing",
+            "ready",
+            "completed",
+            "stale",
+            "failed",
+            "abandoned",
+            "expired"
+        ]
+    );
+    assert_wire_labels!(
+        VaultKeyRotationStaleReason,
+        [
+            "vault_version",
+            "member_set",
+            "item_state",
+            "attachment_state"
+        ]
+    );
+    assert_wire_labels!(
+        VaultKeyRotationManifestKind,
+        ["member", "item", "attachment"]
+    );
 }
 
 /// Reads every `CREATE TYPE ... AS ENUM (...)` and `ALTER TYPE ... ADD VALUE` label.
@@ -168,6 +197,10 @@ fn closed_sets_match_the_postgres_enums() {
     assert_matches_postgres!(SyncEventType);
     assert_matches_postgres!(SyncEntityType);
     assert_matches_postgres!(ItemCategory);
+    assert_matches_postgres!(KeyRotationReason);
+    assert_matches_postgres!(VaultKeyRotationPlanState);
+    assert_matches_postgres!(VaultKeyRotationStaleReason);
+    assert_matches_postgres!(VaultKeyRotationManifestKind);
 }
 
 #[test]

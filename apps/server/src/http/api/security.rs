@@ -16,6 +16,30 @@ enum OperationSecurity {
 
 // Contract generation fails until every new operation makes a deliberate public-or-bearer choice.
 const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
+    ("abandonVaultKeyRotationPlan", OperationSecurity::Bearer),
+    (
+        "createVaultMemberRemovalRotationPlans",
+        OperationSecurity::Bearer,
+    ),
+    (
+        "finalizeVaultMemberRemovalRotationPlans",
+        OperationSecurity::Bearer,
+    ),
+    ("createTeamLeaveRotationPlans", OperationSecurity::Bearer),
+    ("finalizeTeamLeaveRotationPlans", OperationSecurity::Bearer),
+    (
+        "createTeamMemberRemovalRotationPlans",
+        OperationSecurity::Bearer,
+    ),
+    (
+        "finalizeTeamMemberRemovalRotationPlans",
+        OperationSecurity::Bearer,
+    ),
+    (
+        "getVaultKeyRotationPreparationPage",
+        OperationSecurity::Bearer,
+    ),
+    ("stageVaultKeyRotationOutputs", OperationSecurity::Bearer),
     ("getApiMetadata", OperationSecurity::Public),
     ("deleteAttachment", OperationSecurity::Bearer),
     ("updateAttachment", OperationSecurity::Bearer),
@@ -79,15 +103,8 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("sendTeamInvitation", OperationSecurity::Bearer),
     ("cancelTeamInvitation", OperationSecurity::Bearer),
     ("resendTeamInvitation", OperationSecurity::Bearer),
-    ("leaveTeam", OperationSecurity::Bearer),
-    ("getTeamLeaveRotationData", OperationSecurity::Bearer),
     ("listTeamMembers", OperationSecurity::Bearer),
-    ("removeTeamMember", OperationSecurity::Bearer),
     ("getTeamMemberAccess", OperationSecurity::Bearer),
-    (
-        "getTeamMemberRemovalRotationData",
-        OperationSecurity::Bearer,
-    ),
     ("listTeamVaults", OperationSecurity::Bearer),
     ("getTravelMode", OperationSecurity::Bearer),
     ("disableTravelMode", OperationSecurity::Bearer),
@@ -116,12 +133,7 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("createItem", OperationSecurity::Bearer),
     ("listVaultMembers", OperationSecurity::Bearer),
     ("addVaultMember", OperationSecurity::Bearer),
-    ("removeVaultMember", OperationSecurity::Bearer),
     ("updateVaultMemberRole", OperationSecurity::Bearer),
-    (
-        "getVaultMemberRemovalRotationData",
-        OperationSecurity::Bearer,
-    ),
     ("convertVaultType", OperationSecurity::Bearer),
 ];
 

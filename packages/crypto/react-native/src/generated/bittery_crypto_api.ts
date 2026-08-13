@@ -939,37 +939,6 @@ export async function initialize(asyncOpts_?: { signal: AbortSignal }): Promise<
     }
     }
 
-export async function performKeyRotation(oldVaultKey: KeyHandleLike, members: Array<MemberKeyData>, items: Array<ItemData>, vaultId: string, keyVersion: bigint, currentUserId: string, masterUnlockKey: KeyHandleLike, asyncOpts_?: { signal: AbortSignal }): Promise<KeyRotationResult> /*throws*/ {
-    const __stack = uniffiIsDebug ? new Error().stack : undefined;
-    try {
-        return await uniffiRustCallAsync(
-            /*rustCaller:*/ uniffiCaller,
-            /*rustFutureFunc:*/ () => {
-                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(FfiConverterTypeKeyHandle.lower(oldVaultKey, nativeModule().rustbuffer_alloc),FfiConverterSequenceTypeMemberKeyData.lower(members, nativeModule().rustbuffer_alloc),FfiConverterSequenceTypeItemData.lower(items, nativeModule().rustbuffer_alloc),FfiConverterString.lower(vaultId, nativeModule().rustbuffer_alloc),FfiConverterUInt64.lower(keyVersion, nativeModule().rustbuffer_alloc),FfiConverterString.lower(currentUserId, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(masterUnlockKey, nativeModule().rustbuffer_alloc)
-                );
-            },
-            /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_rust_buffer,
-            /*cancelFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_cancel_rust_buffer,
-            /*completeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_complete_rust_buffer,
-            /*freeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_free_rust_buffer,
-            // Async returns always go through the JS-side converter: the
-            // FFI symbol returns the future handle (u64), and the user-level
-            // RustBuffer comes back via the shared `rust_future_complete_*`
-            // export. The bytes the runtime hands back must be deserialized
-            // here using the per-callable return-type converter.
-            /*liftFunc:*/ FfiConverterTypeKeyRotationResult.lift.bind(FfiConverterTypeKeyRotationResult),
-            /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
-            /*asyncOpts:*/ asyncOpts_,
-            /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(FfiConverterTypeCryptoError)
-        );
-    } catch (__error: any) {
-        if (uniffiIsDebug && __error instanceof Error) {
-            __error.stack = __stack;
-        }
-        throw __error;
-    }
-    }
-
 export async function reEncryptItem(item: ItemData, oldVaultKey: KeyHandleLike, newVaultKey: KeyHandleLike, asyncOpts_?: { signal: AbortSignal }): Promise<ReEncryptedItem> /*throws*/ {
     const __stack = uniffiIsDebug ? new Error().stack : undefined;
     try {
@@ -989,6 +958,42 @@ export async function reEncryptItem(item: ItemData, oldVaultKey: KeyHandleLike, 
             // export. The bytes the runtime hands back must be deserialized
             // here using the per-callable return-type converter.
             /*liftFunc:*/ FfiConverterTypeReEncryptedItem.lift.bind(FfiConverterTypeReEncryptedItem),
+            /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
+            /*asyncOpts:*/ asyncOpts_,
+            /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(FfiConverterTypeCryptoError)
+        );
+    } catch (__error: any) {
+        if (uniffiIsDebug && __error instanceof Error) {
+            __error.stack = __stack;
+        }
+        throw __error;
+    }
+    }
+
+/**
+ * Rewraps an Attachment key envelope after Vault key rotation. The attachment key stays below
+ * the FFI boundary. The old context opens the envelope and the new context seals it with the
+ * next envelope version.
+ */
+export async function rewrapAttachmentKey(encryptedAttachmentKey: EncryptedData, oldVaultKey: KeyHandleLike, newVaultKey: KeyHandleLike, oldContext: EncryptionContext, newContext: EncryptionContext, asyncOpts_?: { signal: AbortSignal }): Promise<EncryptedData> /*throws*/ {
+    const __stack = uniffiIsDebug ? new Error().stack : undefined;
+    try {
+        return await uniffiRustCallAsync(
+            /*rustCaller:*/ uniffiCaller,
+            /*rustFutureFunc:*/ () => {
+                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(FfiConverterTypeEncryptedData.lower(encryptedAttachmentKey, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(oldVaultKey, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(newVaultKey, nativeModule().rustbuffer_alloc),FfiConverterTypeEncryptionContext.lower(oldContext, nativeModule().rustbuffer_alloc),FfiConverterTypeEncryptionContext.lower(newContext, nativeModule().rustbuffer_alloc)
+                );
+            },
+            /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_rust_buffer,
+            /*cancelFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_cancel_rust_buffer,
+            /*completeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_complete_rust_buffer,
+            /*freeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_free_rust_buffer,
+            // Async returns always go through the JS-side converter: the
+            // FFI symbol returns the future handle (u64), and the user-level
+            // RustBuffer comes back via the shared `rust_future_complete_*`
+            // export. The bytes the runtime hands back must be deserialized
+            // here using the per-callable return-type converter.
+            /*liftFunc:*/ FfiConverterTypeEncryptedData.lift.bind(FfiConverterTypeEncryptedData),
             /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
             /*asyncOpts:*/ asyncOpts_,
             /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(FfiConverterTypeCryptoError)
@@ -1156,37 +1161,6 @@ export async function validateRecoveryKey(recoveryKey: string, asyncOpts_?: { si
     }
     }
 
-export async function validateRotationData(members: Array<MemberKeyData>, asyncOpts_?: { signal: AbortSignal }): Promise<ValidationResult> /*throws*/ {
-    const __stack = uniffiIsDebug ? new Error().stack : undefined;
-    try {
-        return await uniffiRustCallAsync(
-            /*rustCaller:*/ uniffiCaller,
-            /*rustFutureFunc:*/ () => {
-                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(FfiConverterSequenceTypeMemberKeyData.lower(members, nativeModule().rustbuffer_alloc)
-                );
-            },
-            /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_rust_buffer,
-            /*cancelFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_cancel_rust_buffer,
-            /*completeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_complete_rust_buffer,
-            /*freeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_free_rust_buffer,
-            // Async returns always go through the JS-side converter: the
-            // FFI symbol returns the future handle (u64), and the user-level
-            // RustBuffer comes back via the shared `rust_future_complete_*`
-            // export. The bytes the runtime hands back must be deserialized
-            // here using the per-callable return-type converter.
-            /*liftFunc:*/ FfiConverterTypeValidationResult.lift.bind(FfiConverterTypeValidationResult),
-            /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
-            /*asyncOpts:*/ asyncOpts_,
-            /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(FfiConverterTypeCryptoError)
-        );
-    } catch (__error: any) {
-        if (uniffiIsDebug && __error instanceof Error) {
-            __error.stack = __stack;
-        }
-        throw __error;
-    }
-    }
-
 export async function validateSecretKey(secretKey: string, asyncOpts_?: { signal: AbortSignal }): Promise<boolean> /*throws*/ {
     const __stack = uniffiIsDebug ? new Error().stack : undefined;
     try {
@@ -1244,13 +1218,13 @@ export async function verifyServerSession(clientPublicEphemeral: string, session
     }
     }
 
-export async function wrapKey(key: KeyHandleLike, wrappingKey: KeyHandleLike, asyncOpts_?: { signal: AbortSignal }): Promise<EncryptedData> /*throws*/ {
+export async function wrapKey(key: KeyHandleLike, wrappingKey: KeyHandleLike, context: EncryptionContext | undefined, asyncOpts_?: { signal: AbortSignal }): Promise<EncryptedData> /*throws*/ {
     const __stack = uniffiIsDebug ? new Error().stack : undefined;
     try {
         return await uniffiRustCallAsync(
             /*rustCaller:*/ uniffiCaller,
             /*rustFutureFunc:*/ () => {
-                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(FfiConverterTypeKeyHandle.lower(key, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(wrappingKey, nativeModule().rustbuffer_alloc)
+                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(FfiConverterTypeKeyHandle.lower(key, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(wrappingKey, nativeModule().rustbuffer_alloc),FfiConverterOptionalTypeEncryptionContext.lower(context, nativeModule().rustbuffer_alloc)
                 );
             },
             /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_rust_buffer,
@@ -1766,139 +1740,6 @@ const FfiConverterTypeKdfProfile = (() => {
     return new FFIConverter();
 })();
 
-export type MemberEncryptedKey = {
-    userId: string,
-    encryptedVaultKey: string
-}
-
-/**
- * Generated factory for {@link MemberEncryptedKey} record objects.
- */
-export const MemberEncryptedKey = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<MemberEncryptedKey, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<MemberEncryptedKey>,
-    });
-})();
-
-const FfiConverterTypeMemberEncryptedKey = (() => {
-    type TypeName = MemberEncryptedKey;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                userId: FfiConverterString.read(from), 
-                encryptedVaultKey: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.userId, into);
-            FfiConverterString.write(value.encryptedVaultKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.userId) +
-             FfiConverterString.allocationSize(value.encryptedVaultKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type ReEncryptedItem = {
-    itemId: string,
-    encryptedData: string,
-    encryptionIv: string
-}
-
-/**
- * Generated factory for {@link ReEncryptedItem} record objects.
- */
-export const ReEncryptedItem = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<ReEncryptedItem, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<ReEncryptedItem>,
-    });
-})();
-
-const FfiConverterTypeReEncryptedItem = (() => {
-    type TypeName = ReEncryptedItem;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                itemId: FfiConverterString.read(from), 
-                encryptedData: FfiConverterString.read(from), 
-                encryptionIv: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.itemId, into);
-            FfiConverterString.write(value.encryptedData, into);
-            FfiConverterString.write(value.encryptionIv, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.itemId) +
-             FfiConverterString.allocationSize(value.encryptedData) +
-             FfiConverterString.allocationSize(value.encryptionIv);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type KeyRotationResult = {
-    memberEncryptedKeys: Array<MemberEncryptedKey>,
-    reEncryptedItems: Array<ReEncryptedItem>
-}
-
-/**
- * Generated factory for {@link KeyRotationResult} record objects.
- */
-export const KeyRotationResult = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<KeyRotationResult, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<KeyRotationResult>,
-    });
-})();
-
-const FfiConverterTypeKeyRotationResult = (() => {
-    type TypeName = KeyRotationResult;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                memberEncryptedKeys: FfiConverterSequenceTypeMemberEncryptedKey.read(from), 
-                reEncryptedItems: FfiConverterSequenceTypeReEncryptedItem.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterSequenceTypeMemberEncryptedKey.write(value.memberEncryptedKeys, into);
-            FfiConverterSequenceTypeReEncryptedItem.write(value.reEncryptedItems, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterSequenceTypeMemberEncryptedKey.allocationSize(value.memberEncryptedKeys) +
-             FfiConverterSequenceTypeReEncryptedItem.allocationSize(value.reEncryptedItems);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
 export type MemberKeyData = {
     userId: string,
     publicKey: string
@@ -2069,6 +1910,53 @@ const FfiConverterTypePasskeyKeypair = (() => {
             return FfiConverterString.allocationSize(value.privateKey) +
              FfiConverterString.allocationSize(value.publicKeyCose) +
              FfiConverterString.allocationSize(value.publicKeySpki);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type ReEncryptedItem = {
+    itemId: string,
+    encryptedData: string,
+    encryptionIv: string
+}
+
+/**
+ * Generated factory for {@link ReEncryptedItem} record objects.
+ */
+export const ReEncryptedItem = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<ReEncryptedItem, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<ReEncryptedItem>,
+    });
+})();
+
+const FfiConverterTypeReEncryptedItem = (() => {
+    type TypeName = ReEncryptedItem;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                itemId: FfiConverterString.read(from), 
+                encryptedData: FfiConverterString.read(from), 
+                encryptionIv: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.itemId, into);
+            FfiConverterString.write(value.encryptedData, into);
+            FfiConverterString.write(value.encryptionIv, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.itemId) +
+             FfiConverterString.allocationSize(value.encryptedData) +
+             FfiConverterString.allocationSize(value.encryptionIv);
             
         }
     };
@@ -2335,49 +2223,6 @@ const FfiConverterTypeTotpResult = (() => {
              FfiConverterUInt64.allocationSize(value.remainingSeconds) +
              FfiConverterUInt64.allocationSize(value.period) +
              FfiConverterFloat64.allocationSize(value.progress);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type ValidationResult = {
-    valid: boolean,
-    errors: Array<string>
-}
-
-/**
- * Generated factory for {@link ValidationResult} record objects.
- */
-export const ValidationResult = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<ValidationResult, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<ValidationResult>,
-    });
-})();
-
-const FfiConverterTypeValidationResult = (() => {
-    type TypeName = ValidationResult;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                valid: FfiConverterBool.read(from), 
-                errors: FfiConverterSequenceString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterBool.write(value.valid, into);
-            FfiConverterSequenceString.write(value.errors, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterBool.allocationSize(value.valid) +
-             FfiConverterSequenceString.allocationSize(value.errors);
             
         }
     };
@@ -3683,26 +3528,11 @@ const FfiConverterOptionalString = new FfiConverterOptional(FfiConverterString);
 // FfiConverter for EncryptionContext | undefined
 const FfiConverterOptionalTypeEncryptionContext = new FfiConverterOptional(FfiConverterTypeEncryptionContext);
 
-// FfiConverter for Array<MemberEncryptedKey>
-const FfiConverterSequenceTypeMemberEncryptedKey = new FfiConverterArray(FfiConverterTypeMemberEncryptedKey);
-
-// FfiConverter for Array<ReEncryptedItem>
-const FfiConverterSequenceTypeReEncryptedItem = new FfiConverterArray(FfiConverterTypeReEncryptedItem);
-
-// FfiConverter for Array<string>
-const FfiConverterSequenceString = new FfiConverterArray(FfiConverterString);
-
 // FfiConverter for Array<DecryptRequest>
 const FfiConverterSequenceTypeDecryptRequest = new FfiConverterArray(FfiConverterTypeDecryptRequest);
 
 // FfiConverter for Array<DecryptManyResult>
 const FfiConverterSequenceTypeDecryptManyResult = new FfiConverterArray(FfiConverterTypeDecryptManyResult);
-
-// FfiConverter for Array<MemberKeyData>
-const FfiConverterSequenceTypeMemberKeyData = new FfiConverterArray(FfiConverterTypeMemberKeyData);
-
-// FfiConverter for Array<ItemData>
-const FfiConverterSequenceTypeItemData = new FfiConverterArray(FfiConverterTypeItemData);
 
 
 /**
@@ -3813,11 +3643,11 @@ function uniffiEnsureInitialized() {
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_initialize() !== 30669) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_initialize");
     }
-    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation() !== 10957) {
-        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_perform_key_rotation");
-    }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() !== 40513) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_re_encrypt_item");
+    }
+    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key() !== 43871) {
+        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key");
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_decrypt() !== 34811) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_rsa_decrypt");
@@ -3834,16 +3664,13 @@ function uniffiEnsureInitialized() {
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() !== 314) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_validate_recovery_key");
     }
-    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data() !== 26621) {
-        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_validate_rotation_data");
-    }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key() !== 29683) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_validate_secret_key");
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_verify_server_session() !== 33486) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_verify_server_session");
     }
-    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key() !== 24393) {
+    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key() !== 45322) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_wrap_key");
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_constructor_srpclient_new() !== 22254) {
@@ -3879,8 +3706,6 @@ export default Object.freeze({
     FfiConverterTypeItemData,
     FfiConverterTypeKdfProfile,
     FfiConverterTypeKeyHandle,
-    FfiConverterTypeKeyRotationResult,
-    FfiConverterTypeMemberEncryptedKey,
     FfiConverterTypeMemberKeyData,
     FfiConverterTypePasskeyAssertion,
     FfiConverterTypePasskeyAttestation,
@@ -3894,6 +3719,5 @@ export default Object.freeze({
     FfiConverterTypeSrpServer,
     FfiConverterTypeSrpServerChallenge,
     FfiConverterTypeTotpResult,
-    FfiConverterTypeValidationResult,
   }
 });

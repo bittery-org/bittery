@@ -14,6 +14,7 @@ pub(crate) mod sync;
 pub(crate) mod team;
 pub(crate) mod travel_mode;
 pub(crate) mod vault;
+pub(crate) mod vault_key_rotation;
 
 pub(crate) const ORDINARY_API_BODY_LIMIT_BYTES: usize = 1_048_576;
 
@@ -90,6 +91,7 @@ fn openapi_router() -> OpenApiRouter<AppState> {
             "/v1",
             auth::router()
                 .merge(vault::router())
+                .merge(vault_key_rotation::router())
                 .merge(sync::router())
                 .merge(team::router())
                 .merge(share::router())
@@ -186,8 +188,8 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 86);
-        assert_eq!(operation_count, 101);
+        assert_eq!(paths.len(), 90);
+        assert_eq!(operation_count, 104);
     }
 
     /// Every `ToSchema` type reaches the document under its short Rust name, so two types that
@@ -303,6 +305,10 @@ mod tests {
             ("team", super::team::router().into_openapi()),
             ("travel_mode", super::travel_mode::router().into_openapi()),
             ("vault", super::vault::router().into_openapi()),
+            (
+                "vault_key_rotation",
+                super::vault_key_rotation::router().into_openapi(),
+            ),
         ];
 
         // name -> serialized schema -> modules that registered exactly that schema.
@@ -389,7 +395,7 @@ mod tests {
             .count();
 
         assert_eq!(public, 17);
-        assert_eq!(bearer, 84);
+        assert_eq!(bearer, 87);
         assert_eq!(public + bearer, operations.len());
 
         for operation_id in [

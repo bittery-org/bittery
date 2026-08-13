@@ -40,43 +40,4 @@ macro_rules! team_details_shape {
     };
 }
 
-/// A member who must be rewrapped a key while a team-wide rotation runs.
-macro_rules! rotation_member_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            user_id: String,
-            public_key: String,
-            role: $crate::db::enums::VaultRole,
-        } }
-    };
-}
-
-/// One vault's slice of a team-wide rotation.
-macro_rules! rotation_vault_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            vault_id: String,
-            vault_name: String,
-            key_version: i32,
-            @schema(max_items = 100)
-            members: Vec<RotationMemberResponse> = each,
-            @schema(max_items = 100)
-            items: Vec<RotationItemResponse> = each,
-        } }
-    };
-}
-
-/// Every vault a departing member's removal forces a rotation of.
-macro_rules! rotation_data_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            @schema(max_items = 100)
-            vaults: Vec<RotationVaultResponse> = each,
-        } }
-    };
-}
-
-pub(crate) use {
-    rotation_data_shape, rotation_member_shape, rotation_vault_shape, team_details_shape,
-    team_summary_shape,
-};
+pub(crate) use {team_details_shape, team_summary_shape};

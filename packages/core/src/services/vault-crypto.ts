@@ -89,8 +89,9 @@ export type StoredItemCiphertext = StoredItemBinding &
 
 interface AttachmentContextInput {
 	vaultId: string;
-	attachmentKey: string;
+	attachmentId: string;
 	userId: string;
+	envelopeVersion: number;
 }
 
 interface VaultKeyContextInput {
@@ -152,8 +153,9 @@ export function buildAttachmentNameEncryptionContext(
 ): EncryptionContext {
 	return {
 		vaultId: input.vaultId,
-		entityId: input.attachmentKey,
+		entityId: input.attachmentId,
 		entityType: "attachment_name",
+		// Key rotation rewraps only the Attachment-key envelope; payload AAD stays stable.
 		version: 1,
 		userId: input.userId,
 	};
@@ -164,7 +166,7 @@ export function buildAttachmentContentTypeEncryptionContext(
 ): EncryptionContext {
 	return {
 		vaultId: input.vaultId,
-		entityId: input.attachmentKey,
+		entityId: input.attachmentId,
 		entityType: "attachment_content_type",
 		version: 1,
 		userId: input.userId,
@@ -176,9 +178,21 @@ export function buildAttachmentBlobEncryptionContext(
 ): EncryptionContext {
 	return {
 		vaultId: input.vaultId,
-		entityId: input.attachmentKey,
+		entityId: input.attachmentId,
 		entityType: "attachment_blob",
 		version: 1,
+		userId: input.userId,
+	};
+}
+
+export function buildAttachmentKeyEncryptionContext(
+	input: AttachmentContextInput,
+): EncryptionContext {
+	return {
+		vaultId: input.vaultId,
+		entityId: input.attachmentId,
+		entityType: "attachment_key",
+		version: normalizeVersion(input.envelopeVersion),
 		userId: input.userId,
 	};
 }
@@ -264,8 +278,9 @@ export interface VaultCryptoDeps {
 
 export interface AttachmentScope {
 	vaultId: string;
-	attachmentKey: string;
+	attachmentId: string;
 	userId: string;
+	envelopeVersion: number;
 }
 
 export type AttachmentField = "name" | "contentType" | "blob";
@@ -420,6 +435,26 @@ export interface VaultCrypto {
 		vaultKey: KeyRef,
 		scope: AttachmentScope,
 	): Promise<{ name: string; contentType: string }>;
+
+	/** Mints a fresh Attachment key; the caller owns it until it is retired. */
+	generateAttachmentKey(): Promise<KeyRef>;
+
+	/** Retires a caller-owned Attachment key. */
+	destroyAttachmentKey(key: KeyRef): Promise<void>;
+
+	/** Wraps an Attachment key under the Vault key without exposing either key's bytes. */
+	wrapAttachmentKey(
+		attachmentKey: KeyRef,
+		vaultKey: KeyRef,
+		scope: AttachmentScope,
+	): Promise<EncryptedData>;
+
+	/** Opens an authenticated Attachment-key envelope as a fresh ref owned by the caller. */
+	unwrapAttachmentKey(
+		encryptedAttachmentKey: EncryptedData,
+		vaultKey: KeyRef,
+		scope: AttachmentScope,
+	): Promise<KeyRef>;
 
 	// --- the account's RSA private key ---
 
@@ -722,6 +757,30 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				),
 			]);
 			return { name, contentType };
+		},
+
+		async generateAttachmentKey() {
+			return crypto.generateEncryptionKey();
+		},
+
+		async destroyAttachmentKey(key) {
+			await crypto.destroyKey(key);
+		},
+
+		async wrapAttachmentKey(attachmentKey, vaultKey, scope) {
+			return crypto.wrapKey(
+				attachmentKey,
+				vaultKey,
+				buildAttachmentKeyEncryptionContext(scope),
+			);
+		},
+
+		async unwrapAttachmentKey(encryptedAttachmentKey, vaultKey, scope) {
+			return crypto.unwrapKey(
+				encryptedAttachmentKey,
+				vaultKey,
+				buildAttachmentKeyEncryptionContext(scope),
+			);
 		},
 
 		async decryptPrivateKey(

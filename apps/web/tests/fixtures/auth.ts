@@ -204,6 +204,7 @@ export async function signUp(
 	// step - a Team signup that skips it silently gets the default team name.
 	const choosesTeamName = plan === "team";
 	await page.goto(choosesTeamName ? "/signup" : `/signup?plan=${plan}`);
+	const appOrigin = new URL(page.url()).origin;
 
 	if (choosesTeamName) {
 		await expect(
@@ -255,14 +256,19 @@ export async function signUp(
 	await page.locator("#signup-verification-step-code").fill(code);
 	await page.getByRole("button", { name: "Verify code" }).click();
 
-	// A paid plan hands straight off to Stripe checkout, which the E2E stack has
-	// no credentials for, so it lands on /billing instead. The account and its
-	// team exist either way; only the subscription is missing.
-	await page.waitForURL(plan === "free" ? "**/home" : "**/billing", {
-		timeout,
-	});
+	// A paid plan hands straight off to Stripe checkout. Depending on the test
+	// Stripe configuration that may stay on local /billing or reach the hosted
+	// checkout page. The account and Team exist either way; only the subscription
+	// is missing until the database fixture activates it.
+	await page.waitForURL(
+		plan === "free"
+			? "**/home"
+			: (url) =>
+					url.pathname === "/billing" || url.hostname === "checkout.stripe.com",
+		{ timeout },
+	);
 	if (plan !== "free") {
-		await page.goto("/home");
+		await page.goto(new URL("/home", appOrigin).href);
 		await page.waitForURL("**/home", { timeout });
 	}
 	await waitForAppReady(page);

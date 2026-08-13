@@ -211,6 +211,19 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(keys[0]?.role).toBe("owner");
 	});
 
+	it("fails an authoritative bootstrap when refreshed Vault keys are unavailable", async () => {
+		const { repo } = await setup();
+		const client = createClient();
+		if (!client.vaults) throw new Error("Missing Vault client fixture.");
+		client.vaults.list = mock(async () => {
+			throw new Error("network unavailable");
+		});
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"network unavailable",
+		);
+	});
+
 	it("caches vault metadata with a usable type", async () => {
 		const { repo, itemCache } = await setup();
 

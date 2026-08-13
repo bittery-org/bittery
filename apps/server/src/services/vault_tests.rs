@@ -470,12 +470,16 @@ async fn seed_attachment(
     uploaded_by: &str,
 ) {
     query(
-			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 		)
 		.bind(attachment_id)
 		.bind(item_id)
 		.bind(vault_id)
 		.bind(format!("attachments/{attachment_id}"))
+		.bind("encrypted-attachment-key")
+		.bind("attachment-key-iv")
+		.bind("AES-GCM-AAD-V1")
+		.bind(1_i32)
 		.bind("encrypted-attachment-name")
 		.bind("encrypted-content-type")
 		.bind("attachment-iv")
@@ -644,14 +648,14 @@ async fn vault_handlers_require_authentication() {
                 Some(json!({})),
             ),
             (
-                Method::GET,
-                "/api/v1/vaults/vault_test/members/user_test/removal-rotation-data",
+                Method::POST,
+                "/api/v1/vaults/vault_test/members/user_test/removal-rotation-plans",
                 None,
             ),
             (
-                Method::DELETE,
-                "/api/v1/vaults/vault_test/members/user_test",
-                Some(json!({})),
+                Method::POST,
+                "/api/v1/vaults/vault_test/members/user_test/removal-rotation-plans/finalize",
+                Some(json!({ "planIds": [] })),
             ),
         ];
 
@@ -700,9 +704,9 @@ async fn vault_handlers_reject_malformed_request_input() {
                     ),
                 ),
                 (
-                    Method::DELETE,
+                    Method::POST,
                     format!(
-                        "/api/v1/vaults/{}/members/{}",
+                        "/api/v1/vaults/{}/members/{}/removal-rotation-plans/finalize",
                         fixture.main_vault_id, fixture.member_user_id
                     ),
                 ),
@@ -2623,17 +2627,6 @@ async fn vault_key_write_routes_reject_oversized_keys() {
                 ),
                 json!({ "targetType": "personal", "personalEncryptedVaultKey": oversized.clone() }),
             ),
-            (
-                Method::DELETE,
-                format!(
-                    "/api/v1/vaults/{}/members/{}",
-                    fixture.main_vault_id, fixture.member_user_id
-                ),
-                json!({ "keyRotation": {
-                    "memberKeys": [{ "userId": fixture.owner_user_id, "encryptedVaultKey": oversized }],
-                    "reEncryptedItems": []
-                } }),
-            ),
         ];
         for (method, path, body) in requests {
             let response = app
@@ -2712,8 +2705,18 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				.expect("pending attachment storage size should load");
 				assert_eq!(pending_storage_size, 102);
 
+				let invalid_envelope_version = app
+					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "attachmentId": "attachment_pending", "storageKey": "invalid-key", "encryptedAttachmentKey": "encrypted-attachment-key", "attachmentKeyIv": "attachment-key-iv", "attachmentKeyAlgorithm": "aes-gcm", "envelopeVersion": 0, "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())
+					.await;
+				invalid_envelope_version.assert_contract_status();
+				assert_handler_error(
+					&invalid_envelope_version.body,
+					"BAD_REQUEST",
+					"Unsupported attachment envelope version",
+				);
+
 				let create_attachment_response = app
-					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "storageKey": "invalid-key", "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())
+					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "attachmentId": "attachment_pending", "storageKey": "invalid-key", "encryptedAttachmentKey": "encrypted-attachment-key", "attachmentKeyIv": "attachment-key-iv", "attachmentKeyAlgorithm": "aes-gcm", "envelopeVersion": 1, "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())
 					.await;
 				create_attachment_response.assert_contract_status();
 				assert_handler_error(
@@ -2778,280 +2781,97 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 }
 
 #[tokio::test]
-async fn vault_member_handlers_manage_members_and_rotation() {
-    with_api_test_app(
-        "vault_member_handlers_manage_members_and_rotation",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let owner_session = app.issue_session(&fixture.owner_user_id).await;
-            let owner_headers = authenticated_json_headers(&owner_session.token);
-            let starting_key_version: i32 =
-                query_scalar("SELECT key_version FROM vault WHERE id = $1")
-                    .bind(&fixture.main_vault_id)
-                    .fetch_one(&app.pool)
-                    .await
-                    .expect("starting key version should load");
-
-            let members_response = app
-                .api_json(
-                    Method::GET,
-                    &format!("/api/v1/vaults/{}/members", fixture.main_vault_id),
-                    None,
-                    owner_headers.clone(),
-                )
-                .await;
-            members_response.assert_contract_status();
-            let members = members_response
-                .body
-                .get("items")
-                .and_then(Value::as_array)
-                .expect("members should be returned");
-            assert_eq!(members.len(), 4);
-            assert!(members
-                .iter()
-                .any(|member| member["userId"] == json!(fixture.readonly_user_id)));
-
-            let available_members_response = app
-                .api_json(
-                    Method::GET,
-                    &format!(
-                        "/api/v1/vaults/{}/available-team-members",
-                        fixture.main_vault_id
-                    ),
-                    None,
-                    owner_headers.clone(),
-                )
-                .await;
-            available_members_response.assert_contract_status();
-            let available_members = available_members_response
-                .body
-                .get("items")
-                .and_then(Value::as_array)
-                .expect("available members should be returned");
-            assert!(available_members
-                .iter()
-                .any(|member| member["userId"] == json!(fixture.addable_user_id)));
-            assert!(!available_members
-                .iter()
-                .any(|member| member["userId"] == json!(fixture.member_user_id)));
-
-            let update_role_response = app
-                .api_json(
-                    Method::PATCH,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.readonly_user_id
-                    ),
-                    Some(json!({ "role": "member" })),
-                    owner_headers.clone(),
-                )
-                .await;
-            update_role_response.assert_contract_status();
-            let updated_role: String = query_scalar(
-                "SELECT role::text FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+async fn vault_member_handlers_manage_members() {
+    with_api_test_app("vault_member_handlers_manage_members", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let owner_headers = authenticated_json_headers(&owner_session.token);
+        let members_response = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/vaults/{}/members", fixture.main_vault_id),
+                None,
+                owner_headers.clone(),
             )
-            .bind(&fixture.main_vault_id)
-            .bind(&fixture.readonly_user_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("updated vault role should load");
-            assert_eq!(updated_role, "member");
+            .await;
+        members_response.assert_contract_status();
+        let members = members_response
+            .body
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("members should be returned");
+        assert_eq!(members.len(), 4);
+        assert!(members
+            .iter()
+            .any(|member| member["userId"] == json!(fixture.readonly_user_id)));
 
-            let add_member_response = app
-                .api_json(
-                    Method::PUT,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.addable_user_id
-                    ),
-                    Some(json!({ "role": "member", "encryptedVaultKey": "addable-member-key" })),
-                    owner_headers.clone(),
-                )
-                .await;
-            add_member_response.assert_contract_status();
-            let added_member_count: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+        let available_members_response = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/vaults/{}/available-team-members",
+                    fixture.main_vault_id
+                ),
+                None,
+                owner_headers.clone(),
             )
-            .bind(&fixture.main_vault_id)
-            .bind(&fixture.addable_user_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("added member count should load");
-            assert_eq!(added_member_count, 1);
+            .await;
+        available_members_response.assert_contract_status();
+        let available_members = available_members_response
+            .body
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("available members should be returned");
+        assert!(available_members
+            .iter()
+            .any(|member| member["userId"] == json!(fixture.addable_user_id)));
+        assert!(!available_members
+            .iter()
+            .any(|member| member["userId"] == json!(fixture.member_user_id)));
 
-            let rotation_data_response = app
-                .api_json(
-                    Method::GET,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}/removal-rotation-data",
-                        fixture.main_vault_id, fixture.member_user_id
-                    ),
-                    None,
-                    owner_headers.clone(),
-                )
-                .await;
-            rotation_data_response.assert_contract_status();
-            assert_eq!(
-                rotation_data_response.body["keyVersion"],
-                json!(starting_key_version)
-            );
-            let rotation_members = rotation_data_response.body["members"]
-                .as_array()
-                .expect("rotation members should be returned");
-            assert!(!rotation_members
-                .iter()
-                .any(|member| member["userId"] == json!(fixture.member_user_id)));
-            let rotation_items = rotation_data_response.body["items"]
-                .as_array()
-                .expect("rotation items should be returned");
-            assert!(rotation_items
-                .iter()
-                .any(|item| item["id"] == json!(fixture.active_item_id)));
-
-            let remove_member_response = app
-                .api_json(
-                    Method::DELETE,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.addable_user_id
-                    ),
-                    Some(json!({ "keyRotation": {
-                            "memberKeys": [],
-                            "reEncryptedItems": [{
-                                "itemId": fixture.active_item_id,
-                                "encryptedData": "rotated-active-data",
-                                "encryptionIv": "rotated-active-iv"
-                            }]
-                        } })),
-                    owner_headers,
-                )
-                .await;
-            remove_member_response.assert_contract_status();
-            assert_eq!(
-                remove_member_response.body["keyRotation"]["newKeyVersion"],
-                json!(starting_key_version + 1)
-            );
-            let removed_member_count: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+        let update_role_response = app
+            .api_json(
+                Method::PATCH,
+                &format!(
+                    "/api/v1/vaults/{}/members/{}",
+                    fixture.main_vault_id, fixture.readonly_user_id
+                ),
+                Some(json!({ "role": "member" })),
+                owner_headers.clone(),
             )
-            .bind(&fixture.main_vault_id)
-            .bind(&fixture.addable_user_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("removed member count should load");
-            let ending_key_version: i32 =
-                query_scalar("SELECT key_version FROM vault WHERE id = $1")
-                    .bind(&fixture.main_vault_id)
-                    .fetch_one(&app.pool)
-                    .await
-                    .expect("ending key version should load");
-            let rotated_item: (String, String, i32, Option<i32>, Option<String>) =
-                sqlx::query_as(
-                    "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
-                )
-                .bind(&fixture.active_item_id)
+            .await;
+        update_role_response.assert_contract_status();
+        let updated_role: String =
+            query_scalar("SELECT role::text FROM vault_key WHERE vault_id = $1 AND user_id = $2")
+                .bind(&fixture.main_vault_id)
+                .bind(&fixture.readonly_user_id)
                 .fetch_one(&app.pool)
                 .await
-                .expect("rotated item should load");
-            assert_eq!(removed_member_count, 0);
-            assert_eq!(ending_key_version, starting_key_version + 1);
-            // Rotation advances the concurrency counter but leaves the AAD binding
-            // (`encryption_version`/`encrypted_by_user_id`) exactly as the ciphertext was sealed.
-            assert_eq!(
-                rotated_item,
-                (
-                    "rotated-active-data".to_string(),
-                    "rotated-active-iv".to_string(),
-                    2,
-                    Some(1),
-                    Some(fixture.owner_user_id),
-                )
-            );
-        },
-    )
-    .await;
-}
+                .expect("updated vault role should load");
+        assert_eq!(updated_role, "member");
 
-/// Rotation hands the server a ciphertext re-sealed under the context the item *already*
-/// carried. If the apply step also re-stamps `encryption_version`/`encrypted_by_user_id`, the
-/// stored context no longer describes the ciphertext and every rotated item stops decrypting —
-/// removing one member bricks the whole vault. `version` and `last_modified_by` are free to
-/// move: they are concurrency and audit, not the AAD binding.
-#[tokio::test]
-async fn vault_rotation_advances_version_without_rebinding_encryption_context() {
-    with_api_test_app(
-        "vault_rotation_preserves_encryption_context",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let owner_headers = authenticated_json_headers(
-                &app.issue_session(&fixture.owner_user_id).await.token,
-            );
-            let admin_headers = authenticated_json_headers(
-                &app.issue_session(&fixture.admin_user_id).await.token,
-            );
-
-            let add_member_response = app
-                .api_json(
-                    Method::PUT,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.addable_user_id
-                    ),
-                    Some(json!({ "role": "member", "encryptedVaultKey": "addable-member-key" })),
-                    owner_headers,
-                )
-                .await;
-            add_member_response.assert_contract_status();
-
-            let before: (i32, i32, String) = sqlx::query_as(
-                "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        let add_member_response = app
+            .api_json(
+                Method::PUT,
+                &format!(
+                    "/api/v1/vaults/{}/members/{}",
+                    fixture.main_vault_id, fixture.addable_user_id
+                ),
+                Some(json!({ "role": "member", "encryptedVaultKey": "addable-member-key" })),
+                owner_headers.clone(),
             )
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("pre-rotation item context should load");
-            assert_eq!(before, (1, 1, fixture.owner_user_id.clone()));
-
-            // The admin rotates; the item was sealed by the owner. Any re-stamping is visible.
-            let remove_member_response = app
-                .api_json(
-                    Method::DELETE,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.addable_user_id
-                    ),
-                    Some(json!({ "keyRotation": {
-                        "memberKeys": [],
-                        "reEncryptedItems": [{
-                            "itemId": fixture.active_item_id,
-                            "encryptedData": "rotated-active-data",
-                            "encryptionIv": "rotated-active-iv"
-                        }]
-                    } })),
-                    admin_headers,
-                )
-                .await;
-            remove_member_response.assert_contract_status();
-
-            let after: (String, String, i32, i32, String, String) = sqlx::query_as(
-                "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
-            )
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("rotated item should load");
-
-            assert_eq!(after.0, "rotated-active-data");
-            assert_eq!(after.1, "rotated-active-iv");
-            // Concurrency counter advances: the row changed.
-            assert_eq!(after.2, before.0 + 1);
-            // The AAD binding is whatever the rotating client re-sealed under — untouched.
-            assert_eq!(after.3, before.1);
-            assert_eq!(after.4, before.2);
-            // Audit still names the actor who performed the rotation.
-            assert_eq!(after.5, fixture.admin_user_id);
-        },
-    )
+            .await;
+        add_member_response.assert_contract_status();
+        let added_member_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+        )
+        .bind(&fixture.main_vault_id)
+        .bind(&fixture.addable_user_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("added member count should load");
+        assert_eq!(added_member_count, 1);
+    })
     .await;
 }
 
@@ -3156,45 +2976,6 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 &wrong_team_add_response.body,
                 "BAD_REQUEST",
                 "User must belong to the same team as this vault",
-            );
-
-            let blocked_rotation_response = app
-                .api_json(
-                    Method::GET,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}/removal-rotation-data",
-                        fixture.main_vault_id, fixture.member_user_id
-                    ),
-                    None,
-                    member_headers,
-                )
-                .await;
-            blocked_rotation_response.assert_contract_status();
-            assert_handler_error(
-                &blocked_rotation_response.body,
-                "FORBIDDEN",
-                "Only vault owner or admin can manage members",
-            );
-
-            let self_remove_response = app
-                .api_json(
-                    Method::DELETE,
-                    &format!(
-                        "/api/v1/vaults/{}/members/{}",
-                        fixture.main_vault_id, fixture.owner_user_id
-                    ),
-                    Some(json!({ "keyRotation": {
-                            "memberKeys": [],
-                            "reEncryptedItems": []
-                        } })),
-                    owner_headers,
-                )
-                .await;
-            self_remove_response.assert_contract_status();
-            assert_handler_error(
-                &self_remove_response.body,
-                "BAD_REQUEST",
-                "Cannot remove yourself",
             );
         },
     )

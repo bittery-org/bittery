@@ -272,24 +272,6 @@ impl From<core::ReEncryptedItem> for ReEncryptedItem {
 }
 
 #[derive(uniffi::Record)]
-pub struct MemberEncryptedKey {
-    pub user_id: String,
-    pub encrypted_vault_key: String,
-}
-
-#[derive(uniffi::Record)]
-pub struct KeyRotationResult {
-    pub member_encrypted_keys: Vec<MemberEncryptedKey>,
-    pub re_encrypted_items: Vec<ReEncryptedItem>,
-}
-
-#[derive(uniffi::Record)]
-pub struct ValidationResult {
-    pub valid: bool,
-    pub errors: Vec<String>,
-}
-
-#[derive(uniffi::Record)]
 pub struct SrpRegistration {
     pub salt: String,
     pub verifier: String,
@@ -552,14 +534,15 @@ pub async fn decrypt_many(
 pub async fn wrap_key(
     key: Arc<KeyHandle>,
     wrapping_key: Arc<KeyHandle>,
+    context: Option<EncryptionContext>,
 ) -> Result<EncryptedData, CryptoError> {
     run_crypto(move || {
         let material = key.copy_material()?;
         let wrapping_material = wrapping_key.copy_material()?;
         let mut encoded = BASE64.encode(material.as_slice());
-        let result = core::encrypt(&encoded, &wrapping_material).map(Into::into);
+        let result = encrypt_inner(&encoded, &wrapping_material, context);
         encoded.zeroize();
-        result.map_err(Into::into)
+        result
     })
     .await
 }
@@ -698,60 +681,28 @@ pub async fn re_encrypt_item(
     .await
 }
 
+/// Rewraps an Attachment key envelope after Vault key rotation. The attachment key stays below
+/// the FFI boundary. The old context opens the envelope and the new context seals it with the
+/// next envelope version.
 #[cfg_attr(target_arch = "wasm32", uniffi::export)]
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export(async_runtime = "tokio"))]
-pub async fn perform_key_rotation(
+pub async fn rewrap_attachment_key(
+    encrypted_attachment_key: EncryptedData,
     old_vault_key: Arc<KeyHandle>,
-    members: Vec<MemberKeyData>,
-    items: Vec<ItemData>,
-    vault_id: String,
-    key_version: u64,
-    current_user_id: String,
-    master_unlock_key: Arc<KeyHandle>,
-) -> Result<KeyRotationResult, CryptoError> {
+    new_vault_key: Arc<KeyHandle>,
+    old_context: EncryptionContext,
+    new_context: EncryptionContext,
+) -> Result<EncryptedData, CryptoError> {
     run_crypto(move || {
-        let members: Vec<_> = members.into_iter().map(Into::into).collect();
-        let items: Vec<_> = items.into_iter().map(Into::into).collect();
-        let result = core::perform_key_rotation(
+        core::rewrap_attachment_key(
+            &encrypted_attachment_key.into(),
             &old_vault_key.copy_material()?,
-            &members,
-            &items,
-            &vault_id,
-            key_version,
-            &current_user_id,
-            &master_unlock_key.copy_material()?,
-        )?;
-        Ok(KeyRotationResult {
-            member_encrypted_keys: result
-                .member_encrypted_keys
-                .into_iter()
-                .map(|value| MemberEncryptedKey {
-                    user_id: value.user_id,
-                    encrypted_vault_key: value.encrypted_vault_key,
-                })
-                .collect(),
-            re_encrypted_items: result
-                .re_encrypted_items
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        })
-    })
-    .await
-}
-
-#[cfg_attr(target_arch = "wasm32", uniffi::export)]
-#[cfg_attr(not(target_arch = "wasm32"), uniffi::export(async_runtime = "tokio"))]
-pub async fn validate_rotation_data(
-    members: Vec<MemberKeyData>,
-) -> Result<ValidationResult, CryptoError> {
-    run_crypto(move || {
-        let members: Vec<_> = members.into_iter().map(Into::into).collect();
-        let result = core::validate_rotation_data(&members);
-        Ok(ValidationResult {
-            valid: result.valid,
-            errors: result.errors,
-        })
+            &new_vault_key.copy_material()?,
+            &old_context.into(),
+            &new_context.into(),
+        )
+        .map(Into::into)
+        .map_err(Into::into)
     })
     .await
 }

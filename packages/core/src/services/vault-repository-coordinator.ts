@@ -58,6 +58,10 @@ export class VaultRepositoryCoordinator {
 		string,
 		Promise<{ id: string } | null>
 	>();
+	private readonly queuedServerRefreshes = new Map<
+		string,
+		Promise<{ id: string } | null>
+	>();
 	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
 
@@ -230,10 +234,21 @@ export class VaultRepositoryCoordinator {
 
 	private refreshAccountFromServer(
 		account: AccountInfo,
+		afterInFlight = false,
 	): Promise<{ id: string } | null> {
 		const existing = this.serverRefreshes.get(account.accountId);
 		if (existing) {
-			return existing;
+			if (!afterInFlight) return existing;
+			const queued = this.queuedServerRefreshes.get(account.accountId);
+			if (queued) return queued;
+			const followUp = existing
+				.catch(() => null)
+				.then(() => {
+					this.queuedServerRefreshes.delete(account.accountId);
+					return this.refreshAccountFromServer(account, true);
+				});
+			this.queuedServerRefreshes.set(account.accountId, followUp);
+			return followUp;
 		}
 
 		const refresh = this.getOrCreate(
@@ -271,7 +286,11 @@ export class VaultRepositoryCoordinator {
 				await this.ensureTravelModeVerified(account);
 				await repo.hydrate();
 				if (!repo.hasCacheSnapshot()) {
-					await this.refreshAccountFromServer(account);
+					try {
+						await this.refreshAccountFromServer(account);
+					} catch {
+						await this.refreshAccountFromServer(account);
+					}
 				}
 			} catch (error) {
 				console.error(
@@ -365,7 +384,10 @@ export class VaultRepositoryCoordinator {
 		await Promise.all(
 			accounts.map(async (account) => {
 				await this.accountHydrations.get(account.accountId);
-				await this.refreshAccountFromServer(account);
+				// A caller asking for authoritative state must not join a bootstrap that
+				// may have started before its triggering server commit. Queue one full pass
+				// behind it; refreshes arriving after this call coalesce into that pass.
+				await this.refreshAccountFromServer(account, true);
 			}),
 		);
 	}
@@ -512,6 +534,7 @@ export class VaultRepositoryCoordinator {
 		this.hydratingAccountIds.clear();
 		this.accountHydrations.clear();
 		this.serverRefreshes.clear();
+		this.queuedServerRefreshes.clear();
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
 		this.apiClientByAccountId.clear();

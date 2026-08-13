@@ -1,7 +1,4 @@
 import type { VaultMember } from "@bittery/api-contract";
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import type { KeyRotationResult } from "@bittery/crypto-port";
 import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
@@ -32,6 +29,7 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
@@ -48,8 +46,7 @@ export function VaultMemberList({
 	userRole,
 }: VaultMemberListProps) {
 	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
+	const rotation = useVaultKeyRotation();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 	const canManage = userRole === "owner" || userRole === "admin";
@@ -86,104 +83,25 @@ export function VaultMemberList({
 		updateRoleMutation.mutate({ vaultId, userId, role: newRole });
 	};
 
-	/**
-	 * Handle member removal with key rotation
-	 * This performs the following steps:
-	 * 1. Get the current decrypted vault key and Master Unlock Key
-	 * 2. Fetch rotation data (remaining members' public keys and all items)
-	 * 3. Perform key rotation (generate new key, re-encrypt items, encrypt new key for members)
-	 *    - Current user's key is encrypted with MUK (AES-GCM)
-	 *    - Other members' keys are encrypted with RSA
-	 * 4. Submit to server which updates all the encrypted data
-	 */
 	const handleRemove = async (userId: string) => {
 		setIsRotating(true);
 		setRotatingUserId(userId);
 
 		try {
-			const masterUnlockKey = await storage.getMasterUnlockKey();
-			if (!masterUnlockKey) {
-				throw new Error("master_unlock_key_missing");
-			}
-
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
 				throw new Error("session_data_missing");
 			}
 
-			const rotationData = (
-				await api.vaults.members.removalRotationData(vaultId, userId)
-			).data;
-
-			const currentVaultKey = await vaultCrypto.getVaultKey({ vaultId });
-			if (!currentVaultKey) {
-				throw new Error("vault_key_decrypt_failed");
-			}
-
-			let rotationResult: KeyRotationResult;
-			try {
-				rotationResult = await crypto.performKeyRotation(
-					currentVaultKey,
-					rotationData.members.map((m) => ({
-						userId: m.userId,
-						publicKey: m.publicKey,
-					})),
-					rotationData.items.map((item) => ({
-						id: item.id,
-						encryptedData: item.encryptedData,
-						encryptionIv: item.encryptionIv,
-						encryptionAlgorithm: item.encryptionAlgorithm,
-						context: buildStoredItemEncryptionContext({ ...item, vaultId }),
-					})),
-					vaultId,
-					rotationData.keyVersion + 1,
-					currentUserId,
-					masterUnlockKey,
-				);
-			} finally {
-				// The store owns the borrowed master unlock key; only this fresh vault-key ref
-				// is ours to retire, including when preparation fails before rotation.
-				await crypto.destroyKey(currentVaultKey);
-			}
-
-			// Step 4: Submit to server
-			const result = (
-				await api.vaults.members.remove(
-					vaultId,
-					userId,
-					{
-						keyRotation: {
-							memberKeys: rotationResult.memberEncryptedKeys,
-							reEncryptedItems: rotationResult.reEncryptedItems,
-						},
-					},
-					{},
-				)
-			).data;
-
-			// Step 5: Update local session storage with new vault key
-			const vaultKeys = await storage.getVaultKeys();
-			if (vaultKeys) {
-				const myNewKey = rotationResult.memberEncryptedKeys.find(
-					(mk) => mk.userId === currentUserId,
-				);
-				// The server already committed the rotation, so a missing copy for us cannot be
-				// rolled back: keeping the stale key would lock us out on the next unlock silently.
-				if (!myNewKey) {
-					throw new Error("rotated_key_missing");
-				}
-				const updatedVaultKeys = vaultKeys.map((vk) =>
-					vk.vaultId === vaultId
-						? { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey }
-						: vk,
-				);
-				await storage.storeVaultKeys(updatedVaultKeys);
-			}
-
+			const outcome = await rotation.rotate({
+				intent: { kind: "vault-member-removal", vaultId, userId },
+				currentUserId,
+			});
 			toast.success(
-				m.vaults_member_list_toast_member_removed_rotated({
-					count: result.keyRotation?.itemsReEncrypted ?? 0,
-				}),
+				m.vaults_member_list_toast_member_removed(),
+				outcome.kind === "refresh_required"
+					? { description: m.vault_key_rotation_refresh_required() }
+					: undefined,
 			);
 			await invalidator.invalidateVaultMembers(vaultId);
 		} catch (error) {
@@ -194,6 +112,7 @@ export function VaultMemberList({
 						toast.error(m.vaults_member_list_error_vault_key_decrypt_failed());
 						break;
 					case "master_unlock_key_missing":
+					case "The account is locked.":
 						toast.error(m.vaults_member_list_error_master_unlock_key_missing());
 						break;
 					case "session_data_missing":
@@ -357,6 +276,7 @@ export function VaultMemberList({
 												size="icon"
 												className="h-7 w-7 text-muted-foreground hover:text-destructive"
 												disabled={isRotating}
+												aria-label={m.vaults_member_list_remove_dialog_title()}
 											>
 												{rotatingUserId === member.userId ? (
 													<Loader2 className="h-3.5 w-3.5 animate-spin" />

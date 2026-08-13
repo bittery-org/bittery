@@ -94,6 +94,79 @@ describe("VaultRepositoryCoordinator", () => {
 		resetTravelModeEnforcerForTests();
 	});
 
+	it("runs an explicit refresh after a bootstrap that was already in flight", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		let releaseFirst: (() => void) | undefined;
+		let bootstrapCalls = 0;
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example.com",
+		);
+		account.apiClient.sync.bootstrap = mock(async () => {
+			bootstrapCalls += 1;
+			if (bootstrapCalls === 1) {
+				await new Promise<void>((resolve) => {
+					releaseFirst = resolve;
+				});
+			}
+			return {
+				data: { items: [], hasMore: false, nextCursor: null },
+			};
+		}) as never;
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+
+		const first = coordinator.refreshFromServer([account]);
+		while (!releaseFirst) await Promise.resolve();
+		const second = coordinator.refreshFromServer([account]);
+		const third = coordinator.refreshFromServer([account]);
+		expect(bootstrapCalls).toBe(1);
+
+		releaseFirst();
+		await Promise.all([first, second, third]);
+		expect(bootstrapCalls).toBe(2);
+	});
+
+	it("retries one failed initial server hydration", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example.com",
+		);
+		let attempts = 0;
+		account.apiClient.vaults.list = mock(async () => {
+			attempts += 1;
+			if (attempts === 1) throw new Error("temporary network failure");
+			return { data: [] };
+		}) as never;
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+
+		await coordinator.hydrate([account]);
+
+		expect(attempts).toBe(2);
+	});
+
 	describe("M5 — findAccount resolution with shared email across servers", () => {
 		it("findAccountForVault returns the repo that actually holds the vault, not the first email match", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();

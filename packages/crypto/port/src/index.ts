@@ -20,8 +20,6 @@ export type {
 	ItemData,
 	KdfAlgorithm,
 	KdfProfile,
-	KeyRotationResult,
-	MemberEncryptedKey,
 	MemberKeyData,
 	ReEncryptedItem,
 	RsaKeyPair,
@@ -30,5 +28,4 @@ export type {
 	SRPRegistration,
 	SRPServerChallenge,
 	TotpResult,
-	ValidationResult,
 } from "./types";

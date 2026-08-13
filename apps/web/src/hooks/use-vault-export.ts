@@ -1,9 +1,9 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import {
-	buildAttachmentBlobEncryptionContext,
-	buildAttachmentContentTypeEncryptionContext,
-	buildAttachmentNameEncryptionContext,
-} from "@bittery/core/services/vault-crypto";
+	decryptAttachmentParts,
+	parseAttachmentBlobEnvelope,
+	unwrapAttachmentKey,
+} from "@bittery/core/services/attachment-crypto";
 import type { KeyRef } from "@bittery/crypto-port";
 import type {
 	ExportedAttachment,
@@ -187,24 +187,12 @@ export function useVaultExport() {
 
 				for (const attachment of item.attachments) {
 					try {
-						const contextUserId = attachment.uploadedBy;
-
-						const blobContext = buildAttachmentBlobEncryptionContext({
+						const scope = {
 							vaultId: item.vaultId,
-							attachmentKey: attachment.storageKey,
-							userId: contextUserId,
-						});
-						const nameContext = buildAttachmentNameEncryptionContext({
-							vaultId: item.vaultId,
-							attachmentKey: attachment.storageKey,
-							userId: contextUserId,
-						});
-						const contentTypeContext =
-							buildAttachmentContentTypeEncryptionContext({
-								vaultId: item.vaultId,
-								attachmentKey: attachment.storageKey,
-								userId: contextUserId,
-							});
+							attachmentId: attachment.id,
+							userId: attachment.uploadedBy,
+							envelopeVersion: attachment.envelopeVersion,
+						};
 
 						const {
 							downloadUrl,
@@ -219,38 +207,38 @@ export function useVaultExport() {
 						if (!response.ok) {
 							throw new Error("Failed to download attachment");
 						}
-						const encryptedJson = await response.text();
-						const encryptedFile = JSON.parse(encryptedJson) as {
-							ciphertext: string;
-							iv: string;
-							algorithm: string;
-						};
-
-						const base64File = await crypto.decrypt(
-							encryptedFile,
+						const attachmentKey = await unwrapAttachmentKey(
+							vaultCrypto,
 							vaultKey,
-							blobContext,
+							scope,
+							attachment,
 						);
-
-						const fileName = await crypto.decrypt(
-							{
-								ciphertext: encryptedName,
-								iv: encryptionIv,
-								algorithm: encryptionAlgorithm,
-							},
-							vaultKey,
-							nameContext,
-						);
-
-						const contentType = await crypto.decrypt(
-							{
-								ciphertext: encryptedContentType,
-								iv: encryptedContentTypeIv,
-								algorithm: encryptionAlgorithm,
-							},
-							vaultKey,
-							contentTypeContext,
-						);
+						let base64File: string;
+						let fileName: string;
+						let contentType: string;
+						try {
+							({
+								base64File,
+								name: fileName,
+								contentType,
+							} = await decryptAttachmentParts(
+								vaultCrypto,
+								attachmentKey,
+								scope,
+								{
+									blobEnvelope: parseAttachmentBlobEnvelope(
+										await response.text(),
+									),
+									encryptedName,
+									encryptedContentType,
+									encryptionIv,
+									encryptedContentTypeIv,
+									encryptionAlgorithm,
+								},
+							));
+						} finally {
+							await crypto.destroyKey(attachmentKey);
+						}
 
 						// Convert base64 to bytes for the ZIP entry
 						const binaryString = atob(base64File);

@@ -144,11 +144,6 @@ fn key_schemas_publish_their_named_limits() {
         schemas["CreateVaultBody"]["properties"]["name"]["maxLength"],
         NAME_MAX_CHARS as u64
     );
-    assert_eq!(
-        schemas["VaultKeyRotationInput"]["properties"]["memberKeys"]["maxItems"],
-        MAX_BATCH_ITEMS as u64
-    );
-
     // `AuditEventsQuery` is `IntoParams`, so its bounds land on the operation's parameters.
     let audit_parameters = &document["paths"]["/api/v1/audit-events"]["get"]["parameters"];
     let audit_parameter = |name: &str| {

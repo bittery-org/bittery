@@ -1,6 +1,3 @@
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -17,6 +14,7 @@ import {
 import { IconLogOut as LogOut } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
@@ -30,109 +28,30 @@ interface LeaveTeamDialogProps {
 export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [isLeaving, setIsLeaving] = useState(false);
-	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
+	const rotation = useVaultKeyRotation();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const { m } = useI18n();
 
-	/**
-	 * Handle leaving the team with key rotation for all team vaults.
-	 *
-	 * Steps:
-	 * 1. Get the Master Unlock Key and current user ID from storage
-	 * 2. Fetch leave rotation data (all team vaults with remaining members' keys and items)
-	 * 3. For each team vault: decrypt current vault key, perform key rotation
-	 * 4. Submit all vault rotations to server
-	 */
 	const handleLeave = async () => {
 		setIsLeaving(true);
 
 		try {
-			const masterUnlockKey = await storage.getMasterUnlockKey();
-			if (!masterUnlockKey) {
-				throw new TeamRotationError("MASTER_UNLOCK_KEY_MISSING");
-			}
-
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
 				throw new TeamRotationError("SESSION_DATA_MISSING");
 			}
 
-			// Fetch rotation data for all team vaults
-			const leaveRotationData = (await api.teams.leaveRotationData(teamId))
-				.data;
-
-			// Perform key rotation for each team vault
-			const vaultRotations: Array<{
-				vaultId: string;
-				keyRotation: {
-					memberKeys: Array<{
-						userId: string;
-						encryptedVaultKey: string;
-					}>;
-					reEncryptedItems: Array<{
-						itemId: string;
-						encryptedData: string;
-						encryptionIv: string;
-					}>;
-				};
-			}> = [];
-
-			for (const vaultData of leaveRotationData.vaults) {
-				const currentVaultKey = await vaultCrypto.getVaultKey({
-					vaultId: vaultData.vaultId,
-				});
-
-				if (!currentVaultKey) {
-					throw new TeamRotationError("VAULT_KEY_DECRYPT_FAILED", {
-						vaultName: vaultData.vaultName,
-					});
-				}
-
-				try {
-					const rotationResult = await crypto.performKeyRotation(
-						currentVaultKey,
-						vaultData.members.map((m) => ({
-							userId: m.userId,
-							publicKey: m.publicKey,
-						})),
-						vaultData.items.map((item) => ({
-							id: item.id,
-							encryptedData: item.encryptedData,
-							encryptionIv: item.encryptionIv,
-							encryptionAlgorithm: item.encryptionAlgorithm,
-							context: buildStoredItemEncryptionContext({
-								...item,
-								vaultId: vaultData.vaultId,
-							}),
-						})),
-						vaultData.vaultId,
-						vaultData.keyVersion + 1,
-						currentUserId,
-						masterUnlockKey,
-					);
-
-					vaultRotations.push({
-						vaultId: vaultData.vaultId,
-						keyRotation: {
-							memberKeys: rotationResult.memberEncryptedKeys,
-							reEncryptedItems: rotationResult.reEncryptedItems,
-						},
-					});
-				} finally {
-					// `getVaultKey` mints a fresh ref per call; the store's master unlock key
-					// is not ours to touch.
-					await crypto.destroyKey(currentVaultKey);
-				}
-			}
-
-			await api.teams.leave(teamId, {
-				vaultRotations,
+			const outcome = await rotation.rotate({
+				intent: { kind: "team-leave", teamId },
+				currentUserId,
 			});
-
-			toast.success(m.team_leave_dialog_toast_left());
+			toast.success(
+				m.team_leave_dialog_toast_left(),
+				outcome.kind === "refresh_required"
+					? { description: m.vault_key_rotation_refresh_required() }
+					: undefined,
+			);
 			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/team" });

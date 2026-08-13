@@ -14,10 +14,16 @@ pub enum AppErrorCode {
     Unauthorized,
     #[serde(rename = "CONFLICT")]
     Conflict,
+    #[serde(rename = "CONFLICT")]
+    RetryableConflict,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
     PayloadTooLarge,
+    RotationStaleVaultVersion,
+    RotationStaleMemberSet,
+    RotationStaleItemState,
+    RotationStaleAttachmentState,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -66,6 +72,26 @@ impl AppError {
         Self {
             code: AppErrorCode::Conflict,
             message: message.into(),
+        }
+    }
+
+    pub(crate) fn retryable_conflict(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::RetryableConflict,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn rotation_stale(reason: crate::db::enums::VaultKeyRotationStaleReason) -> Self {
+        use crate::db::enums::VaultKeyRotationStaleReason::*;
+        Self {
+            code: match reason {
+                VaultVersion => AppErrorCode::RotationStaleVaultVersion,
+                MemberSet => AppErrorCode::RotationStaleMemberSet,
+                ItemState => AppErrorCode::RotationStaleItemState,
+                AttachmentState => AppErrorCode::RotationStaleAttachmentState,
+            },
+            message: "Rotation plan is stale".to_owned(),
         }
     }
 

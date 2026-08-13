@@ -427,6 +427,23 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
         datetime!(2025-05-01 12:00 UTC),
     )
     .await;
+    // Targeted events can name a vault for cache cleanup, but they are visible
+    // only to their user. Other members of that vault must not process someone
+    // else's access revocation and delete their own local copy.
+    seed_sync_event(
+        pool,
+        "event_sync_outsider_revoked",
+        "vault_access_revoked",
+        &primary_vault_id,
+        "vault_member",
+        Some(&primary_vault_id),
+        &outsider_user_id,
+        4,
+        None,
+        None,
+        datetime!(2025-05-01 12:30 UTC),
+    )
+    .await;
     seed_sync_event(
         pool,
         &secondary_event_id,
@@ -507,12 +524,16 @@ async fn seed_attachment(
     created_at: OffsetDateTime,
 ) {
     query(
-			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 		)
 		.bind(attachment_id)
 		.bind(item_id)
 		.bind(vault_id)
 		.bind(format!("attachments/{attachment_id}"))
+		.bind("encrypted-attachment-key")
+		.bind("attachment-key-iv")
+		.bind("AES-GCM-AAD-V1")
+		.bind(1_i32)
 		.bind("encrypted-attachment-name")
 		.bind("encrypted-content-type")
 		.bind("attachment-iv")

@@ -1223,7 +1223,11 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			const deviceKey = await getDeviceKey();
 			const currentTime = now();
 
-			const encryptedMasterUnlockKey = await cryptoPort.wrapKey(muk, deviceKey);
+			const encryptedMasterUnlockKey = await cryptoPort.wrapKey(
+				muk,
+				deviceKey,
+				null,
+			);
 
 			await writeSessionData(resolved, {
 				encryptedMasterUnlockKey,

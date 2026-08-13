@@ -22,12 +22,14 @@
 		"./services/vault-service": "./src/services/vault-service.ts",
 		"./services/share-service": "./src/services/share-service.ts",
 		"./services/account-session-manager": "./src/services/account-session-manager.ts",
+		"./services/attachment-crypto": "./src/services/attachment-crypto.ts",
 		"./services/select-active-account": "./src/services/select-active-account.ts",
 		"./services/staged-full-refresh": "./src/services/staged-full-refresh.ts",
 		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts",
 		"./services/travel-mode-sync": "./src/services/travel-mode-sync.ts",
 		"./services/unlock": "./src/services/unlock.ts",
 		"./services/vault-crypto": "./src/services/vault-crypto.ts",
+		"./services/vault-key-rotation": "./src/services/vault-key-rotation.ts",
 		"./services/vault-repository-coordinator": "./src/services/vault-repository-coordinator.ts"
 	},
 	"dependencies": {

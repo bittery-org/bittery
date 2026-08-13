@@ -36,11 +36,14 @@ import type {
 	AccountResolver,
 	DefaultApiClient,
 } from "./account-resolver";
+import type { DecryptedAttachmentParts } from "./attachment-crypto";
 import {
+	createAttachmentKeyEnvelope,
 	decryptAttachmentParts,
 	encodeAttachmentBlobEnvelope,
 	encryptAttachmentParts,
 	parseAttachmentBlobEnvelope,
+	unwrapAttachmentKey,
 } from "./attachment-crypto";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type {
@@ -957,23 +960,36 @@ export class ItemService {
 				const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
 
 				// Decrypt under the source vault key and the attachment's persisted scope.
-				const decrypted = await decryptAttachmentParts(
+				const sourceScope = {
+					vaultId: params.sourceVaultId,
+					attachmentId: attachment.id,
+					userId: attachment.uploadedBy,
+					envelopeVersion: attachment.envelopeVersion,
+				};
+				const sourceAttachmentKey = await unwrapAttachmentKey(
 					this.vaultCrypto,
 					sourceVaultKey,
-					{
-						vaultId: params.sourceVaultId,
-						attachmentKey: attachment.storageKey,
-						userId: attachment.uploadedBy,
-					},
-					{
-						blobEnvelope,
-						encryptedName: attachment.encryptedName,
-						encryptedContentType: attachment.encryptedContentType,
-						encryptionIv: attachment.encryptionIv,
-						encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-						encryptionAlgorithm: attachment.encryptionAlgorithm,
-					},
+					sourceScope,
+					attachment,
 				);
+				let decrypted: DecryptedAttachmentParts;
+				try {
+					decrypted = await decryptAttachmentParts(
+						this.vaultCrypto,
+						sourceAttachmentKey,
+						sourceScope,
+						{
+							blobEnvelope,
+							encryptedName: attachment.encryptedName,
+							encryptedContentType: attachment.encryptedContentType,
+							encryptionIv: attachment.encryptionIv,
+							encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+							encryptionAlgorithm: attachment.encryptionAlgorithm,
+						},
+					);
+				} finally {
+					await this.crypto.destroyKey(sourceAttachmentKey);
+				}
 
 				// Mint a NEW server-signed storage key on the target. Quota errors
 				// (file-too-large / storage-limit-reached) reject here and propagate,
@@ -991,46 +1007,59 @@ export class ItemService {
 					);
 
 				// Re-encrypt under the TARGET scope (target vault key + target AAD bound
-				// to the freshly-minted storage key).
-				const reEncrypted = await encryptAttachmentParts(
+				// to the server-minted target Attachment id).
+				const targetScope = {
+					vaultId: params.targetVaultId,
+					attachmentId: upload.attachmentId,
+					userId: params.targetUserId,
+					envelopeVersion: 1,
+				};
+				const targetAttachment = await createAttachmentKeyEnvelope(
 					this.vaultCrypto,
 					params.targetVaultKey,
-					{
-						vaultId: params.targetVaultId,
-						attachmentKey: upload.key,
-						userId: params.targetUserId,
-					},
-					decrypted,
+					targetScope,
 				);
-
-				const putResponse = await fetch(upload.uploadUrl, {
-					method: "PUT",
-					headers: { "Content-Type": "application/octet-stream" },
-					body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
-				});
-				if (!putResponse.ok) {
-					throw new Error(
-						`Failed to upload migrated attachment for item ${params.targetItemId}.`,
+				try {
+					const reEncrypted = await encryptAttachmentParts(
+						this.vaultCrypto,
+						targetAttachment.key,
+						targetScope,
+						decrypted,
 					);
-				}
 
-				await params.targetClient.attachments.create(
-					params.targetItemId,
-					{
-						storageKey: upload.key,
-						encryptedName: reEncrypted.encryptedName,
-						encryptedContentType: reEncrypted.encryptedContentType,
-						encryptionIv: reEncrypted.encryptionIv,
-						encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
-						encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
-						fileSize: attachment.fileSize,
-					},
-					params.attachmentAttemptId
-						? {
-								idempotencyKey: `${params.attachmentAttemptId}:attachment:${attachment.id}`,
-							}
-						: undefined,
-				);
+					const putResponse = await fetch(upload.uploadUrl, {
+						method: "PUT",
+						headers: { "Content-Type": "application/octet-stream" },
+						body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
+					});
+					if (!putResponse.ok) {
+						throw new Error(
+							`Failed to upload migrated attachment for item ${params.targetItemId}.`,
+						);
+					}
+
+					await params.targetClient.attachments.create(
+						params.targetItemId,
+						{
+							attachmentId: upload.attachmentId,
+							storageKey: upload.key,
+							...targetAttachment.encryptedAttachmentKey,
+							encryptedName: reEncrypted.encryptedName,
+							encryptedContentType: reEncrypted.encryptedContentType,
+							encryptionIv: reEncrypted.encryptionIv,
+							encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
+							encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
+							fileSize: attachment.fileSize,
+						},
+						params.attachmentAttemptId
+							? {
+									idempotencyKey: `${params.attachmentAttemptId}:attachment:${attachment.id}`,
+								}
+							: undefined,
+					);
+				} finally {
+					await this.crypto.destroyKey(targetAttachment.key);
+				}
 			}
 		} finally {
 			await this.crypto.destroyKey(sourceVaultKey);

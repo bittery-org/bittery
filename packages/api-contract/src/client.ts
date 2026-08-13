@@ -14,6 +14,7 @@ import type {
 	ApiWriteOptions,
 	Attachment,
 	AttachmentDownload,
+	AttachmentUpload,
 	AttachmentUploadInput,
 	AuthUser,
 	AuthVaultKey,
@@ -51,14 +52,15 @@ import type {
 	RecoveryVerificationInput,
 	RefreshSessionResponse,
 	RegistrationStatus,
-	RemoveTeamMemberInput,
-	RemoveTeamMemberResponse,
-	RemoveVaultMemberInput,
-	RemoveVaultMemberResponse,
 	RenameSessionInput,
 	ResendTeamInvitationResponse,
 	ResetPasswordInput,
 	ResetPasswordResponse,
+	RotationPlanSet,
+	RotationPlanSetFinalizeInput,
+	RotationPlanSetFinalizeResponse,
+	RotationPreparationPage,
+	RotationStageInput,
 	SecretKeyRotationInput,
 	SendTeamInvitationInput,
 	SendTeamInvitationResponse,
@@ -74,10 +76,8 @@ import type {
 	TeamDetails,
 	TeamImageUploadInput,
 	TeamInvitation,
-	TeamLeaveInput,
 	TeamMember,
 	TeamMemberAccess,
-	TeamRotationData,
 	TeamSummary,
 	TeamVault,
 	UpdateAttachmentInput,
@@ -92,7 +92,6 @@ import type {
 	VaultItem,
 	VaultItemDetails,
 	VaultMember,
-	VaultRotationData,
 	VaultStats,
 	VerifyRecoveryInput,
 	VerifyRecoveryResponse,
@@ -241,6 +240,19 @@ export interface ApiClient {
 			options?: ApiWriteOptions,
 		): Promise<ApiResult<BulkImportResponse>>;
 		members: {
+			startRemovalRotation(
+				vaultId: string,
+				userId: string,
+				options: ApiWriteOptions,
+				signal?: AbortSignal,
+			): Promise<ApiResult<RotationPlanSet>>;
+			finalizeRemovalRotation(
+				vaultId: string,
+				userId: string,
+				input: RotationPlanSetFinalizeInput,
+				options: ApiWriteOptions,
+				signal?: AbortSignal,
+			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
 			list(vaultId: string): Promise<ApiResult<readonly VaultMember[]>>;
 			add(
 				vaultId: string,
@@ -254,16 +266,6 @@ export interface ApiClient {
 				input: UpdateVaultMemberRoleInput,
 				options: ApiWriteOptions,
 			): Promise<ApiResult<unknown>>;
-			remove(
-				vaultId: string,
-				userId: string,
-				input: RemoveVaultMemberInput,
-				options: ApiWriteOptions,
-			): Promise<ApiResult<RemoveVaultMemberResponse>>;
-			removalRotationData(
-				vaultId: string,
-				userId: string,
-			): Promise<ApiResult<VaultRotationData>>;
 		};
 	};
 	readonly items: {
@@ -336,12 +338,23 @@ export interface ApiClient {
 		createUpload(
 			itemId: string,
 			input: AttachmentUploadInput,
-		): Promise<ApiResult<PresignedUpload>>;
+		): Promise<ApiResult<AttachmentUpload>>;
 		createDownloadUrl(
 			attachmentId: string,
 		): Promise<ApiResult<AttachmentDownload>>;
 	};
 	readonly teams: {
+		startLeaveRotation(
+			teamId: string,
+			options: ApiWriteOptions,
+			signal?: AbortSignal,
+		): Promise<ApiResult<RotationPlanSet>>;
+		finalizeLeaveRotation(
+			teamId: string,
+			input: RotationPlanSetFinalizeInput,
+			options: ApiWriteOptions,
+			signal?: AbortSignal,
+		): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
 		create(
 			input: CreateTeamInput,
 			options?: ApiWriteOptions,
@@ -396,30 +409,42 @@ export interface ApiClient {
 				options?: ApiWriteOptions,
 			): Promise<ApiResult<unknown>>;
 		};
-		leave(
-			teamId: string,
-			input: TeamLeaveInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
-		leaveRotationData(teamId: string): Promise<ApiResult<TeamRotationData>>;
 		members: {
-			list(teamId: string): Promise<ApiResult<readonly TeamMember[]>>;
-			remove(
+			startRemovalRotation(
 				teamId: string,
 				userId: string,
-				input: RemoveTeamMemberInput,
 				options: ApiWriteOptions,
-			): Promise<ApiResult<RemoveTeamMemberResponse>>;
+				signal?: AbortSignal,
+			): Promise<ApiResult<RotationPlanSet>>;
+			finalizeRemovalRotation(
+				teamId: string,
+				userId: string,
+				input: RotationPlanSetFinalizeInput,
+				options: ApiWriteOptions,
+				signal?: AbortSignal,
+			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+			list(teamId: string): Promise<ApiResult<readonly TeamMember[]>>;
 			access(
 				teamId: string,
 				userId: string,
 			): Promise<ApiResult<TeamMemberAccess>>;
-			removalRotationData(
-				teamId: string,
-				userId: string,
-			): Promise<ApiResult<TeamRotationData>>;
 		};
 		vaults(teamId: string): Promise<ApiResult<readonly TeamVault[]>>;
+	};
+	readonly vaultKeyRotation: {
+		preparationPage(
+			planId: string,
+			kind: string,
+			cursor: string | null,
+			signal?: AbortSignal,
+		): Promise<ApiResult<RotationPreparationPage>>;
+		stage(
+			planId: string,
+			kind: string,
+			input: RotationStageInput,
+			signal?: AbortSignal,
+		): Promise<ApiResult<unknown>>;
+		abandon(planId: string, signal?: AbortSignal): Promise<ApiResult<unknown>>;
 	};
 	readonly sync: {
 		bootstrap(
@@ -986,6 +1011,27 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					headers: writeHeaders(write),
 				}),
 			members: {
+				startRemovalRotation: (vaultId, userId, write, signal) =>
+					call(
+						"POST",
+						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans",
+						{
+							params: { path: { vaultId, userId } },
+							headers: writeHeaders(write),
+							signal,
+						},
+					),
+				finalizeRemovalRotation: (vaultId, userId, input, write, signal) =>
+					call(
+						"POST",
+						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize",
+						{
+							params: { path: { vaultId, userId } },
+							body: input,
+							headers: writeHeaders(write),
+							signal,
+						},
+					),
 				list: (vaultId) =>
 					drainPages<VaultMember>("/api/v1/vaults/{vaultId}/members", {
 						params: { path: { vaultId } },
@@ -1002,18 +1048,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 						body: input,
 						headers: writeHeaders(write),
 					}),
-				remove: (vaultId, userId, input, write) =>
-					call("DELETE", "/api/v1/vaults/{vaultId}/members/{userId}", {
-						params: { path: { vaultId, userId } },
-						body: input,
-						headers: writeHeaders(write),
-					}),
-				removalRotationData: (vaultId, userId) =>
-					call(
-						"GET",
-						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-data",
-						{ params: { path: { vaultId, userId } } },
-					),
 			},
 		},
 		items: {
@@ -1102,6 +1136,19 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 		},
 		teams: {
+			startLeaveRotation: (teamId, write, signal) =>
+				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans", {
+					params: { path: { teamId } },
+					headers: writeHeaders(write),
+					signal,
+				}),
+			finalizeLeaveRotation: (teamId, input, write, signal) =>
+				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans/finalize", {
+					params: { path: { teamId } },
+					body: input,
+					headers: writeHeaders(write),
+					signal,
+				}),
 			create: (input, write) =>
 				call("POST", "/api/v1/teams", {
 					body: input,
@@ -1191,43 +1238,65 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 						headers: writeHeaders(write),
 					}),
 			},
-			leave: (teamId, input, write) =>
-				call("POST", "/api/v1/teams/{teamId}/leave", {
-					params: { path: { teamId } },
-					body: input,
-					headers: writeHeaders(write),
-				}),
-			leaveRotationData: (teamId) =>
-				call("GET", "/api/v1/teams/{teamId}/leave-rotation-data", {
-					params: { path: { teamId } },
-				}),
 			members: {
+				startRemovalRotation: (teamId, userId, write, signal) =>
+					call(
+						"POST",
+						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans",
+						{
+							params: { path: { teamId, userId } },
+							headers: writeHeaders(write),
+							signal,
+						},
+					),
+				finalizeRemovalRotation: (teamId, userId, input, write, signal) =>
+					call(
+						"POST",
+						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize",
+						{
+							params: { path: { teamId, userId } },
+							body: input,
+							headers: writeHeaders(write),
+							signal,
+						},
+					),
 				list: (teamId) =>
 					drainPages<TeamMember>("/api/v1/teams/{teamId}/members", {
 						params: { path: { teamId } },
-					}),
-				remove: (teamId, userId, input, write) =>
-					call("DELETE", "/api/v1/teams/{teamId}/members/{userId}", {
-						params: { path: { teamId, userId } },
-						body: input,
-						headers: writeHeaders(write),
 					}),
 				access: (teamId, userId) =>
 					call("GET", "/api/v1/teams/{teamId}/members/{userId}/access", {
 						params: { path: { teamId, userId } },
 					}),
-				removalRotationData: (teamId, userId) =>
-					call(
-						"GET",
-						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-data",
-						{
-							params: { path: { teamId, userId } },
-						},
-					),
 			},
 			vaults: (teamId) =>
 				drainPages<TeamVault>("/api/v1/teams/{teamId}/vaults", {
 					params: { path: { teamId } },
+				}),
+		},
+		vaultKeyRotation: {
+			preparationPage: (planId, kind, cursor, signal) =>
+				call(
+					"GET",
+					"/api/v1/vault-key-rotation-plans/{planId}/preparation/{kind}",
+					{
+						params: {
+							path: { planId, kind },
+							query: { cursor: cursor ?? undefined },
+						},
+						signal,
+					},
+				),
+			stage: (planId, kind, input, signal) =>
+				call("PUT", "/api/v1/vault-key-rotation-plans/{planId}/staged/{kind}", {
+					params: { path: { planId, kind } },
+					body: input,
+					signal,
+				}),
+			abandon: (planId, signal) =>
+				call("DELETE", "/api/v1/vault-key-rotation-plans/{planId}", {
+					params: { path: { planId } },
+					signal,
 				}),
 		},
 		sync: {

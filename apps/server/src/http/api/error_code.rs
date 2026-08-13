@@ -87,6 +87,10 @@ pub enum ErrorCode {
     IdempotencyOutcomeIndeterminate,
     /// The outcome could not be stored or replayed.
     IdempotencyResponseUnavailable,
+    RotationStaleVaultVersion,
+    RotationStaleMemberSet,
+    RotationStaleItemState,
+    RotationStaleAttachmentState,
 }
 
 impl ErrorCode {
@@ -125,6 +129,10 @@ impl ErrorCode {
         Self::IdempotencyRequestInProgress,
         Self::IdempotencyOutcomeIndeterminate,
         Self::IdempotencyResponseUnavailable,
+        Self::RotationStaleVaultVersion,
+        Self::RotationStaleMemberSet,
+        Self::RotationStaleItemState,
+        Self::RotationStaleAttachmentState,
     ];
 
     pub(crate) const fn as_str(&self) -> &'static str {
@@ -161,6 +169,10 @@ impl ErrorCode {
             Self::IdempotencyRequestInProgress => "IDEMPOTENCY_REQUEST_IN_PROGRESS",
             Self::IdempotencyOutcomeIndeterminate => "IDEMPOTENCY_OUTCOME_INDETERMINATE",
             Self::IdempotencyResponseUnavailable => "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+            Self::RotationStaleVaultVersion => "ROTATION_STALE_VAULT_VERSION",
+            Self::RotationStaleMemberSet => "ROTATION_STALE_MEMBER_SET",
+            Self::RotationStaleItemState => "ROTATION_STALE_ITEM_STATE",
+            Self::RotationStaleAttachmentState => "ROTATION_STALE_ATTACHMENT_STATE",
         }
     }
 

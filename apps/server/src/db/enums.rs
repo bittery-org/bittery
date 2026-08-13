@@ -433,6 +433,71 @@ closed_enum!(ItemCategory, "item_category", {
     Totp => "totp",
 });
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyRotationReason {
+    MemberRemoved,
+    Scheduled,
+    SecurityBreach,
+    Manual,
+}
+closed_enum!(KeyRotationReason, "key_rotation_reason", {
+    MemberRemoved => "member_removed", Scheduled => "scheduled",
+    SecurityBreach => "security_breach", Manual => "manual",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultKeyRotationPlanState {
+    Preparing,
+    Ready,
+    Completed,
+    Stale,
+    Failed,
+    Abandoned,
+    Expired,
+}
+
+closed_enum!(VaultKeyRotationPlanState, "vault_key_rotation_plan_state", {
+    Preparing => "preparing",
+    Ready => "ready",
+    Completed => "completed",
+    Stale => "stale",
+    Failed => "failed",
+    Abandoned => "abandoned",
+    Expired => "expired",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultKeyRotationStaleReason {
+    VaultVersion,
+    MemberSet,
+    ItemState,
+    AttachmentState,
+}
+
+closed_enum!(VaultKeyRotationStaleReason, "vault_key_rotation_stale_reason", {
+    VaultVersion => "vault_version",
+    MemberSet => "member_set",
+    ItemState => "item_state",
+    AttachmentState => "attachment_state",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultKeyRotationManifestKind {
+    Member,
+    Item,
+    Attachment,
+}
+
+closed_enum!(VaultKeyRotationManifestKind, "vault_key_rotation_manifest_kind", {
+    Member => "member",
+    Item => "item",
+    Attachment => "attachment",
+});
+
 #[cfg(test)]
 #[path = "enums_tests.rs"]
 mod tests;

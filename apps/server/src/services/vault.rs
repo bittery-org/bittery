@@ -26,21 +26,16 @@ use crate::{
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, remove_vault_member_shape,
-        rotation_item_shape, success_shape, update_item_shape, update_vault_shape,
-        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
-        vault_member_shape, vault_rotation_data_shape, vault_rotation_member_shape,
-        vault_rotation_summary_shape, vault_stats_shape, vault_summary_shape,
+        create_item_shape, create_vault_shape, item_shape, success_shape, update_item_shape,
+        update_vault_shape, vault_available_member_shape, vault_details_shape,
+        vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
-};
-
-pub use crate::services::vault_key::{
-    RotationMemberKeyInput, RotationReEncryptedItemInput, VaultKeyRotationInput,
 };
 
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 const VAULT_PAGE_QUERY_BYTES: i64 = ITEM_PAGE_QUERY_BYTES;
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
+pub(crate) const ATTACHMENT_ENVELOPE_VERSION: i32 = 1;
 
 #[derive(Debug)]
 pub(crate) struct ByteBoundedPage<T> {
@@ -114,7 +109,12 @@ pub struct CreateAttachmentUploadInput {
 #[serde(deny_unknown_fields)]
 pub struct CreateAttachmentInput {
     pub item_id: String,
+    pub attachment_id: String,
     pub storage_key: String,
+    pub encrypted_attachment_key: String,
+    pub attachment_key_iv: String,
+    pub attachment_key_algorithm: String,
+    pub envelope_version: i32,
     pub encrypted_name: String,
     pub encrypted_content_type: String,
     pub encryption_iv: String,
@@ -146,6 +146,14 @@ pub struct UpdateAttachmentInput {
     pub encryption_algorithm: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAttachmentUploadResponse {
+    pub attachment_id: String,
+    pub storage_key: String,
+    pub upload_url: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -163,24 +171,6 @@ pub struct AddVaultMemberInput {
     pub user_id: String,
     pub role: VaultRole,
     pub encrypted_vault_key: String,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct GetVaultRotationDataInput {
-    pub vault_id: String,
-    pub exclude_user_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct RemoveVaultMemberInput {
-    pub vault_id: String,
-    pub user_id: String,
-    pub key_rotation: VaultKeyRotationInput,
     pub client_id: Option<String>,
 }
 
@@ -406,36 +396,6 @@ vault_available_member_shape!(service_struct {
     pub struct VaultAvailableMemberResponse
 });
 
-vault_rotation_member_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct VaultRotationMemberResponse
-});
-
-rotation_item_shape! {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct VaultRotationItemResponse {}
-}
-
-vault_rotation_data_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct VaultRotationDataResponse
-});
-
-vault_rotation_summary_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct VaultKeyRotationSummaryResponse
-});
-
-remove_vault_member_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct RemoveVaultMemberResponse
-});
-
 attachment_download_shape!(service_struct {
     #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -612,7 +572,7 @@ pub(crate) async fn create_vault_attachment_upload(
     pool: &PgPool,
     user_id: &str,
     input: CreateAttachmentUploadInput,
-) -> Result<storage::PresignedUploadResult, AppError> {
+) -> Result<CreateAttachmentUploadResponse, AppError> {
     if input.file_name.trim().is_empty()
         || input.content_type.trim().is_empty()
         || input.file_size <= 0
@@ -675,10 +635,12 @@ pub(crate) async fn create_vault_attachment_upload(
             ));
         }
     }
+    let attachment_id = generate_resource_id("attachment");
     query(
-		"INSERT INTO pending_attachment_upload (id, team_id, vault_id, item_id, storage_key, file_size, storage_size, content_type, created_by, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+		"INSERT INTO pending_attachment_upload (id, attachment_id, team_id, vault_id, item_id, storage_key, file_size, storage_size, content_type, created_by, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
 	)
 	.bind(generate_resource_id("attachment_pending"))
+	.bind(&attachment_id)
 	.bind(&actor.team_id)
 	.bind(&scoped_item.vault_id)
 	.bind(&input.item_id)
@@ -697,7 +659,7 @@ pub(crate) async fn create_vault_attachment_upload(
         AppError::internal("Failed to commit attachment upload reservation")
     })?;
 
-    storage::create_presigned_upload(
+    let upload = storage::create_presigned_upload(
         &key,
         &input.content_type,
         Some(i64::from(storage_size)),
@@ -707,6 +669,11 @@ pub(crate) async fn create_vault_attachment_upload(
     .map_err(|error| {
         tracing::error!(error = %error, "Internal error");
         AppError::internal("An internal error occurred")
+    })?;
+    Ok(CreateAttachmentUploadResponse {
+        attachment_id,
+        storage_key: upload.key,
+        upload_url: upload.upload_url,
     })
 }
 
@@ -720,6 +687,11 @@ pub(crate) async fn create_vault_attachment(
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(access.role, "Access denied")?;
+    if input.envelope_version != ATTACHMENT_ENVELOPE_VERSION {
+        return Err(AppError::bad_request(
+            "Unsupported attachment envelope version",
+        ));
+    }
     let is_valid_key =
         storage::is_valid_attachment_upload_key(&input.storage_key, user_id, &input.item_id, None)
             .map_err(|error| {
@@ -744,6 +716,11 @@ pub(crate) async fn create_vault_attachment(
             "Attachment metadata does not match the reserved upload.",
         ));
     }
+    if reservation.attachment_id != input.attachment_id {
+        return Err(AppError::bad_request(
+            "Attachment metadata does not match the reserved upload.",
+        ));
+    }
     let Some(uploaded_object) =
         storage::head_object(&input.storage_key)
             .await
@@ -761,18 +738,21 @@ pub(crate) async fn create_vault_attachment(
             "Uploaded attachment does not match the reserved encrypted size.",
         ));
     }
-    let attachment_id = generate_resource_id("attachment");
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start attachment create transaction");
         AppError::internal("Failed to start attachment create transaction")
     })?;
     query(
-		"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+		"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 	)
-	.bind(&attachment_id)
+	.bind(&input.attachment_id)
 	.bind(&input.item_id)
 	.bind(&scoped_item.vault_id)
 	.bind(&input.storage_key)
+	.bind(&input.encrypted_attachment_key)
+	.bind(&input.attachment_key_iv)
+	.bind(&input.attachment_key_algorithm)
+	.bind(input.envelope_version)
 	.bind(&input.encrypted_name)
 	.bind(&input.encrypted_content_type)
 	.bind(&input.encryption_iv)
@@ -809,7 +789,9 @@ pub(crate) async fn create_vault_attachment(
         AppError::internal("Failed to commit attachment create")
     })?;
 
-    Ok(CreateAttachmentResponse { attachment_id })
+    Ok(CreateAttachmentResponse {
+        attachment_id: input.attachment_id,
+    })
 }
 
 pub(crate) async fn list_vault_attachments_page(
@@ -825,7 +807,7 @@ pub(crate) async fn list_vault_attachments_page(
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
     let attachment_rows = query_as::<_, DbBootstrapAttachmentRow>(
-        "SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = $1 AND ($2::timestamptz IS NULL OR (created_at, id) > ($2, $3)) ORDER BY created_at ASC, id ASC LIMIT $4",
+		"SELECT id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = $1 AND ($2::timestamptz IS NULL OR (created_at, id) > ($2, $3)) ORDER BY created_at ASC, id ASC LIMIT $4",
     )
     .bind(&input.item_id)
     .bind(cursor_timestamp)
@@ -2534,259 +2516,6 @@ pub(crate) mod member_handlers {
         Ok(SuccessResponse { success: true })
     }
 
-    pub(crate) async fn get_vault_rotation_data(
-        pool: &PgPool,
-        user_id: &str,
-        input: GetVaultRotationDataInput,
-    ) -> Result<VaultRotationDataResponse, AppError> {
-        let _actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        let vault_record = query_as::<_, DbTeamRotationVaultRow>(
-            "SELECT id, name, key_version FROM vault WHERE id = $1 LIMIT 1",
-        )
-        .bind(&input.vault_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load vault");
-            AppError::internal("Failed to load vault")
-        })?
-        .ok_or_else(|| AppError::not_found("Vault not found"))?;
-        let members = query_as::<_, DbRotationMemberRow>(
-			"SELECT vk.user_id, u.public_key, vk.role::text AS role FROM vault_key vk INNER JOIN \"user\" u ON vk.user_id = u.id WHERE vk.vault_id = $1 AND vk.user_id != $2 ORDER BY vk.created_at ASC",
-		)
-		.bind(&input.vault_id)
-		.bind(&input.exclude_user_id)
-		.fetch_all(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
-        let items = query_as::<_, DbRotationItemRow>(&format!(
-            "SELECT {ROTATION_ITEM_COLUMNS} FROM item WHERE vault_id = $1 ORDER BY created_at ASC"
-        ))
-        .bind(&input.vault_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load rotation items");
-            AppError::internal("Failed to load rotation items")
-        })?;
-        Ok(VaultRotationDataResponse {
-            key_version: vault_record.key_version,
-            members: members
-                .into_iter()
-                .map(|member| VaultRotationMemberResponse {
-                    user_id: member.user_id,
-                    public_key: member.public_key,
-                    role: member.role,
-                })
-                .collect(),
-            items: items
-                .into_iter()
-                .map(|item| VaultRotationItemResponse::compose(item.into()))
-                .collect(),
-        })
-    }
-
-    pub(crate) async fn remove_vault_member(
-        pool: &PgPool,
-        user_id: &str,
-        request_client_id: Option<&str>,
-        input: RemoveVaultMemberInput,
-    ) -> Result<RemoveVaultMemberResponse, AppError> {
-        for key in &input.key_rotation.member_keys {
-            validate_encrypted_vault_key(&key.encrypted_vault_key)?;
-        }
-        let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        if input.user_id == user_id {
-            return Err(AppError::bad_request("Cannot remove yourself"));
-        }
-        let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
-            .await
-            .map_err(|error| {
-                if error.code == AppErrorCode::Forbidden {
-                    AppError::not_found("Member not found")
-                } else {
-                    error
-                }
-            })?;
-        if target_access.role == VaultRole::Owner {
-            return Err(AppError::forbidden("Cannot remove vault owner"));
-        }
-        if actor.role == VaultRole::Admin && target_access.role == VaultRole::Admin {
-            return Err(AppError::forbidden("Admins cannot remove other admins"));
-        }
-        let current_vault = query_as::<_, DbTeamRotationVaultRow>(
-            "SELECT id, name, key_version FROM vault WHERE id = $1 LIMIT 1",
-        )
-        .bind(&input.vault_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load vault");
-            AppError::internal("Failed to load vault")
-        })?
-        .ok_or_else(|| AppError::not_found("Vault not found"))?;
-        let new_key_version = current_vault.key_version + 1;
-        let rotation_id = generate_resource_id("rotation");
-        query(
-			"INSERT INTO vault_key_rotation (id, vault_id, key_version, reason, initiated_by_id, removed_user_id, items_re_encrypted, members_updated, status, created_at) VALUES ($1, $2, $3, 'member_removed'::key_rotation_reason, $4, $5, $6, $7, 'in_progress', $8)",
-		)
-		.bind(&rotation_id)
-		.bind(&input.vault_id)
-		.bind(new_key_version)
-		.bind(user_id)
-		.bind(&input.user_id)
-		.bind(input.key_rotation.re_encrypted_items.len() as i32)
-		.bind(input.key_rotation.member_keys.len() as i32)
-		.bind(OffsetDateTime::now_utc())
-		.execute(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to create vault key rotation"); AppError::internal("Failed to create vault key rotation") })?;
-
-        let removal_result = async {
-			let mut transaction = pool
-				.begin()
-				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to start vault member removal transaction"); AppError::internal("Failed to start vault member removal transaction") })?;
-			let deleted_rows = query(
-				"DELETE FROM vault_key WHERE vault_id = $1 AND user_id = $2",
-			)
-			.bind(&input.vault_id)
-			.bind(&input.user_id)
-			.execute(&mut *transaction)
-			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to remove vault member"); AppError::internal("Failed to remove vault member") })?
-			.rows_affected();
-			if deleted_rows == 0 {
-				return Err(AppError::not_found("Member not found"));
-			}
-			for member_key in &input.key_rotation.member_keys {
-				let updated_rows = query(
-					"UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3",
-				)
-				.bind(&member_key.encrypted_vault_key)
-				.bind(&input.vault_id)
-				.bind(&member_key.user_id)
-				.execute(&mut *transaction)
-				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated member key"); AppError::internal("Failed to update rotated member key") })?
-				.rows_affected();
-				if updated_rows == 0 {
-					return Err(AppError::not_found("Member key not found for rotation"));
-				}
-			}
-			for item in &input.key_rotation.re_encrypted_items {
-				// Rotation re-seals the ciphertext under the context the item already carried, so
-				// `encryption_version`/`encrypted_by_user_id` must not move — they describe the AAD
-				// binding, and rewriting them would make every rotated item undecryptable.
-				let updated_rows = query(
-					"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
-				)
-				.bind(&item.encrypted_data)
-				.bind(&item.encryption_iv)
-				.bind(user_id)
-				.bind(OffsetDateTime::now_utc())
-				.bind(&item.item_id)
-				.bind(&input.vault_id)
-				.execute(&mut *transaction)
-				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated item"); AppError::internal("Failed to update rotated item") })?
-				.rows_affected();
-				if updated_rows == 0 {
-					return Err(AppError::not_found("Item not found in vault during rotation"));
-				}
-			}
-			query("UPDATE vault SET key_version = $1, updated_at = $2 WHERE id = $3")
-				.bind(new_key_version)
-				.bind(OffsetDateTime::now_utc())
-				.bind(&input.vault_id)
-				.execute(&mut *transaction)
-				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to update vault key version"); AppError::internal("Failed to update vault key version") })?;
-			query(
-				"UPDATE vault_key_rotation SET status = 'completed', completed_at = $1 WHERE id = $2",
-			)
-			.bind(OffsetDateTime::now_utc())
-			.bind(&rotation_id)
-			.execute(&mut *transaction)
-			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to finalize vault key rotation"); AppError::internal("Failed to finalize vault key rotation") })?;
-			insert_vault_access_revoked_sync_event_with_metadata(
-				&mut transaction,
-				&input.vault_id,
-				&input.user_id,
-				input.client_id.as_deref().or(request_client_id),
-				new_key_version,
-				json!({ "reason": "member_removed", "removedUserId": input.user_id }),
-			)
-			.await?;
-			insert_vault_member_sync_event(
-				&mut transaction,
-				SyncEventType::VaultMemberRemoved,
-				&input.user_id,
-				&input.vault_id,
-				user_id,
-				input.client_id.as_deref().or(request_client_id),
-				json!({ "removedUserId": input.user_id }),
-			)
-			.await?;
-			insert_vault_key_rotated_sync_event(
-				&mut transaction,
-				&input.vault_id,
-				user_id,
-				input.client_id.as_deref().or(request_client_id),
-				new_key_version,
-				json!({ "reason": "member_removed", "keyRotationId": rotation_id }),
-			)
-			.await?;
-			transaction
-				.commit()
-				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to commit vault member removal"); AppError::internal("Failed to commit vault member removal") })?;
-			Ok(())
-		}
-		.await;
-
-        if let Err(error) = removal_result {
-            query(
-                "UPDATE vault_key_rotation SET status = 'failed', error_message = $1 WHERE id = $2",
-            )
-            .bind(error.message.clone())
-            .bind(&rotation_id)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to mark vault key rotation as failed");
-                AppError::internal("Failed to mark vault key rotation as failed")
-            })?;
-            return Err(AppError::internal("Key rotation failed. Please try again."));
-        }
-
-        insert_vault_audit_log_with_metadata(
-            pool,
-            "vault_member_removed",
-            &input.vault_id,
-            user_id,
-            json!({
-                "removedUserId": input.user_id,
-                "keyRotationId": rotation_id,
-                "newKeyVersion": new_key_version,
-                "itemsReEncrypted": input.key_rotation.re_encrypted_items.len(),
-                "membersUpdated": input.key_rotation.member_keys.len(),
-            }),
-        )
-        .await?;
-
-        Ok(RemoveVaultMemberResponse {
-            success: true,
-            key_rotation: VaultKeyRotationSummaryResponse {
-                id: rotation_id,
-                new_key_version,
-                items_re_encrypted: input.key_rotation.re_encrypted_items.len(),
-                members_updated: input.key_rotation.member_keys.len(),
-            },
-        })
-    }
-
     struct ManagedVaultActor {
         role: VaultRole,
         team_id: Option<String>,
@@ -3085,50 +2814,6 @@ async fn insert_vault_member_sync_event(
     .await
 }
 
-async fn insert_vault_access_revoked_sync_event_with_metadata(
-    transaction: &mut Transaction<'_, Postgres>,
-    vault_id: &str,
-    user_id: &str,
-    client_id: Option<&str>,
-    version: i32,
-    metadata: serde_json::Value,
-) -> Result<(), AppError> {
-    insert_sync_event(
-        &mut **transaction,
-        SyncEventType::VaultAccessRevoked,
-        vault_id,
-        SyncEntityType::Vault,
-        vault_id,
-        user_id,
-        version,
-        client_id,
-        Some(&metadata.to_string()),
-    )
-    .await
-}
-
-async fn insert_vault_key_rotated_sync_event(
-    transaction: &mut Transaction<'_, Postgres>,
-    vault_id: &str,
-    user_id: &str,
-    client_id: Option<&str>,
-    version: i32,
-    metadata: serde_json::Value,
-) -> Result<(), AppError> {
-    insert_sync_event(
-        &mut **transaction,
-        SyncEventType::VaultKeyRotated,
-        vault_id,
-        SyncEntityType::VaultKey,
-        vault_id,
-        user_id,
-        version,
-        client_id,
-        Some(&metadata.to_string()),
-    )
-    .await
-}
-
 fn map_item(item: DbBootstrapItemRow) -> VaultItemResponse {
     VaultItemResponse::compose(item.into())
 }
@@ -3175,7 +2860,7 @@ async fn load_item_attachments(
     }
     let item_ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
     let attachment_rows = query_as::<_, DbBootstrapAttachmentRow>(
-		"SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = ANY($1) ORDER BY created_at ASC",
+		"SELECT id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = ANY($1) ORDER BY created_at ASC",
 	)
 	.bind(&item_ids)
 	.fetch_all(pool)
@@ -3287,7 +2972,7 @@ async fn load_pending_attachment_reservation(
     created_by: &str,
 ) -> Result<Option<DbPendingAttachmentReservationRow>, AppError> {
     query_as::<_, DbPendingAttachmentReservationRow>(
-		"SELECT id, file_size, storage_size FROM pending_attachment_upload WHERE storage_key = $1 AND item_id = $2 AND created_by = $3 AND consumed_at IS NULL AND expires_at > $4 LIMIT 1",
+		"SELECT id, attachment_id, file_size, storage_size FROM pending_attachment_upload WHERE storage_key = $1 AND item_id = $2 AND created_by = $3 AND consumed_at IS NULL AND expires_at > $4 LIMIT 1",
 	)
 	.bind(storage_key)
 	.bind(item_id)
@@ -3304,7 +2989,7 @@ async fn load_attachment_access(
     user_id: &str,
 ) -> Result<DbScopedAttachmentAccessRow, AppError> {
     query_as::<_, DbScopedAttachmentAccessRow>(
-		"SELECT ia.id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
+		"SELECT ia.id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_attachment_key, ia.attachment_key_iv, ia.attachment_key_algorithm, ia.envelope_version, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
 	)
 	.bind(attachment_id)
 	.bind(user_id)
@@ -3345,17 +3030,9 @@ async fn insert_vault_key(
     encrypted_vault_key: &str,
 ) -> Result<(), AppError> {
     validate_encrypted_vault_key(encrypted_vault_key)?;
-    query(
-		"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role, created_at) VALUES ($1, $2, $3, $4, 'owner', $5)",
-	)
-	.bind(generate_resource_id("vault_key"))
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(encrypted_vault_key)
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault key"); AppError::internal("Failed to create vault key") })?;
+    query("INSERT INTO vault_key (id,vault_id,user_id,encrypted_vault_key,role,created_at) VALUES ($1,$2,$3,$4,'owner',$5)")
+        .bind(generate_resource_id("vault_key")).bind(vault_id).bind(user_id).bind(encrypted_vault_key).bind(OffsetDateTime::now_utc())
+        .execute(&mut **transaction).await.map_err(|e| { tracing::error!(error=%e,"Failed to create vault key"); AppError::internal("Failed to create vault key") })?;
     Ok(())
 }
 
