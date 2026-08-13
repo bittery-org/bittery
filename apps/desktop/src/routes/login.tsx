@@ -54,9 +54,6 @@ export const Route = createFileRoute("/login")({
 			await storage.setActiveAccount(activeAccount);
 		}
 
-		const activeAccountMetadata = accountsList.find(
-			(account) => account.accountId === activeAccount,
-		);
 		const sessionValid = await storage.isSessionValid(activeAccount);
 		if (sessionValid) {
 			// This guard can run before AccountProvider constructs the manager; with no
@@ -70,12 +67,7 @@ export const Route = createFileRoute("/login")({
 			}
 		}
 
-		throw redirect({
-			to: "/unlock",
-			search: activeAccountMetadata?.email
-				? { email: activeAccountMetadata.email }
-				: undefined,
-		});
+		throw redirect({ to: "/unlock" });
 	},
 	component: LoginPage,
 	validateSearch: (search: Record<string, unknown>): LoginSearchParams => ({

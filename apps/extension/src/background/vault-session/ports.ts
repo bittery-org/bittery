@@ -33,7 +33,6 @@ export interface DesktopPort {
 export type SessionInvalidationTarget =
 	| "active"
 	| { accountId: string }
-	| { email: string }
 	| { sessionId: string };
 
 /** The identity C1 reports back, flattened to what callers actually consume. */
@@ -46,13 +45,13 @@ export interface InvalidatedSession {
 export interface VaultLifecyclePort {
 	lockAll(): Promise<void>;
 	/**
-	 * `fallbackEmail` exists because `StoredSessionData.sessionId` is optional:
+	 * `fallbackAccountId` exists because `StoredSessionData.sessionId` is optional:
 	 * an unresolved id yields an empty, failure-free outcome that is
-	 * indistinguishable from success, so the adapter retries by email.
+	 * indistinguishable from success, so the adapter retries by accountId.
 	 */
 	invalidateSession(
 		target: SessionInvalidationTarget,
-		fallbackEmail?: string | null,
+		fallbackAccountId?: string | null,
 	): Promise<InvalidatedSession>;
 }
 

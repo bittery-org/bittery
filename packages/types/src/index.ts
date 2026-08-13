@@ -165,7 +165,6 @@ export interface ItemSyncCommand {
 	vaultId: string;
 	targetVaultId?: string;
 	targetAccountId?: string;
-	targetAccountEmail?: string;
 	targetItemId?: string;
 	/**
 	 * Only a `create` carries one, and it is the value the server will be asked to store —

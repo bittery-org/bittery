@@ -1,6 +1,6 @@
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import { resolveUserIdForScope } from "@bittery/storage/account-id";
+import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import { AccountResolver } from "./services/account-resolver";
 import type { AccountVaultRuntime } from "./services/account-vault-runtime";
 import { type CommandQueuePort, ItemCommands } from "./services/item-commands";
@@ -57,7 +57,7 @@ export function createCoreContext(
 					options.hydrateItem?.(account.accountId, itemId)
 			: undefined,
 		resolveUserId: (accountId) =>
-			resolveUserIdForScope(options.storage, accountId),
+			resolveUserIdForAccount(options.storage, accountId),
 	});
 	const vaults = new VaultService({
 		storage: options.storage,
@@ -67,7 +67,6 @@ export function createCoreContext(
 		vaultKeyProjection: vaultRepository,
 	});
 	const shares = new ShareService({
-		storage: options.storage,
 		crypto: options.crypto,
 		vaultCrypto: options.vaultCrypto,
 		accounts,

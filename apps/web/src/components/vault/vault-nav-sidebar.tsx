@@ -33,7 +33,13 @@ import { useVaultDnd } from "@/providers/vault-dnd-provider";
  */
 type SidebarVault = Pick<
 	VaultKeyWithAccount,
-	"vaultId" | "vaultName" | "vaultType" | "vaultIcon" | "vaultImageUrl" | "role"
+	| "vaultId"
+	| "vaultName"
+	| "vaultType"
+	| "vaultIcon"
+	| "vaultImageUrl"
+	| "role"
+	| "accountId"
 >;
 
 interface DroppableVaultEntryProps {
@@ -67,6 +73,7 @@ function DroppableVaultEntry({
 		type: "vault",
 		vaultId: vault.vaultId,
 		role: vault.role,
+		accountId: vault.accountId,
 	};
 
 	const { isOver, setNodeRef, active } = useDroppable({

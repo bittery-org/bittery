@@ -48,21 +48,12 @@ export const Route = createFileRoute("/vault")({
 			throw redirect({ to: "/login" });
 		}
 
-		// Single account mode: validate session for specific account
-		const accountsList = await storage.getAccountsList();
-		const activeAccountEmail = accountsList.find(
-			(account) => account.accountId === activeAccount,
-		)?.email;
-
 		// Check if user has stored credentials for active account
 		const hasSecretKey = await storage.getStoredSecretKey(activeAccount);
 		const sessionValid = await storage.isSessionValid(activeAccount);
 
 		if (!hasSecretKey || !sessionValid) {
-			throw redirect({
-				to: "/unlock",
-				search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
-			});
+			throw redirect({ to: "/unlock" });
 		}
 
 		// This guard can run before AccountProvider constructs the manager; with no
@@ -73,10 +64,7 @@ export const Route = createFileRoute("/vault")({
 		);
 
 		if (!restored) {
-			throw redirect({
-				to: "/unlock",
-				search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
-			});
+			throw redirect({ to: "/unlock" });
 		}
 
 		// Extension "view item" handoff that arrived while the app was locked
@@ -200,7 +188,7 @@ function RouteComponent() {
 		},
 	) => {
 		try {
-			// Find the vault to get its account email
+			// Resolve the vault's stable account scope.
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
 			const accountId = vault?.accountId;
 			if (!accountId) throw new Error();
@@ -229,7 +217,7 @@ function RouteComponent() {
 
 	const handleDeleteVault = async (vaultId: string) => {
 		try {
-			// Find the vault to get its account email
+			// Resolve the vault's stable account scope.
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
 			const accountId = vault?.accountId;
 			if (!accountId) throw new Error();
@@ -260,7 +248,7 @@ function RouteComponent() {
 		category: ItemCategory,
 	) => {
 		try {
-			// Find the vault to get its account email
+			// Resolve the vault's stable account scope.
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
 			const accountId = vault?.accountId;
 			if (!accountId) throw new Error();

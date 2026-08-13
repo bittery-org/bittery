@@ -33,11 +33,15 @@ export function ItemListRow({
 	const hasPasskeys =
 		item.category === "login" && (item.passkeys?.length ?? 0) > 0;
 
-	const dragData: DragItemData = {
-		type: "vault-item",
-		item,
-		sourceVaultId: vaultId,
-	};
+	const accountId = item.accountId ?? item.account?.accountId;
+	const dragData: DragItemData | undefined = accountId
+		? {
+				type: "vault-item",
+				item,
+				sourceVaultId: vaultId,
+				accountId,
+			}
+		: undefined;
 
 	const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
 		id: `item-${item.id}`,

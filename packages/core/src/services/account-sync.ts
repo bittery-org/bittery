@@ -35,8 +35,6 @@ export type AccountSyncClientFactory = (
 ) => Promise<DefaultApiClient | null>;
 
 export interface AccountSyncAssembly {
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
 	sources: SyncSource[];
 	getClientForAccount: (accountId: string) => Promise<DefaultApiClient>;
 	replicaStore: SyncOrchestratorReplica;
@@ -166,7 +164,6 @@ export function createAccountSync({
 			const getClientForAccount = (targetAccountId: string) =>
 				requireClient(targetAccountId, clientId);
 			const semanticExecutor = new CrossAccountItemCommandExecutor({
-				storage,
 				crypto,
 				vaultCrypto,
 				getClientForAccount,
@@ -184,8 +181,6 @@ export function createAccountSync({
 				itemCacheServerUrl: account.serverUrl,
 			};
 			const assembly: AccountSyncAssembly = {
-				serverUrl: account.serverUrl,
-				getAuthToken,
 				sources: [source],
 				getClientForAccount,
 				replicaStore: vaultRepository,

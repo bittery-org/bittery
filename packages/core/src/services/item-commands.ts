@@ -12,24 +12,29 @@ export type CreateItemIntent = {
 	vaultId: string;
 	category: ItemCategory;
 	data: DecryptedItemData;
-	accountId?: string;
-	accountEmail?: string;
+	accountId: string;
 };
 export type UpdateItemIntent = {
 	type: "update";
 	itemId: string;
 	vaultId?: string;
 	data: Partial<DecryptedItemData>;
-	accountEmail?: string;
+	accountId: string;
 };
 export type ItemLifecycleIntent =
 	| {
 			type: "delete" | "toggle_favorite";
 			itemId: string;
 			vaultId: string;
+			accountId: string;
 			favorite?: boolean;
 	  }
-	| { type: "restore" | "permanent_delete"; itemId: string; vaultId: string };
+	| {
+			type: "restore" | "permanent_delete";
+			itemId: string;
+			vaultId: string;
+			accountId: string;
+	  };
 export type MoveItemIntent = {
 	type: "move";
 	itemId: string;
@@ -37,8 +42,8 @@ export type MoveItemIntent = {
 	targetVaultId: string;
 	category: ItemCategory;
 	decryptedData: DecryptedItemData;
-	targetAccountId?: string;
-	targetAccountEmail?: string;
+	accountId: string;
+	targetAccountId: string;
 };
 
 export type ItemIntent =
@@ -76,13 +81,10 @@ export interface ItemCommandAccount {
 }
 
 export interface ItemCommandRepositoryPort {
-	findAccountForItem(itemId: string): { accountId: string } | undefined;
 	findAccountForVault(vaultId: string): { accountId: string } | undefined;
-	resolveAccountIdByEmail(email: string): string | undefined;
 	getAccountInfo(accountId: string): { email: string } | undefined;
-	getById(itemId: string, accountId?: string): RepositoryItem | undefined;
-	getDeleted(accountId?: string): RepositoryItem[];
-	getVaultById(vaultId: string, accountId: string): unknown;
+	getById(itemId: string, accountId: string): RepositoryItem | undefined;
+	getDeleted(accountId: string): RepositoryItem[];
 	encryptForVault(input: {
 		accountId: string;
 		vaultId: string;
@@ -154,59 +156,40 @@ export class ItemCommands {
 		);
 	}
 
-	private requireVault(
-		vaultId: string,
-		accountId?: string,
-		accountEmail?: string,
-	) {
-		const resolvedId =
-			accountId ??
-			(accountEmail
-				? this.deps.repository.resolveAccountIdByEmail(accountEmail)
-				: undefined) ??
-			this.deps.repository.findAccountForVault(vaultId)?.accountId;
-		const info = resolvedId
-			? this.deps.repository.getAccountInfo(resolvedId)
-			: undefined;
-		const account =
-			resolvedId && info
-				? { accountId: resolvedId, accountEmail: info.email }
-				: undefined;
-		if (!account)
+	private requireVault(vaultId: string, accountId: string) {
+		const vaultAccount = this.deps.repository.findAccountForVault(vaultId);
+		const info = this.deps.repository.getAccountInfo(accountId);
+		if (vaultAccount?.accountId !== accountId || !info) {
 			throw new Error(`No account repository found for vault ${vaultId}`);
-		return account;
+		}
+		return { accountId, accountEmail: info.email };
 	}
 
-	private async requireItem(
-		itemId: string,
-		includeDeleted = false,
-		vaultId?: string,
-		accountEmail?: string,
-	) {
-		let accountId = this.deps.repository.findAccountForItem(itemId)?.accountId;
-		if (!accountId && accountEmail)
-			accountId = this.deps.repository.resolveAccountIdByEmail(accountEmail);
-		const info = accountId
-			? this.deps.repository.getAccountInfo(accountId)
-			: undefined;
-		const account =
-			accountId && info ? { accountId, accountEmail: info.email } : undefined;
-		if (!account)
+	private async requireItem(input: {
+		itemId: string;
+		accountId: string;
+		includeDeleted?: boolean;
+		vaultId?: string;
+	}) {
+		const { itemId, accountId, includeDeleted = false, vaultId } = input;
+		const info = this.deps.repository.getAccountInfo(accountId);
+		if (!info)
 			throw new Error(`No account repository found for item ${itemId}`);
+		const account = { accountId, accountEmail: info.email };
 		let item =
-			this.deps.repository.getById(itemId, account.accountId) ??
+			this.deps.repository.getById(itemId, accountId) ??
 			(includeDeleted
 				? this.deps.repository
-						.getDeleted(account.accountId)
+						.getDeleted(accountId)
 						.find((entry) => entry.id === itemId)
 				: undefined);
 		if (!item && this.deps.hydrateItem) {
 			await this.deps.hydrateItem(account, itemId);
 			item =
-				this.deps.repository.getById(itemId, account.accountId) ??
+				this.deps.repository.getById(itemId, accountId) ??
 				(includeDeleted
 					? this.deps.repository
-							.getDeleted(account.accountId)
+							.getDeleted(accountId)
 							.find((entry) => entry.id === itemId)
 					: undefined);
 		}
@@ -240,11 +223,7 @@ export class ItemCommands {
 	private async create(
 		intent: CreateItemIntent,
 	): Promise<CreateItemCommandResult> {
-		const account = this.requireVault(
-			intent.vaultId,
-			intent.accountId,
-			intent.accountEmail,
-		);
+		const account = this.requireVault(intent.vaultId, intent.accountId);
 		const itemId = await this.deps.generateId();
 		const encrypted = await this.deps.repository.encryptForVault({
 			accountId: account.accountId,
@@ -264,12 +243,11 @@ export class ItemCommands {
 	}
 
 	private async update(intent: UpdateItemIntent): Promise<void> {
-		const { account, item } = await this.requireItem(
-			intent.itemId,
-			false,
-			undefined,
-			intent.accountEmail,
-		);
+		const { account, item } = await this.requireItem({
+			itemId: intent.itemId,
+			accountId: intent.accountId,
+			vaultId: intent.vaultId,
+		});
 		const data = this.merge(
 			stripToDecryptedData(item),
 			intent.data,
@@ -293,11 +271,12 @@ export class ItemCommands {
 	private async changeLifecycle(intent: ItemLifecycleIntent): Promise<void> {
 		const includeDeleted =
 			intent.type === "restore" || intent.type === "permanent_delete";
-		const { account, item } = await this.requireItem(
-			intent.itemId,
+		const { account, item } = await this.requireItem({
+			itemId: intent.itemId,
+			accountId: intent.accountId,
 			includeDeleted,
-			includeDeleted ? intent.vaultId : undefined,
-		);
+			vaultId: intent.vaultId,
+		});
 		await this.enqueue(account, item.version, {
 			type: intent.type,
 			entityId: item.id,
@@ -309,15 +288,14 @@ export class ItemCommands {
 	}
 
 	private async move(intent: MoveItemIntent): Promise<MoveItemCommandResult> {
-		const { account: source, item } = await this.requireItem(intent.itemId);
-		const vaultHint = this.deps.repository.getVaultById(
-			intent.targetVaultId,
-			source.accountId,
-		);
+		const { account: source, item } = await this.requireItem({
+			itemId: intent.itemId,
+			accountId: intent.accountId,
+			vaultId: intent.sourceVaultId,
+		});
 		const target = this.requireVault(
 			intent.targetVaultId,
-			intent.targetAccountId ?? (vaultHint ? source.accountId : undefined),
-			intent.targetAccountEmail,
+			intent.targetAccountId,
 		);
 		if (source.accountId !== target.accountId) {
 			const targetItemId = await this.deps.generateId();
@@ -334,7 +312,6 @@ export class ItemCommands {
 				vaultId: intent.sourceVaultId,
 				targetVaultId: intent.targetVaultId,
 				targetAccountId: target.accountId,
-				targetAccountEmail: target.accountEmail,
 				targetItemId,
 				category: intent.category,
 				encryptedPayload: toEncryptedPayload(encrypted),

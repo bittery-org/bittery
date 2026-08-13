@@ -13,6 +13,7 @@ import { useItemMutationRuntime } from "./mutation-utils";
 export interface RestoreItemInput {
 	itemId: string;
 	vaultId: string;
+	accountId: string;
 }
 
 /**

@@ -45,9 +45,9 @@ export function MoveItemDialog({
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
 
-	const currentVaultAccount = useMemo(() => {
+	const currentVaultAccountId = useMemo(() => {
 		const currentVault = vaultKeys.find((vk) => vk.vaultId === currentVaultId);
-		return currentVault?.accountEmail;
+		return currentVault?.accountId;
 	}, [vaultKeys, currentVaultId]);
 
 	const filteredVaultKeys = useMemo(() => {
@@ -66,7 +66,7 @@ export function MoveItemDialog({
 	const vaultsByAccount = useMemo(() => {
 		const grouped: Record<string, typeof filteredVaultKeys> = {};
 		for (const vault of filteredVaultKeys) {
-			const accountKey = vault.accountEmail || "__unknown__";
+			const accountKey = vault.accountId;
 			if (!grouped[accountKey]) {
 				grouped[accountKey] = [];
 			}
@@ -81,12 +81,17 @@ export function MoveItemDialog({
 
 	const isCrossAccount = useMemo(() => {
 		if (!selectedVault) return false;
-		return selectedVault.accountEmail !== currentVaultAccount;
-	}, [selectedVault, currentVaultAccount]);
+		return selectedVault.accountId !== currentVaultAccountId;
+	}, [selectedVault, currentVaultAccountId]);
 
 	const handleMove = async () => {
 		if (!selectedVaultId) {
 			toast.error(m.vaults_detail_items_move_dialog_toast_select_vault());
+			return;
+		}
+		const sourceAccountId = currentVaultAccountId;
+		if (!selectedVault || !sourceAccountId) {
+			toast.error(m.vaults_detail_items_move_dialog_toast_error());
 			return;
 		}
 
@@ -107,7 +112,8 @@ export function MoveItemDialog({
 				targetVaultId: selectedVaultId,
 				category: item.category,
 				decryptedData,
-				targetAccountEmail: selectedVault?.accountEmail,
+				accountId: sourceAccountId,
+				targetAccountId: selectedVault.accountId,
 			});
 
 			if (result.crossAccount) {
@@ -178,20 +184,19 @@ export function MoveItemDialog({
 								{m.vaults_detail_items_move_dialog_empty_no_matches()}
 							</div>
 						) : (
-							Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
+							Object.entries(vaultsByAccount).map(([accountId, vaults]) => {
 								const [firstVault] = vaults;
 								if (!firstVault) return null;
 
 								const accountName =
 									firstVault.accountTeamName ||
 									firstVault.accountName ||
-									(accountEmail === "__unknown__"
-										? m.vaults_detail_items_move_dialog_account_unknown()
-										: accountEmail);
+									firstVault.accountEmail ||
+									m.vaults_detail_items_move_dialog_account_unknown();
 								const accountTeamAvatarUrl = firstVault.accountTeamAvatarUrl;
 
 								return (
-									<CommandGroup key={accountEmail} className="p-0 pb-1">
+									<CommandGroup key={accountId} className="p-0 pb-1">
 										<div className="flex items-center gap-2 px-2.5 py-2">
 											<Avatar className="size-5 rounded-[5px]">
 												<AvatarImage

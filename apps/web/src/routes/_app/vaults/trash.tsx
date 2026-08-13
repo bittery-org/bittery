@@ -59,6 +59,7 @@ function VaultTrashPage() {
 	const [itemToDelete, setItemToDelete] = useState<{
 		id: string;
 		vaultId: string;
+		accountId: string;
 		title: string;
 	} | null>(null);
 
@@ -70,9 +71,13 @@ function VaultTrashPage() {
 		});
 	}, [deletedItems]);
 
-	const handleRestore = async (itemId: string, vaultId: string) => {
+	const handleRestore = async (
+		itemId: string,
+		vaultId: string,
+		accountId: string,
+	) => {
 		try {
-			await restoreItem.mutateAsync({ itemId, vaultId });
+			await restoreItem.mutateAsync({ itemId, vaultId, accountId });
 			toast.success(m.vaults_trash_toast_restore_success());
 		} catch {
 			toast.error(m.vaults_trash_toast_restore_error());
@@ -85,6 +90,7 @@ function VaultTrashPage() {
 			await permanentDeleteItem.mutateAsync({
 				itemId: itemToDelete.id,
 				vaultId: itemToDelete.vaultId,
+				accountId: itemToDelete.accountId,
 			});
 			setItemToDelete(null);
 			toast.success(m.vaults_trash_toast_permanent_delete_success());
@@ -187,7 +193,9 @@ function VaultTrashPage() {
 												variant="ghost"
 												size="sm"
 												className="size-7 p-0"
-												onClick={() => handleRestore(item.id, item.vaultId)}
+												onClick={() =>
+													handleRestore(item.id, item.vaultId, item.accountId)
+												}
 												disabled={restoreItem.isPending}
 												title={m.vaults_trash_item_action_restore()}
 												aria-label={m.vaults_trash_item_action_restore()}
@@ -204,6 +212,7 @@ function VaultTrashPage() {
 													setItemToDelete({
 														id: item.id,
 														vaultId: item.vaultId,
+														accountId: item.accountId,
 														title: item.title || m.vaults_trash_item_untitled(),
 													})
 												}

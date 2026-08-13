@@ -341,6 +341,7 @@ describe("passkey handler helpers", () => {
 			{
 				id: "vault_1",
 				name: "Personal",
+				accountId: "account_1",
 				type: "personal",
 				role: "owner",
 			},

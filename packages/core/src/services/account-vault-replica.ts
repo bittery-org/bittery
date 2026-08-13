@@ -43,7 +43,7 @@ import type { ItemWriteScope, VaultCrypto } from "./vault-crypto";
 export type VaultView = VaultSummary;
 
 export interface VaultRepositoryItem extends DecryptedItem {
-	accountId?: string;
+	accountId: string;
 	accountEmail?: string;
 	serverUrl?: string;
 	deletedAt: string | null;
@@ -280,8 +280,11 @@ export class AccountVaultReplica {
 		this.emit();
 	}
 
-	private getVaultView(vaultId: string): VaultView {
-		const vault = this.vaults.get(vaultId);
+	private getVaultView(
+		vaultId: string,
+		vaults: ReadonlyMap<string, CachedVaultMetadata> = this.vaults,
+	): VaultView {
+		const vault = vaults.get(vaultId);
 		if (!vault) {
 			return {
 				id: vaultId,
@@ -324,6 +327,7 @@ export class AccountVaultReplica {
 
 	private async decryptItemBatch(
 		items: readonly CachedEncryptedItem[],
+		vaults: ReadonlyMap<string, CachedVaultMetadata> = this.vaults,
 	): Promise<
 		Array<
 			| { item: CachedEncryptedItem; decrypted: VaultRepositoryItem }
@@ -364,6 +368,7 @@ export class AccountVaultReplica {
 						decrypted: this.buildItem(
 							entry.item,
 							JSON.parse(result.plaintext) as DecryptedItemData,
+							vaults,
 						),
 					});
 					continue;
@@ -537,24 +542,17 @@ export class AccountVaultReplica {
 			return;
 		}
 
+		const hydratedVaults = this.buildHydratedVaults(
+			[...this.vaults.values()],
+			vaultKeys,
+		);
 		this.vaultKeyEntries.clear();
 		for (const vaultKey of vaultKeys) {
 			this.vaultKeyEntries.set(vaultKey.vaultId, vaultKey);
-
-			if (this.vaults.has(vaultKey.vaultId)) {
-				continue;
-			}
-
-			this.vaults.set(vaultKey.vaultId, {
-				id: vaultKey.vaultId,
-				accountId: this.accountId,
-				accountEmail: this.accountEmail,
-				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-				name: vaultKey.vaultName,
-				type: vaultKey.vaultType,
-				icon: vaultKey.vaultIcon ?? null,
-				imageUrl: vaultKey.vaultImageUrl ?? null,
-			});
+		}
+		this.vaults.clear();
+		for (const vault of hydratedVaults.values()) {
+			this.vaults.set(vault.id, vault);
 		}
 	}
 
@@ -589,6 +587,7 @@ export class AccountVaultReplica {
 	private buildItem(
 		cached: CachedEncryptedItem,
 		decryptedData: DecryptedItemData,
+		vaults: ReadonlyMap<string, CachedVaultMetadata> = this.vaults,
 	): VaultRepositoryItem {
 		return {
 			id: cached.id,
@@ -612,8 +611,29 @@ export class AccountVaultReplica {
 				iv: cached.encryptionIv,
 				algorithm: cached.encryptionAlgorithm,
 			},
-			vault: this.getVaultView(cached.vaultId),
+			vault: this.getVaultView(cached.vaultId, vaults),
 		};
+	}
+
+	private buildHydratedVaults(
+		cachedVaults: readonly CachedVaultMetadata[],
+		vaultKeys: readonly VaultKeyData[],
+	): Map<string, CachedVaultMetadata> {
+		const vaults = new Map(cachedVaults.map((vault) => [vault.id, vault]));
+		for (const vaultKey of vaultKeys) {
+			if (vaults.has(vaultKey.vaultId)) continue;
+			vaults.set(vaultKey.vaultId, {
+				id: vaultKey.vaultId,
+				accountId: this.accountId,
+				accountEmail: this.accountEmail,
+				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+				name: vaultKey.vaultName,
+				type: vaultKey.vaultType,
+				icon: vaultKey.vaultIcon ?? null,
+				imageUrl: vaultKey.vaultImageUrl ?? null,
+			});
+		}
+		return vaults;
 	}
 
 	private async decryptVaultKey(vaultId: string): Promise<KeyRef> {
@@ -993,7 +1013,14 @@ export class AccountVaultReplica {
 					this.itemCache.getItemCacheMetadata(this.accountId),
 					this.storage.getVaultKeys(this.accountId),
 				]);
-			const outcomes = await this.decryptItemBatch(cachedItems ?? []);
+			const hydratedVaults = this.buildHydratedVaults(
+				cachedVaults ?? [],
+				storedVaultKeys ?? [],
+			);
+			const outcomes = await this.decryptItemBatch(
+				cachedItems ?? [],
+				hydratedVaults,
+			);
 			if (generation !== this.hydrationGeneration || (await this.isLocked())) {
 				return;
 			}
@@ -1003,7 +1030,7 @@ export class AccountVaultReplica {
 			this.vaults.clear();
 			this.vaultKeyEntries.clear();
 
-			for (const vault of cachedVaults ?? []) {
+			for (const vault of hydratedVaults.values()) {
 				if (!this.serverUrl && vault.serverUrl) {
 					this.serverUrl = vault.serverUrl;
 				}
@@ -1161,13 +1188,17 @@ export class AccountVaultReplica {
 		if (refreshedVaultKeys) {
 			await this.storage.storeVaultKeys(refreshedVaultKeys, this.accountId);
 		}
-		const outcomes = await this.decryptItemBatch(cachedItems);
+		const hydratedVaults = this.buildHydratedVaults(
+			cachedVaults ?? [],
+			vaultKeys ?? [],
+		);
+		const outcomes = await this.decryptItemBatch(cachedItems, hydratedVaults);
 		if (generation !== this.hydrationGeneration || (await this.isLocked())) {
 			return syncBaseline;
 		}
 
 		this.vaults.clear();
-		for (const vault of cachedVaults ?? []) {
+		for (const vault of hydratedVaults.values()) {
 			this.vaults.set(vault.id, vault);
 		}
 

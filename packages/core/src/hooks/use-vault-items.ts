@@ -2,7 +2,6 @@
  * useVaultItems Hook - Simplified Vault-Specific Item Fetching
  */
 
-import type { DecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
 import { useVaultRepositoryState } from "./use-vault-repository-state";
 
@@ -27,10 +26,7 @@ export function useVaultItems(
 		// Snapshot is an invalidation signal from the repository.
 		void snapshot;
 		return enabled
-			? (vaultRepository.getByVault(
-					vaultId,
-					options.accountId,
-				) as DecryptedItem[])
+			? vaultRepository.getByVault(vaultId, options.accountId)
 			: [];
 	}, [vaultRepository, enabled, vaultId, options.accountId, snapshot]);
 

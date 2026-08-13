@@ -20,8 +20,8 @@ export interface MoveItemInput {
 	targetVaultId: string;
 	category: ItemCategory;
 	decryptedData: DecryptedItemData;
-	targetAccountId?: string;
-	targetAccountEmail?: string;
+	accountId: string;
+	targetAccountId: string;
 }
 
 /**

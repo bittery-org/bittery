@@ -1,4 +1,3 @@
-import { useApiClient } from "@bittery/shared/api";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ItemSyncEngine, type OutboundQueueApiClient } from "./outbound-queue";
@@ -8,16 +7,12 @@ import {
 	type QueryInvalidator,
 } from "./query-invalidation";
 import {
-	buildDefaultSyncSourceId,
 	type SyncEventContext,
 	type SyncSource,
 	selectScopedSyncSources,
 } from "./source";
 import { MemorySyncStorage, NamespacedSyncStorage } from "./storage";
-import {
-	SyncOrchestrator,
-	type SyncOrchestratorOptions,
-} from "./sync-orchestrator";
+import { SyncOrchestrator } from "./sync-orchestrator";
 import { subscribeToNewTerminalCommands } from "./terminal-command-status";
 import type {
 	ItemCommandProjection,
@@ -80,10 +75,9 @@ function aggregateStatuses(
  * Options for useSync hook
  */
 export interface UseSyncOptions {
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
 	clientId: string;
 	queryClient: QueryClient;
+	sources: SyncSource[];
 	storage?: SyncStorage;
 	enabled?: boolean;
 	realtimeEnabled?: boolean;
@@ -93,15 +87,9 @@ export interface UseSyncOptions {
 	commandProjection?: ItemCommandProjection;
 	/** Executor for commands that do not map to the ordinary item API. */
 	semanticCommandExecutor?: SemanticItemCommandExecutor;
-	itemCacheAccountId?: string | null;
-	itemCacheAccountEmail?: string | null;
-	itemCacheServerUrl?: string | null;
-	sources?: SyncSource[];
 	getClientForAccount?: (
 		accountId: string,
 	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
-	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
-	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
@@ -141,26 +129,17 @@ export interface SyncContextValue {
  * React hook for real-time synchronization
  */
 export function useSync(options: UseSyncOptions): SyncContextValue {
-	const apiClient = useApiClient();
-
 	const {
-		serverUrl,
-		getAuthToken,
 		clientId,
 		queryClient,
+		sources,
 		storage,
 		enabled = true,
 		realtimeEnabled = true,
 		replicaStore,
 		commandProjection,
 		semanticCommandExecutor,
-		itemCacheAccountId,
-		itemCacheAccountEmail,
-		itemCacheServerUrl,
-		sources,
 		getClientForAccount,
-		refreshFromServer,
-		initializeFromServer,
 		onSessionRevoked,
 		onEventProcessed,
 		onTerminalCommandFailure,
@@ -230,34 +209,8 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 	);
 
 	const syncSources = useMemo<SyncSource[]>(() => {
-		if (sources && sources.length > 0) {
-			return selectScopedSyncSources(sources);
-		}
-
-		return selectScopedSyncSources([
-			{
-				id: buildDefaultSyncSourceId(serverUrl, itemCacheAccountId),
-				serverUrl,
-				getAuthToken,
-				apiClient,
-				refreshFromServer,
-				initializeFromServer,
-				itemCacheAccountId,
-				itemCacheAccountEmail,
-				itemCacheServerUrl,
-			},
-		]);
-	}, [
-		sources,
-		serverUrl,
-		getAuthToken,
-		apiClient,
-		refreshFromServer,
-		initializeFromServer,
-		itemCacheAccountId,
-		itemCacheAccountEmail,
-		itemCacheServerUrl,
-	]);
+		return selectScopedSyncSources(sources);
+	}, [sources]);
 
 	useEffect(() => {
 		if (!enabled || !replicaStore || syncSources.length === 0) {

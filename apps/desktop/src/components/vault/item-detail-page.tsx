@@ -75,6 +75,7 @@ export function ItemDetailPage({
 	const navigate = useNavigate();
 	// Unified hook - automatically handles account detection
 	const { rawItem, decryptedData, isLoading } = useItem(itemId);
+	const itemAccountId = rawItem?.accountId ?? rawItem?.account?.accountId;
 
 	// Shared hooks for item operations
 	const updateItem = useUpdateItem();
@@ -84,7 +85,7 @@ export function ItemDetailPage({
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {
-			if (!rawItem || !decryptedData) return;
+			if (!rawItem || !decryptedData || !itemAccountId) return;
 
 			setIsUpdatingTags(true);
 
@@ -98,6 +99,7 @@ export function ItemDetailPage({
 					itemId: rawItem.id,
 					vaultId: rawItem.vaultId,
 					data: updatedData,
+					accountId: itemAccountId,
 				},
 				{
 					onSettled: () => {
@@ -107,12 +109,18 @@ export function ItemDetailPage({
 				},
 			);
 		},
-		[rawItem, decryptedData, updateItem],
+		[rawItem, decryptedData, itemAccountId, updateItem],
 	);
 
 	const handleRemovePasskey = useCallback(
 		async (credentialId: string) => {
-			if (!rawItem || !decryptedData || rawItem.category !== "login") return;
+			if (
+				!rawItem ||
+				!decryptedData ||
+				!itemAccountId ||
+				rawItem.category !== "login"
+			)
+				return;
 
 			const currentPasskeys = decryptedData.passkeys ?? [];
 			const nextPasskeys = currentPasskeys.filter(
@@ -132,6 +140,7 @@ export function ItemDetailPage({
 					itemId: rawItem.id,
 					vaultId: rawItem.vaultId,
 					data: updatedData,
+					accountId: itemAccountId,
 				});
 				toast.success(
 					m.vaults_detail_items_detail_page_toast_passkey_removed(),
@@ -144,7 +153,7 @@ export function ItemDetailPage({
 				toast.error(errorMessage);
 			}
 		},
-		[rawItem, decryptedData, m, updateItem],
+		[rawItem, decryptedData, itemAccountId, m, updateItem],
 	);
 
 	const handleShare = () => {
@@ -156,7 +165,7 @@ export function ItemDetailPage({
 	};
 
 	const handleDuplicate = async () => {
-		if (!rawItem || !decryptedData) return;
+		if (!rawItem || !decryptedData || !itemAccountId) return;
 
 		try {
 			const titleForDuplicate =
@@ -174,6 +183,7 @@ export function ItemDetailPage({
 				vaultId: rawItem.vaultId,
 				category: rawItem.category,
 				data: duplicatedData,
+				accountId: itemAccountId,
 			});
 
 			toast.success(m.vaults_detail_items_detail_page_toast_item_duplicated());
@@ -194,7 +204,7 @@ export function ItemDetailPage({
 
 	const handleRestorePassword = useCallback(
 		async (password: string) => {
-			if (!rawItem) {
+			if (!rawItem || !itemAccountId) {
 				return;
 			}
 
@@ -203,6 +213,7 @@ export function ItemDetailPage({
 					itemId: rawItem.id,
 					vaultId: rawItem.vaultId,
 					data: { password },
+					accountId: itemAccountId,
 				});
 				toast.success(
 					m.vaults_detail_items_password_history_dialog_toast_restore_success(),
@@ -216,16 +227,17 @@ export function ItemDetailPage({
 				toast.error(errorMessage);
 			}
 		},
-		[rawItem, m, updateItem],
+		[rawItem, itemAccountId, m, updateItem],
 	);
 
 	const confirmDelete = async () => {
-		if (!rawItem) return;
+		if (!rawItem || !itemAccountId) return;
 
 		try {
 			await deleteItem.mutateAsync({
 				itemId: rawItem.id,
 				vaultId: rawItem.vaultId,
+				accountId: itemAccountId,
 			});
 
 			toast.success(m.vaults_detail_toast_item_moved_to_trash());
@@ -310,12 +322,13 @@ export function ItemDetailPage({
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									onClick={async () => {
-										if (!rawItem) return;
+										if (!rawItem || !itemAccountId) return;
 										try {
 											await toggleFavorite.mutateAsync({
 												itemId: rawItem.id,
 												vaultId: rawItem.vaultId,
 												favorite: !rawItem.favorite,
+												accountId: itemAccountId,
 											});
 											toast.success(
 												!rawItem.favorite
@@ -401,7 +414,7 @@ export function ItemDetailPage({
 						<ItemAttachments
 							itemId={rawItem.id}
 							vaultId={rawItem.vaultId}
-							accountEmail={rawItem.accountEmail ?? rawItem.account?.email}
+							accountId={rawItem.accountId}
 							canEdit
 						/>
 					)}
@@ -425,12 +438,13 @@ export function ItemDetailPage({
 					category: getCategoryDisplayName(rawItem?.category ?? "login"),
 				})}
 				onUpdateItem={async (data) => {
-					if (!rawItem) return;
+					if (!rawItem || !itemAccountId) return;
 					try {
 						await updateItem.mutateAsync({
 							itemId: rawItem.id,
 							vaultId: rawItem.vaultId,
 							data,
+							accountId: itemAccountId,
 						});
 						toast.success(m.vaults_detail_toast_item_updated());
 						setIsEditDialogOpen(false);

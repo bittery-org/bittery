@@ -92,8 +92,13 @@ function AllItemsPage() {
 		vaultId: string,
 		category: ItemCategory,
 	) => {
+		const accountId = vaultKeys.find(
+			(vault) => vault.vaultId === vaultId,
+		)?.accountId;
+		if (!accountId) throw new Error("Vault account is unavailable");
 		const result = await createItem.mutateAsync({
 			vaultId,
+			accountId,
 			category,
 			data,
 		});
@@ -107,6 +112,7 @@ function AllItemsPage() {
 		await updateItem.mutateAsync({
 			itemId: selectedItem.id,
 			vaultId: selectedItem.vaultId,
+			accountId: selectedItem.accountId,
 			data,
 		});
 		setIsEditItemDialogOpen(false);
@@ -119,6 +125,7 @@ function AllItemsPage() {
 			await deleteItem.mutateAsync({
 				itemId: selectedItem.id,
 				vaultId: selectedItem.vaultId,
+				accountId: selectedItem.accountId,
 			});
 			setIsDeleteItemDialogOpen(false);
 			navigate({ to: "/vaults", search: { itemId: undefined } });

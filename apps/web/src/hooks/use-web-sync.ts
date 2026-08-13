@@ -10,8 +10,6 @@ import { lifecycleDeps } from "@/lib/lifecycle";
 import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
-const NO_AUTH_TOKEN = async (): Promise<null> => null;
-
 /**
  * Get or create a unique client ID for this browser session
  */
@@ -167,16 +165,14 @@ export function useWebSync(
 	}, [m]);
 
 	return useSync({
-		serverUrl: assembly?.serverUrl ?? "",
-		getAuthToken: assembly?.getAuthToken ?? NO_AUTH_TOKEN,
 		clientId,
 		queryClient,
+		sources: assembly?.sources ?? [],
 		storage: syncStorage,
 		enabled: enabled && isFetched && assembly !== null,
 		replicaStore: assembly?.replicaStore,
 		commandProjection: assembly?.commandProjection,
 		semanticCommandExecutor: assembly?.semanticCommandExecutor,
-		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onEventProcessed: assembly?.onEventProcessed,
 		onSessionRevoked,

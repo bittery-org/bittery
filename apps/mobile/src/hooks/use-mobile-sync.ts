@@ -7,6 +7,7 @@ import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-r
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import { useToast } from "heroui-native";
 import {
 	useCallback,
@@ -24,8 +25,6 @@ import {
 import { useI18n } from "../providers/i18n-provider";
 import { lifecycleDeps } from "../services/lifecycle";
 import { vaultCrypto, vaultRepository } from "../services/vault-runtime";
-
-const NO_AUTH_TOKEN = async (): Promise<null> => null;
 
 /**
  * React Native-compatible sync storage implementation using SQLite
@@ -105,6 +104,7 @@ export function useMobileSync(
 ) {
 	const { m } = useI18n();
 	const { toast } = useToast();
+	const router = useRouter();
 	const [clientId, setClientId] = useState<string>("");
 	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
@@ -124,7 +124,7 @@ export function useMobileSync(
 		vaultRuntime.getSnapshot,
 		vaultRuntime.getSnapshot,
 	);
-	useSyncExternalStore(
+	const accountRevision = useSyncExternalStore(
 		manager.subscribe,
 		manager.getSnapshot,
 		manager.getSnapshot,
@@ -153,6 +153,7 @@ export function useMobileSync(
 
 	// Ignore obsolete async results during rapid account switches.
 	useEffect(() => {
+		void accountRevision;
 		if (!clientId) return;
 		let current = true;
 		setIsInitialized(false);
@@ -166,7 +167,7 @@ export function useMobileSync(
 		return () => {
 			current = false;
 		};
-	}, [accountSync, activeAccountId, clientId]);
+	}, [accountSync, accountRevision, activeAccountId, clientId]);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const onSessionRevoked = useCallback(
@@ -178,8 +179,10 @@ export function useMobileSync(
 			await queryClient.cancelQueries();
 			queryClient.clear();
 			setAssembly(null);
+			await manager.refresh();
+			router.replace("/(auth)/login");
 		},
-		[accountSync, queryClient],
+		[accountSync, manager, queryClient, router],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.show({
@@ -191,17 +194,15 @@ export function useMobileSync(
 	}, [m, toast]);
 
 	const syncState = useSync({
-		serverUrl: assembly?.serverUrl ?? "",
-		getAuthToken: assembly?.getAuthToken ?? NO_AUTH_TOKEN,
 		clientId,
 		queryClient,
+		sources: assembly?.sources ?? [],
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!clientId && assembly !== null,
 		realtimeEnabled: true,
 		replicaStore: assembly?.replicaStore,
 		commandProjection: assembly?.commandProjection,
 		semanticCommandExecutor: assembly?.semanticCommandExecutor,
-		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed: assembly?.onEventProcessed,

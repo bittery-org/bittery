@@ -15,6 +15,7 @@ export interface UpdateItemInput {
 	itemId: string;
 	vaultId: string;
 	data: Partial<DecryptedItemData>;
+	accountId: string;
 }
 
 /**

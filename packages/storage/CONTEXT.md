@@ -209,7 +209,7 @@ Two rules keep it that way, and both are load-bearing:
 
 - **An email is not an identity.** Emails, userIds, serverUrls and vaultIds are all bare
   strings too, and passing one where an accountId belongs names a collection after it.
-  `resolveAccountScopeId` maps a scope (accountId or display email) to an accountId
+  account-scoped operations take a stable accountId directly; email is display/login metadata
   and **throws** when it cannot, so an unresolved scope fails loudly at the boundary rather
   than quietly downgrading to whichever account happens to be active.
 - **`AccountStore` still resolves an omitted `accountId` to the active account**, which is

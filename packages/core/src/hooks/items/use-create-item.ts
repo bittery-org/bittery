@@ -16,8 +16,7 @@ export interface CreateItemInput {
 	vaultId: string;
 	category: ItemCategory;
 	data: DecryptedItemData;
-	accountId?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 /**

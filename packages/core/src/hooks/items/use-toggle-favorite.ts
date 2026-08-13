@@ -13,6 +13,7 @@ import { useItemMutationRuntime } from "./mutation-utils";
 export interface ToggleFavoriteInput {
 	itemId: string;
 	vaultId: string;
+	accountId: string;
 	favorite: boolean;
 }
 

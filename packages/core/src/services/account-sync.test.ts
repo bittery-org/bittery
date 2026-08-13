@@ -99,7 +99,6 @@ describe("account-aware Sync assembly", () => {
 
 		const assembly = await sync.assemble({ clientId: "device_1" });
 
-		expect(assembly?.serverUrl).toBe("https://vault.example/");
 		expect(assembly?.sources).toHaveLength(1);
 		expect(assembly?.sources[0]).toMatchObject({
 			serverUrl: "https://vault.example/",
@@ -107,7 +106,7 @@ describe("account-aware Sync assembly", () => {
 			itemCacheAccountEmail: alice.email,
 			itemCacheServerUrl: "https://vault.example/",
 		});
-		expect(await assembly?.getAuthToken()).toBe("alice-token");
+		expect(await assembly?.sources[0]?.getAuthToken()).toBe("alice-token");
 		expect(await assembly?.getClientForAccount(alice.accountId)).toBe(
 			apiClient,
 		);

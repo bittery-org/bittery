@@ -169,6 +169,8 @@ export interface UnlockResult {
  * Session state information
  */
 export interface SessionState {
+	/** Stable ID of the selected account. */
+	accountId: string | null;
 	/** Whether the session is valid (not expired) */
 	isValid: boolean;
 	/** Whether quick unlock is available (has stored secret key + valid session) */
@@ -996,6 +998,7 @@ export async function getSessionState(
 	]);
 
 	return {
+		accountId: resolvedAccountId ?? null,
 		isValid,
 		canQuickUnlock,
 		canBiometricUnlock,

@@ -19,7 +19,6 @@ const POPUP_PROJECTION_LEASE_MS = 30_000;
 
 let queuePromise: Promise<ItemSyncEngine> | null = null;
 const semanticExecutor = new CrossAccountItemCommandExecutor({
-	storage,
 	crypto,
 	vaultCrypto,
 	getClientForAccount: async (accountId) => {

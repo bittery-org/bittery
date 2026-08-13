@@ -74,8 +74,8 @@ export function ExtensionAccountSwitcher() {
 	const handleSwitchAccount = async (accountId: string) => {
 		if (accountId === activeAccountId) return;
 
-		const account = accountsData.find((item) => item.accountId === accountId);
-		if (!account) return;
+		if (!accountsData.some((account) => account.accountId === accountId))
+			return;
 
 		try {
 			await switchAccount.mutateAsync(accountId);
@@ -101,8 +101,8 @@ export function ExtensionAccountSwitcher() {
 					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				]);
 			} else {
-				// Need to unlock - redirect to unlock screen with the account email
-				navigate({ to: "/unlock", search: { email: account.email } });
+				// The unlock screen handles every locked account; no account selector is needed.
+				navigate({ to: "/unlock" });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);

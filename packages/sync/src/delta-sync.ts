@@ -55,7 +55,11 @@ export async function performDeltaSync(
 		return;
 	}
 
-	const itemAccountEmail = accountEmail ?? accountScope;
+	const cacheScope = {
+		accountId: accountScope,
+		accountEmail: accountEmail ?? undefined,
+		serverUrl,
+	};
 
 	const upsertItem = (item: CachedEncryptedItem) =>
 		cache.upsertCachedItem(item, accountScope);
@@ -72,9 +76,7 @@ export async function performDeltaSync(
 	const reconcileCurrentItem = async (itemId: string) => {
 		try {
 			const { data: item } = await apiClient.items.get(itemId);
-			await upsertItem(
-				toCachedItem(item, { accountEmail: itemAccountEmail, serverUrl }),
-			);
+			await upsertItem(toCachedItem(item, cacheScope));
 		} catch (error) {
 			if (!isApiErrorStatus(error, 404)) throw error;
 			await removeItem(itemId);
@@ -130,12 +132,7 @@ export async function performDeltaSync(
 					await apiClient.items.listInVault(targetVaultId);
 
 				for (const vaultItem of items) {
-					await upsertItem(
-						toCachedItem(vaultItem, {
-							accountEmail: itemAccountEmail,
-							serverUrl,
-						}),
-					);
+					await upsertItem(toCachedItem(vaultItem, cacheScope));
 				}
 			}
 
@@ -143,8 +140,7 @@ export async function performDeltaSync(
 			const vault = normalizeVaultSummary(rawVault);
 			await upsertVault({
 				...toCachedVaultFields(vault),
-				accountEmail: itemAccountEmail,
-				serverUrl,
+				...cacheScope,
 			} as CachedVaultMetadata);
 			break;
 		}
@@ -156,12 +152,7 @@ export async function performDeltaSync(
 			const targetVaultId = event.vaultId ?? event.entityId;
 			const { data: items } = await apiClient.items.listInVault(targetVaultId);
 			for (const vaultItem of items) {
-				await upsertItem(
-					toCachedItem(vaultItem, {
-						accountEmail: itemAccountEmail,
-						serverUrl,
-					}),
-				);
+				await upsertItem(toCachedItem(vaultItem, cacheScope));
 			}
 			break;
 		}

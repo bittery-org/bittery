@@ -1,4 +1,3 @@
-import { useApiClient } from "@bittery/shared/api";
 import type { AccountStore } from "@bittery/storage";
 import type { TravelModeConfig } from "@bittery/storage/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,20 +17,14 @@ import type { ApiVaultClient } from "../services/vault-service";
 
 async function resolveAccountApiClient(
 	storage: AccountStore,
-	defaultClient: DefaultApiClient,
 	accountId: string,
 ): Promise<{ accountId: string; apiClient: DefaultApiClient }> {
-	const apiClient = await getClientForAccount(
-		storage,
-		defaultClient,
-		accountId,
-	);
+	const apiClient = await getClientForAccount(storage, accountId);
 	return { accountId, apiClient };
 }
 
 export function useTravelMode(accountId?: string) {
 	const queryClient = useQueryClient();
-	const apiClient = useApiClient() as DefaultApiClient;
 	const storage = usePlatformStorage();
 	const crypto = usePlatformCrypto();
 	const { vaultRepository, accounts, itemCache } = useCoreContext();
@@ -44,7 +37,7 @@ export function useTravelMode(accountId?: string) {
 				return null;
 			}
 			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
-				await resolveAccountApiClient(storage, apiClient, accountId);
+				await resolveAccountApiClient(storage, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -88,7 +81,7 @@ export function useTravelMode(accountId?: string) {
 				throw new Error("No active account");
 			}
 			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
-				await resolveAccountApiClient(storage, apiClient, accountId);
+				await resolveAccountApiClient(storage, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -112,7 +105,7 @@ export function useTravelMode(accountId?: string) {
 				throw new Error("No active account");
 			}
 			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
-				await resolveAccountApiClient(storage, apiClient, accountId);
+				await resolveAccountApiClient(storage, accountId);
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
@@ -136,7 +129,7 @@ export function useTravelMode(accountId?: string) {
 				throw new Error("No active account");
 			}
 			const { accountId: resolvedAccountId, apiClient: accountApiClient } =
-				await resolveAccountApiClient(storage, apiClient, accountId);
+				await resolveAccountApiClient(storage, accountId);
 			const proof = await deriveSrpLoginProof(
 				{ accountId: resolvedAccountId, password: input.password },
 				{

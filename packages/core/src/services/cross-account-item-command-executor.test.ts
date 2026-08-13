@@ -28,7 +28,6 @@ function command(overrides: Partial<ItemSyncCommand> = {}): ItemSyncCommand {
 		entityId: "item-source",
 		vaultId: "vault-source",
 		targetAccountId: TARGET,
-		targetAccountEmail: "target@example.com",
 		targetVaultId: "vault-target",
 		targetItemId: "item-target",
 		category: "login",
@@ -61,15 +60,6 @@ function targetItem(overrides: Record<string, unknown> = {}) {
 
 function executor(clients: Record<string, unknown>) {
 	return new CrossAccountItemCommandExecutor({
-		storage: {
-			getAccountsList: async () => [
-				{ accountId: SOURCE, email: "source@example.com" },
-				{ accountId: TARGET, email: "target@example.com" },
-			],
-			getStoredSessionData: async (accountId: string) => ({
-				userId: accountId === TARGET ? "user-target" : "user-source",
-			}),
-		} as never,
 		crypto: { destroyKey: async () => undefined } as never,
 		vaultCrypto: { getVaultKey: async () => ({ id: "target-key" }) } as never,
 		getClientForAccount: async (accountId) => clients[accountId] as never,
@@ -177,6 +167,58 @@ describe("CrossAccountItemCommandExecutor", () => {
 		expect(created).toBe(false);
 	});
 
+	test("resolves attachment prerequisites by account id before creating the target", async () => {
+		let created = false;
+		const keyScopes: string[] = [];
+		const destroyed: unknown[] = [];
+		const sourceKey = { id: "source-key" };
+		const service = new CrossAccountItemCommandExecutor({
+			crypto: {
+				destroyKey: async (key: unknown) => {
+					destroyed.push(key);
+				},
+			} as never,
+			vaultCrypto: {
+				getVaultKey: async ({ accountId }: { accountId: string }) => {
+					keyScopes.push(accountId);
+					return accountId === SOURCE ? sourceKey : null;
+				},
+			} as never,
+			getClientForAccount: async (accountId) =>
+				({
+					[SOURCE]: {
+						items: {
+							get: async () => ({ data: { version: 1, deletedAt: null } }),
+						},
+						attachments: {
+							list: async () => ({ data: [{ id: "attachment-1" }] }),
+						},
+					},
+					[TARGET]: {
+						items: {
+							get: async () => {
+								throw notFound();
+							},
+							create: async () => {
+								created = true;
+							},
+						},
+					},
+				})[accountId] as never,
+		});
+
+		await expect(
+			service.executeSemanticItemCommand(
+				command({
+					accountEmail: "duplicate@example.com",
+				}),
+			),
+		).rejects.toThrow("Cannot access target vault key");
+		expect(created).toBe(false);
+		expect(keyScopes).toEqual([SOURCE, TARGET]);
+		expect(destroyed).toEqual([sourceKey]);
+	});
+
 	test("keeps the source when attachment download fails", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async () => ({ ok: false })) as never;
@@ -223,6 +265,9 @@ describe("CrossAccountItemCommandExecutor", () => {
 					get: async () => ({ data: { version: 1, deletedAt: null } }),
 					trash: async () => undefined,
 					deletePermanently: async () => undefined,
+				},
+				attachments: {
+					list: async () => ({ data: [{ id: "attachment-1" }] }),
 				},
 			},
 		});

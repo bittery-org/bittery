@@ -1,5 +1,4 @@
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
-import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import {
@@ -30,37 +29,11 @@ export interface ResolveAccountsResult {
 	accountsInfo: AccountInfo[];
 }
 
-export interface ItemWithOptionalAccount extends ItemContextMetadata {
-	id: string;
-}
-
-/**
- * Extracts the account email from an item if it has account metadata.
- */
-export function getItemAccountEmail(
-	item: ItemWithOptionalAccount | null | undefined,
-): string | undefined {
-	if (!item) return undefined;
-	return item.accountEmail ?? item.account?.email;
-}
-
-/**
- * Finds the account email for a specific item by searching through a list of items.
- */
-export function findAccountForItem(
-	itemId: string,
-	items: Array<ItemWithOptionalAccount | null | undefined>,
-): string | undefined {
-	const item = items.find((candidate) => candidate?.id === itemId);
-	return getItemAccountEmail(item);
-}
-
 /**
  * Returns an account-specific API client when accountId is provided.
  */
 export async function getClientForAccount(
 	storage: AccountStore,
-	_defaultClient: DefaultApiClient,
 	accountId: string,
 ): Promise<DefaultApiClient> {
 	const client = await createStoredAccountApiClient(storage, accountId);
@@ -163,18 +136,7 @@ export class AccountResolver {
 		return infos.filter((info): info is AccountInfo => info !== null);
 	}
 
-	async getClientForAccount(
-		defaultClient: DefaultApiClient,
-		accountId?: string,
-	): Promise<DefaultApiClient> {
-		if (!accountId) return defaultClient;
-		return getClientForAccount(this.storage, defaultClient, accountId);
-	}
-
-	findAccountForItem(
-		itemId: string,
-		items: Array<ItemWithOptionalAccount | null | undefined>,
-	): string | undefined {
-		return findAccountForItem(itemId, items);
+	async getClientForAccount(accountId: string): Promise<DefaultApiClient> {
+		return getClientForAccount(this.storage, accountId);
 	}
 }

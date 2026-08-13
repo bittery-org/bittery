@@ -125,11 +125,28 @@ describe("VaultRepository", () => {
 			accountId: "acc-b",
 			email: "b@example.com",
 		});
-		expect(repository.resolveAccountIdByEmail("b@example.com")).toBe("acc-b");
 	});
 
 	it("reloads a projection after another process changes the durable cache", async () => {
-		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		const {
+			storage,
+			itemCache: durableCache,
+			crypto,
+			vaultCrypto,
+		} = await createLayers();
+		let cacheReadError: Error | null = null;
+		const itemCache = new Proxy(durableCache, {
+			get(target, property) {
+				if (property === "getCachedItems") {
+					return async (accountId: string) => {
+						if (cacheReadError) throw cacheReadError;
+						return target.getCachedItems(accountId);
+					};
+				}
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
 		await unlock({ storage, crypto }, "acc-a");
 		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
 			enabled: false,
@@ -147,60 +164,39 @@ describe("VaultRepository", () => {
 			itemCache,
 		);
 		repository.setLocalActiveAccounts([account]);
-		await repository.hydrateRemoteAccounts([account]);
-		const entry = (
-			repository as unknown as {
-				repos: Map<
-					string,
-					{
-						replica: {
-							clear(): void;
-							hydrate(): Promise<void>;
-							upsertLocal(item: unknown, encrypted: unknown): Promise<void>;
-						};
-					}
-				>;
-			}
-		).repos.get("acc-a");
-		if (!entry) throw new Error("missing account replica");
-		const originalHydrate = entry.replica.hydrate.bind(entry.replica);
-		entry.replica.hydrate = async () => {
-			await originalHydrate();
-			await entry.replica.upsertLocal(
-				{
-					id: "worker-item",
-					vaultId: "vault-a",
-					category: "login",
-					favorite: false,
-					createdAt: new Date(0).toISOString(),
-					updatedAt: new Date(0).toISOString(),
-					title: "Written by worker",
-				},
-				{
-					ciphertext: "cipher",
-					iv: "iv",
-					algorithm: "AES",
-					encryptionVersion: 1,
-					encryptedByUserId: "acc-a-user",
-				},
-			);
-		};
-
-		expect(repository.getById("worker-item")).toBeUndefined();
 		await repository.hydrateLocalAccounts([account]);
-		expect(repository.getById("worker-item")).toMatchObject({
-			id: "worker-item",
-			title: "Written by worker",
+		const workerRepository = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		workerRepository.setLocalActiveAccounts([account]);
+		await workerRepository.upsertCachedVault(
+			{
+				id: "worker-vault",
+				name: "Written by worker",
+				type: "personal",
+				icon: null,
+				imageUrl: null,
+				accountId: "acc-a",
+			} as never,
+			"acc-a",
+		);
+
+		expect(repository.getVaultById("worker-vault", "acc-a")).toBeUndefined();
+		await repository.hydrateLocalAccounts([account]);
+		expect(repository.getVaultById("worker-vault", "acc-a")).toMatchObject({
+			id: "worker-vault",
+			name: "Written by worker",
 		});
-		entry.replica.hydrate = async () => {
-			throw new Error("durable cache failed");
-		};
+		cacheReadError = new Error("durable cache failed");
 		await expect(repository.hydrateLocalAccounts([account])).rejects.toThrow(
 			"durable cache failed",
 		);
-		expect(repository.getById("worker-item")).toBeUndefined();
+		expect(repository.getVaultById("worker-vault", "acc-a")).toBeUndefined();
 		repository.setLocalActiveAccounts([]);
-		expect(repository.getById("worker-item")).toBeUndefined();
+		expect(repository.getVaultById("worker-vault", "acc-a")).toBeUndefined();
 		expect(repository.getAll()).toEqual([]);
 	});
 
@@ -248,7 +244,40 @@ describe("VaultRepository", () => {
 	});
 
 	it("serializes local opening with an authoritative server refresh", async () => {
-		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		const {
+			storage,
+			itemCache: durableCache,
+			crypto,
+			vaultCrypto,
+		} = await createLayers();
+		let releaseLocal!: () => void;
+		let localStarted!: () => void;
+		const localGate = new Promise<void>((resolve) => {
+			releaseLocal = resolve;
+		});
+		const enteredLocal = new Promise<void>((resolve) => {
+			localStarted = resolve;
+		});
+		const order: string[] = [];
+		let blockNextCacheRead = true;
+		const itemCache = new Proxy(durableCache, {
+			get(target, property) {
+				if (property === "getCachedItems") {
+					return async (accountId: string) => {
+						if (blockNextCacheRead) {
+							blockNextCacheRead = false;
+							order.push("local:start");
+							localStarted();
+							await localGate;
+							order.push("local:end");
+						}
+						return target.getCachedItems(accountId);
+					};
+				}
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
 		await unlock({ storage, crypto }, "acc-a");
 		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
 			enabled: false,
@@ -259,6 +288,12 @@ describe("VaultRepository", () => {
 			"a@example.com",
 			"https://a.example.com",
 		);
+		account.apiClient.sync.bootstrap = mock(async () => {
+			order.push("remote");
+			return {
+				data: { items: [], hasMore: false, nextCursor: null },
+			};
+		}) as never;
 		const repository = new VaultRepository(
 			crypto,
 			vaultCrypto,
@@ -266,40 +301,6 @@ describe("VaultRepository", () => {
 			itemCache,
 		);
 		repository.setLocalActiveAccounts([account]);
-		const entry = (
-			repository as unknown as {
-				repos: Map<
-					string,
-					{
-						replica: {
-							hydrate(): Promise<void>;
-							hydrateFromServer(): Promise<null>;
-						};
-					}
-				>;
-			}
-		).repos.get("acc-a");
-		if (!entry) throw new Error("missing account replica");
-
-		let releaseLocal!: () => void;
-		let localStarted!: () => void;
-		const localGate = new Promise<void>((resolve) => {
-			releaseLocal = resolve;
-		});
-		const enteredLocal = new Promise<void>((resolve) => {
-			localStarted = resolve;
-		});
-		const order: string[] = [];
-		entry.replica.hydrate = async () => {
-			order.push("local:start");
-			localStarted();
-			await localGate;
-			order.push("local:end");
-		};
-		entry.replica.hydrateFromServer = async () => {
-			order.push("remote");
-			return null;
-		};
 
 		const local = repository.hydrateLocalAccounts([account]);
 		await enteredLocal;

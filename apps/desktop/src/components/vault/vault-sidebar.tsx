@@ -34,7 +34,13 @@ import { AccountSwitcher } from "../account-switcher";
  */
 type SidebarVault = Pick<
 	VaultKeyWithAccount,
-	"vaultId" | "vaultName" | "vaultType" | "vaultIcon" | "vaultImageUrl" | "role"
+	| "vaultId"
+	| "vaultName"
+	| "vaultType"
+	| "vaultIcon"
+	| "vaultImageUrl"
+	| "role"
+	| "accountId"
 >;
 
 interface VaultSidebarProps {
@@ -80,6 +86,7 @@ function DroppableVaultEntry({
 		type: "vault",
 		vaultId: vault.vaultId,
 		role: vault.role,
+		accountId: vault.accountId,
 	};
 
 	const { isOver, setNodeRef, active } = useDroppable({

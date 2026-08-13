@@ -28,8 +28,6 @@ import {
 import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
-const NO_AUTH_TOKEN = async (): Promise<null> => null;
-
 // Desktop currently has one renderer. This tail coordinates every SyncStorage instance in
 // that process; the Tauri store write and save stay inside the same critical section.
 let desktopSyncUpdateTail: Promise<void> = Promise.resolve();
@@ -121,7 +119,7 @@ export function useDesktopSync(
 		vaultRuntime.getSnapshot,
 		vaultRuntime.getSnapshot,
 	);
-	useSyncExternalStore(
+	const accountRevision = useSyncExternalStore(
 		manager.subscribe,
 		manager.getSnapshot,
 		manager.getSnapshot,
@@ -142,6 +140,7 @@ export function useDesktopSync(
 
 	// Generation cancellation prevents a slow A→B assembly from overwriting B→A.
 	useEffect(() => {
+		void accountRevision;
 		if (!clientId) return;
 		let current = true;
 		setIsInitialized(false);
@@ -155,7 +154,7 @@ export function useDesktopSync(
 		return () => {
 			current = false;
 		};
-	}, [accountSync, activeAccountId, clientId]);
+	}, [accountSync, accountRevision, activeAccountId, clientId]);
 
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
@@ -169,7 +168,7 @@ export function useDesktopSync(
 			queryClient.clear();
 
 			if (outcome.wasActive) {
-				window.location.href = `/unlock?email=${encodeURIComponent(invalidated.email.toLowerCase())}`;
+				window.location.href = "/unlock";
 			}
 			return invalidated;
 		},
@@ -263,16 +262,14 @@ export function useDesktopSync(
 	}, [m]);
 
 	const syncState = useSync({
-		serverUrl: assembly?.serverUrl ?? "",
-		getAuthToken: assembly?.getAuthToken ?? NO_AUTH_TOKEN,
 		clientId,
 		queryClient,
+		sources: assembly?.sources ?? [],
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!clientId && assembly !== null,
 		replicaStore: assembly?.replicaStore,
 		commandProjection: assembly?.commandProjection,
 		semanticCommandExecutor: assembly?.semanticCommandExecutor,
-		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed: assembly?.onEventProcessed,

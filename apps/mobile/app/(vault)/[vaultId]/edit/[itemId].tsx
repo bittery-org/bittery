@@ -1,9 +1,9 @@
-import { useUpdateItem, useVaultItems } from "@bittery/core/hooks";
-import type {
-	CustomField,
-	DecryptedItem,
-	DecryptedItemData,
-} from "@bittery/shared/types";
+import {
+	type UnifiedItem,
+	useUpdateItem,
+	useVaultItems,
+} from "@bittery/core/hooks";
+import type { CustomField, DecryptedItemData } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Input, useToast } from "heroui-native";
 import { useRef, useState } from "react";
@@ -101,7 +101,7 @@ function EditItemForm({
 	onSaved,
 	updateItem,
 }: {
-	item: DecryptedItem;
+	item: UnifiedItem;
 	itemId: string;
 	vaultId: string;
 	categoryLabel: string;
@@ -175,6 +175,8 @@ function EditItemForm({
 		setSaving(true);
 
 		try {
+			const accountId = item.accountId ?? item.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
 			let itemData: DecryptedItemData = {
 				title,
 				notes: notes || undefined,
@@ -208,6 +210,7 @@ function EditItemForm({
 				itemId,
 				vaultId,
 				data: itemData,
+				accountId,
 			});
 
 			toast.show({

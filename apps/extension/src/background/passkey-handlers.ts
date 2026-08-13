@@ -35,7 +35,7 @@ import {
 	updateExtensionItem,
 } from "./extension-item-mutations";
 import {
-	resolveAccountEmailForVault,
+	resolveAccountIdForItem,
 	resolveEmailFromAccountId,
 } from "./services/account-resolution";
 import {
@@ -49,6 +49,7 @@ const PASSKEY_TRANSPORTS: string[] = ["internal", "hybrid"];
 
 type LoginItemWithAccount = DecryptedItemWithContext & {
 	account?: {
+		accountId?: string;
 		email?: string;
 		serverUrl?: string;
 	};
@@ -246,25 +247,21 @@ function compareByMostRecent(
 async function getLoginItems(): Promise<LoginItemWithAccount[]> {
 	const items = await getDecryptedItemsForCurrentMode();
 	return items.filter((item): item is LoginItemWithAccount => {
-		if (!item || item.category !== "login") {
+		if (item?.category !== "login") {
 			return false;
 		}
 		return true;
 	});
 }
 
-async function resolveAccountEmailForItem(
+async function resolveItemAccountId(
 	item: LoginItemWithAccount,
 ): Promise<string | undefined> {
-	const itemAccountEmail = getItemAccountEmail(item);
-	if (itemAccountEmail) {
-		return itemAccountEmail;
-	}
-
-	const activeAccount = await storage.getActiveAccount();
-	return activeAccount
-		? await resolveEmailFromAccountId(activeAccount)
-		: undefined;
+	return (
+		item.accountId ??
+		item.account?.accountId ??
+		(await resolveAccountIdForItem(item.id))
+	);
 }
 
 function allowCredentialIds(
@@ -321,6 +318,9 @@ function readVaultAccountEmail(vault: unknown): string | undefined {
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
+	const accountId = await storage.getActiveAccount();
+	if (!accountId) return [];
+	const accountEmail = await resolveEmailFromAccountId(accountId);
 	const { data: vaults } = await apiClient.vaults.list();
 	return vaults
 		.map((vault) => {
@@ -332,7 +332,8 @@ async function getWritableVaultOptions(): Promise<
 			return {
 				id: decodedVault.vaultId,
 				name: decodedVault.vaultName,
-				accountEmail: readVaultAccountEmail(vault),
+				accountId,
+				accountEmail: readVaultAccountEmail(vault) ?? accountEmail,
 				type: decodedVault.vaultType,
 				role: decodedVault.role,
 			};
@@ -533,12 +534,13 @@ async function attachPasskeyToExistingItem(input: {
 	item: LoginItemWithAccount;
 	passkey: Passkey;
 }): Promise<void> {
-	const accountEmail = await resolveAccountEmailForItem(input.item);
-	if (accountEmail) {
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
-		if (!hasWriteCapability) {
-			throw new Error("No vault keys available for item account");
-		}
+	const accountId = await resolveItemAccountId(input.item);
+	if (!accountId) {
+		throw new Error("Unable to resolve account for item");
+	}
+	const hasWriteCapability = await ensureDesktopWriteCapability(accountId);
+	if (!hasWriteCapability) {
+		throw new Error("No vault keys available for item account");
 	}
 
 	const existingData = toDecryptedData(input.item);
@@ -550,7 +552,7 @@ async function attachPasskeyToExistingItem(input: {
 			...existingData,
 			passkeys: nextPasskeys,
 		},
-		accountEmail,
+		accountId,
 	});
 }
 
@@ -560,14 +562,9 @@ async function createItemWithPasskey(input: {
 	passkey: Passkey;
 	targetVault: PasskeyWritableVaultOption;
 }): Promise<void> {
-	const accountEmail =
-		input.targetVault.accountEmail ??
-		(await resolveAccountEmailForVault(input.targetVault.id));
-	if (!accountEmail) {
-		throw new Error("Unable to resolve account for writable vault");
-	}
-
-	const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+	const hasWriteCapability = await ensureDesktopWriteCapability(
+		input.targetVault.accountId,
+	);
 	if (!hasWriteCapability) {
 		throw new Error("No vault keys available for writable vault");
 	}
@@ -581,7 +578,7 @@ async function createItemWithPasskey(input: {
 			username: input.username,
 			passkeys: [input.passkey],
 		},
-		accountEmail,
+		accountId: input.targetVault.accountId,
 	});
 }
 
@@ -699,17 +696,15 @@ async function updateStoredPasskey(input: {
 	update: (current: Passkey) => Passkey;
 	allowBiometricPrompt?: boolean;
 }): Promise<void> {
-	const accountEmail = await resolveAccountEmailForItem(input.match.item);
-	if (accountEmail) {
-		const hasWriteCapability = await ensureDesktopWriteCapability(
-			accountEmail,
-			{
-				allowBiometricPrompt: input.allowBiometricPrompt,
-			},
-		);
-		if (!hasWriteCapability) {
-			throw new Error("No vault keys available for passkey update");
-		}
+	const accountId = await resolveItemAccountId(input.match.item);
+	if (!accountId) {
+		throw new Error("Unable to resolve account for passkey update");
+	}
+	const hasWriteCapability = await ensureDesktopWriteCapability(accountId, {
+		allowBiometricPrompt: input.allowBiometricPrompt,
+	});
+	if (!hasWriteCapability) {
+		throw new Error("No vault keys available for passkey update");
 	}
 
 	const data = toDecryptedData(input.match.item);
@@ -726,7 +721,7 @@ async function updateStoredPasskey(input: {
 			...data,
 			passkeys: nextPasskeys,
 		},
-		accountEmail,
+		accountId,
 	});
 }
 

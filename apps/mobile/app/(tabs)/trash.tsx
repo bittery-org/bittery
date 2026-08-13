@@ -88,7 +88,13 @@ export default function TrashScreen() {
 	const handleRestore = async (item: DeletedItem) => {
 		setActionInProgress(item.id);
 		try {
-			await restoreItem.mutateAsync({ itemId: item.id, vaultId: item.vaultId });
+			const accountId = item.accountId ?? item.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
+			await restoreItem.mutateAsync({
+				itemId: item.id,
+				vaultId: item.vaultId,
+				accountId,
+			});
 			await refetch();
 			toast.show({
 				variant: "success",
@@ -119,9 +125,12 @@ export default function TrashScreen() {
 					onPress: async () => {
 						setActionInProgress(item.id);
 						try {
+							const accountId = item.accountId ?? item.account?.accountId;
+							if (!accountId) throw new Error("Item account is unavailable");
 							await permanentDeleteItem.mutateAsync({
 								itemId: item.id,
 								vaultId: item.vaultId,
+								accountId,
 							});
 							await refetch();
 							toast.show({

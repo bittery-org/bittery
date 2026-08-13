@@ -387,7 +387,7 @@ describe("session_revoked over SSE", () => {
 		).toBe(false);
 	});
 
-	test("without a session id it still locks and invalidates by the connection email", async () => {
+	test("without a session id it still locks and invalidates by the connection account id", async () => {
 		unlockVault();
 		stubStream([revocationFrame({ reason: "device_revoked" })]);
 
@@ -395,22 +395,22 @@ describe("session_revoked over SSE", () => {
 
 		expect(vaultSession.getSnapshot().unlocked).toBe(false);
 		expect(lockAllCalls).toBe(1);
-		expect(invalidationTargets).toEqual([{ email: CONNECTION_EMAIL }]);
+		expect(invalidationTargets).toEqual([{ accountId: ACCOUNT.accountId }]);
 	});
 
-	test("a session id that matches nothing retries by email instead of reporting success", async () => {
+	test("a session id that matches nothing retries by account id instead of reporting success", async () => {
 		unlockVault();
 		// `StoredSessionData.sessionId` is optional, so an unresolved id yields an
 		// empty, failure-free outcome — indistinguishable from a successful kill.
 		invalidateResult = (target) =>
-			typeof target === "object" && "email" in target ? [ACCOUNT] : [];
+			typeof target === "object" && "accountId" in target ? [ACCOUNT] : [];
 		stubStream([revocationFrame({ session_id: "unknown" })]);
 
 		await connect();
 
 		expect(invalidationTargets).toEqual([
 			{ sessionId: "unknown" },
-			{ email: CONNECTION_EMAIL },
+			{ accountId: ACCOUNT.accountId },
 		]);
 	});
 

@@ -1,6 +1,6 @@
 import { useItemListFilters } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import {
 	Checkbox,
 	cn,
@@ -20,9 +20,9 @@ import { useVaultDnd } from "@/providers/vault-dnd-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListProps {
-	items: DecryptedItem[];
+	items: DecryptedItemWithContext[];
 	isLoading: boolean;
-	onItemSelect?: (item: DecryptedItem) => void;
+	onItemSelect?: (item: DecryptedItemWithContext) => void;
 	selectedItemId?: string;
 	selectionMode?: boolean;
 	selectedItemIds?: string[];
@@ -204,9 +204,9 @@ export function ItemList({
 }
 
 interface ItemRowProps {
-	item: DecryptedItem;
+	item: DecryptedItemWithContext;
 	isSelected: boolean;
-	onSelect?: (item: DecryptedItem) => void;
+	onSelect?: (item: DecryptedItemWithContext) => void;
 	selectionMode?: boolean;
 	isChecked?: boolean;
 	onToggleCheck?: () => void;
@@ -229,11 +229,15 @@ function ItemRow({
 		? detectCardBrand(item.cardNumber)
 		: undefined;
 
-	const dragData: DragItemData = {
-		type: "vault-item",
-		item,
-		sourceVaultId: item.vaultId,
-	};
+	const accountId = item.accountId ?? item.account?.accountId;
+	const dragData: DragItemData | undefined = accountId
+		? {
+				type: "vault-item",
+				item,
+				sourceVaultId: item.vaultId,
+				accountId,
+			}
+		: undefined;
 
 	const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
 		id: `item-${item.id}`,

@@ -253,6 +253,26 @@ describe("performDeltaSync Item encryption context", () => {
 		expect(items[0]?.encryptedByUserId).toBe("member_1");
 	});
 
+	it("stores accountId as the cache scope without copying it into accountEmail", async () => {
+		const api = client();
+		api.items.get = async () => ({ data: serverItem() }) as never;
+		const { cache, items } = recordingCache();
+
+		await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "item_updated",
+				entityId: "item_1",
+				entityType: "item",
+			}),
+			"acc_1",
+		);
+
+		expect(items[0]?.accountId).toBe("acc_1");
+		expect(items[0]?.accountEmail).toBeUndefined();
+	});
+
 	it("preserves ciphertext context during bulk-import refresh", async () => {
 		const api = client();
 		api.items.listInVault = async () => ({ data: [serverItem()] }) as never;

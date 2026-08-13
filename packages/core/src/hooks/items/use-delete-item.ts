@@ -13,6 +13,7 @@ import { useItemMutationRuntime } from "./mutation-utils";
 export interface DeleteItemInput {
 	itemId: string;
 	vaultId: string;
+	accountId: string;
 }
 
 /**

@@ -51,12 +51,15 @@ export default function SignInForm({
 		[insecureTransportConfirmed, serverUrl],
 	);
 	const isQuickUnlock = Boolean(
-		sessionState?.canQuickUnlock && sessionState?.email,
+		sessionState?.canQuickUnlock &&
+			sessionState.accountId &&
+			sessionState.email,
 	);
 	const storedSecretKeyQuery = useQuery({
-		queryKey: ["auth", "stored-secret-key", sessionState?.email],
-		enabled: isQuickUnlock && !!sessionState?.email,
-		queryFn: () => storage.getStoredSecretKey(),
+		queryKey: ["auth", "stored-secret-key", sessionState?.accountId],
+		enabled: isQuickUnlock && !!sessionState?.accountId,
+		queryFn: () =>
+			storage.getStoredSecretKey(sessionState?.accountId ?? undefined),
 	});
 	const registrationStatusQuery = useQuery({
 		queryKey: [

@@ -40,20 +40,14 @@ function fixture() {
 		...login,
 	};
 	const repo: ItemCommandRepositoryPort = {
-		findAccountForItem: (id) =>
-			id === item.id ? { accountId: "account-1" } : undefined,
 		findAccountForVault: (id) =>
 			["vault-1", "vault-2"].includes(id)
 				? { accountId: "account-1" }
 				: undefined,
-		resolveAccountIdByEmail: (email) =>
-			email === "alice@example.com" ? "account-1" : undefined,
 		getAccountInfo: (id) =>
 			id === "account-1" ? { email: "alice@example.com" } : undefined,
 		getById: (id) => (id === item.id ? item : undefined),
 		getDeleted: () => [],
-		getVaultById: (id) =>
-			["vault-1", "vault-2"].includes(id) ? {} : undefined,
 		encryptForVault: async ({ vaultId, data, version, userId }) => {
 			encrypted.push({
 				vaultId,
@@ -92,6 +86,7 @@ describe("ItemCommands", () => {
 			vaultId: "vault-1",
 			category: "login",
 			data: login,
+			accountId: "account-1",
 		});
 		expect(result).toEqual({ itemId: "generated-id" });
 		expect(queued[0]).toMatchObject({
@@ -113,6 +108,7 @@ describe("ItemCommands", () => {
 			itemId: "item-1",
 			vaultId: "vault-1",
 			data: { password: "new" },
+			accountId: "account-1",
 		});
 		expect(encrypted[0]).toMatchObject({
 			vaultId: "vault-1",
@@ -135,6 +131,8 @@ describe("ItemCommands", () => {
 			targetVaultId: "vault-2",
 			category: "login",
 			decryptedData: login,
+			accountId: "account-1",
+			targetAccountId: "account-1",
 		});
 		expect(result).toMatchObject({ crossAccount: false });
 		expect(encrypted[0]).toMatchObject({
@@ -143,5 +141,38 @@ describe("ItemCommands", () => {
 			userId: "authenticated-user",
 		});
 		expect(queued[0]).toMatchObject({ type: "move", targetVaultId: "vault-2" });
+	});
+
+	test("rejects an account email where a stable account ID is required", async () => {
+		const { commands, queued } = fixture();
+
+		await expect(
+			commands.execute({
+				type: "create",
+				vaultId: "vault-1",
+				category: "login",
+				data: login,
+				accountId: "alice@example.com",
+			}),
+		).rejects.toThrow("No account repository found for vault vault-1");
+		expect(queued).toHaveLength(0);
+	});
+
+	test("rejects a move whose source vault does not own the item", async () => {
+		const { commands, queued } = fixture();
+
+		await expect(
+			commands.execute({
+				type: "move",
+				itemId: "item-1",
+				sourceVaultId: "vault-2",
+				targetVaultId: "vault-1",
+				category: "login",
+				decryptedData: login,
+				accountId: "account-1",
+				targetAccountId: "account-1",
+			}),
+		).rejects.toThrow("Item item-1 does not belong to vault vault-2");
+		expect(queued).toHaveLength(0);
 	});
 });

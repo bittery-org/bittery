@@ -90,7 +90,7 @@ export function AccountSwitcher() {
 
 			const sessionValid = await storage.isSessionValid(accountId);
 			if (!sessionValid) {
-				navigate({ to: "/unlock", search: { email: account.email } });
+				navigate({ to: "/unlock" });
 			} else {
 				await invalidator.invalidateAllAccountData();
 				navigate({ to: "/vault" });
@@ -150,7 +150,7 @@ export function AccountSwitcher() {
 					successor !== null &&
 					(await storage.isSessionValid(successor.accountId));
 				if (!sessionValid) {
-					navigate({ to: "/unlock", search: { email: successor?.email } });
+					navigate({ to: "/unlock" });
 				} else {
 					await invalidator.invalidateAllAccountData();
 					navigate({ to: "/vault" });

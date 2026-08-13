@@ -41,15 +41,12 @@ describe("VaultService.createVault", () => {
 			vaultKeyProjection,
 		});
 
-		const result = await service.createVault(
-			{
-				name: "Personal",
-				type: "personal",
-				icon: "lock",
-				accountId: "account_1",
-			},
-			{} as never,
-		);
+		const result = await service.createVault({
+			name: "Personal",
+			type: "personal",
+			icon: "lock",
+			accountId: "account_1",
+		});
 
 		expect(createdVaultId).toBeDefined();
 		if (!createdVaultId)
@@ -116,7 +113,7 @@ describe("VaultService.createVault", () => {
 			},
 		});
 
-		await service.refreshVaultKeys({} as never, "account-1");
+		await service.refreshVaultKeys("account-1");
 		expect(stored).toEqual([
 			{
 				vaultId: "vault-1",

@@ -215,11 +215,11 @@ describe("unlock all accounts", () => {
 		expect(await storage.getActiveAccount()).toBeNull();
 	});
 
-	it("filters to the requested emails but still returns ids", async () => {
+	it("filters to the requested account ids", async () => {
 		const { storage } = await createStorage();
 
 		const outcome = await unlockAllWithPassword(
-			{ password: "pw", emails: ["b@test.com"] },
+			{ password: "pw", accountIds: ["acc-2"] },
 			{ storage, itemCache, crypto, credentialMirror },
 		);
 
@@ -255,11 +255,11 @@ describe("unlock all accounts", () => {
 		expect(await storage.getActiveAccount()).toEqual("acc-1");
 	});
 
-	it("leaves an account outside the requested emails locked", async () => {
+	it("leaves an account outside the requested account ids locked", async () => {
 		const { storage } = await createStorage({ biometric: true });
 
 		const outcome = await unlockAllWithBiometric(
-			{ promptMessage: PROMPT, emails: ["b@test.com"] },
+			{ promptMessage: PROMPT, accountIds: ["acc-2"] },
 			{ storage, itemCache, credentialMirror },
 		);
 
@@ -366,7 +366,7 @@ describe("unlock all accounts", () => {
 		);
 
 		const outcome = await unlockAllWithBiometric(
-			{ promptMessage: PROMPT, emails: ["c@test.com"] },
+			{ promptMessage: PROMPT, accountIds: ["acc-3"] },
 			{ storage, itemCache, credentialMirror },
 		);
 

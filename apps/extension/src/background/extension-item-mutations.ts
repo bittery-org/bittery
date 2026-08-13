@@ -5,13 +5,13 @@ interface CreateItemInput {
 	vaultId: string;
 	category: ItemCategory;
 	data: DecryptedItemData;
-	accountEmail: string;
+	accountId: string;
 }
 
 interface UpdateItemInput {
 	itemId: string;
 	data: Partial<DecryptedItemData>;
-	accountEmail?: string;
+	accountId: string;
 }
 
 /** Background callers share the same semantic command application service as UI hooks. */
@@ -23,7 +23,7 @@ export async function createExtensionItem(
 		vaultId: input.vaultId,
 		category: input.category,
 		data: input.data,
-		accountEmail: input.accountEmail,
+		accountId: input.accountId,
 	});
 	if (!result.itemId) {
 		throw new Error("Create Item command did not produce an Item id");
@@ -38,6 +38,6 @@ export async function updateExtensionItem(
 		type: "update",
 		itemId: input.itemId,
 		data: input.data,
-		accountEmail: input.accountEmail,
+		accountId: input.accountId,
 	});
 }

@@ -49,10 +49,10 @@ export interface SyncCacheStorage {
 	getAccountsList: () => Promise<
 		Array<{ accountId: string; email: string; userId?: string }>
 	>;
-	getAuthToken: (accountId?: string) => Promise<string | null>;
-	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
-	getServerUrl: (accountId?: string) => Promise<string | null>;
-	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
+	getAuthToken: (accountId: string) => Promise<string | null>;
+	storeAuthToken: (token: string, accountId: string) => Promise<void>;
+	getServerUrl: (accountId: string) => Promise<string | null>;
+	getVaultKeys: (accountId: string) => Promise<VaultKeyLike[] | null>;
 	getAccountMetadata: (accountId: string) => Promise<{
 		email?: string;
 		insecureTransportConfirmed?: boolean;
@@ -60,7 +60,7 @@ export interface SyncCacheStorage {
 }
 
 export interface SyncCacheDesktopClient {
-	getAuthToken: (email: string) => Promise<string | null>;
+	getAuthToken: (accountId: string) => Promise<string | null>;
 	clearCache: () => void;
 }
 
@@ -237,11 +237,6 @@ export function createSyncCacheService(
 		}
 
 		try {
-			const email = await resolveEmailForAccountId(accountId);
-			if (!email) {
-				return null;
-			}
-
 			const desktopToken = await deps.desktopClient.getAuthToken(accountId);
 			if (!desktopToken) {
 				return null;
@@ -254,18 +249,8 @@ export function createSyncCacheService(
 		}
 	}
 
-	async function getServerUrlForAccountId(
-		accountId?: string | null,
-	): Promise<string> {
-		if (accountId) {
-			const accountScoped = await deps.storage.getServerUrl(accountId);
-			if (accountScoped) {
-				return accountScoped;
-			}
-		}
-
-		const globalServerUrl = await deps.storage.getServerUrl();
-		return globalServerUrl ?? DEFAULT_SERVER_URL;
+	async function getServerUrlForAccountId(accountId: string): Promise<string> {
+		return (await deps.storage.getServerUrl(accountId)) ?? DEFAULT_SERVER_URL;
 	}
 
 	async function getAccountClientForAccountId(
@@ -376,19 +361,6 @@ export function createSyncCacheService(
 		const onlyAccount = accounts.at(0);
 		if (accounts.length === 1 && onlyAccount) {
 			return onlyAccount.accountId;
-		}
-
-		const metadataEmail =
-			typeof event.metadata?.email === "string" ? event.metadata.email : null;
-		if (metadataEmail) {
-			const normalizedMetadataEmail = normalizeEmail(metadataEmail);
-			const emailMatches = accounts.filter(
-				(account) => normalizeEmail(account.email) === normalizedMetadataEmail,
-			);
-			const onlyEmailMatch = emailMatches.at(0);
-			if (emailMatches.length === 1 && onlyEmailMatch) {
-				return onlyEmailMatch.accountId;
-			}
 		}
 
 		return null;

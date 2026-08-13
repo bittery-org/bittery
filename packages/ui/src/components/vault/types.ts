@@ -15,6 +15,7 @@ export interface DragItemData {
 	type: "vault-item";
 	item: DecryptedItem;
 	sourceVaultId: string;
+	accountId: string;
 }
 
 /** Data attached to droppable vault drop targets via dnd-kit. */
@@ -22,6 +23,7 @@ export interface DropVaultData {
 	type: "vault";
 	vaultId: string;
 	role: string;
+	accountId: string;
 }
 
 export interface MoveItemDialogProps {

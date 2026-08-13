@@ -4,7 +4,7 @@
  * Imported by the MV3 service worker, so module scope only builds objects —
  * no DOM, no React, no eager I/O (same convention as `background/lifecycle.ts`).
  *
- * `sync` and the revocation fallback email arrive through setters rather than
+ * `sync` and the revocation fallback accountId arrive through setters rather than
  * imports: `sync-manager` dispatches into this module, so importing it back
  * would close a cycle at module-eval time in the worker.
  */
@@ -17,7 +17,7 @@ import { createVaultSessionMachine } from "./machine";
 import type { SyncPort, VaultSessionPorts } from "./ports";
 
 let syncPort: SyncPort = { disconnect: () => {} };
-let sessionFallbackEmail: string | null = null;
+let sessionFallbackAccountId: string | null = null;
 
 /** `sync-manager` registers its own disconnect once, at initialization. */
 export function setSyncPort(port: SyncPort): void {
@@ -26,17 +26,17 @@ export function setSyncPort(port: SyncPort): void {
 
 /**
  * The SSE `session_revoked` payload names a session, never an account, so the
- * connection's own email is the only fallback when the id resolves to nothing.
+ * connection's accountId is the fallback when the session id resolves to nothing.
  */
-export function setSessionFallbackEmail(email: string | null): void {
-	sessionFallbackEmail = email;
+export function setSessionFallbackAccountId(accountId: string | null): void {
+	sessionFallbackAccountId = accountId;
 }
 
 export const vaultSessionPorts: VaultSessionPorts = {
 	chrome: createChromeSessionAdapter(),
 	desktop: createDesktopAdapter(),
 	lifecycle: createLifecycleAdapter({
-		resolveFallbackEmail: () => sessionFallbackEmail,
+		resolveFallbackAccountId: () => sessionFallbackAccountId,
 	}),
 	sync: {
 		disconnect: (reason, suppressReconnect) =>

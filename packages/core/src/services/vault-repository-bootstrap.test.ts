@@ -197,6 +197,70 @@ describe("VaultRepository.hydrateFromServer", () => {
 		resetTravelModeEnforcerForTests();
 	});
 
+	it("builds locally hydrated items with their cached Vault metadata", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("local_item", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await itemCache.setCachedVaults(
+			[
+				{
+					id: "vault_1",
+					name: "Cached Team Vault",
+					type: "team",
+					icon: "lock",
+					imageUrl: null,
+				},
+			],
+			ACCOUNT_ID,
+		);
+
+		await repo.hydrate();
+
+		expect(repo.getById(item.id)?.vault).toEqual({
+			id: "vault_1",
+			name: "Cached Team Vault",
+			type: "team",
+			icon: "lock",
+			imageUrl: null,
+		});
+	});
+
+	it("builds server-hydrated items with promoted Vault metadata", async () => {
+		const { repo, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("server_item", crypto, vaultCrypto);
+		const client: BootstrapItemsClient = {
+			sync: {
+				bootstrap: mock(async () => ({
+					data: {
+						items: [
+							{
+								...item,
+								vault: {
+									id: "vault_1",
+									name: "Promoted Team Vault",
+									vaultType: "team" as const,
+									icon: "lock",
+									imageUrl: null,
+								},
+							},
+						],
+						hasMore: false,
+					},
+				})),
+			},
+		};
+
+		await repo.hydrateFromServer(client);
+
+		expect(repo.getById(item.id)?.vault).toEqual({
+			id: "vault_1",
+			name: "Promoted Team Vault",
+			type: "team",
+			icon: "lock",
+			imageUrl: null,
+		});
+	});
+
 	// Regression guard: the server serialises vault payloads as camelCase, so the
 	// wire field is `vaultType`. Bootstrap used to read `vault.type`, storing
 	// `undefined` for every vault. The vault detail page only offers member

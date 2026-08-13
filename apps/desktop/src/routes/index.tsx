@@ -22,10 +22,7 @@ export const Route = createFileRoute("/")({
 			activeAccount = firstAccount.accountId;
 		}
 
-		// Single account mode: check if active account has valid session
-		const activeAccountEmail = accountsList.find(
-			(account) => account.accountId === activeAccount,
-		)?.email;
+		// Single account mode: check if the active account has a valid session.
 		const sessionValid = await storage.isSessionValid(activeAccount);
 
 		if (sessionValid) {
@@ -41,9 +38,6 @@ export const Route = createFileRoute("/")({
 		}
 
 		// Session not valid or restore failed, go to unlock
-		throw redirect({
-			to: "/unlock",
-			search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
-		});
+		throw redirect({ to: "/unlock" });
 	},
 });

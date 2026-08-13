@@ -580,20 +580,6 @@ export class VaultRepository {
 		return undefined;
 	}
 
-	private findAccountIdByEmail(email: string): string | undefined {
-		const normalized = email.toLowerCase();
-		for (const info of this.accountInfoByAccountId.values()) {
-			if (info.email.toLowerCase() === normalized) {
-				return info.accountId;
-			}
-		}
-		return undefined;
-	}
-
-	resolveAccountIdByEmail(email: string): string | undefined {
-		return this.findAccountIdByEmail(email);
-	}
-
 	getAccountInfo(accountId: string): VaultRepositoryItemAccount | undefined {
 		const account = this.accountInfoByAccountId.get(accountId);
 		return account ? { ...account } : undefined;

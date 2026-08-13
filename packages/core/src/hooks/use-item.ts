@@ -14,7 +14,6 @@ import { useVaultRepositoryState } from "./use-vault-repository-state";
 
 export interface UseItemOptions {
 	accountId?: string;
-	accountEmail?: string;
 	enabled?: boolean;
 }
 
@@ -23,6 +22,7 @@ export interface UseItemOptions {
  * drop one the server started sending. `account` is the repository's, not the server's.
  */
 export type RawItemForAccount = CachedEncryptedItem & {
+	accountId: string;
 	/** Already decoded by the repository; the wire spells it as an open string. */
 	category: ItemCategory;
 	account?: VaultRepositoryItemAccount;
@@ -81,10 +81,11 @@ export function useItem(
 
 	const rawItem: RawItemForAccount = {
 		...toCachedItemFromRepositoryItem(item, {
-			accountId: item.account?.accountId,
+			accountId: item.accountId,
 			accountEmail: item.account?.email,
 			serverUrl: item.account?.serverUrl,
 		}),
+		accountId: item.accountId,
 		category: item.category,
 		account: item.account,
 	};

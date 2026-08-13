@@ -4,6 +4,7 @@
  */
 
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
+import { storage } from "../lib/storage";
 import { apiClient } from "./api-client";
 import type {
 	VaultItemResponse,
@@ -47,6 +48,10 @@ export async function handleGetWritableVaults(): Promise<WritableVaultsResponse>
 	updateActivity();
 
 	try {
+		const accountId = await storage.getActiveAccount();
+		if (!accountId) {
+			return { success: false, error: "No active account" };
+		}
 		const { data: vaultData } = await apiClient.vaults.list();
 		const vaults = vaultData.map((vault) =>
 			toVaultKeyEntry({
@@ -62,6 +67,7 @@ export async function handleGetWritableVaults(): Promise<WritableVaultsResponse>
 			vaults: writableVaults.map((vault) => ({
 				id: vault.vaultId,
 				name: vault.vaultName,
+				accountId,
 				type: vault.vaultType,
 				role: vault.role,
 			})),

@@ -19,7 +19,7 @@ import { toast } from "../../sonner";
 interface ItemAttachmentsProps {
 	itemId: string;
 	vaultId: string;
-	accountEmail?: string;
+	accountId: string;
 	canEdit?: boolean;
 	handleDownloadedFile?: (bytes: Uint8Array, fileName: string) => void;
 }
@@ -68,13 +68,13 @@ function AttachmentRow({
 	onDownload,
 	onDelete,
 	canEdit,
-	accountEmail,
+	accountId,
 }: {
 	attachment: AttachmentMeta;
 	onDownload: (attachment: AttachmentMeta) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
-	accountEmail?: string;
+	accountId: string;
 }) {
 	const { m } = useI18n();
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
@@ -85,7 +85,7 @@ function AttachmentRow({
 	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
-		accountEmail,
+		accountId,
 	);
 
 	const decryptedNameQuery = useQuery({
@@ -94,7 +94,7 @@ function AttachmentRow({
 			attachment.vaultId,
 			attachment.itemId,
 			attachment.id,
-			accountEmail,
+			accountId,
 		],
 		queryFn: async () => {
 			const decrypted = await decryptMeta(attachment);
@@ -131,7 +131,7 @@ function AttachmentRow({
 					attachment.vaultId,
 					attachment.itemId,
 					attachment.id,
-					accountEmail,
+					accountId,
 				],
 				trimmed,
 			);
@@ -217,7 +217,7 @@ function AttachmentRow({
 export function ItemAttachments({
 	itemId,
 	vaultId,
-	accountEmail,
+	accountId,
 	canEdit = false,
 	handleDownloadedFile,
 }: ItemAttachmentsProps) {
@@ -234,7 +234,7 @@ export function ItemAttachments({
 		download,
 		remove,
 		attachmentMaxFileSizeBytes,
-	} = useItemAttachments(itemId, vaultId, accountEmail);
+	} = useItemAttachments(itemId, vaultId, accountId);
 
 	const handleFileChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,7 +406,7 @@ export function ItemAttachments({
 							onDownload={handleDownload}
 							onDelete={handleDelete}
 							canEdit={canEdit}
-							accountEmail={accountEmail}
+							accountId={accountId}
 						/>
 					))}
 				</div>
