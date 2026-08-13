@@ -6,6 +6,7 @@ import {
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
+import type { VaultKeyData } from "@bittery/storage/types";
 import type { AccountResolver, DefaultApiClient } from "./account-resolver";
 import type { VaultCrypto } from "./vault-crypto";
 
@@ -68,18 +69,21 @@ export async function refreshVaultKeys(
 	apiClient: ApiVaultClient,
 	storage: AccountStore,
 	accountId?: string,
-): Promise<void> {
+): Promise<VaultKeyData[]> {
 	const { data: vaultList } = await apiClient.vaults.list();
-	await storage.storeVaultKeys(
-		vaultList.map((vault) =>
-			toVaultKeyEntry({
-				...vault,
-				icon: vault.icon ?? null,
-				imageUrl: vault.imageUrl ?? null,
-			}),
-		),
-		accountId,
+	const vaultKeys = vaultList.map((vault) =>
+		toVaultKeyEntry({
+			...vault,
+			icon: vault.icon ?? null,
+			imageUrl: vault.imageUrl ?? null,
+		}),
 	);
+	await storage.storeVaultKeys(vaultKeys, accountId);
+	return vaultKeys;
+}
+
+interface VaultKeyProjection {
+	syncVaultKeys(vaultKeys: VaultKeyData[], accountId: string): Promise<void>;
 }
 
 interface VaultServiceDeps {
@@ -87,6 +91,7 @@ interface VaultServiceDeps {
 	crypto: CryptoPort;
 	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
+	vaultKeyProjection: VaultKeyProjection;
 }
 
 export class VaultService {
@@ -94,12 +99,14 @@ export class VaultService {
 	private readonly crypto: CryptoPort;
 	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
+	private readonly vaultKeyProjection: VaultKeyProjection;
 
 	constructor(deps: VaultServiceDeps) {
 		this.storage = deps.storage;
 		this.crypto = deps.crypto;
 		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
+		this.vaultKeyProjection = deps.vaultKeyProjection;
 	}
 
 	async createVault(
@@ -290,6 +297,7 @@ export class VaultService {
 			defaultClient,
 			accountId,
 		);
-		await refreshVaultKeys(client, this.storage, accountId);
+		const vaultKeys = await refreshVaultKeys(client, this.storage, accountId);
+		await this.vaultKeyProjection.syncVaultKeys(vaultKeys, accountId);
 	}
 }

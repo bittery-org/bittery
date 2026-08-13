@@ -223,7 +223,7 @@ export type SyncVaultKeyEntry = VaultKeyEntry;
  * `accountId` is required: an omitted one used to name the wrong collection, and an
  * email passed in its place named a collection after an email.
  */
-export interface ItemCacheAdapter {
+export interface SyncReplicaStore {
 	upsertCachedItem(
 		item: import("@bittery/types").CachedEncryptedItem,
 		accountId: string,
@@ -235,29 +235,22 @@ export interface ItemCacheAdapter {
 	): Promise<void>;
 	removeCachedVault(vaultId: string, accountId: string): Promise<void>;
 	clearItemCache(accountId: string): Promise<void>;
-}
-
-/**
- * What delta sync and the orchestrator actually drive: an item cache that also owns
- * vault keys and optimistic-id reconciliation.
- *
- * Those two are genuinely NOT `ItemCache` methods and never will be — `ItemCache` stores
- * opaque encrypted blobs and knows nothing about key wrapping or temp ids. In this repo
- * the implementer is `VaultRepositoryCoordinator` (and `VaultRepository`), which sits
- * above both the cache and the crypto.
- */
-export interface SyncItemCache extends ItemCacheAdapter {
 	syncVaultKeys(
 		vaultKeys: SyncVaultKeyEntry[],
 		accountId: string,
 	): Promise<void>;
+}
+
+/** Replica operations additionally needed by the orchestrator after outbound creates. */
+export interface SyncOrchestratorReplica extends SyncReplicaStore {
 	replaceItemId(tempId: string, realId: string, accountId: string): void;
+}
+
+/** Optimistic projection and authoritative-result reconciliation for queued commands. */
+export interface ItemCommandProjection {
 	applyItemCommand(
 		command: import("@bittery/types").ItemSyncCommand,
 	): Promise<void>;
-	executeSemanticItemCommand(
-		command: import("@bittery/types").ItemSyncCommand,
-	): Promise<import("@bittery/types").ItemSyncAcknowledgement | undefined>;
 	discardItemCommandAcknowledgedElsewhere(
 		command: import("@bittery/types").ItemSyncCommand,
 	): Promise<void>;
@@ -268,4 +261,11 @@ export interface SyncItemCache extends ItemCacheAdapter {
 		command: import("@bittery/types").ItemSyncCommand,
 		acknowledgement: import("@bittery/types").ItemSyncAcknowledgement,
 	): Promise<void>;
+}
+
+/** Executes commands whose meaning cannot be represented by the ordinary item API. */
+export interface SemanticItemCommandExecutor {
+	executeSemanticItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+	): Promise<import("@bittery/types").ItemSyncAcknowledgement | undefined>;
 }

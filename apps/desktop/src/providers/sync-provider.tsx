@@ -1,6 +1,7 @@
 import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
+import { useDesktopAccountRuntime } from "@/contexts/account-context";
 import { useDesktopClientId, useDesktopSync } from "../hooks/use-desktop-sync";
 
 /**
@@ -26,7 +27,8 @@ export function DesktopSyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const syncState = useDesktopSync(queryClient, enabled);
+	const { manager, vaultRuntime } = useDesktopAccountRuntime();
+	const syncState = useDesktopSync(queryClient, manager, vaultRuntime, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

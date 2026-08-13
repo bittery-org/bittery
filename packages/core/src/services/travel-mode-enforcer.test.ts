@@ -12,7 +12,7 @@ import {
 	resetTravelModeEnforcerForTests,
 	TravelModeEnforcer,
 } from "./travel-mode-enforcer";
-import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { VaultRepository } from "./vault-repository";
 
 const ACCOUNT_ID = "acc-1";
 
@@ -68,14 +68,14 @@ describe("TravelModeEnforcer", () => {
 
 	it("enable purges every layer, including the record cache", async () => {
 		const { storage, itemCache } = await createLayers();
-		const coordinator = {
+		const repository = {
 			purgeHiddenVaultsForAccount: mock(() => {}),
-		} as unknown as VaultRepositoryCoordinator;
+		} as unknown as VaultRepository;
 
 		const enforcer = new TravelModeEnforcer({
 			storage,
 			itemCache,
-			coordinator,
+			repository,
 		});
 
 		await enforcer.applyConfig(ACCOUNT_ID, {
@@ -83,7 +83,7 @@ describe("TravelModeEnforcer", () => {
 			hiddenVaultIds: ["v1"],
 		});
 
-		expect(coordinator.purgeHiddenVaultsForAccount).toHaveBeenCalledWith(
+		expect(repository.purgeHiddenVaultsForAccount).toHaveBeenCalledWith(
 			ACCOUNT_ID,
 			["v1"],
 		);

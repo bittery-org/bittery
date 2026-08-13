@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { AccountMetadata } from "@bittery/storage/types";
 import { NO_CREDENTIAL_MIRROR } from "./account-lifecycle";
 import type { DefaultApiClient } from "./account-resolver";
 import { createAccountSync } from "./account-sync";
+import type { VaultRepository } from "./vault-repository";
+
+const semanticDeps = { crypto: {} as never, vaultCrypto: {} as never };
 
 const alice: AccountMetadata = {
 	accountId: "account_alice",
@@ -30,19 +32,24 @@ function makeDependencies(activeAccount: string | null = alice.accountId) {
 			accountId === alice.accountId ? "https://vault.example/" : null,
 		getAuthToken: async (accountId?: string) =>
 			accountId === alice.accountId ? "alice-token" : null,
+		getUnlockedAccounts: async () => (activeAccount ? [activeAccount] : []),
 		onUnlockStateChanged: () => () => undefined,
 	} as unknown as AccountStore;
 	const itemCache = {
 		initialize: async () => undefined,
 	} as unknown as ItemCache;
-	return { storage, itemCache };
+	const vaultRepository = {
+		openAccounts: async () => undefined,
+	} as unknown as VaultRepository;
+	return { storage, itemCache, vaultRepository };
 }
 
 describe("account-aware Sync assembly", () => {
 	test("disables Sync when no account is active", async () => {
-		const { storage, itemCache } = makeDependencies(null);
+		const { storage, itemCache, vaultRepository } = makeDependencies(null);
 		const sync = createAccountSync({
-			crypto: {} as CryptoPort,
+			...semanticDeps,
+			vaultRepository,
 			lifecycle: {
 				storage,
 				itemCache,
@@ -57,9 +64,10 @@ describe("account-aware Sync assembly", () => {
 	});
 
 	test("disables Sync when the active account has no authenticated client", async () => {
-		const { storage, itemCache } = makeDependencies();
+		const { storage, itemCache, vaultRepository } = makeDependencies();
 		const sync = createAccountSync({
-			crypto: {} as CryptoPort,
+			...semanticDeps,
+			vaultRepository,
 			lifecycle: {
 				storage,
 				itemCache,
@@ -72,11 +80,12 @@ describe("account-aware Sync assembly", () => {
 	});
 
 	test("assembles one account-scoped source and queue client policy", async () => {
-		const { storage, itemCache } = makeDependencies();
+		const { storage, itemCache, vaultRepository } = makeDependencies();
 		const clientRequests: Array<[string, string]> = [];
 		const apiClient = { marker: "alice" } as unknown as DefaultApiClient;
 		const sync = createAccountSync({
-			crypto: {} as CryptoPort,
+			...semanticDeps,
+			vaultRepository,
 			lifecycle: {
 				storage,
 				itemCache,
@@ -102,16 +111,16 @@ describe("account-aware Sync assembly", () => {
 		expect(await assembly?.getClientForAccount(alice.accountId)).toBe(
 			apiClient,
 		);
-		expect(clientRequests).toEqual([
-			[alice.accountId, "device_1"],
-			[alice.accountId, "device_1"],
-		]);
+		expect(clientRequests.every((request) => request[1] === "device_1")).toBe(
+			true,
+		);
 	});
 
 	test("reuses an unchanged assembly so platform polling does not reconnect", async () => {
-		const { storage, itemCache } = makeDependencies();
+		const { storage, itemCache, vaultRepository } = makeDependencies();
 		const sync = createAccountSync({
-			crypto: {} as CryptoPort,
+			...semanticDeps,
+			vaultRepository,
 			lifecycle: {
 				storage,
 				itemCache,

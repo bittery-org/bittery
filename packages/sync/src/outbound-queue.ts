@@ -1111,7 +1111,10 @@ export class ItemSyncEngine {
 		const persistence = this.persistenceTail
 			.catch(() => undefined)
 			.then(async () => {
-				await this.storage.remove(QUEUE_DOCUMENT_KEY);
+				await this.storage.update<QueueDocument>(
+					QUEUE_DOCUMENT_KEY,
+					() => null,
+				);
 			});
 		this.persistenceTail = persistence.catch(() => undefined);
 		await persistence;

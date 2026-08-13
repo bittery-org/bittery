@@ -1,13 +1,12 @@
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
+import { resolveUserIdForScope } from "@bittery/storage/account-id";
 import { AccountResolver } from "./services/account-resolver";
-import { ItemService } from "./services/item-service";
+import type { AccountVaultRuntime } from "./services/account-vault-runtime";
+import { type CommandQueuePort, ItemCommands } from "./services/item-commands";
 import { ShareService } from "./services/share-service";
 import type { VaultCrypto } from "./services/vault-crypto";
-import {
-	getOrCreateVaultRepositoryCoordinator,
-	type VaultRepositoryCoordinator,
-} from "./services/vault-repository-coordinator";
+import type { VaultRepository } from "./services/vault-repository";
 import { VaultService } from "./services/vault-service";
 
 export interface CoreContext {
@@ -23,10 +22,13 @@ export interface CoreContext {
 	/** Every account, vault and item key ceremony, over the platform's `CryptoPort`. */
 	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
-	items: ItemService;
+	itemCommands: ItemCommands;
 	vaults: VaultService;
 	shares: ShareService;
-	vaultCoordinator: VaultRepositoryCoordinator;
+	vaultRepository: VaultRepository;
+	vaultRuntime: AccountVaultRuntime;
+	/** Explicit user-requested remote refresh; local reads never call this during render/bootstrap. */
+	refreshActiveVaults(): Promise<void>;
 }
 
 export interface CreateCoreContextOptions {
@@ -34,33 +36,35 @@ export interface CreateCoreContextOptions {
 	itemCache: ItemCache;
 	crypto: CryptoPort;
 	vaultCrypto: VaultCrypto;
+	vaultRuntime: AccountVaultRuntime;
+	commandQueue: CommandQueuePort;
+	hydrateItem?: (accountId: string, itemId: string) => Promise<void>;
 }
 
 export function createCoreContext(
 	options: CreateCoreContextOptions,
 ): CoreContext {
 	const accounts = new AccountResolver(options.storage);
-	const vaultCoordinator = getOrCreateVaultRepositoryCoordinator(
-		options.crypto,
-		options.vaultCrypto,
-		options.storage,
-		options.itemCache,
-	);
-	const items = new ItemService({
-		storage: options.storage,
-		itemCache: options.itemCache,
-		crypto: options.crypto,
-		vaultCrypto: options.vaultCrypto,
-		accounts,
+	const vaultRepository = options.vaultRuntime.repository;
+	const itemCommands = new ItemCommands({
+		queue: options.commandQueue,
+		repository: vaultRepository,
+		generateId: () => options.crypto.generateUuid(),
+		now: Date.now,
+		project: (command) => vaultRepository.applyItemCommand(command),
+		hydrateItem: options.hydrateItem
+			? async (account, itemId) =>
+					options.hydrateItem?.(account.accountId, itemId)
+			: undefined,
+		resolveUserId: (accountId) =>
+			resolveUserIdForScope(options.storage, accountId),
 	});
-	vaultCoordinator.setItemCommandExecutor((command) =>
-		items.executeCrossAccountMoveCommand(command),
-	);
 	const vaults = new VaultService({
 		storage: options.storage,
 		crypto: options.crypto,
 		vaultCrypto: options.vaultCrypto,
 		accounts,
+		vaultKeyProjection: vaultRepository,
 	});
 	const shares = new ShareService({
 		storage: options.storage,
@@ -68,15 +72,30 @@ export function createCoreContext(
 		vaultCrypto: options.vaultCrypto,
 		accounts,
 	});
+	const refreshActiveVaults = async (): Promise<void> => {
+		// First recover the local projection and clear any runtime hydration error.
+		// The explicit remote refresh follows only once the local read seam is sound.
+		await options.vaultRuntime.retry();
+		const { activeAccount, accountsInfo } = await accounts.resolveAccounts();
+		if (!activeAccount) return;
+		if (accountsInfo.length === 0) {
+			throw new Error(
+				`No authenticated API client for account ${activeAccount}`,
+			);
+		}
+		await vaultRepository.refreshFromServer(accountsInfo);
+	};
 
 	return {
 		storage: options.storage,
 		itemCache: options.itemCache,
 		vaultCrypto: options.vaultCrypto,
 		accounts,
-		items,
+		itemCommands,
 		vaults,
 		shares,
-		vaultCoordinator,
+		vaultRepository,
+		vaultRuntime: options.vaultRuntime,
+		refreshActiveVaults,
 	};
 }

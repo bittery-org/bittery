@@ -17,7 +17,7 @@
  * accountEmail) — it does not allow-list or drop any decrypted fields. So
  * the wire payload already carries every `DecryptedItemData` field
  * (passkeys, totp*, credit-card/identity fields, custom fields, etc.), the
- * same way the local WASM/coordinator decrypt path does.
+ * same way the local WASM/repository decrypt path does.
  *
  * We still validate the required structural fields before trusting the rest
  * of the object, since this is data crossing a native-messaging process
@@ -28,9 +28,11 @@
  * desktop-mode reads match the local decrypt path field-for-field.
  */
 
-import type { MultiAccountItem } from "@bittery/core/services/item-service";
+import type { VaultRepositoryItemWithAccount } from "@bittery/core/services/vault-repository";
 import type { ItemCategory } from "@bittery/shared/types";
 import { decodeVaultType } from "@bittery/shared/vault-mapping";
+
+type MultiAccountItem = VaultRepositoryItemWithAccount;
 
 function isItemCategory(value: unknown): value is ItemCategory {
 	return (

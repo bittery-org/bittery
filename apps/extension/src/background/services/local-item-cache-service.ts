@@ -36,29 +36,29 @@ interface LocalItemUpdatedInput {
 }
 
 interface LocalItemCacheServiceDeps {
-	vaultCoordinator?: typeof core.vaultCoordinator;
+	vaultRepository?: typeof core.vaultRepository;
 	desktopClient: {
 		clearCache: () => void;
 	};
 }
 
 const defaultDeps: LocalItemCacheServiceDeps = {
-	vaultCoordinator: core.vaultCoordinator,
+	vaultRepository: core.vaultRepository,
 	desktopClient,
 };
 
 function resolveAccountFromEmail(
-	vaultCoordinator: NonNullable<LocalItemCacheServiceDeps["vaultCoordinator"]>,
+	vaultRepository: NonNullable<LocalItemCacheServiceDeps["vaultRepository"]>,
 	accountEmail: string,
 ) {
-	const accountId = vaultCoordinator.resolveAccountIdByEmail(accountEmail);
+	const accountId = vaultRepository.resolveAccountIdByEmail(accountEmail);
 	if (!accountId) {
 		return undefined;
 	}
 	return {
 		accountId,
 		email: accountEmail,
-		repo: vaultCoordinator.getRepositoryForAccount(accountId),
+		account: vaultRepository.getAccountInfo(accountId),
 	};
 }
 
@@ -72,8 +72,8 @@ export function createLocalItemCacheService(
 
 	return {
 		async onLocalItemCreated(input: LocalItemCreatedInput): Promise<void> {
-			const vaultCoordinator = deps.vaultCoordinator;
-			if (!vaultCoordinator) {
+			const vaultRepository = deps.vaultRepository;
+			if (!vaultRepository) {
 				return;
 			}
 
@@ -82,13 +82,12 @@ export function createLocalItemCacheService(
 				return;
 			}
 			const resolvedAccount = resolveAccountFromEmail(
-				vaultCoordinator,
+				vaultRepository,
 				accountEmail,
 			);
 			if (!resolvedAccount) {
 				return;
 			}
-			const repo = resolvedAccount.repo;
 			const item = toNewCachedItem(
 				{
 					id: input.itemId,
@@ -100,32 +99,35 @@ export function createLocalItemCacheService(
 					version: 1,
 					payload: toEncryptedPayload(input.encryptedData),
 				},
-				{ accountEmail, serverUrl: repo.getServerUrl() },
+				{ accountEmail, serverUrl: resolvedAccount.account?.serverUrl },
 			);
-			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
+			await vaultRepository.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 
 		async onLocalItemUpdated(input: LocalItemUpdatedInput): Promise<void> {
-			const vaultCoordinator = deps.vaultCoordinator;
-			if (!vaultCoordinator) {
+			const vaultRepository = deps.vaultRepository;
+			if (!vaultRepository) {
 				return;
 			}
 
 			const resolvedAccount = input.accountEmail
-				? resolveAccountFromEmail(vaultCoordinator, input.accountEmail)
-				: existingItemAccount(vaultCoordinator, input.itemId);
+				? resolveAccountFromEmail(vaultRepository, input.accountEmail)
+				: existingItemAccount(vaultRepository, input.itemId);
 			if (!resolvedAccount) {
 				return;
 			}
-			const existing = resolvedAccount.repo.getById(input.itemId);
+			const existing = vaultRepository.getById(
+				input.itemId,
+				resolvedAccount.accountId,
+			);
 			if (!existing) {
 				return;
 			}
 			const item: CachedEncryptedItem = withEncryptedPayload(
 				toCachedItemMetadata(existing, {
 					accountEmail: resolvedAccount.email,
-					serverUrl: resolvedAccount.repo.getServerUrl(),
+					serverUrl: resolvedAccount.account?.serverUrl,
 				}),
 				toEncryptedPayload(input.encryptedData),
 				{
@@ -136,19 +138,19 @@ export function createLocalItemCacheService(
 					updatedAt: new Date().toISOString(),
 				},
 			);
-			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
+			await vaultRepository.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 	};
 }
 
 function existingItemAccount(
-	vaultCoordinator: NonNullable<LocalItemCacheServiceDeps["vaultCoordinator"]>,
+	vaultRepository: NonNullable<LocalItemCacheServiceDeps["vaultRepository"]>,
 	itemId: string,
 ) {
-	const item = vaultCoordinator.getById(itemId);
+	const item = vaultRepository.getById(itemId);
 	if (item?.accountEmail) {
-		return resolveAccountFromEmail(vaultCoordinator, item.accountEmail);
+		return resolveAccountFromEmail(vaultRepository, item.accountEmail);
 	}
 	return undefined;
 }

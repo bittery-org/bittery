@@ -19,6 +19,7 @@ import {
 	QueryClient,
 	QueryClientProvider,
 } from "@tanstack/react-query";
+import { AccountRuntimeProvider } from "./providers/account-runtime-provider";
 import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
 import { SyncProvider } from "./providers/sync-provider";
@@ -145,9 +146,11 @@ export const getRouter = () => {
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
 					<ApiProvider apiClient={apiClient}>
-						<SyncProvider queryClient={queryClient}>
-							<WebPlatformProvider>{children}</WebPlatformProvider>
-						</SyncProvider>
+						<AccountRuntimeProvider queryClient={queryClient}>
+							<SyncProvider queryClient={queryClient}>
+								<WebPlatformProvider>{children}</WebPlatformProvider>
+							</SyncProvider>
+						</AccountRuntimeProvider>
 					</ApiProvider>
 				</QueryClientProvider>
 			</I18nProvider>

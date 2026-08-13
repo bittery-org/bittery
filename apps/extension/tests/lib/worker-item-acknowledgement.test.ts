@@ -6,7 +6,7 @@ import {
 } from "../../src/lib/worker-item-acknowledgement";
 
 describe("worker Item acknowledgement", () => {
-	test("rejects malformed runtime messages before coordinator access", () => {
+	test("rejects malformed runtime messages before projection access", () => {
 		expect(
 			isWorkerItemCommandAcknowledgedMessage({
 				type: "SYNC_ITEM_COMMAND_ACKNOWLEDGED",

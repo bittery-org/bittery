@@ -66,14 +66,14 @@ export function isWorkerItemCommandAcknowledgedMessage(
 
 export async function reconcileWorkerItemCommandAcknowledgement(
 	message: WorkerItemCommandAcknowledgedMessage,
-	coordinator: {
+	commandProjection: {
 		acknowledgeItemCommand(
 			command: ItemSyncCommand,
 			acknowledgement: ItemSyncAcknowledgement,
 		): Promise<void>;
 	},
 ): Promise<void> {
-	await coordinator.acknowledgeItemCommand(
+	await commandProjection.acknowledgeItemCommand(
 		message.command,
 		message.acknowledgement,
 	);

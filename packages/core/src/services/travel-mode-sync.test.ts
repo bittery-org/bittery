@@ -15,7 +15,7 @@ import {
 	handleTravelModeSyncEvent,
 	restoreAfterTravelModeDisabled,
 } from "./travel-mode-sync";
-import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { VaultRepository } from "./vault-repository";
 import type { ApiVaultClient } from "./vault-service";
 
 const ACCOUNT_ID = "account-1";
@@ -80,7 +80,7 @@ describe("travel-mode-sync", () => {
 		const coordinator = {
 			syncVaultKeys: mock(async () => undefined),
 			refreshFromServer: mock(async () => undefined),
-		} as unknown as VaultRepositoryCoordinator;
+		} as unknown as VaultRepository;
 
 		const accounts = {
 			resolveAccounts: mock(async () => ({
@@ -148,7 +148,7 @@ describe("travel-mode-sync", () => {
 			purgeHiddenVaultsForAccount: mock(() => undefined),
 			syncVaultKeys: mock(async () => undefined),
 			refreshFromServer: mock(async () => undefined),
-		} as unknown as VaultRepositoryCoordinator;
+		} as unknown as VaultRepository;
 
 		const accounts = {
 			resolveAccounts: mock(async () => ({
@@ -202,7 +202,7 @@ describe("travel-mode-sync", () => {
 			purgeHiddenVaultsForAccount: mock(() => undefined),
 			syncVaultKeys: mock(async () => undefined),
 			refreshFromServer: mock(async () => undefined),
-		} as unknown as VaultRepositoryCoordinator;
+		} as unknown as VaultRepository;
 
 		const enforcer = getTravelModeEnforcer(storage, itemCache, coordinator);
 		await enforcer.applyConfig(ACCOUNT_ID, {

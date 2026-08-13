@@ -3,10 +3,13 @@ import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import {
 	buildDefaultSyncSourceId,
+	type ItemCommandProjection,
+	type SemanticItemCommandExecutor,
+	type SyncEvent,
 	type SyncEventContext,
+	type SyncOrchestratorReplica,
 	type SyncSource,
-} from "@bittery/sync/source";
-import type { SyncEvent, SyncItemCache } from "@bittery/sync/types";
+} from "@bittery/sync";
 import {
 	invalidateAccountSession,
 	type LifecycleDeps,
@@ -17,13 +20,14 @@ import {
 	createStoredAccountApiClient,
 	type DefaultApiClient,
 } from "./account-resolver";
+import { CrossAccountItemCommandExecutor } from "./cross-account-item-command-executor";
 import {
 	createInitialSyncBootstrap,
 	createStagedFullRefresh,
 } from "./staged-full-refresh";
 import { handleTravelModeSyncEvent } from "./travel-mode-sync";
-import { createVaultCrypto } from "./vault-crypto";
-import { getOrCreateVaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { VaultCrypto } from "./vault-crypto";
+import type { VaultRepository } from "./vault-repository";
 
 export type AccountSyncClientFactory = (
 	accountId: string,
@@ -35,7 +39,9 @@ export interface AccountSyncAssembly {
 	getAuthToken: () => Promise<string | null>;
 	sources: SyncSource[];
 	getClientForAccount: (accountId: string) => Promise<DefaultApiClient>;
-	itemCacheAdapter: SyncItemCache;
+	replicaStore: SyncOrchestratorReplica;
+	commandProjection: ItemCommandProjection;
+	semanticCommandExecutor: SemanticItemCommandExecutor;
 	onEventProcessed: (
 		event: SyncEvent,
 		context: SyncEventContext,
@@ -53,8 +59,10 @@ export interface AccountSyncModule {
 }
 
 export interface CreateAccountSyncOptions {
-	crypto: CryptoPort;
 	lifecycle: LifecycleDeps;
+	vaultRepository: VaultRepository;
+	crypto: CryptoPort;
+	vaultCrypto: VaultCrypto;
 	/** Internal remote seam; production uses the stored-account HTTP adapter. */
 	clientFactory?: AccountSyncClientFactory;
 }
@@ -73,20 +81,19 @@ interface ResolvedAccount {
  * Travel mode processing and Session invalidation.
  */
 export function createAccountSync({
-	crypto,
 	lifecycle,
+	vaultRepository,
+	crypto,
+	vaultCrypto,
 	clientFactory,
 }: CreateAccountSyncOptions): AccountSyncModule {
 	const { storage, itemCache } = lifecycle;
-	const coordinator = getOrCreateVaultRepositoryCoordinator(
-		crypto,
-		createVaultCrypto({ crypto, storage }),
-		storage,
-		itemCache,
-	);
 	const accounts = new AccountResolver(storage);
-	const refreshFromServer = createStagedFullRefresh(storage, coordinator);
-	const initializeFromServer = createInitialSyncBootstrap(storage, coordinator);
+	const refreshFromServer = createStagedFullRefresh(storage, vaultRepository);
+	const initializeFromServer = createInitialSyncBootstrap(
+		storage,
+		vaultRepository,
+	);
 	const createClient: AccountSyncClientFactory =
 		clientFactory ??
 		((accountId, clientId) =>
@@ -146,7 +153,6 @@ export function createAccountSync({
 				cached = undefined;
 				return null;
 			}
-
 			const cacheKey = JSON.stringify([
 				clientId,
 				accountId,
@@ -159,6 +165,12 @@ export function createAccountSync({
 
 			const getClientForAccount = (targetAccountId: string) =>
 				requireClient(targetAccountId, clientId);
+			const semanticExecutor = new CrossAccountItemCommandExecutor({
+				storage,
+				crypto,
+				vaultCrypto,
+				getClientForAccount,
+			});
 			const getAuthToken = () => storage.getAuthToken(accountId);
 			const source: SyncSource = {
 				id: buildDefaultSyncSourceId(account.serverUrl, accountId),
@@ -176,7 +188,9 @@ export function createAccountSync({
 				getAuthToken,
 				sources: [source],
 				getClientForAccount,
-				itemCacheAdapter: coordinator,
+				replicaStore: vaultRepository,
+				commandProjection: vaultRepository,
+				semanticCommandExecutor: semanticExecutor,
 				onEventProcessed: async (event, context) => {
 					if (event.type !== "travel_mode_updated" || !context.accountId) {
 						return;
@@ -186,7 +200,7 @@ export function createAccountSync({
 						context.accountId,
 						storage,
 						itemCache,
-						coordinator,
+						vaultRepository,
 						{
 							apiClient: await getClientForAccount(context.accountId),
 							accounts,

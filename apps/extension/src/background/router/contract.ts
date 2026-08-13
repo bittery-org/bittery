@@ -345,6 +345,10 @@ export interface RouteContract {
 	// -- Sync lifecycle --
 	SYNC_CONNECT: { payload: undefined; response: Acknowledgement };
 	SYNC_DISCONNECT: { payload: undefined; response: Acknowledgement };
+	RECONCILE_ACCOUNT_SCOPE: {
+		payload: undefined;
+		response: Acknowledgement;
+	};
 	GET_SYNC_STATUS: { payload: undefined; response: SyncStatusResponse };
 	GET_SYNC_CLIENT_ID: { payload: undefined; response: SyncClientIdResponse };
 	GET_SYNC_COMMAND_SUMMARY: {

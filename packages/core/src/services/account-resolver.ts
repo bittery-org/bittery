@@ -107,7 +107,7 @@ export class AccountResolver {
 	 *
 	 * View-mode independent: used by the item Move dialog to surface
 	 * cross-account move targets while a single account stays active. Does not
-	 * change the active account or the coordinator's active-account set.
+	 * change the active account or the repository's active-account set.
 	 */
 	async resolveUnlockedAccounts(): Promise<AccountInfo[]> {
 		const accountIds = await this.storage.getUnlockedAccounts();

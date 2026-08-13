@@ -1,7 +1,7 @@
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { AccountResolver } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
-import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { VaultRepository } from "./vault-repository";
 import { type ApiVaultClient, refreshVaultKeys } from "./vault-service";
 
 export interface TravelModeSyncEvent {
@@ -17,14 +17,14 @@ export interface TravelModeSyncRestoreOptions {
 export async function restoreAfterTravelModeDisabled(
 	accountId: string,
 	storage: AccountStore,
-	coordinator: VaultRepositoryCoordinator,
+	repository: VaultRepository,
 	{ apiClient, accounts }: TravelModeSyncRestoreOptions,
 ): Promise<void> {
 	await refreshVaultKeys(apiClient, storage, accountId);
 
 	const vaultKeys = await storage.getVaultKeys(accountId);
 	if (vaultKeys) {
-		await coordinator.syncVaultKeys(vaultKeys, accountId);
+		await repository.syncVaultKeys(vaultKeys, accountId);
 	}
 
 	const { accountsInfo } = await accounts.resolveAccounts();
@@ -32,7 +32,7 @@ export async function restoreAfterTravelModeDisabled(
 		(candidate) => candidate.accountId === accountId,
 	);
 	if (account) {
-		await coordinator.refreshFromServer([account]);
+		await repository.refreshFromServer([account]);
 	}
 }
 
@@ -41,14 +41,14 @@ export async function handleTravelModeSyncEvent(
 	accountId: string,
 	storage: AccountStore,
 	itemCache: ItemCache,
-	coordinator?: VaultRepositoryCoordinator,
+	repository?: VaultRepository,
 	restoreOptions?: TravelModeSyncRestoreOptions,
 ): Promise<void> {
 	if (event.type !== "travel_mode_updated") {
 		return;
 	}
 
-	const enforcer = getTravelModeEnforcer(storage, itemCache, coordinator);
+	const enforcer = getTravelModeEnforcer(storage, itemCache, repository);
 	const previousConfig = enforcer.getConfig(accountId);
 	const config = await enforcer.applySyncEventMetadata(
 		accountId,
@@ -59,11 +59,11 @@ export async function handleTravelModeSyncEvent(
 		return;
 	}
 
-	if (previousConfig.enabled && coordinator && restoreOptions) {
+	if (previousConfig.enabled && repository && restoreOptions) {
 		await restoreAfterTravelModeDisabled(
 			accountId,
 			storage,
-			coordinator,
+			repository,
 			restoreOptions,
 		);
 	}

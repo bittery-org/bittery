@@ -8,16 +8,15 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { useDesktopAccountRuntime } from "@/contexts/account-context";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
+import { vaultCrypto } from "@/lib/vault-runtime";
 import { useSyncContext } from "./sync-provider";
-
-const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Props for DesktopPlatformProvider
@@ -39,6 +38,7 @@ export function DesktopPlatformProvider({
 	children,
 }: DesktopPlatformProviderProps) {
 	const syncContext = useSyncContext();
+	const { vaultRuntime } = useDesktopAccountRuntime();
 
 	// Map sync context to ISyncContext interface
 	const sync: ISyncContext = useMemo(
@@ -65,6 +65,7 @@ export function DesktopPlatformProvider({
 			crypto={crypto}
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
+			vaultRuntime={vaultRuntime}
 			sync={sync}
 		>
 			{children}

@@ -17,6 +17,7 @@ describe("VaultService.createVault", () => {
 			getPinnedKdfProfile: async () => null,
 		} as never;
 		const vaultCrypto = createVaultCrypto({ crypto, storage });
+		const vaultKeyProjection = { syncVaultKeys: async () => {} };
 		const service = new VaultService({
 			storage,
 			crypto,
@@ -37,6 +38,7 @@ describe("VaultService.createVault", () => {
 					},
 				}),
 			} as never,
+			vaultKeyProjection,
 		});
 
 		const result = await service.createVault(
@@ -73,5 +75,59 @@ describe("VaultService.createVault", () => {
 		await crypto.destroyKey(reopened);
 		await crypto.destroyKey(masterUnlockKey);
 		expect(crypto.liveKeyCount).toBe(0);
+	});
+
+	test("refreshes durable keys and the live repository projection together", async () => {
+		const crypto = createInMemoryCryptoPort();
+		let stored: unknown;
+		let projected: unknown;
+		const storage = {
+			storeVaultKeys: async (keys: unknown) => {
+				stored = keys;
+			},
+		} as never;
+		const service = new VaultService({
+			storage,
+			crypto,
+			vaultCrypto: {} as never,
+			accounts: {
+				getClientForAccount: async () => ({
+					vaults: {
+						list: async () => ({
+							data: [
+								{
+									id: "vault-1",
+									name: "Personal",
+									vaultType: "personal",
+									icon: null,
+									imageUrl: null,
+									encryptedVaultKey: "wrapped",
+									role: "owner",
+								},
+							],
+						}),
+					},
+				}),
+			} as never,
+			vaultKeyProjection: {
+				syncVaultKeys: async (keys, accountId) => {
+					projected = { keys, accountId };
+				},
+			},
+		});
+
+		await service.refreshVaultKeys({} as never, "account-1");
+		expect(stored).toEqual([
+			{
+				vaultId: "vault-1",
+				vaultName: "Personal",
+				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
+				encryptedVaultKey: "wrapped",
+				role: "owner",
+			},
+		]);
+		expect(projected).toEqual({ keys: stored, accountId: "account-1" });
 	});
 });

@@ -8,7 +8,7 @@
  *
  * This module extracts the "subtle" pieces (envelope encode/parse, base64
  * conversion and per-field context wiring) so the
- * `useItemAttachments` hook and `ItemService.moveItem` share ONE implementation
+ * Item attachment hooks and cross-account command replay share one implementation
  * instead of duplicating crypto.
  */
 

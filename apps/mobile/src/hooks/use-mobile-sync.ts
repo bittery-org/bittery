@@ -1,12 +1,20 @@
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	type AccountSyncAssembly,
 	createAccountSync,
 } from "@bittery/core/services/account-sync";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useToast } from "heroui-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
 import {
@@ -15,6 +23,7 @@ import {
 } from "../lib/sync-client-id";
 import { useI18n } from "../providers/i18n-provider";
 import { lifecycleDeps } from "../services/lifecycle";
+import { vaultCrypto, vaultRepository } from "../services/vault-runtime";
 
 const NO_AUTH_TOKEN = async (): Promise<null> => null;
 
@@ -88,64 +97,76 @@ class ReactNativeSyncStorage implements SyncStorage {
 /**
  * Mobile-specific sync hook that integrates with React Native storage
  */
-export function useMobileSync(queryClient: QueryClient, enabled = true) {
+export function useMobileSync(
+	queryClient: QueryClient,
+	manager: AccountSessionManager,
+	vaultRuntime: AccountVaultRuntime,
+	enabled = true,
+) {
 	const { m } = useI18n();
 	const { toast } = useToast();
 	const [clientId, setClientId] = useState<string>("");
 	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
 	const accountSync = useMemo(
-		() => createAccountSync({ crypto, lifecycle: lifecycleDeps }),
+		() =>
+			createAccountSync({
+				lifecycle: lifecycleDeps,
+				vaultRepository,
+				crypto,
+				vaultCrypto,
+			}),
 		[],
 	);
 
-	// Initialize and keep sync connection context fresh.
+	useSyncExternalStore(
+		vaultRuntime.subscribe,
+		vaultRuntime.getSnapshot,
+		vaultRuntime.getSnapshot,
+	);
+	useSyncExternalStore(
+		manager.subscribe,
+		manager.getSnapshot,
+		manager.getSnapshot,
+	);
+	const activeAccountId = manager.getActiveAccount();
+
+	// Client identity is process-stable; account changes drive assembly separately.
 	useEffect(() => {
 		let mounted = true;
-		let resolving = false;
-
-		const resolveContext = async () => {
-			if (resolving) {
-				return;
-			}
-			resolving = true;
-			try {
-				const id = await getOrCreateMobileSyncClientId();
-				const resolved = await accountSync.assemble({ clientId: id });
-				if (!mounted) {
-					return;
-				}
-				setClientId(id);
-				setAssembly((current) => (current === resolved ? current : resolved));
-				setIsInitialized(true);
-			} finally {
-				resolving = false;
-			}
-		};
-
-		void resolveContext();
-
-		const appStateSubscription = AppState.addEventListener(
-			"change",
-			(nextState) => {
-				if (nextState === "active") {
-					void resolveContext();
-				}
-			},
-		);
-
-		const interval = setInterval(() => {
-			if (AppState.currentState === "active") {
-				void resolveContext();
-			}
-		}, 30000);
+		void getOrCreateMobileSyncClientId().then((id) => {
+			if (mounted) setClientId(id);
+		});
 
 		return () => {
 			mounted = false;
-			appStateSubscription.remove();
-			clearInterval(interval);
 		};
-	}, [accountSync]);
+	}, []);
+
+	// Native account state may change while JavaScript is suspended.
+	useEffect(() => {
+		const subscription = AppState.addEventListener("change", (nextState) => {
+			if (nextState === "active") void manager.refresh();
+		});
+		return () => subscription.remove();
+	}, [manager]);
+
+	// Ignore obsolete async results during rapid account switches.
+	useEffect(() => {
+		if (!clientId) return;
+		let current = true;
+		setIsInitialized(false);
+		void accountSync
+			.assemble({ clientId, activeAccountId })
+			.then((resolved) => {
+				if (!current) return;
+				setAssembly(resolved);
+				setIsInitialized(true);
+			});
+		return () => {
+			current = false;
+		};
+	}, [accountSync, activeAccountId, clientId]);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const onSessionRevoked = useCallback(
@@ -177,7 +198,9 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!clientId && assembly !== null,
 		realtimeEnabled: true,
-		itemCacheAdapter: assembly?.itemCacheAdapter,
+		replicaStore: assembly?.replicaStore,
+		commandProjection: assembly?.commandProjection,
+		semanticCommandExecutor: assembly?.semanticCommandExecutor,
 		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onSessionRevoked,

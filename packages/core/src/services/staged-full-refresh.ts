@@ -1,6 +1,6 @@
 import type { AccountStore } from "@bittery/storage";
-import { AccountResolver } from "./account-resolver";
-import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { AccountInfo, DefaultApiClient } from "./account-resolver";
+import type { VaultRepository } from "./vault-repository";
 
 export type StagedFullRefresh = (
 	apiClient: unknown,
@@ -18,39 +18,55 @@ export type InitialSyncBootstrap = (
  * cannot be refreshed must throw instead of resolving silently — otherwise the
  * events the refresh was supposed to replace are skipped for good.
  *
- * The whole active set is re-hydrated, not just the target account:
- * `refreshFromServer` republishes the active accounts it is handed, so passing
- * one account would drop the others from the coordinator's active set.
+ * The Sync source supplies its already-authenticated client. This remote path
+ * enriches exactly that account and never changes the runtime-owned read scope.
  */
 export function createStagedFullRefresh(
 	storage: AccountStore,
-	coordinator: VaultRepositoryCoordinator,
+	repository: VaultRepository,
 ): StagedFullRefresh {
-	const accounts = new AccountResolver(storage);
-
-	return async (_apiClient, accountId) => {
-		const { accountsInfo } = await accounts.resolveAccounts();
-		if (!accountsInfo.some((account) => account.accountId === accountId)) {
-			throw new Error(
-				`Cannot stage a full refresh for account ${accountId}: it is not unlocked`,
-			);
-		}
-		await coordinator.refreshFromServer(accountsInfo);
+	return async (apiClient, accountId) => {
+		await repository.refreshFromServer([
+			await remoteAccount(storage, accountId, apiClient as DefaultApiClient),
+		]);
 	};
 }
 
 export function createInitialSyncBootstrap(
 	storage: AccountStore,
-	coordinator: VaultRepositoryCoordinator,
+	repository: VaultRepository,
 ): InitialSyncBootstrap {
-	const accounts = new AccountResolver(storage);
-
-	return async (_apiClient, accountId, currentCursor) => {
-		const { accountsInfo } = await accounts.resolveAccounts();
-		return coordinator.initializeSyncBaseline(
-			accountsInfo,
+	return async (apiClient, accountId, currentCursor) => {
+		return repository.initializeSyncBaseline(
+			[await remoteAccount(storage, accountId, apiClient as DefaultApiClient)],
 			accountId,
 			currentCursor,
 		);
+	};
+}
+
+async function remoteAccount(
+	storage: AccountStore,
+	accountId: string,
+	apiClient: DefaultApiClient,
+): Promise<AccountInfo> {
+	const [metadata, authToken, storedServerUrl] = await Promise.all([
+		storage.getAccountMetadata(accountId),
+		storage.getAuthToken(accountId),
+		storage.getServerUrl(accountId),
+	]);
+	if (!metadata || !authToken) {
+		throw new Error(`Cannot enrich unavailable Sync account ${accountId}`);
+	}
+	return {
+		accountId,
+		email: metadata.email,
+		userId: metadata.userId,
+		name: metadata.name,
+		teamName: metadata.teamName,
+		teamAvatarUrl: metadata.teamAvatarUrl,
+		authToken,
+		serverUrl: storedServerUrl || metadata.serverUrl,
+		apiClient,
 	};
 }

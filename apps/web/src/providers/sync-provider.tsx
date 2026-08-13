@@ -2,6 +2,7 @@ import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useSyncClientId, useWebSync } from "../hooks/use-web-sync";
+import { useAccountRuntime } from "./account-runtime-provider";
 
 /** Web adds nothing to what `useSync` publishes; the shape lives in `@bittery/sync`. */
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -18,7 +19,8 @@ export function SyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const syncState = useWebSync(queryClient, enabled);
+	const { manager, vaultRuntime } = useAccountRuntime();
+	const syncState = useWebSync(queryClient, manager, vaultRuntime, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

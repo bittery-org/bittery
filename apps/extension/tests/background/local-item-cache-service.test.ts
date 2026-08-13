@@ -17,12 +17,10 @@ describe("local-item-cache-service", () => {
 		};
 
 		const service = createLocalItemCacheService({
-			vaultCoordinator: {
+			vaultRepository: {
 				resolveAccountIdByEmail: () => "account_123",
-				getRepositoryForAccount: () => ({
-					getById: () => existing,
-					getServerUrl: () => "https://api.example.test",
-				}),
+				getAccountInfo: () => ({ serverUrl: "https://api.example.test" }),
+				getById: () => existing,
 				upsertCachedItem: async (item, accountId) => {
 					calls.push({ itemId: item.id, accountId });
 				},
@@ -60,11 +58,9 @@ describe("local-item-cache-service", () => {
 		let desktopCacheClearCount = 0;
 
 		const service = createLocalItemCacheService({
-			vaultCoordinator: {
+			vaultRepository: {
 				resolveAccountIdByEmail: () => "account_123",
-				getRepositoryForAccount: () => ({
-					getServerUrl: () => "https://api.example.test",
-				}),
+				getAccountInfo: () => ({ serverUrl: "https://api.example.test" }),
 				upsertCachedItem: async () => {
 					createCallCount++;
 				},

@@ -15,7 +15,7 @@ import {
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
-import type { SyncEvent, SyncItemCache } from "./types";
+import type { SyncEvent, SyncReplicaStore } from "./types";
 
 export type DeltaSyncApiClient = Pick<AppApiClient, "items" | "vaults">;
 
@@ -45,7 +45,7 @@ function normalizeVaultListEntry(
  */
 export async function performDeltaSync(
 	apiClient: DeltaSyncApiClient,
-	cache: SyncItemCache,
+	cache: SyncReplicaStore,
 	event: SyncEvent,
 	accountScope: string,
 	serverUrl?: string,

@@ -632,7 +632,7 @@ export function useVaultImport() {
 						try {
 							for (const sourceItem of sourceItems) {
 								const decryptedItem = provider.toDecryptedItemData(sourceItem);
-								const itemId = await core.items.generateItemId();
+								const itemId = await crypto.generateUuid();
 								const encryptedData = await core.vaultCrypto.encryptItem(
 									JSON.stringify(decryptedItem.data),
 									vaultKey,
@@ -737,7 +737,7 @@ export function useVaultImport() {
 
 				const { accountsInfo } = await core.accounts.resolveAccounts();
 				if (accountsInfo.length > 0) {
-					await core.vaultCoordinator.refreshFromServer(accountsInfo);
+					await core.vaultRepository.refreshFromServer(accountsInfo);
 				}
 
 				if (createdVaults.length > 0) {
@@ -782,10 +782,9 @@ export function useVaultImport() {
 			providerId,
 			mappings,
 			existingVaultById,
-			core.items,
 			core.vaults,
 			core.accounts,
-			core.vaultCoordinator,
+			core.vaultRepository,
 			core.vaultCrypto,
 			crypto,
 			apiClient,

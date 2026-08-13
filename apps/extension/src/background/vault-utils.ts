@@ -3,14 +3,17 @@
  * Shared helpers for vault operations.
  */
 
-import type { MultiAccountItem } from "@bittery/core/services/item-service";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import type { VaultRepositoryItemWithAccount } from "@bittery/core/services/vault-repository";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { itemCache, storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
 import { parseDesktopSnapshotItem } from "./desktop-snapshot";
 import { isDesktopReadAvailable } from "./desktop-status";
+import { reconcileVaultRuntimeFromStorage } from "./vault-runtime";
+
+type MultiAccountItem = VaultRepositoryItemWithAccount;
 
 export function mergeItemCollections(
 	desktopItems: MultiAccountItem[],
@@ -116,18 +119,17 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[] | null> {
 	return normalizedItems;
 }
 
-async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
+async function getLocalRepositoryItems(): Promise<MultiAccountItem[]> {
 	try {
-		const { accountsInfo } = await core.accounts.resolveAccounts();
-		core.vaultCoordinator.setActiveAccounts(accountsInfo);
-		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
+		await reconcileVaultRuntimeFromStorage();
+		const items = core.vaultRepository.getAll() as MultiAccountItem[];
 		return filterItemsForTravelMode(items);
 	} catch (error) {
 		console.warn(
-			"[vault-utils] Failed to load local coordinator items for desktop merge:",
+			"[vault-utils] Failed to load local repository items for desktop merge:",
 			error,
 		);
-		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
+		const items = core.vaultRepository.getAll() as MultiAccountItem[];
 		return filterItemsForTravelMode(items);
 	}
 }
@@ -146,7 +148,7 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 		try {
 			const mergedItems = await mergeDesktopAndLocalItemSources(
 				getDesktopItemsSnapshot(),
-				getLocalCoordinatorItems(),
+				getLocalRepositoryItems(),
 			);
 			return mergedItems;
 		} catch (error) {
@@ -157,8 +159,7 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 		}
 	}
 
-	const { accountsInfo } = await core.accounts.resolveAccounts();
-	await core.vaultCoordinator.hydrate(accountsInfo);
-	const localItems = core.vaultCoordinator.getAll() as MultiAccountItem[];
+	await reconcileVaultRuntimeFromStorage();
+	const localItems = core.vaultRepository.getAll() as MultiAccountItem[];
 	return filterItemsForTravelMode(localItems);
 }

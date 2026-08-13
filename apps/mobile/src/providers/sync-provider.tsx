@@ -1,6 +1,7 @@
 import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
+import { useMobileAccountRuntime } from "../contexts/account-context";
 import { useMobileClientId, useMobileSync } from "../hooks/use-mobile-sync";
 
 /**
@@ -26,7 +27,8 @@ export function MobileSyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const syncState = useMobileSync(queryClient, enabled);
+	const { manager, vaultRuntime } = useMobileAccountRuntime();
+	const syncState = useMobileSync(queryClient, manager, vaultRuntime, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

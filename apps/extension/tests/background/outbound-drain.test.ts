@@ -6,6 +6,24 @@ const backgroundDir = path.resolve(import.meta.dir, "../../src/background");
 const localStorage = new Map<string, unknown>();
 const sentItemIds: string[] = [];
 const runtimeMessages: unknown[] = [];
+const lockTails = new Map<string, Promise<void>>();
+
+const locks = {
+	request: async <T>(name: string, callback: () => Promise<T>): Promise<T> => {
+		const previous = lockTails.get(name) ?? Promise.resolve();
+		const release = Promise.withResolvers<void>();
+		lockTails.set(
+			name,
+			previous.then(() => release.promise),
+		);
+		await previous;
+		try {
+			return await callback();
+		} finally {
+			release.resolve();
+		}
+	},
+};
 
 let releaseFirstRequest: (() => void) | undefined;
 let markFirstRequestStarted: (() => void) | undefined;
@@ -29,6 +47,7 @@ const apiClient = {
 };
 
 Object.assign(globalThis, {
+	navigator: { locks },
 	chrome: {
 		storage: {
 			local: {
@@ -67,11 +86,12 @@ Object.assign(globalThis, {
 
 mock.module(path.join(backgroundDir, "core-instance.ts"), () => ({
 	core: {
-		vaultCoordinator: {
+		vaultRepository: {
 			applyItemCommand: async () => {},
 			executeSemanticItemCommand: async () => undefined,
 			discardItemCommandAcknowledgedElsewhere: async () => {},
 			preserveItemConflict: async () => undefined,
+			reconcileAuthoritative: async () => {},
 			acknowledgeItemCommand: async () => {},
 			replaceItemId: () => {},
 			setEncryptionContextMigrationPort: async () => {},
@@ -91,6 +111,11 @@ mock.module(path.join(backgroundDir, "sync-client-id.ts"), () => ({
 
 mock.module(path.resolve(backgroundDir, "../lib/storage.ts"), () => ({
 	storage: { getAccountsList: async () => [] },
+	itemCache: {},
+}));
+
+mock.module(path.resolve(backgroundDir, "../lib/vault-runtime.ts"), () => ({
+	vaultCrypto: {},
 }));
 
 const {

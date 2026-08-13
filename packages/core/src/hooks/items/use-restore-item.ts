@@ -5,11 +5,7 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
-import {
-	enqueueItemMutation,
-	requireLocalItemMutationContext,
-	useItemMutationRuntime,
-} from "./mutation-utils";
+import { useItemMutationRuntime } from "./mutation-utils";
 
 /**
  * Input for restoring an item from trash
@@ -23,23 +19,10 @@ export interface RestoreItemInput {
  * Hook for restoring a soft-deleted item from trash.
  */
 export function useRestoreItem() {
-	const { core, queue } = useItemMutationRuntime();
+	const { commands } = useItemMutationRuntime();
 
 	return useMutation({
-		mutationFn: async (input: RestoreItemInput) => {
-			const context = requireLocalItemMutationContext(core, input.itemId, {
-				vaultId: input.vaultId,
-				includeDeleted: true,
-			});
-			await enqueueItemMutation(queue, context, {
-				type: "restore",
-				entityId: input.itemId,
-				vaultId: input.vaultId,
-			});
-
-			return {
-				_accountEmail: context.accountEmail,
-			};
-		},
+		mutationFn: (input: RestoreItemInput) =>
+			commands.execute({ type: "restore", ...input }),
 	});
 }

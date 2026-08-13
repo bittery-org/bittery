@@ -12,11 +12,11 @@ import {
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
-import { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import { VaultRepository } from "./vault-repository";
 
 /**
  * A real `AccountStore` and a real `ItemCache`, each over its own in-memory port. The
- * real pair gives the coordinator honest per-account isolation: `ItemCache` keys every
+ * real pair gives the repository honest per-account isolation: `ItemCache` keys every
  * collection by accountId, which is exactly what these tests are about.
  */
 async function createLayers(): Promise<{
@@ -89,9 +89,119 @@ function makeAccountInfo(
 	} as unknown as AccountInfo;
 }
 
-describe("VaultRepositoryCoordinator", () => {
+describe("VaultRepository", () => {
 	beforeEach(() => {
 		resetTravelModeEnforcerForTests();
+	});
+
+	it("remembers unlocked non-active accounts without widening the active read scope", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a", "acc-b");
+		for (const accountId of ["acc-a", "acc-b"]) {
+			await getTravelModeEnforcer(storage, itemCache).applyConfig(accountId, {
+				enabled: false,
+				hiddenVaultIds: [],
+			});
+		}
+		const active = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example",
+		);
+		const unlocked = makeAccountInfo(
+			"acc-b",
+			"b@example.com",
+			"https://b.example",
+		);
+		const repository = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		repository.setLocalActiveAccounts([active]);
+		await repository.hydrateRemoteAccounts([active, unlocked]);
+		expect(repository.getAccountInfo("acc-b")).toMatchObject({
+			accountId: "acc-b",
+			email: "b@example.com",
+		});
+		expect(repository.resolveAccountIdByEmail("b@example.com")).toBe("acc-b");
+	});
+
+	it("reloads a projection after another process changes the durable cache", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example",
+		);
+		const repository = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		repository.setLocalActiveAccounts([account]);
+		await repository.hydrateRemoteAccounts([account]);
+		const entry = (
+			repository as unknown as {
+				repos: Map<
+					string,
+					{
+						replica: {
+							clear(): void;
+							hydrate(): Promise<void>;
+							upsertLocal(item: unknown, encrypted: unknown): Promise<void>;
+						};
+					}
+				>;
+			}
+		).repos.get("acc-a");
+		if (!entry) throw new Error("missing account replica");
+		const originalHydrate = entry.replica.hydrate.bind(entry.replica);
+		entry.replica.hydrate = async () => {
+			await originalHydrate();
+			await entry.replica.upsertLocal(
+				{
+					id: "worker-item",
+					vaultId: "vault-a",
+					category: "login",
+					favorite: false,
+					createdAt: new Date(0).toISOString(),
+					updatedAt: new Date(0).toISOString(),
+					title: "Written by worker",
+				},
+				{
+					ciphertext: "cipher",
+					iv: "iv",
+					algorithm: "AES",
+					encryptionVersion: 1,
+					encryptedByUserId: "acc-a-user",
+				},
+			);
+		};
+
+		expect(repository.getById("worker-item")).toBeUndefined();
+		await repository.hydrateLocalAccounts([account]);
+		expect(repository.getById("worker-item")).toMatchObject({
+			id: "worker-item",
+			title: "Written by worker",
+		});
+		entry.replica.hydrate = async () => {
+			throw new Error("durable cache failed");
+		};
+		await expect(repository.hydrateLocalAccounts([account])).rejects.toThrow(
+			"durable cache failed",
+		);
+		expect(repository.getById("worker-item")).toBeUndefined();
+		repository.setLocalActiveAccounts([]);
+		expect(repository.getById("worker-item")).toBeUndefined();
+		expect(repository.getAll()).toEqual([]);
 	});
 
 	it("runs an explicit refresh after a bootstrap that was already in flight", async () => {
@@ -119,22 +229,86 @@ describe("VaultRepositoryCoordinator", () => {
 				data: { items: [], hasMore: false, nextCursor: null },
 			};
 		}) as never;
-		const coordinator = new VaultRepositoryCoordinator(
+		const repository = new VaultRepository(
 			crypto,
 			vaultCrypto,
 			storage,
 			itemCache,
 		);
 
-		const first = coordinator.refreshFromServer([account]);
+		const first = repository.refreshFromServer([account]);
 		while (!releaseFirst) await Promise.resolve();
-		const second = coordinator.refreshFromServer([account]);
-		const third = coordinator.refreshFromServer([account]);
+		const second = repository.refreshFromServer([account]);
+		const third = repository.refreshFromServer([account]);
 		expect(bootstrapCalls).toBe(1);
 
 		releaseFirst();
 		await Promise.all([first, second, third]);
 		expect(bootstrapCalls).toBe(2);
+	});
+
+	it("serializes local opening with an authoritative server refresh", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example.com",
+		);
+		const repository = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		repository.setLocalActiveAccounts([account]);
+		const entry = (
+			repository as unknown as {
+				repos: Map<
+					string,
+					{
+						replica: {
+							hydrate(): Promise<void>;
+							hydrateFromServer(): Promise<null>;
+						};
+					}
+				>;
+			}
+		).repos.get("acc-a");
+		if (!entry) throw new Error("missing account replica");
+
+		let releaseLocal!: () => void;
+		let localStarted!: () => void;
+		const localGate = new Promise<void>((resolve) => {
+			releaseLocal = resolve;
+		});
+		const enteredLocal = new Promise<void>((resolve) => {
+			localStarted = resolve;
+		});
+		const order: string[] = [];
+		entry.replica.hydrate = async () => {
+			order.push("local:start");
+			localStarted();
+			await localGate;
+			order.push("local:end");
+		};
+		entry.replica.hydrateFromServer = async () => {
+			order.push("remote");
+			return null;
+		};
+
+		const local = repository.hydrateLocalAccounts([account]);
+		await enteredLocal;
+		const remote = repository.refreshFromServer([account]);
+		await Promise.resolve();
+		expect(order).toEqual(["local:start"]);
+		releaseLocal();
+		await Promise.all([local, remote]);
+		expect(order).toEqual(["local:start", "local:end", "remote"]);
 	});
 
 	it("retries one failed initial server hydration", async () => {
@@ -155,14 +329,14 @@ describe("VaultRepositoryCoordinator", () => {
 			if (attempts === 1) throw new Error("temporary network failure");
 			return { data: [] };
 		}) as never;
-		const coordinator = new VaultRepositoryCoordinator(
+		const repository = new VaultRepository(
 			crypto,
 			vaultCrypto,
 			storage,
 			itemCache,
 		);
 
-		await coordinator.hydrate([account]);
+		await repository.hydrateRemoteAccounts([account]);
 
 		expect(attempts).toBe(2);
 	});
@@ -181,7 +355,7 @@ describe("VaultRepositoryCoordinator", () => {
 				hiddenVaultIds: [],
 			});
 
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -198,10 +372,10 @@ describe("VaultRepositoryCoordinator", () => {
 				"https://b.example.com",
 			);
 			// acc-a registered first, so a naive email .find() would resolve to it.
-			coordinator.setActiveAccounts([accountA, accountB]);
+			repository.setLocalActiveAccounts([accountA, accountB]);
 
 			// Seed the vault ONLY into acc-b's repo.
-			await coordinator.upsertCachedVault(
+			await repository.upsertCachedVault(
 				{
 					id: "vault-1",
 					name: "Vault 1",
@@ -213,7 +387,7 @@ describe("VaultRepositoryCoordinator", () => {
 				"acc-b",
 			);
 
-			const located = coordinator.findAccountForVault("vault-1");
+			const located = repository.findAccountForVault("vault-1");
 			expect(located?.accountId).toBe("acc-b");
 		});
 
@@ -229,7 +403,7 @@ describe("VaultRepositoryCoordinator", () => {
 				hiddenVaultIds: [],
 			});
 
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -245,15 +419,11 @@ describe("VaultRepositoryCoordinator", () => {
 				"shared@example.com",
 				"https://b.example.com",
 			);
-			coordinator.setActiveAccounts([accountA, accountB]);
+			repository.setLocalActiveAccounts([accountA, accountB]);
 
-			// Seed a decrypted item directly into acc-b's repo (no crypto needed).
-			const repoB = coordinator.getOrCreate(
+			// Seed through the account-aware public repository boundary.
+			await repository.upsertLocal(
 				"acc-b",
-				"https://b.example.com",
-				"shared@example.com",
-			);
-			await repoB.upsertLocal(
 				{
 					id: "item-1",
 					vaultId: "vault-1",
@@ -272,7 +442,7 @@ describe("VaultRepositoryCoordinator", () => {
 				},
 			);
 
-			const located = coordinator.findAccountForItem("item-1");
+			const located = repository.findAccountForItem("item-1");
 			expect(located?.accountId).toBe("acc-b");
 		});
 	});
@@ -289,7 +459,7 @@ describe("VaultRepositoryCoordinator", () => {
 				hiddenVaultIds: [],
 			});
 
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -308,14 +478,11 @@ describe("VaultRepositoryCoordinator", () => {
 
 			// Must resolve (not reject) despite the unverified account throwing.
 			await expect(
-				coordinator.hydrate([verified, unverified]),
+				repository.hydrateRemoteAccounts([verified, unverified]),
 			).resolves.toBeUndefined();
 
-			const verifiedRepo = coordinator.getRepositoryForAccount("acc-verified");
-			const unverifiedRepo =
-				coordinator.getRepositoryForAccount("acc-unverified");
-			expect(verifiedRepo.isHydrated()).toBe(true);
-			expect(unverifiedRepo.isHydrated()).toBe(false);
+			expect(repository.isAccountHydrated("acc-verified")).toBe(true);
+			expect(repository.isAccountHydrated("acc-unverified")).toBe(false);
 		});
 
 		it("verifies travel mode against the server when the in-memory policy was lost", async () => {
@@ -326,7 +493,7 @@ describe("VaultRepositoryCoordinator", () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			await unlock({ storage, crypto }, "acc-reloaded");
 			const travelMode = makeTravelModeClient();
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -339,21 +506,19 @@ describe("VaultRepositoryCoordinator", () => {
 				travelMode,
 			);
 
-			await coordinator.hydrate([account]);
+			await repository.hydrateRemoteAccounts([account]);
 
 			expect(travelMode.get).toHaveBeenCalled();
 			expect(
 				getTravelModeEnforcer(storage, itemCache).isVerified("acc-reloaded"),
 			).toBe(true);
-			expect(
-				coordinator.getRepositoryForAccount("acc-reloaded").isHydrated(),
-			).toBe(true);
+			expect(repository.isAccountHydrated("acc-reloaded")).toBe(true);
 		});
 
 		it("verifies each account only once across concurrent hydrate calls", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const travelMode = makeTravelModeClient();
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -367,8 +532,8 @@ describe("VaultRepositoryCoordinator", () => {
 			);
 
 			await Promise.all([
-				coordinator.hydrate([account]),
-				coordinator.hydrate([account]),
+				repository.hydrateRemoteAccounts([account]),
+				repository.hydrateRemoteAccounts([account]),
 			]);
 
 			expect(travelMode.get).toHaveBeenCalledTimes(1);
@@ -378,7 +543,7 @@ describe("VaultRepositoryCoordinator", () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			await unlock({ storage, crypto }, "acc-cold");
 			const travelMode = makeTravelModeClient();
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -400,8 +565,8 @@ describe("VaultRepositoryCoordinator", () => {
 			})) as never;
 
 			const [, baseline] = await Promise.all([
-				coordinator.hydrate([account]),
-				coordinator.initializeSyncBaseline([account], account.accountId),
+				repository.hydrateRemoteAccounts([account]),
+				repository.initializeSyncBaseline([account], account.accountId),
 			]);
 
 			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(1);
@@ -417,7 +582,7 @@ describe("VaultRepositoryCoordinator", () => {
 		it("keeps a later cursor only while its cache generation still exists", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			await unlock({ storage, crypto }, "acc-generation");
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -440,10 +605,10 @@ describe("VaultRepositoryCoordinator", () => {
 			})) as never;
 
 			expect(
-				await coordinator.initializeSyncBaseline([account], account.accountId),
+				await repository.initializeSyncBaseline([account], account.accountId),
 			).toEqual({ id: "evt_bootstrap" });
 			expect(
-				await coordinator.initializeSyncBaseline([account], account.accountId, {
+				await repository.initializeSyncBaseline([account], account.accountId, {
 					id: "evt_later",
 				}),
 			).toEqual({ id: "evt_later" });
@@ -452,7 +617,7 @@ describe("VaultRepositoryCoordinator", () => {
 			await itemCache.clearItemCache(account.accountId);
 			bootstrapCursor = "evt_after_fresh_login";
 			expect(
-				await coordinator.initializeSyncBaseline([account], account.accountId, {
+				await repository.initializeSyncBaseline([account], account.accountId, {
 					id: "evt_later",
 				}),
 			).toEqual({ id: "evt_after_fresh_login" });
@@ -461,7 +626,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 		it("does not initialize a cursor before a locked account commits bootstrap", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
-			const coordinator = new VaultRepositoryCoordinator(
+			const repository = new VaultRepository(
 				crypto,
 				vaultCrypto,
 				storage,
@@ -475,7 +640,7 @@ describe("VaultRepositoryCoordinator", () => {
 			);
 
 			await expect(
-				coordinator.initializeSyncBaseline([account], account.accountId),
+				repository.initializeSyncBaseline([account], account.accountId),
 			).rejects.toThrow("did not commit a sync baseline");
 			expect(account.apiClient.sync.bootstrap).not.toHaveBeenCalled();
 			expect(

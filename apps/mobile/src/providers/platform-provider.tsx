@@ -8,17 +8,16 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import type { ISyncContext } from "@bittery/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { useMobileAccountRuntime } from "../contexts/account-context";
 import { useMobileSync } from "../hooks/use-mobile-sync";
 import { crypto } from "../lib/crypto";
 import { lifecycleDeps } from "../services/lifecycle";
 import { itemCache, storage } from "../services/storage";
-
-const vaultCrypto = createVaultCrypto({ crypto, storage });
+import { vaultCrypto } from "../services/vault-runtime";
 
 /**
  * Props for MobilePlatformProvider
@@ -39,9 +38,10 @@ export function MobilePlatformProvider({
 	children,
 }: MobilePlatformProviderProps) {
 	const queryClient = useQueryClient();
+	const { manager, vaultRuntime } = useMobileAccountRuntime();
 
 	// Initialize real-time sync with WebSocket connection
-	const syncState = useMobileSync(queryClient, true);
+	const syncState = useMobileSync(queryClient, manager, vaultRuntime, true);
 
 	// Create sync context with real-time sync state
 	const sync: ISyncContext = useMemo(
@@ -68,6 +68,7 @@ export function MobilePlatformProvider({
 			crypto={crypto}
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
+			vaultRuntime={vaultRuntime}
 			sync={sync}
 		>
 			{children}

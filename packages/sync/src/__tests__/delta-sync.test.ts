@@ -3,7 +3,7 @@ import { ApiError } from "@bittery/shared/api-client";
 import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import { type DeltaSyncApiClient, performDeltaSync } from "../delta-sync";
-import type { SyncEvent, SyncItemCache, SyncVaultKeyEntry } from "../types";
+import type { SyncEvent, SyncReplicaStore, SyncVaultKeyEntry } from "../types";
 
 function serverVault() {
 	return {
@@ -59,7 +59,7 @@ function recordingCache() {
 	const items: CachedEncryptedItem[] = [];
 	const removedItems: string[] = [];
 
-	const cache: SyncItemCache = {
+	const cache: SyncReplicaStore = {
 		syncVaultKeys: async (keys) => {
 			vaultKeys.push(...keys);
 		},
@@ -74,12 +74,6 @@ function recordingCache() {
 		},
 		removeCachedVault: async () => undefined,
 		clearItemCache: async () => undefined,
-		replaceItemId: () => undefined,
-		applyItemCommand: async () => undefined,
-		executeSemanticItemCommand: async () => undefined,
-		discardItemCommandAcknowledgedElsewhere: async () => undefined,
-		preserveItemConflict: async () => undefined,
-		acknowledgeItemCommand: async () => undefined,
 	};
 
 	return { cache, items, removedItems, vaultKeys, vaults };

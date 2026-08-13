@@ -20,10 +20,12 @@ import {
 } from "./sync-orchestrator";
 import { subscribeToNewTerminalCommands } from "./terminal-command-status";
 import type {
+	ItemCommandProjection,
+	SemanticItemCommandExecutor,
 	SessionRevokedControlPayload,
 	SyncCommandSummary,
 	SyncEvent,
-	SyncItemCache,
+	SyncOrchestratorReplica,
 	SyncStatus,
 	SyncStorage,
 } from "./types";
@@ -85,7 +87,12 @@ export interface UseSyncOptions {
 	storage?: SyncStorage;
 	enabled?: boolean;
 	realtimeEnabled?: boolean;
-	itemCacheAdapter?: SyncItemCache;
+	/** Replica state updated by inbound sync events. */
+	replicaStore?: SyncOrchestratorReplica;
+	/** Optimistic local projection and acknowledgement reconciliation. */
+	commandProjection?: ItemCommandProjection;
+	/** Executor for commands that do not map to the ordinary item API. */
+	semanticCommandExecutor?: SemanticItemCommandExecutor;
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
@@ -144,7 +151,9 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 		storage,
 		enabled = true,
 		realtimeEnabled = true,
-		itemCacheAdapter,
+		replicaStore,
+		commandProjection,
+		semanticCommandExecutor,
 		itemCacheAccountId,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
@@ -165,28 +174,34 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 		() =>
 			new ItemSyncEngine(syncStorage, clientId, {
 				apply: async (command) => {
-					await itemCacheAdapter?.applyItemCommand(command);
+					await commandProjection?.applyItemCommand(command);
 				},
 				executeSemanticCommand: async (command) =>
-					itemCacheAdapter?.executeSemanticItemCommand(command),
+					semanticCommandExecutor?.executeSemanticItemCommand(command),
 				discardAcknowledgedElsewhere: async (command) => {
-					await itemCacheAdapter?.discardItemCommandAcknowledgedElsewhere(
+					await commandProjection?.discardItemCommandAcknowledgedElsewhere(
 						command,
 					);
 				},
 				preserveConflict: async (command) =>
-					itemCacheAdapter?.preserveItemConflict(command),
+					commandProjection?.preserveItemConflict(command),
 				reconcileAuthoritative: async (command, item) => {
-					await itemCacheAdapter?.upsertCachedItem(item, command.accountId);
+					await replicaStore?.upsertCachedItem(item, command.accountId);
 				},
 				acknowledge: async (command, acknowledgement) => {
-					await itemCacheAdapter?.acknowledgeItemCommand(
+					await commandProjection?.acknowledgeItemCommand(
 						command,
 						acknowledgement,
 					);
 				},
 			}),
-		[syncStorage, clientId, itemCacheAdapter],
+		[
+			syncStorage,
+			clientId,
+			commandProjection,
+			semanticCommandExecutor,
+			replicaStore,
+		],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
@@ -245,7 +260,7 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 	]);
 
 	useEffect(() => {
-		if (!enabled || !itemCacheAdapter || syncSources.length === 0) {
+		if (!enabled || !replicaStore || syncSources.length === 0) {
 			return;
 		}
 
@@ -280,7 +295,7 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 				apiClient: source.apiClient,
 				refreshFromServer: source.refreshFromServer,
 				initializeFromServer: source.initializeFromServer,
-				itemCache: itemCacheAdapter,
+				itemCache: replicaStore,
 				outboundQueue,
 				itemCacheAccountId: source.itemCacheAccountId,
 				itemCacheAccountEmail: source.itemCacheAccountEmail,
@@ -350,7 +365,7 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 		};
 	}, [
 		enabled,
-		itemCacheAdapter,
+		replicaStore,
 		syncSources,
 		clientId,
 		syncStorage,

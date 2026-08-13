@@ -24,7 +24,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { loadRecoveredAccountBootstrap } from "@/lib/recovery-session";
-import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
+import { itemCache, refreshAccountRuntime, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 type RecoveryStep =
@@ -330,7 +330,7 @@ function RecoverRouteComponent() {
 					bootstrap.user.email,
 					{ serverUrl, insecureTransportConfirmed },
 				);
-				await refreshActiveAccountId();
+				await refreshAccountRuntime();
 			} catch (bootstrapError) {
 				console.error("Recovery session bootstrap failed:", bootstrapError);
 				// Bootstrap precedes local adoption, so only that failure still leaves the

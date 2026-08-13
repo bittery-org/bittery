@@ -15,6 +15,7 @@ import type {
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { type CoreContext, createCoreContext } from "../core-context";
 import type { CredentialMirror } from "../services/account-lifecycle";
+import type { AccountVaultRuntime } from "../services/account-vault-runtime";
 import type { VaultCrypto } from "../services/vault-crypto";
 
 /**
@@ -76,6 +77,9 @@ export interface PlatformProviderProps {
 	/** The ceremonies over {@link crypto}, built against the same `storage`. */
 	vaultCrypto: VaultCrypto;
 
+	/** The process-local Vault lifetime and projection shared by reads and Sync. */
+	vaultRuntime: AccountVaultRuntime;
+
 	/** Autolock service (optional) */
 	autolock?: IAutolockService;
 
@@ -124,6 +128,7 @@ export function PlatformProvider({
 	crypto,
 	credentialMirror,
 	vaultCrypto,
+	vaultRuntime,
 	autolock,
 	sync,
 	children,
@@ -135,8 +140,21 @@ export function PlatformProvider({
 				itemCache,
 				crypto,
 				vaultCrypto,
+				vaultRuntime,
+				commandQueue: sync?.outboundQueue ?? {
+					enqueue: async () => {
+						throw new Error("Item mutations require an outbound Sync queue");
+					},
+				},
 			}),
-		[storage, itemCache, crypto, vaultCrypto],
+		[
+			storage,
+			itemCache,
+			crypto,
+			vaultCrypto,
+			vaultRuntime,
+			sync?.outboundQueue,
+		],
 	);
 
 	const value = useMemo(

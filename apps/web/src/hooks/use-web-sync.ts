@@ -1,14 +1,13 @@
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
-import {
-	getActiveAccountIdSnapshot,
-	subscribeActiveAccountId,
-} from "@/lib/storage";
+import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
 const NO_AUTH_TOKEN = async (): Promise<null> => null;
@@ -94,12 +93,23 @@ class WebSyncStorage implements SyncStorage {
 /**
  * Web-specific sync hook that integrates with existing auth system
  */
-export function useWebSync(queryClient: QueryClient, enabled = true) {
+export function useWebSync(
+	queryClient: QueryClient,
+	manager: AccountSessionManager,
+	vaultRuntime: AccountVaultRuntime,
+	enabled = true,
+) {
 	const { m } = useI18n();
 	const clientId = useMemo(() => getClientId(), []);
 	const syncStorage = useMemo(() => new WebSyncStorage(), []);
 	const accountSync = useMemo(
-		() => createAccountSync({ crypto, lifecycle: lifecycleDeps }),
+		() =>
+			createAccountSync({
+				lifecycle: lifecycleDeps,
+				vaultRepository,
+				crypto,
+				vaultCrypto,
+			}),
 		[],
 	);
 
@@ -109,13 +119,24 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 	 * instead of `null`. The snapshot is refreshed whenever the unlocked set changes
 	 * and explicitly after a login.
 	 */
-	const syncAccountId = useSyncExternalStore(
-		subscribeActiveAccountId,
-		getActiveAccountIdSnapshot,
-		getActiveAccountIdSnapshot,
+	useSyncExternalStore(
+		manager.subscribe,
+		manager.getSnapshot,
+		manager.getSnapshot,
+	);
+	const syncAccountId = manager.getActiveAccount();
+	const runtimeRevision = useSyncExternalStore(
+		vaultRuntime.subscribe,
+		() => vaultRuntime.getSnapshot().revision,
+		() => vaultRuntime.getSnapshot().revision,
 	);
 	const { data: assembly = null, isFetched } = useQuery({
-		queryKey: ["account-sync-assembly", clientId, syncAccountId],
+		queryKey: [
+			"account-sync-assembly",
+			clientId,
+			syncAccountId,
+			runtimeRevision,
+		],
 		queryFn: () =>
 			accountSync.assemble({
 				clientId,
@@ -152,7 +173,9 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		queryClient,
 		storage: syncStorage,
 		enabled: enabled && isFetched && assembly !== null,
-		itemCacheAdapter: assembly?.itemCacheAdapter,
+		replicaStore: assembly?.replicaStore,
+		commandProjection: assembly?.commandProjection,
+		semanticCommandExecutor: assembly?.semanticCommandExecutor,
 		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onEventProcessed: assembly?.onEventProcessed,

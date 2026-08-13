@@ -34,7 +34,7 @@ export function useTravelMode(accountId?: string) {
 	const apiClient = useApiClient() as DefaultApiClient;
 	const storage = usePlatformStorage();
 	const crypto = usePlatformCrypto();
-	const { vaultCoordinator, accounts, itemCache } = useCoreContext();
+	const { vaultRepository, accounts, itemCache } = useCoreContext();
 
 	const query = useQuery({
 		queryKey: ["travel-mode", accountId],
@@ -48,7 +48,7 @@ export function useTravelMode(accountId?: string) {
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
-				vaultCoordinator,
+				vaultRepository,
 			);
 			const config = await enforcer.fetchFromServer(
 				resolvedAccountId,
@@ -70,7 +70,7 @@ export function useTravelMode(accountId?: string) {
 					await restoreAfterTravelModeDisabled(
 						resolvedAccountId,
 						storage,
-						vaultCoordinator,
+						vaultRepository,
 						{
 							apiClient: accountApiClient as unknown as ApiVaultClient,
 							accounts,
@@ -92,7 +92,7 @@ export function useTravelMode(accountId?: string) {
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
-				vaultCoordinator,
+				vaultRepository,
 			);
 			return enforcer.setHiddenVaults(
 				resolvedAccountId,
@@ -116,7 +116,7 @@ export function useTravelMode(accountId?: string) {
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
-				vaultCoordinator,
+				vaultRepository,
 			);
 			return enforcer.enable(
 				resolvedAccountId,
@@ -148,7 +148,7 @@ export function useTravelMode(accountId?: string) {
 			const enforcer = getTravelModeEnforcer(
 				storage,
 				itemCache,
-				vaultCoordinator,
+				vaultRepository,
 			);
 			const config = await enforcer.disable(
 				resolvedAccountId,
@@ -159,7 +159,7 @@ export function useTravelMode(accountId?: string) {
 				await restoreAfterTravelModeDisabled(
 					resolvedAccountId,
 					storage,
-					vaultCoordinator,
+					vaultRepository,
 					{
 						apiClient: accountApiClient as unknown as ApiVaultClient,
 						accounts,

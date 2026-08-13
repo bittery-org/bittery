@@ -51,13 +51,10 @@ export function SettingsAdvancedPanel({
 
 				await clearDesktopSyncState({ preserveClientId: true });
 
-				core.vaultCoordinator.clear();
+				core.vaultRepository.clear();
 				queryClient.clear();
 
-				const { accountsInfo } = await core.accounts.resolveAccounts();
-				if (accountsInfo.length > 0) {
-					await core.vaultCoordinator.hydrate(accountsInfo);
-				}
+				await core.vaultRuntime.retry();
 			} finally {
 				if (wasConnected) {
 					void syncContext.reconnect();

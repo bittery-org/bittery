@@ -1,15 +1,23 @@
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	type AccountSyncAssembly,
 	createAccountSync,
 } from "@bittery/core/services/account-sync";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
@@ -17,6 +25,7 @@ import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
+import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
 const NO_AUTH_TOKEN = async (): Promise<null> => null;
@@ -86,50 +95,67 @@ const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 /**
  * Desktop-specific sync hook that integrates with Tauri storage
  */
-export function useDesktopSync(queryClient: QueryClient, enabled = true) {
+export function useDesktopSync(
+	queryClient: QueryClient,
+	manager: AccountSessionManager,
+	vaultRuntime: AccountVaultRuntime,
+	enabled = true,
+) {
 	const { m } = useI18n();
 	const [clientId, setClientId] = useState<string>("");
 	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
 	const accountSync = useMemo(
-		() => createAccountSync({ crypto, lifecycle: lifecycleDeps }),
+		() =>
+			createAccountSync({
+				lifecycle: lifecycleDeps,
+				vaultRepository,
+				crypto,
+				vaultCrypto,
+			}),
 		[],
 	);
 
-	// Initialize and keep sync connection context fresh.
+	useSyncExternalStore(
+		vaultRuntime.subscribe,
+		vaultRuntime.getSnapshot,
+		vaultRuntime.getSnapshot,
+	);
+	useSyncExternalStore(
+		manager.subscribe,
+		manager.getSnapshot,
+		manager.getSnapshot,
+	);
+	const activeAccountId = manager.getActiveAccount();
+
+	// Client identity is process-stable; account changes drive assembly separately.
 	useEffect(() => {
 		let mounted = true;
-		let resolving = false;
-
-		const resolveContext = async () => {
-			if (resolving) {
-				return;
-			}
-			resolving = true;
-			try {
-				const id = await getOrCreateDesktopSyncClientId();
-				const resolved = await accountSync.assemble({ clientId: id });
-				if (!mounted) {
-					return;
-				}
-				setClientId(id);
-				setAssembly((current) => (current === resolved ? current : resolved));
-				setIsInitialized(true);
-			} finally {
-				resolving = false;
-			}
-		};
-
-		void resolveContext();
-		const interval = setInterval(() => {
-			void resolveContext();
-		}, 5000);
+		void getOrCreateDesktopSyncClientId().then((id) => {
+			if (mounted) setClientId(id);
+		});
 
 		return () => {
 			mounted = false;
-			clearInterval(interval);
 		};
-	}, [accountSync]);
+	}, []);
+
+	// Generation cancellation prevents a slow A→B assembly from overwriting B→A.
+	useEffect(() => {
+		if (!clientId) return;
+		let current = true;
+		setIsInitialized(false);
+		void accountSync
+			.assemble({ clientId, activeAccountId })
+			.then((resolved) => {
+				if (!current) return;
+				setAssembly(resolved);
+				setIsInitialized(true);
+			});
+		return () => {
+			current = false;
+		};
+	}, [accountSync, activeAccountId, clientId]);
 
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
@@ -243,7 +269,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		queryClient,
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!clientId && assembly !== null,
-		itemCacheAdapter: assembly?.itemCacheAdapter,
+		replicaStore: assembly?.replicaStore,
+		commandProjection: assembly?.commandProjection,
+		semanticCommandExecutor: assembly?.semanticCommandExecutor,
 		sources: assembly?.sources,
 		getClientForAccount: assembly?.getClientForAccount,
 		onSessionRevoked,

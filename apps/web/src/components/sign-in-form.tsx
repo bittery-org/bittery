@@ -24,7 +24,7 @@ import { useMemo, useState } from "react";
 import {
 	forgetActiveSession,
 	itemCache,
-	refreshActiveAccountId,
+	refreshAccountRuntime,
 	storage,
 } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -233,7 +233,7 @@ function SignInFormContent({
 			// `storeLoginSession` sets the master unlock key before it moves the
 			// active-account pointer, so the unlock notification alone would publish the
 			// pre-login id. Re-read it once the pointer is final.
-			await refreshActiveAccountId();
+			await refreshAccountRuntime();
 			return result;
 		},
 		onSuccess: () => {

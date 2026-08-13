@@ -49,12 +49,10 @@ export function useVaultKeyRotation() {
 			storeVaultKeys: (keys, accountId) =>
 				storage.storeVaultKeys([...keys], accountId),
 			removeCachedVault: (vaultId, accountId) =>
-				core.vaultCoordinator
-					.getRepositoryForAccount(accountId)
-					.removeCachedVault(vaultId, accountId),
+				core.vaultRepository.removeCachedVault(vaultId, accountId),
 			refreshFromServer: async (accountId) => {
 				const { accountsInfo } = await core.accounts.resolveAccounts(accountId);
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
+				await core.vaultRepository.refreshFromServer(accountsInfo);
 			},
 		});
 		return createVaultKeyRotationCeremony({

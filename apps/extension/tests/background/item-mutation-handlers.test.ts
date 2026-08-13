@@ -17,7 +17,7 @@ mock.module(path.join(backgroundDir, "extension-item-mutations.ts"), () => ({
 
 mock.module(path.join(backgroundDir, "core-instance.ts"), () => ({
 	core: {
-		vaultCoordinator: {
+		vaultRepository: {
 			getById: () => ({
 				id: "item-1",
 				vaultId: "vault-1",

@@ -23,6 +23,12 @@ export {
 	getSyncStatus,
 };
 
+/** Switch the worker-owned stream to the account now authoritative in storage. */
+export async function reconcileSyncAccountScope(): Promise<void> {
+	disconnectSync("account scope changed");
+	await initializeSync();
+}
+
 export function ensureSyncInitialized(_reason: string): void {
 	const status = getSyncStatus();
 	if (status === "connected" || status === "connecting") {

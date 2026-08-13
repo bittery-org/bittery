@@ -174,6 +174,11 @@ export {
 	useVaultItems,
 } from "./use-vault-items";
 export {
+	type UseVaultRepositoryStateOptions,
+	type UseVaultRepositoryStateResult,
+	useVaultRepositoryState,
+} from "./use-vault-repository-state";
+export {
 	type SearchResult,
 	type SingleVaultSearchResult,
 	useSingleVaultSearch,

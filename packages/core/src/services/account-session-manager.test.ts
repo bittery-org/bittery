@@ -18,13 +18,14 @@ import {
  * `acc-1` active and unlocked, `acc-2` locked but quick-unlockable.
  */
 async function createStore(
-	opts: { unlockAcc2?: boolean } = {},
+	opts: { unlockAcc1?: boolean; unlockAcc2?: boolean } = {},
 ): Promise<AccountStore> {
 	const harness = await createTestAccountStore();
 	const { store } = harness;
 	await seedAccountWithSession(
 		harness,
 		accountMetadata({ accountId: "acc-1" }),
+		{ unlocked: opts.unlockAcc1 ?? true },
 	);
 	await seedAccountWithSession(
 		harness,
@@ -46,6 +47,94 @@ describe("AccountSessionManager", () => {
 	beforeEach(async () => {
 		resetAccountSessionManagerForTests();
 		itemCache = (await createTestItemCache()).cache;
+	});
+
+	it("silently restores local Vault sessions without remote unlock verification", async () => {
+		const storage = await createStore({ unlockAcc1: false });
+		const restoreSession = spyOn(storage, "tryRestoreSessionWithoutPrompt");
+		const verifyUnlockPolicy = mock(async () => {
+			throw new Error("network must not be consulted");
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy,
+		});
+		await manager.initializeLocalVaultState();
+		expect(manager.getActiveAccount()).toBe("acc-1");
+		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
+		expect(restoreSession).toHaveBeenCalledWith("acc-1");
+		expect(restoreSession).toHaveBeenCalledWith("acc-2");
+		expect(verifyUnlockPolicy).not.toHaveBeenCalled();
+	});
+
+	it("shares local restoration with full verified initialization", async () => {
+		const storage = await createStore({
+			unlockAcc1: false,
+			unlockAcc2: false,
+		});
+		const restore = spyOn(storage, "tryRestoreSessionWithoutPrompt");
+		const verifyUnlockPolicy = mock(async () => {});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy,
+		});
+
+		await Promise.all([
+			manager.initializeLocalVaultState(),
+			manager.initialize(),
+		]);
+
+		expect(restore).toHaveBeenCalledTimes(2);
+		expect(verifyUnlockPolicy).toHaveBeenCalledTimes(2);
+		expect(manager.isInitialized()).toBe(true);
+		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
+	});
+
+	it("serializes a newer lock after delayed silent restoration", async () => {
+		const storage = await createStore({
+			unlockAcc1: false,
+			unlockAcc2: false,
+		});
+		const originalRestore =
+			storage.tryRestoreSessionWithoutPrompt.bind(storage);
+		let restorationStarted!: () => void;
+		let releaseRestoration!: () => void;
+		const started = new Promise<void>((resolve) => {
+			restorationStarted = resolve;
+		});
+		const blocked = new Promise<void>((resolve) => {
+			releaseRestoration = resolve;
+		});
+		spyOn(storage, "tryRestoreSessionWithoutPrompt").mockImplementation(
+			async (accountId) => {
+				if (accountId === "acc-1") {
+					restorationStarted();
+					await blocked;
+				}
+				return originalRestore(accountId);
+			},
+		);
+		const lockAllAccounts = spyOn(storage, "lockAllAccounts");
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy: async () => {},
+		});
+
+		const restoring = manager.initializeLocalVaultState();
+		await started;
+		const locking = manager.lockAll("cross-context");
+		await Promise.resolve();
+		expect(lockAllAccounts).not.toHaveBeenCalled();
+
+		releaseRestoration();
+		await Promise.all([restoring, locking]);
+
+		expect(lockAllAccounts).toHaveBeenCalledTimes(1);
+		expect(manager.getUnlockedAccountIds()).toEqual([]);
+		expect(await storage.getUnlockedAccounts()).toEqual([]);
 	});
 
 	it("removeAccount clears the removed account's encrypted item cache", async () => {
@@ -94,6 +183,37 @@ describe("AccountSessionManager", () => {
 		expect(manager.getActiveAccount()).toEqual("acc-2");
 		expect(manager.isUnlocked("acc-1")).toBe(true);
 		expect(manager.isUnlocked("acc-2")).toBe(true);
+	});
+
+	it("publishes an account switch before awaiting platform callbacks", async () => {
+		const storage = await createStore({ unlockAcc2: true });
+		let release!: () => void;
+		let entered!: () => void;
+		const callback = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const callbackEntered = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy: async () => {},
+			onActiveChanged: () => {
+				entered();
+				return callback;
+			},
+		});
+		await manager.initialize();
+		let observed: string | null = null;
+		manager.subscribe(() => {
+			observed = manager.getActiveAccount();
+		});
+		const switching = manager.switchAccount("acc-2");
+		await callbackEntered;
+		expect(observed as string | null).toBe("acc-2");
+		release();
+		await switching;
 	});
 
 	it("switching to an already-unlocked account does not restore it again", async () => {
@@ -170,6 +290,37 @@ describe("AccountSessionManager", () => {
 		await manager.lockAll("autolock");
 
 		expect(order).toEqual(["storage", "broadcast:autolock"]);
+	});
+
+	it("publishes locked scope before awaiting broadcast callbacks", async () => {
+		const storage = await createStore({ unlockAcc2: true });
+		let release!: () => void;
+		let entered!: () => void;
+		const callback = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const callbackEntered = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy: async () => {},
+			onLockBroadcast: () => {
+				entered();
+				return callback;
+			},
+		});
+		await manager.initialize();
+		let observed: string[] | null = null;
+		manager.subscribe(() => {
+			observed = manager.getUnlockedAccountIds();
+		});
+		const locking = manager.lockAll();
+		await callbackEntered;
+		expect(observed as string[] | null).toEqual([]);
+		release();
+		await locking;
 	});
 
 	it("removeAccount switches to remaining account when active is removed", async () => {

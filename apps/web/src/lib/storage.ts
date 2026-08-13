@@ -14,6 +14,7 @@ import {
 	invalidateAccountSession,
 	removeAccount,
 } from "@bittery/core/services/account-lifecycle";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	type AccountStore,
 	createAccountStore,
@@ -57,45 +58,9 @@ function getOrCreateWebAccountId(): string {
 	return accountId;
 }
 
-// ---------------------------------------------------------------------------
-// Active account id — a synchronous snapshot for `useSyncExternalStore`
-// ---------------------------------------------------------------------------
-
-let activeAccountIdSnapshot: string | null = null;
-const activeAccountListeners = new Set<() => void>();
-
-/**
- * Re-read the active account and publish it to subscribers.
- *
- * Called after initialization, whenever the unlocked set changes (login, lock, sign-out)
- * and explicitly after a login, because `storeLoginSession` sets the master unlock key
- * *before* it moves the active-account pointer.
- */
-export async function refreshActiveAccountId(): Promise<void> {
-	const active = await storage.getActiveAccount();
-	const next = active ?? null;
-	if (next === activeAccountIdSnapshot) {
-		return;
-	}
-	activeAccountIdSnapshot = next;
-	for (const listener of activeAccountListeners) {
-		listener();
-	}
-}
-
-storage.onUnlockStateChanged(() => {
-	void refreshActiveAccountId();
-});
-
-export function subscribeActiveAccountId(listener: () => void): () => void {
-	activeAccountListeners.add(listener);
-	return () => {
-		activeAccountListeners.delete(listener);
-	};
-}
-
-export function getActiveAccountIdSnapshot(): string | null {
-	return activeAccountIdSnapshot;
+/** Reconcile direct storage ceremonies with the process-owned account runtime. */
+export async function refreshAccountRuntime(): Promise<void> {
+	await peekAccountSessionManager()?.refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +96,6 @@ export async function initializeStorage(): Promise<void> {
 			if ((await storage.getActiveAccount()) === null) {
 				await storage.setActiveAccount(getOrCreateWebAccountId());
 			}
-
-			await refreshActiveAccountId();
 		})();
 	}
 	return initializePromise;
@@ -143,15 +106,15 @@ export async function initializeStorage(): Promise<void> {
 //
 // The sequencing lives in `@bittery/core/services/account-lifecycle`; what stays here is
 // the web-only reactivity around it: `initializeStorage()` first, because every
-// account-scoped call needs the synthetic account to exist, and `refreshActiveAccountId()`
-// after, to republish the `useSyncExternalStore` snapshot.
+// account-scoped call needs the synthetic account to exist. Direct storage ceremonies
+// refresh the AccountSessionManager so AccountVaultRuntime publishes their new scope.
 // ---------------------------------------------------------------------------
 
 /** Sign out of the active account: no quick-unlock offer and no cached ciphertext survive. */
 export async function forgetActiveSession(): Promise<void> {
 	await initializeStorage();
 	await invalidateAccountSession("active", lifecycleDeps);
-	await refreshActiveAccountId();
+	await refreshAccountRuntime();
 }
 
 /** Wipe everything stored for the active account, including its encrypted item cache. */
@@ -161,7 +124,7 @@ export async function clearActiveAccountData(): Promise<void> {
 	if (accountId) {
 		await removeAccount(accountId, lifecycleDeps);
 	}
-	await refreshActiveAccountId();
+	await refreshAccountRuntime();
 }
 
 // Re-export types for convenience

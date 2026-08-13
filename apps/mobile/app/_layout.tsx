@@ -119,13 +119,13 @@ export default function RootLayout() {
 				<SafeAreaProvider>
 					<ApiProvider>
 						<I18nProvider>
-							<MobilePlatformProvider>
-								<AccountProvider>
+							<AccountProvider>
+								<MobilePlatformProvider>
 									<BiometricAuthProvider>
 										<AppContent />
 									</BiometricAuthProvider>
-								</AccountProvider>
-							</MobilePlatformProvider>
+								</MobilePlatformProvider>
+							</AccountProvider>
 						</I18nProvider>
 					</ApiProvider>
 				</SafeAreaProvider>

@@ -29,7 +29,7 @@ export function useCreateShare() {
 
 	return useMutation({
 		mutationFn: async (input: CreateShareInput): Promise<CreateShareResult> => {
-			const coordinatedItem = core.vaultCoordinator.getById(input.item.id);
+			const coordinatedItem = core.vaultRepository.getById(input.item.id);
 			const accountEmail =
 				getItemAccountEmail(input.item) ??
 				coordinatedItem?.accountEmail ??

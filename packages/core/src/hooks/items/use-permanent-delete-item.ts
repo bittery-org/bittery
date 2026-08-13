@@ -5,11 +5,7 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
-import {
-	enqueueItemMutation,
-	requireLocalItemMutationContext,
-	useItemMutationRuntime,
-} from "./mutation-utils";
+import { useItemMutationRuntime } from "./mutation-utils";
 
 /**
  * Input for permanently deleting an item
@@ -23,23 +19,10 @@ export interface PermanentDeleteItemInput {
  * Hook for permanently deleting an item from trash.
  */
 export function usePermanentDeleteItem() {
-	const { core, queue } = useItemMutationRuntime();
+	const { commands } = useItemMutationRuntime();
 
 	return useMutation({
-		mutationFn: async (input: PermanentDeleteItemInput) => {
-			const context = requireLocalItemMutationContext(core, input.itemId, {
-				vaultId: input.vaultId,
-				includeDeleted: true,
-			});
-			await enqueueItemMutation(queue, context, {
-				type: "permanent_delete",
-				entityId: input.itemId,
-				vaultId: input.vaultId,
-			});
-
-			return {
-				_accountEmail: context.accountEmail,
-			};
-		},
+		mutationFn: (input: PermanentDeleteItemInput) =>
+			commands.execute({ type: "permanent_delete", ...input }),
 	});
 }

@@ -10,7 +10,7 @@
 
 import { AccountResolver } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
-import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { VaultRepository } from "@bittery/core/services/vault-repository";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import type {
@@ -18,7 +18,7 @@ import type {
 	SyncApiClient,
 	SyncCursor,
 	SyncEvent,
-	SyncItemCache,
+	SyncReplicaStore,
 } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
@@ -69,10 +69,10 @@ export type SyncEventApiClient = SyncApiClient;
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
 	/**
-	 * `VaultRepositoryCoordinator` in production. Not the raw `ItemCache`: delta sync also
+	 * `VaultRepository` in production. Not the raw `ItemCache`: delta sync also
 	 * drives `syncVaultKeys` and `replaceItemId`, which sit above the cache and the crypto.
 	 */
-	itemCache: SyncItemCache;
+	itemCache: SyncReplicaStore;
 	desktopClient: SyncCacheDesktopClient;
 	createAccountClient: (
 		token: string,
@@ -84,7 +84,7 @@ export interface SyncCacheServiceDeps {
 	 */
 	deltaSync: (
 		client: DeltaSyncApiClient,
-		cache: SyncItemCache,
+		cache: SyncReplicaStore,
 		event: SyncEvent,
 		accountScope: string,
 		serverUrl?: string,
@@ -105,7 +105,7 @@ export interface SyncCacheServiceDeps {
 
 const defaultDeps: SyncCacheServiceDeps = {
 	storage,
-	itemCache: core.vaultCoordinator,
+	itemCache: core.vaultRepository,
 	desktopClient,
 	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
 		createAccountApiClient(token, serverUrl, undefined, undefined, {
@@ -119,7 +119,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 			accountId,
 			storage,
 			itemCache,
-			core.vaultCoordinator as VaultRepositoryCoordinator,
+			core.vaultRepository as VaultRepository,
 			accountClient
 				? {
 						apiClient: accountClient,
@@ -132,13 +132,13 @@ const defaultDeps: SyncCacheServiceDeps = {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		await core.vaultCoordinator.refreshFromServer(accounts);
+		await core.vaultRepository.refreshFromServer(accounts);
 	},
 	initializeFromServer: async (accountId, currentCursor) => {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		return core.vaultCoordinator.initializeSyncBaseline(
+		return core.vaultRepository.initializeSyncBaseline(
 			accounts,
 			accountId,
 			currentCursor,

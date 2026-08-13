@@ -24,7 +24,7 @@ import { useState } from "react";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import {
 	initializeStorage,
-	refreshActiveAccountId,
+	refreshAccountRuntime,
 	storage,
 } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -59,7 +59,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				{ accountId, confirmEmail: input.confirmEmail },
 				deletionDeps,
 			);
-			await refreshActiveAccountId();
+			await refreshAccountRuntime();
 
 			// The module reports instead of throwing, and a failed server delete aborts the
 			// local wipe — the account still exists, so this has to reach the error toast.

@@ -1,5 +1,4 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	AccountSwitcher,
 	Avatar,
@@ -133,12 +132,6 @@ export function ExtensionAccountSwitcher() {
 		}
 
 		queryClient.clear();
-		// The popup keeps its own per-context AccountStore view (storage CONTEXT.md §4.5).
-		await peekAccountSessionManager()
-			?.refresh()
-			.catch((error: unknown) => {
-				console.error("Failed to refresh account session after lock:", error);
-			});
 		navigate({ to: "/unlock" });
 		toast.success(m.ext_account_switcher_toast_all_locked());
 	};

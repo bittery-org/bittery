@@ -8,13 +8,25 @@ import {
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { type SyncApiClient, SyncOrchestrator } from "../sync-orchestrator";
-import type { SyncEvent, SyncItemCache, SyncStorage } from "../types";
+import type {
+	ItemCommandProjection,
+	SemanticItemCommandExecutor,
+	SyncEvent,
+	SyncOrchestratorReplica,
+	SyncStorage,
+} from "../types";
+
+type SyncTestReplica = SyncOrchestratorReplica &
+	ItemCommandProjection &
+	SemanticItemCommandExecutor;
 
 /**
- * Every `SyncItemCache` method is total, so a test double must implement all of
- * them. Overriding one is how a test says which call it cares about.
+ * This integration double implements all three narrow ports because these tests
+ * exercise their composition. Individual production consumers receive one port.
  */
-function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
+function stubItemCache(
+	overrides: Partial<SyncTestReplica> = {},
+): SyncTestReplica {
 	return {
 		upsertCachedItem: async () => undefined,
 		removeCachedItem: async () => undefined,
@@ -105,6 +117,44 @@ class AtomicMemoryStorage extends MemoryStorage {
 			} else {
 				this.data.set(key, structuredClone(result));
 			}
+		});
+		this.atomicUpdateTail = update.catch(() => undefined);
+		await update;
+		return structuredClone(result);
+	}
+}
+
+class GatedAtomicMemoryStorage extends MemoryStorage {
+	private atomicUpdateTail: Promise<void> = Promise.resolve();
+	private gateNextUpdate = false;
+	private readonly gate = Promise.withResolvers<void>();
+	private readonly started = Promise.withResolvers<void>();
+
+	gateNext(): Promise<void> {
+		this.gateNextUpdate = true;
+		return this.started.promise;
+	}
+
+	release(): void {
+		this.gate.resolve();
+	}
+
+	override async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		let result: T | null = null;
+		const shouldGate = this.gateNextUpdate;
+		this.gateNextUpdate = false;
+		const update = this.atomicUpdateTail.then(async () => {
+			if (shouldGate) {
+				this.started.resolve();
+				await this.gate.promise;
+			}
+			const current = (this.data.get(key) as T | undefined) ?? null;
+			result = updater(structuredClone(current));
+			if (result === null) this.data.delete(key);
+			else this.data.set(key, structuredClone(result));
 		});
 		this.atomicUpdateTail = update.catch(() => undefined);
 		await update;
@@ -587,7 +637,7 @@ describe("sync engine regressions", () => {
 
 	// An email is not an account identity. Letting one name a cache scope makes
 	// `ItemCache` create a collection keyed by an email, and makes
-	// `VaultRepositoryCoordinator.getOrCreate` mint a repo under one.
+	// `VaultRepository.openAccount` register a replica under one.
 	test("never scopes a cache write by an email", async () => {
 		const storage = new MemoryStorage();
 		const outboundQueue = new OutboundQueue(storage, "self_client");
@@ -2453,5 +2503,28 @@ describe("outbound push independence from the event stream", () => {
 
 		expect(reader.getPendingCount()).toBe(1);
 		expect(reader.getPendingForItem("item_a")?.type).toBe("delete");
+	});
+
+	test("clear is atomic with an enqueue from another execution context", async () => {
+		const storage = new GatedAtomicMemoryStorage();
+		const clearingQueue = new OutboundQueue(storage, "popup");
+		const enqueueingQueue = new OutboundQueue(storage, "worker");
+		await clearingQueue.enqueue(buildDeleteMutation("account_a", "old_item"));
+		await enqueueingQueue.restore();
+
+		const clearStarted = storage.gateNext();
+		const clearing = clearingQueue.clear();
+		await clearStarted;
+		const enqueueing = enqueueingQueue.enqueue(
+			buildDeleteMutation("account_b", "new_item"),
+		);
+		storage.release();
+		await Promise.all([clearing, enqueueing]);
+
+		const restored = new OutboundQueue(storage, "reader");
+		await restored.restore();
+		expect(restored.getCommands().map((command) => command.entityId)).toEqual([
+			"new_item",
+		]);
 	});
 });

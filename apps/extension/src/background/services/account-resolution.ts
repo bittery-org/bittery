@@ -38,7 +38,7 @@ export async function resolveAccountEmailForVault(
 		return await resolveEmailFromAccountId(activeAccount);
 	}
 
-	const cached = core.vaultCoordinator.findAccountForVault(vaultId);
+	const cached = core.vaultRepository.findAccountForVault(vaultId);
 	if (cached) {
 		return await resolveEmailFromAccountId(cached.accountId);
 	}
@@ -86,7 +86,7 @@ export async function resolveAccountEmailForVault(
 export async function resolveAccountEmailForItemId(
 	itemId: string,
 ): Promise<string | undefined> {
-	const coordinatedItem = core.vaultCoordinator.getById(itemId);
+	const coordinatedItem = core.vaultRepository.getById(itemId);
 	if (coordinatedItem?.accountEmail) {
 		return coordinatedItem.accountEmail;
 	}

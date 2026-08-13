@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { ActiveAccountId } from "@bittery/storage/types";
-import type { SyncEvent, SyncItemCache } from "@bittery/sync";
+import type {
+	ItemCommandProjection,
+	SemanticItemCommandExecutor,
+	SyncEvent,
+	SyncOrchestratorReplica,
+} from "@bittery/sync";
+
+type SyncTestReplica = SyncOrchestratorReplica &
+	ItemCommandProjection &
+	SemanticItemCommandExecutor;
+
 import {
 	createSyncCacheService,
 	type SyncCacheDesktopClient,
@@ -99,10 +109,10 @@ function createStorageStub(input: {
 }
 
 /**
- * Stands in for `VaultRepositoryCoordinator`. Clearing the cache is `ItemCache`'s job —
+ * Stands in for `VaultRepository`. Clearing the cache is `ItemCache`'s job —
  * `AccountStore` cannot reach the record port at all.
  */
-function createItemCacheStub(): SyncItemCache & {
+function createItemCacheStub(): SyncTestReplica & {
 	clearedAccountIds: string[];
 } {
 	const clearedAccountIds: string[] = [];
