@@ -276,6 +276,7 @@ export function VaultMemberList({
 												size="icon"
 												className="h-7 w-7 text-muted-foreground hover:text-destructive"
 												disabled={isRotating}
+												aria-label={m.vaults_member_list_remove_dialog_title()}
 											>
 												{rotatingUserId === member.userId ? (
 													<Loader2 className="h-3.5 w-3.5 animate-spin" />

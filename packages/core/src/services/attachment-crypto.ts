@@ -68,10 +68,7 @@ export async function unwrapAttachmentKey(
 	scope: AttachmentCryptoScope,
 	envelope: AttachmentKeyEnvelope,
 ): Promise<KeyRef> {
-	if (
-		envelope.envelopeVersion !== ATTACHMENT_ENVELOPE_VERSION ||
-		envelope.envelopeVersion !== scope.envelopeVersion
-	) {
+	if (envelope.envelopeVersion !== scope.envelopeVersion) {
 		throw new Error("Attachment-key envelope version mismatch");
 	}
 	return vaultCrypto.unwrapAttachmentKey(

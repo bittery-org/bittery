@@ -31,21 +31,21 @@ import {
 } from "../fixtures/vault";
 
 /**
- * Teams end to end: the team a signup creates, its invitations, and the two
- * ways a member stops being one - removed by an owner, or leaving - both of
- * which rotate every shared vault key on the client.
+ * Teams end to end: the team a signup creates, its invitations, Vault-only
+ * member removal, and the two ways a member stops being one - removed by an
+ * owner, or leaving - all driving key rotation on the real client.
  *
  * The owner signs up once for the whole file, on a throwaway context, and its
  * team is put on an active Team plan (see `../fixtures/billing`) because
  * `assert_team_management_entitlement` refuses every invitation on Free.
  *
- * Three tests below pay for a *second* signup each, and there is no way around
+ * Four tests below pay for a *second* signup each, and there is no way around
  * it: `send_invitation` refuses any address whose user already has a `team_id`
  * and every signup creates a team, so a second team member can only ever be
  * minted by signing up through the invitation link. Removing a member and
  * leaving a team each consume that member permanently (both hand them a fresh
  * personal team), and the pending-invitation surface needs an account that
- * signed up *outside* the invitation - so the three cannot share one account.
+ * signed up *outside* the invitation - so the four cannot share one account.
  */
 
 // Every test accumulates members, vaults and invitations on the one owner team,
@@ -107,7 +107,7 @@ async function populateSharedVault(
 	page: Page,
 	vaultLabel: string,
 	attachmentName?: string,
-): Promise<string> {
+): Promise<{ itemTitle: string; attachmentContents?: string }> {
 	const itemTitle = `${vaultLabel} login ${nanoid(6)}`;
 	await createItem(page, "login", async (sheet) => {
 		await sheet.locator("#title").fill(itemTitle);
@@ -116,11 +116,12 @@ async function populateSharedVault(
 	});
 
 	if (attachmentName) {
+		const attachmentContents = `rotation attachment ${nanoid(12)}`;
 		const pane = page.getByTestId("item-detail-pane");
 		await pane.locator('input[type="file"]').setInputFiles({
 			name: attachmentName,
 			mimeType: "text/plain",
-			buffer: Buffer.from(`rotation attachment ${nanoid(12)}`),
+			buffer: Buffer.from(attachmentContents),
 		});
 		await pane
 			.getByRole("button", {
@@ -136,16 +137,78 @@ async function populateSharedVault(
 		await expect(pane.getByText(attachmentName, { exact: true })).toBeVisible({
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
+		return { itemTitle, attachmentContents };
 	}
 
-	return itemTitle;
+	return { itemTitle };
+}
+
+/** Download and compare plaintext bytes, proving the rotated envelope still opens. */
+async function expectAttachmentDownload(
+	page: Page,
+	attachmentName: string,
+	expectedContents: string,
+): Promise<void> {
+	const downloaded = page.evaluate(() => {
+		return new Promise<{ bytes: number[]; fileName: string }>((resolve) => {
+			const original = URL.createObjectURL;
+			URL.createObjectURL = (source) => {
+				if (!(source instanceof Blob)) return original(source);
+				const blob = source;
+				const bytes = blob.arrayBuffer();
+				const listener = (event: MouseEvent) => {
+					const anchor = (event.target as Element | null)?.closest(
+						"a[download]",
+					);
+					if (!anchor) return;
+					document.removeEventListener("click", listener, true);
+					URL.createObjectURL = original;
+					void bytes.then((buffer) => {
+						resolve({
+							bytes: Array.from(new Uint8Array(buffer)),
+							fileName: (anchor as HTMLAnchorElement).download,
+						});
+					});
+				};
+				document.addEventListener("click", listener, true);
+				return original(blob);
+			};
+		});
+	});
+	const downloadButton = page
+		.getByTestId("item-detail-pane")
+		.getByRole("button", {
+			name: uiText("vaults_detail_items_attachments_action_download"),
+		});
+	await expect(downloadButton).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await downloadButton.click();
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	let result: Awaited<typeof downloaded>;
+	try {
+		result = await Promise.race([
+			downloaded,
+			new Promise<never>((_, reject) => {
+				timeout = setTimeout(
+					() => reject(new Error("Attachment download did not start")),
+					20000,
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timeout);
+	}
+	expect(result.fileName).toBe(attachmentName);
+	expect(Buffer.from(result.bytes).toString("utf8")).toBe(expectedContents);
 }
 
 /** Open the members dialog of the vault the page is showing. */
 async function openVaultMembers(page: Page) {
 	await page.getByTestId("vault-menu-button").click();
 	await page
-		.getByRole("menuitem", { name: uiText("vaults_detail_tab_members") })
+		.getByRole("menuitem", {
+			name: uiText("vaults_detail_tab_members"),
+			exact: true,
+		})
 		.click();
 	const dialog = page.getByRole("dialog", {
 		name: uiText("vaults_nav_members_dialog_title"),
@@ -167,6 +230,8 @@ async function addVaultMember(page: Page, email: string): Promise<void> {
 		timeout: VAULT_READY_TIMEOUT_MS,
 	});
 	await addDialog
+		.getByText(email, { exact: true })
+		.locator("xpath=../..")
 		.getByRole("button", {
 			name: uiText("vaults_add_member_dialog_action_add"),
 			exact: true,
@@ -191,13 +256,13 @@ async function joinTeamThroughInvite(
 	memberPage: Page;
 	close: () => Promise<void>;
 }> {
-	const invitee = generateTestUser();
+	let invitee = generateTestUser();
 	await openTeamPage(page);
 	const inviteUrl = await inviteMember(page, invitee.email);
 
 	const context = await browser.newContext();
 	const memberPage = await context.newPage();
-	await signUpFromInvite(memberPage, inviteUrl, invitee);
+	invitee = await signUpFromInvite(memberPage, inviteUrl, invitee);
 	return { invitee, memberPage, close: () => context.close() };
 }
 
@@ -353,6 +418,104 @@ test("an invitation can be resent for a fresh link and then cancelled", async ({
 	}
 });
 
+test("removing a Vault member rotates its Item and Attachment keys", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(SECOND_ACCOUNT_BUDGET_MS);
+	await signIn(page, owner);
+	const vaultId = await createSharedVault(page);
+	const attachmentName = `vault-removal-${nanoid(6)}.txt`;
+	const { itemTitle, attachmentContents } = await populateSharedVault(
+		page,
+		"Vault removal",
+		attachmentName,
+	);
+	if (!attachmentContents) {
+		throw new Error("Attachment fixture did not return its plaintext");
+	}
+
+	const joined = await joinTeamThroughInvite(page, browser);
+	try {
+		await openVault(page, vaultId);
+		await addVaultMember(page, joined.invitee.email);
+		await page.keyboard.press("Escape");
+
+		// Establish that the member can decrypt the Vault's Item before the owner
+		// removes only this Vault grant. The owner's successful upload above and
+		// exact download below cover the Attachment ciphertext on both sides of the
+		// rotation.
+		await joined.memberPage.reload();
+		await waitForAppReady(joined.memberPage);
+		await openVault(joined.memberPage, vaultId);
+		await openItem(joined.memberPage, itemTitle);
+		await expect(
+			joined.memberPage.getByRole("heading", { name: itemTitle }),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await expectAttachmentDownload(
+			joined.memberPage,
+			attachmentName,
+			attachmentContents,
+		);
+
+		await openVault(page, vaultId);
+		const membersDialog = await openVaultMembers(page);
+		await memberRow(page, joined.invitee.email)
+			.getByRole("button", {
+				name: uiText("vaults_member_list_remove_dialog_title"),
+			})
+			.click();
+		const confirm = page.getByRole("alertdialog");
+		await expect(confirm).toContainText(
+			uiText("vaults_member_list_remove_dialog_description", {
+				name: joined.invitee.name,
+			}),
+		);
+		await expect(confirm).toContainText(
+			uiText("vaults_member_list_remove_dialog_rotation_notice"),
+		);
+		await confirm
+			.getByRole("button", {
+				name: uiText("vaults_member_list_remove_dialog_action_confirm"),
+			})
+			.click();
+		await expect(
+			toastWithText(page, uiText("vaults_member_list_toast_member_removed")),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await expect(membersDialog.getByTestId("member-row")).toHaveCount(1, {
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await page.keyboard.press("Escape");
+
+		// Reloading discards every in-memory query result, so these assertions prove
+		// the server-committed key and Attachment envelope survive a fresh client.
+		await page.reload();
+		await waitForAppReady(page);
+		await openVault(page, vaultId);
+		await openItem(page, itemTitle);
+		await expectAttachmentDownload(page, attachmentName, attachmentContents);
+
+		// Vault-only removal keeps team membership but evicts the inaccessible
+		// Vault from the removed member's authoritative client state.
+		await joined.memberPage.reload();
+		await waitForAppReady(joined.memberPage);
+		await gotoRoute(
+			joined.memberPage,
+			"/vaults",
+			joined.memberPage.getByTestId("new-vault-button"),
+		);
+		await expect(
+			joined.memberPage.locator(`a[href="/vaults/${vaultId}"]`),
+		).toHaveCount(0);
+		await openTeamPage(joined.memberPage);
+		await expect(memberRow(joined.memberPage, owner.email)).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+	} finally {
+		await joined.close();
+	}
+});
+
 test("member departure rotates multiple shared vaults and an attachment", async ({
 	page,
 	browser,
@@ -362,13 +525,18 @@ test("member departure rotates multiple shared vaults and an attachment", async 
 	await signIn(page, owner);
 	const firstVaultId = await createSharedVault(page);
 	const attachmentName = `departure-${nanoid(6)}.txt`;
-	const firstItemTitle = await populateSharedVault(
-		page,
-		"First",
-		attachmentName,
-	);
+	const {
+		itemTitle: firstItemTitle,
+		attachmentContents: firstAttachmentContents,
+	} = await populateSharedVault(page, "First", attachmentName);
+	if (!firstAttachmentContents) {
+		throw new Error("Attachment fixture did not return its plaintext");
+	}
 	const secondVaultId = await createSharedVault(page);
-	const secondItemTitle = await populateSharedVault(page, "Second");
+	const { itemTitle: secondItemTitle } = await populateSharedVault(
+		page,
+		"Second",
+	);
 
 	const joined = await joinTeamThroughInvite(page, browser);
 	try {
@@ -379,7 +547,7 @@ test("member departure rotates multiple shared vaults and an attachment", async 
 		});
 
 		await openTeamPage(page);
-		await expect(page.getByTestId("member-row")).toHaveCount(2, {
+		await expect(memberRow(page, owner.email)).toBeVisible({
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
 		const row = memberRow(page, joined.invitee.email);
@@ -492,7 +660,7 @@ test("member departure rotates multiple shared vaults and an attachment", async 
 		await expect(memberRow(page, joined.invitee.email)).toHaveCount(0, {
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
-		await expect(page.getByTestId("member-row")).toHaveCount(1);
+		await expect(memberRow(page, owner.email)).toBeVisible();
 
 		// The rotation has to leave the owner's own copy of the vault key usable,
 		// and the vault has to be theirs alone again.
@@ -501,6 +669,11 @@ test("member departure rotates multiple shared vaults and an attachment", async 
 		await expect(page.getByText(attachmentName, { exact: true })).toBeVisible({
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
+		await expectAttachmentDownload(
+			page,
+			attachmentName,
+			firstAttachmentContents,
+		);
 		const remaining = await openVaultMembers(page);
 		await expect(remaining.getByTestId("member-row")).toHaveCount(1, {
 			timeout: VAULT_READY_TIMEOUT_MS,
@@ -539,6 +712,15 @@ test("a member can leave the team, rotating the keys they held", async ({
 	test.setTimeout(SECOND_ACCOUNT_BUDGET_MS);
 	await signIn(page, owner);
 	const vaultId = await createSharedVault(page);
+	const attachmentName = `team-leave-${nanoid(6)}.txt`;
+	const { itemTitle, attachmentContents } = await populateSharedVault(
+		page,
+		"Team leave",
+		attachmentName,
+	);
+	if (!attachmentContents) {
+		throw new Error("Attachment fixture did not return its plaintext");
+	}
 
 	const joined = await joinTeamThroughInvite(page, browser);
 	try {
@@ -547,6 +729,13 @@ test("a member can leave the team, rotating the keys they held", async ({
 		await page.keyboard.press("Escape");
 
 		const member = joined.memberPage;
+		await member.reload();
+		await waitForAppReady(member);
+		await openVault(member, vaultId);
+		await openItem(member, itemTitle);
+		await expect(member.getByRole("heading", { name: itemTitle })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
 		await openTeamPage(member);
 		await openTeamTab(member, "team_page_tab_settings");
 		// The section heading and its trigger button carry the same copy.
@@ -581,15 +770,27 @@ test("a member can leave the team, rotating the keys they held", async ({
 		await expect(memberRow(page, joined.invitee.email)).toHaveCount(0, {
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
-		await expect(page.getByTestId("member-row")).toHaveCount(1);
+		await expect(memberRow(page, owner.email)).toBeVisible();
 
 		// The leaver rotated the vault key; the owner must still hold a usable copy
-		// and be the only member left.
+		// of the Item and Attachment key, and be the only member left.
 		await openVault(page, vaultId);
+		await openItem(page, itemTitle);
+		await expect(page.getByText(attachmentName, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await expectAttachmentDownload(page, attachmentName, attachmentContents);
 		const membersDialog = await openVaultMembers(page);
 		await expect(membersDialog.getByTestId("member-row")).toHaveCount(1, {
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
+
+		// Finalization revokes the leaver's old session. After authenticating again,
+		// their fresh personal Team must not retain the former Team's Vault.
+		await member.reload();
+		await signIn(member, joined.invitee);
+		await gotoRoute(member, "/vaults", member.getByTestId("new-vault-button"));
+		await expect(member.locator(`a[href="/vaults/${vaultId}"]`)).toHaveCount(0);
 	} finally {
 		await joined.close();
 	}

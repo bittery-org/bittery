@@ -156,6 +156,11 @@ function apiServerEnv(options: {
 		BITTERY_ENABLE_DEV_AUTH_STUBS: "true",
 		BITTERY_DEV_MAIL_OUTBOX: options.outboxPath,
 		JWT_SECRET: "e2e-jwt-secret-not-used-outside-tests",
+		BITTERY_STORAGE_ENDPOINT: OBJECT_STORAGE_ENDPOINT,
+		BITTERY_STORAGE_BUCKET: "bittery-e2e",
+		BITTERY_STORAGE_ACCESS_KEY_ID: "e2e-access-key",
+		BITTERY_STORAGE_SECRET_ACCESS_KEY: "e2e-secret-key",
+		BITTERY_STORAGE_REGION: "auto",
 		CORS_ORIGIN: options.webAppUrl,
 		WEB_APP_URL: options.webAppUrl,
 		// Postgres-backed limits keep the run off the shared valkey, which the dev
@@ -190,6 +195,9 @@ const STACK_DATABASES: Record<Stack, string> = {
 	cloud: "bittery_e2e",
 	"self-hosted": "bittery_e2e_selfhosted",
 };
+
+const OBJECT_STORAGE_PORT = 3030;
+const OBJECT_STORAGE_ENDPOINT = `http://127.0.0.1:${OBJECT_STORAGE_PORT}`;
 
 type WebServer = Extract<
 	NonNullable<PlaywrightTestConfig["webServer"]>,
@@ -283,5 +291,14 @@ export default defineConfig({
 			},
 		},
 	],
-	webServer: selectedStacks().flatMap(stackServers),
+	webServer: [
+		{
+			command: "node tests/e2e-object-storage.mjs",
+			url: `${OBJECT_STORAGE_ENDPOINT}/healthz`,
+			reuseExistingServer: false,
+			timeout: 30000,
+			env: { E2E_OBJECT_STORAGE_PORT: String(OBJECT_STORAGE_PORT) },
+		},
+		...selectedStacks().flatMap(stackServers),
+	],
 });

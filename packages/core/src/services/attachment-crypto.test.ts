@@ -31,26 +31,33 @@ function vaultCryptoFor(crypto: ReturnType<typeof createInMemoryCryptoPort>) {
 }
 
 describe("attachment-key envelopes", () => {
-	test("rejects an unsupported envelope version even when the scope matches", async () => {
+	test("opens a rotated envelope version when the authenticated scope matches", async () => {
 		const crypto = createInMemoryCryptoPort();
 		const vaultCrypto = vaultCryptoFor(crypto);
 		const vaultKey = await crypto.importKey(new Uint8Array(32).fill(7));
-		const unsupportedVersion = ATTACHMENT_ENVELOPE_VERSION + 1;
-		const unsupportedScope = {
+		const rotatedVersion = ATTACHMENT_ENVELOPE_VERSION + 1;
+		const rotatedScope = {
 			...scope("attachment_unsupported"),
-			envelopeVersion: unsupportedVersion,
+			envelopeVersion: rotatedVersion,
 		};
 		const envelope = await createAttachmentKeyEnvelope(
 			vaultCrypto,
 			vaultKey,
-			unsupportedScope,
+			rotatedScope,
 		);
 
+		const opened = await unwrapAttachmentKey(
+			vaultCrypto,
+			vaultKey,
+			rotatedScope,
+			envelope.encryptedAttachmentKey,
+		);
+		await vaultCrypto.destroyAttachmentKey(opened);
 		await expect(
 			unwrapAttachmentKey(
 				vaultCrypto,
 				vaultKey,
-				unsupportedScope,
+				{ ...rotatedScope, envelopeVersion: rotatedVersion + 1 },
 				envelope.encryptedAttachmentKey,
 			),
 		).rejects.toThrow("Attachment-key envelope version mismatch");
