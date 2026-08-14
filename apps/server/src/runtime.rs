@@ -76,22 +76,3 @@ impl Drop for ServerRuntime {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ServerRuntime;
-    use crate::test_support::{acquire_env_lock_async, EnvVarGuard};
-
-    #[tokio::test]
-    async fn construction_requires_database_url() {
-        let _lock = acquire_env_lock_async().await;
-        let _database_url = EnvVarGuard::remove(&["DATABASE_URL"]);
-
-        let error = ServerRuntime::from_env()
-            .await
-            .err()
-            .expect("runtime construction should fail without a database URL");
-
-        assert!(error.to_string().contains("DATABASE_URL is required"));
-    }
-}

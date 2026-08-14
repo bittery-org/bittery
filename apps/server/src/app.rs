@@ -122,6 +122,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_support_matches_production_router_shape() {
+        let _env_lock = acquire_env_lock_async().await;
+        let _env = EnvVarGuard::set(&[("BITTERY_MODE", "cloud")]);
         let production = create_app(AppState::database_free_test(), EdgeHttpConfig::default());
         let test_support = create_test_router(AppState::database_free_test());
 

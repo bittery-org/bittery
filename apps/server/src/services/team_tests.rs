@@ -9,12 +9,13 @@ use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app, with_api_test_app_state,
+    RecordingObjectStorage,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::{json, Value};
 use sqlx::{query, query_scalar, PgPool};
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 use time::{Duration, OffsetDateTime};
 
 fn set_env_var(key: &str, value: Option<&str>) {
@@ -59,50 +60,21 @@ where
     result
 }
 
-async fn with_storage_env_async<T, F>(future: F) -> T
+async fn with_team_storage_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
 where
-    F: Future<Output = T>,
+    F: FnOnce(crate::test_support::ApiTestApp) -> Fut,
+    Fut: Future<Output = T>,
 {
-    let _guard = acquire_env_lock_async().await;
-    let previous = (
-        std::env::var("BITTERY_STORAGE_ENDPOINT").ok(),
-        std::env::var("BITTERY_STORAGE_BUCKET").ok(),
-        std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
-        std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
-        std::env::var("BITTERY_STORAGE_REGION").ok(),
-        std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
-    );
-    set_env_var(
-        "BITTERY_STORAGE_ENDPOINT",
-        Some("https://storage.example.invalid"),
-    );
-    set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
-    set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
-    set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
-    set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_CDN_URL",
-        Some("https://cdn.example.invalid/assets"),
-    );
-
-    let result = future.await;
-
-    let (
-        previous_endpoint,
-        previous_bucket,
-        previous_access_key,
-        previous_secret_key,
-        previous_region,
-        previous_cdn_url,
-    ) = previous;
-    restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
-    restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
-    restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
-    restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
-    restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
-
-    result
+    with_api_test_app_state(
+        test_name,
+        |state| {
+            state.with_object_storage(Arc::new(RecordingObjectStorage::succeeding(Some(
+                "https://cdn.example.invalid/assets",
+            ))))
+        },
+        test_fn,
+    )
+    .await
 }
 
 fn unauthenticated_json_headers() -> HeaderMap {
@@ -769,7 +741,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
 #[tokio::test]
 async fn team_list_get_create_update_and_image_upload_paths() {
-    with_api_test_app("team_core_mutations", |app| async move {
+    with_team_storage_test_app("team_core_mutations", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
@@ -894,13 +866,14 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             Some("teams/team_router_main/custom-logo.png".to_string())
         );
 
-        let team_after_update = with_storage_env_async(app.api_json(
-            Method::GET,
-            &format!("/api/v1/teams/{}", fixture.team_id),
-            None,
-            owner_headers.clone(),
-        ))
-        .await;
+        let team_after_update = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
         team_after_update.assert_contract_status();
         assert_eq!(
             team_after_update.body["imageUrl"],
@@ -945,17 +918,18 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             "Only image files are allowed",
         );
 
-        let upload_response = with_storage_env_async(app.api_json(
-            Method::POST,
-            &format!("/api/v1/teams/{}/image-uploads", fixture.team_id),
-            Some(json!({
+        let upload_response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/image-uploads", fixture.team_id),
+                Some(json!({
 
-                "fileName": "logo.png",
-                "contentType": "image/png"
-            })),
-            owner_headers,
-        ))
-        .await;
+                    "fileName": "logo.png",
+                    "contentType": "image/png"
+                })),
+                owner_headers,
+            )
+            .await;
         upload_response.assert_contract_status();
         let key = upload_response.body["key"]
             .as_str()
@@ -964,13 +938,9 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             key.starts_with("teams/team_router_main/"),
             "unexpected key: {key}"
         );
-        assert!(
-            upload_response.body["uploadUrl"]
-                .as_str()
-                .expect("upload url should exist")
-                .contains("storage.example.invalid/bittery-test/"),
-            "unexpected upload response: {}",
-            upload_response.body
+        assert_eq!(
+            upload_response.body["uploadUrl"],
+            json!(format!("https://upload.invalid/{key}"))
         );
         assert!(
             upload_response.body["publicUrl"]
