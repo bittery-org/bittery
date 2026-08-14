@@ -12,31 +12,3 @@ export const vaultRepository = createVaultRepository(
 	storage,
 	itemCache,
 );
-
-let vaultRuntime: AccountVaultRuntime | null = null;
-
-const serverAccountSource: AccountVaultStateSource = {
-	initializeLocalVaultState: async () => {},
-	subscribe: () => () => {},
-	getActiveAccount: () => null,
-	getAccounts: () => [],
-	getUnlockedAccountIds: () => [],
-};
-
-export function getWebVaultRuntime(
-	manager: AccountVaultStateSource,
-): AccountVaultRuntime {
-	// TanStack Start must render the document (especially <Scripts />) on the
-	// server, while browser storage must remain untouched there. This inert runtime
-	// preserves the provider tree without creating a process-global SSR account scope.
-	if (typeof window === "undefined") {
-		return new AccountVaultRuntime(serverAccountSource, vaultRepository);
-	}
-	vaultRuntime ??= new AccountVaultRuntime(manager, vaultRepository);
-	return vaultRuntime;
-}
-
-import {
-	AccountVaultRuntime,
-	type AccountVaultStateSource,
-} from "@bittery/core/services/account-vault-runtime";

@@ -11,7 +11,7 @@
  */
 
 import type { AccountStore } from "@bittery/storage";
-import type { IAutolockService } from "@bittery/types";
+import type { IAutolockService } from "./autolock";
 
 /**
  * Should the app re-authenticate after coming back from the background?

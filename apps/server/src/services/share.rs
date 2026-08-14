@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
 
 use crate::{
-    config::{bittery_mode, db_pool, format_timestamp},
+    config::{bittery_mode, format_timestamp},
     db::{
         enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole},
         models::*,
@@ -165,7 +165,7 @@ pub(crate) async fn create_share_link(
     user_id: &str,
     input: CreateShareLinkInput,
 ) -> Result<CreateShareLinkResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
         return Err(AppError::not_found("Item not found"));
@@ -518,7 +518,7 @@ pub(crate) async fn request_email_verification(
     app_state: &AppState,
     input: RequestEmailVerificationInput,
 ) -> Result<RequestEmailVerificationResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     let details = load_public_share_link_details_by_token(
@@ -599,7 +599,7 @@ pub(crate) async fn verify_email_and_access(
     app_state: &AppState,
     input: VerifyEmailAndAccessInput,
 ) -> Result<PublicShareAccessResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     if !VerificationCodeService::is_valid_code(&input.code) {

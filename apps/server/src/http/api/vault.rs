@@ -9,7 +9,6 @@ use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     db::enums::{ItemCategory, VaultRole, VaultType},
     error::{AppError, AppErrorCode},
     services::vault,
@@ -628,10 +627,11 @@ async fn list_vaults(
     auth: AuthenticatedRequest,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultListEntryResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let cursor = decode_page_key(&page, &auth.session.user_id, "vaults", "")?;
     let values = vault::list_vaults_page(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         cursor.as_deref(),
         query_limit(&page)?,
@@ -656,10 +656,11 @@ async fn get_vault(
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
 ) -> Result<Json<VaultDetailsResponseDto>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     Ok(Json(
         vault::get_vault(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::VaultIdInput { vault_id },
         )
@@ -675,7 +676,7 @@ async fn create_vault(
     Path(vault_id): Path<String>,
     ApiJson(body): ApiJson<CreateVaultBody>,
 ) -> Result<Json<CreateVaultResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::create_vault(
         pool,
         &auth.session.user_id,
@@ -705,9 +706,10 @@ async fn update_vault(
     let name = optional_patch_value(body.name, "/name")?;
     let icon = nullable_patch_value(body.icon);
     let image_key = nullable_patch_value(body.image_key);
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::update_vault(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::UpdateVaultInput {
@@ -730,7 +732,7 @@ async fn convert_vault(
     Path(vault_id): Path<String>,
     ApiJson(body): ApiJson<ConvertVaultBody>,
 ) -> Result<Json<ConvertVaultTypeResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::convert_vault_type(
         pool,
         &auth.session.user_id,
@@ -753,9 +755,10 @@ async fn delete_vault(
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::delete_vault(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::VaultIdInput { vault_id },
@@ -772,10 +775,11 @@ async fn create_image_upload(
     Path(vault_id): Path<String>,
     ApiJson(body): ApiJson<ImageUploadBody>,
 ) -> Result<Json<PresignedUploadResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     Ok(Json(
         vault::create_vault_image_upload(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::CreateVaultImageUploadInput {
                 vault_id: Some(vault_id),
@@ -795,7 +799,7 @@ async fn list_items(
     Path(vault_id): Path<String>,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultItemDetailsResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &vault_id)?
         .map(|key| timestamp_cursor_key(&key))
         .transpose()?;
@@ -829,7 +833,7 @@ async fn list_all_items(
     auth: AuthenticatedRequest,
     ApiQuery(query): ApiQuery<AllItemsQuery>,
 ) -> Result<Json<AllItemsResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let state_filter = query.state.as_deref().unwrap_or("active");
     let page = PageRequest {
         cursor: query.cursor,
@@ -842,6 +846,7 @@ async fn list_all_items(
                 .transpose()?;
             let values = vault::list_all_vault_items_page(
                 pool,
+                state.object_storage.as_ref(),
                 &auth.session.user_id,
                 cursor,
                 query_limit(&page)?,
@@ -867,6 +872,7 @@ async fn list_all_items(
                 .transpose()?;
             let values = vault::list_all_deleted_vault_items_page(
                 pool,
+                state.object_storage.as_ref(),
                 &auth.session.user_id,
                 cursor,
                 query_limit(&page)?,
@@ -909,7 +915,8 @@ async fn list_all_trashed_items(
         .map(|key| timestamp_cursor_key(&key))
         .transpose()?;
     let values = vault::list_all_deleted_vault_items_page(
-        db_pool(&state)?,
+        &state.db_pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         cursor,
         query_limit(&page)?,
@@ -942,7 +949,7 @@ async fn list_deleted_items(
     Path(vault_id): Path<String>,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultItemResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let filter = format!("{vault_id}:trashed");
     let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &filter)?
         .map(|key| timestamp_cursor_key(&key))
@@ -982,7 +989,7 @@ async fn get_item(
     auth: AuthenticatedRequest,
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let item: ItemResponseDto =
         vault::get_vault_item(pool, &auth.session.user_id, vault::ItemIdInput { item_id })
             .await?
@@ -1000,7 +1007,7 @@ async fn create_item(
     ApiJsonBytes { value: body, bytes }: ApiJsonBytes<CreateItemBody, ITEM_BODY_LIMIT_BYTES>,
 ) -> Result<Response, ApiError> {
     check_ciphertext(&body.encrypted_data)?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/vaults/{vault_id}/items/{item_id}");
     idempotency::execute(
@@ -1040,7 +1047,7 @@ async fn bulk_import_items(
     ApiJson(body): ApiJson<BulkImportBody>,
 ) -> Result<Json<BulkImportItemsResponse>, ApiError> {
     check_bulk_import(&body)?;
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::bulk_import_vault_items(
         pool,
         &auth.session.user_id,
@@ -1074,7 +1081,7 @@ async fn update_item(
     if let Some(value) = encrypted_data.as_deref() {
         check_ciphertext(value)?;
     }
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}");
     idempotency::execute(
@@ -1120,7 +1127,7 @@ async fn set_favorite(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let client_id = auth.effective_client_id();
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let route_target = format!("/api/v1/items/{item_id}/favorite");
     idempotency::execute(
         pool,
@@ -1157,7 +1164,7 @@ async fn delete_item(
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}");
     idempotency::execute(
@@ -1194,7 +1201,7 @@ async fn restore_item(
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/restore");
     idempotency::execute(
@@ -1233,7 +1240,7 @@ async fn move_item(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     check_ciphertext(&body.encrypted_data)?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/moves");
     idempotency::execute(
@@ -1276,7 +1283,7 @@ async fn permanently_delete_item(
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/permanent");
     idempotency::execute(
@@ -1310,7 +1317,7 @@ async fn stats(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
 ) -> Result<Json<VaultStatsResponseDto>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     Ok(Json(
         vault::get_vault_stats(pool, &auth.session.user_id)
             .await?
@@ -1325,9 +1332,10 @@ async fn create_attachment_upload(
     Path(item_id): Path<String>,
     ApiJson(body): ApiJson<AttachmentUploadBody>,
 ) -> Result<Json<AttachmentUploadResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::create_vault_attachment_upload(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         vault::CreateAttachmentUploadInput {
             item_id,
@@ -1351,9 +1359,10 @@ async fn create_attachment(
     Path(item_id): Path<String>,
     ApiJson(body): ApiJson<CreateAttachmentBody>,
 ) -> Result<Json<CreateAttachmentResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::create_vault_attachment(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::CreateAttachmentInput {
@@ -1384,7 +1393,7 @@ async fn list_attachments(
     Path(item_id): Path<String>,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultAttachmentResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let cursor = decode_page_key(&page, &auth.session.user_id, "attachments", &item_id)?
         .map(|key| timestamp_cursor_key(&key))
         .transpose()?;
@@ -1415,10 +1424,11 @@ async fn create_attachment_download_url(
     auth: AuthenticatedRequest,
     Path(attachment_id): Path<String>,
 ) -> Result<Json<AttachmentDownloadResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     Ok(Json(
         vault::get_attachment_download_url(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::AttachmentIdInput { attachment_id },
         )
@@ -1434,7 +1444,7 @@ async fn update_attachment(
     Path(attachment_id): Path<String>,
     ApiMergePatch(body): ApiMergePatch<UpdateAttachmentBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::update_vault_attachment(
         pool,
         &auth.session.user_id,
@@ -1457,9 +1467,10 @@ async fn delete_attachment(
     auth: AuthenticatedRequest,
     Path(attachment_id): Path<String>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let result = vault::delete_vault_attachment(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::AttachmentIdInput { attachment_id },
@@ -1476,8 +1487,8 @@ async fn list_members(
     Path(vault_id): Path<String>,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultMemberResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
-    let values = vault::member_handlers::list_vault_members(
+    let pool = &state.db_pool;
+    let values = vault::list_vault_members(
         pool,
         &auth.session.user_id,
         vault::VaultIdInput {
@@ -1503,8 +1514,8 @@ async fn available_team_members(
     Path(vault_id): Path<String>,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultAvailableMemberResponse>>, ApiError> {
-    let pool = db_pool(&state)?;
-    let values = vault::member_handlers::available_team_members(
+    let pool = &state.db_pool;
+    let values = vault::available_team_members(
         pool,
         &auth.session.user_id,
         vault::VaultIdInput {
@@ -1530,8 +1541,8 @@ async fn add_member(
     Path((vault_id, user_id)): Path<(String, String)>,
     ApiJson(body): ApiJson<AddVaultMemberBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
-    let pool = db_pool(&state)?;
-    let result = vault::member_handlers::add_vault_member(
+    let pool = &state.db_pool;
+    let result = vault::add_vault_member(
         pool,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
@@ -1555,8 +1566,8 @@ async fn update_member_role(
     Path((vault_id, user_id)): Path<(String, String)>,
     ApiMergePatch(body): ApiMergePatch<UpdateVaultMemberRoleBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
-    let pool = db_pool(&state)?;
-    let result = vault::member_handlers::update_vault_member_role(
+    let pool = &state.db_pool;
+    let result = vault::update_vault_member_role(
         pool,
         &auth.session.user_id,
         vault::UpdateVaultMemberRoleInput {

@@ -53,23 +53,6 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 	},
 }));
 
-mock.module("@bittery/core/services/account-session-manager", () => ({
-	peekAccountSessionManager: () => null,
-	getAccountSessionManager: ({
-		storage,
-	}: {
-		storage: {
-			tryRestoreSession: (
-				skipBiometric: boolean,
-				accountId: string,
-			) => Promise<boolean>;
-		};
-	}) => ({
-		unlockAccount: (accountId: string, skipBiometric = false) =>
-			storage.tryRestoreSession(skipBiometric, accountId),
-	}),
-}));
-
 const { restoreUnlockedSessions } = await import(
 	path.join(bgDir, "services/session-restore.ts")
 );
@@ -77,6 +60,14 @@ const { restoreUnlockedSessions } = await import(
 beforeEach(() => {
 	mukCache = new Map();
 });
+
+const sessions = {
+	unlockAccount: async (accountId: string) => {
+		if (sessionScope[`${accountId}:jwt_token`] === undefined) return false;
+		mukCache.set(accountId, new Uint8Array([1, 2, 3]));
+		return true;
+	},
+};
 
 describe("restoreUnlockedSessions", () => {
 	test("service-worker restart: chrome.storage.session survived, so every account is restored", async () => {
@@ -86,7 +77,7 @@ describe("restoreUnlockedSessions", () => {
 			[`${ACCOUNT_B}:jwt_token`]: "token-b",
 		};
 
-		const restored = await restoreUnlockedSessions();
+		const restored = await restoreUnlockedSessions(sessions);
 
 		expect(restored.accountIds).toEqual([ACCOUNT_A, ACCOUNT_B]);
 		expect([...mukCache.keys()]).toEqual([ACCOUNT_A, ACCOUNT_B]);
@@ -98,7 +89,7 @@ describe("restoreUnlockedSessions", () => {
 	test("browser restart: chrome.storage.session is gone, so nothing is restored or claimed", async () => {
 		sessionScope = {};
 
-		const restored = await restoreUnlockedSessions();
+		const restored = await restoreUnlockedSessions(sessions);
 
 		expect(restored.accountIds).toEqual([]);
 		expect([...mukCache.keys()]).toEqual([]);
@@ -108,7 +99,7 @@ describe("restoreUnlockedSessions", () => {
 	test("partial restore: only the account whose session survived comes back", async () => {
 		sessionScope = { [`${ACCOUNT_B}:jwt_token`]: "token-b" };
 
-		const restored = await restoreUnlockedSessions();
+		const restored = await restoreUnlockedSessions(sessions);
 
 		expect(restored.accountIds).toEqual([ACCOUNT_B]);
 		expect(restored.muk).toEqual(new Uint8Array([1, 2, 3]));

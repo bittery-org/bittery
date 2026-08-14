@@ -8,7 +8,7 @@
  */
 
 import type { DesktopStatus } from "../../desktop-protocol";
-import { desktopSync } from "../../desktop-sync";
+import { getDesktopSync } from "../../desktop-sync";
 import type { DesktopPort } from "../ports";
 import type { DesktopSnapshot } from "../types";
 
@@ -35,10 +35,10 @@ function toSnapshot(status: DesktopStatus | null): DesktopSnapshot | null {
 export function createDesktopAdapter(): DesktopPort {
 	return {
 		readCached(): DesktopSnapshot | null {
-			return toSnapshot(desktopSync.getLastStatus());
+			return toSnapshot(getDesktopSync().getLastStatus());
 		},
 		async refresh(): Promise<DesktopSnapshot | null> {
-			return toSnapshot(await desktopSync.checkDesktopStatus());
+			return toSnapshot(await getDesktopSync().checkDesktopStatus());
 		},
 	};
 }

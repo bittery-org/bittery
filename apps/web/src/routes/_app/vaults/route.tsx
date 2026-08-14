@@ -1,5 +1,6 @@
 import {
 	type CreateVaultInput,
+	useAccountSwitcher,
 	useAllVaultKeys,
 	useAvailableTags,
 	useCreateVault,
@@ -27,7 +28,6 @@ import {
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
-import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -48,6 +48,7 @@ function VaultsLayout() {
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
+	const { accounts, activeAccount } = useAccountSwitcher();
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 	const [isCreateVaultDialogOpen, setIsCreateVaultDialogOpen] = useState(false);
@@ -65,11 +66,8 @@ function VaultsLayout() {
 	} | null>(null);
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
-		const active = await storage.getActiveAccount();
-		if (!active) throw new Error();
 		const result = await createVault.mutateAsync({
 			...data,
-			accountId: active,
 		});
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};
@@ -188,6 +186,13 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
+					accounts={accounts.map(({ accountId, email, name, teamName }) => ({
+						accountId,
+						email,
+						name,
+						teamName,
+					}))}
+					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 
 				<EditVaultDialog

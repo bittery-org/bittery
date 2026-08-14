@@ -39,7 +39,6 @@ import {
 import { desktopClient } from "../desktop-client";
 import { PENDING_DESKTOP_UNLOCK } from "../desktop-protocol";
 import { getDesktopStatus } from "../desktop-status";
-import { desktopSync } from "../desktop-sync";
 import {
 	handleCheckNativeBiometric,
 	handleNativeBiometricUnlock,
@@ -69,7 +68,7 @@ import {
 	handleGetVaultItems,
 	handleGetWritableVaults,
 } from "../vault-handlers";
-import { reconcileVaultRuntimeFromStorage } from "../vault-runtime";
+import { reconcileClientRuntime } from "../vault-runtime";
 import type { PasswordUnlockAllResponse, UnlockResponse } from "./contract";
 import {
 	cleanupSync,
@@ -92,22 +91,22 @@ const didUnlock = (response: UnlockResponse | PasswordUnlockAllResponse) =>
 export const routeRegistry: RouteRegistry = {
 	// Authentication
 	LOGIN: {
-		handle: (payload) => handleLogin(payload),
+		handle: (payload, ctx) => handleLogin(payload, ctx.runtime),
 		syncInitOnSuccess: true,
 	},
 
 	QUICK_UNLOCK: {
-		handle: (payload) => handleQuickUnlock(payload),
+		handle: (payload, ctx) => handleQuickUnlock(payload, ctx.runtime),
 		syncInitOnSuccess: didUnlock,
 	},
 
 	QUICK_UNLOCK_ALL: {
-		handle: (payload) => handleQuickUnlockAll(payload),
+		handle: (payload, ctx) => handleQuickUnlockAll(payload, ctx.runtime),
 		syncInitOnSuccess: didUnlock,
 	},
 
 	CHECK_AUTH: {
-		handle: () => handleCheckAuth(),
+		handle: (_payload, ctx) => handleCheckAuth(ctx.runtime),
 		syncInitOnSuccess: (response) =>
 			Boolean(response.success && response.authenticated),
 	},
@@ -130,7 +129,7 @@ export const routeRegistry: RouteRegistry = {
 
 	LOGOUT: {
 		before: () => cleanupSync(),
-		handle: () => handleLogout(),
+		handle: (_payload, ctx) => handleLogout(ctx.runtime),
 	},
 
 	/**
@@ -156,8 +155,8 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	RECONCILE_ACCOUNT_SCOPE: {
-		handle: async () => {
-			await reconcileVaultRuntimeFromStorage();
+		handle: async (_payload, ctx) => {
+			await reconcileClientRuntime(ctx.runtime);
 			await reconcileSyncAccountScope();
 			return { success: true };
 		},
@@ -259,11 +258,11 @@ export const routeRegistry: RouteRegistry = {
 
 	// Vault operations
 	GET_VAULT_ITEMS: {
-		handle: () => handleGetVaultItems(),
+		handle: (_payload, ctx) => handleGetVaultItems(ctx.runtime),
 	},
 
 	GET_VAULT_ITEM: {
-		handle: (payload) => handleGetVaultItem(payload),
+		handle: (payload, ctx) => handleGetVaultItem(payload, ctx.runtime),
 	},
 
 	GET_WRITABLE_VAULTS: {
@@ -272,15 +271,18 @@ export const routeRegistry: RouteRegistry = {
 
 	// Credential management
 	CHECK_EXISTING_CREDENTIALS: {
-		handle: (payload) => handleCheckExistingCredentials(payload),
+		handle: (payload, ctx) =>
+			handleCheckExistingCredentials(payload, ctx.runtime),
 	},
 
 	SAVE_NEW_CREDENTIAL: {
-		handle: (payload) => handleSaveNewCredential(payload),
+		handle: (payload, ctx) =>
+			handleSaveNewCredential(payload, ctx.desktopSync, ctx.itemCommands),
 	},
 
 	UPDATE_EXISTING_CREDENTIAL: {
-		handle: (payload) => handleUpdateExistingCredential(payload),
+		handle: (payload, ctx) =>
+			handleUpdateExistingCredential(payload, ctx.itemCommands),
 	},
 
 	SET_PENDING_SAVE_PROMPT: {
@@ -305,25 +307,35 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	GET_AUTOFILL_ITEMS: {
-		handle: (payload) => handleGetAutofillItems(payload),
+		handle: (payload, ctx) => handleGetAutofillItems(payload, ctx.runtime),
 	},
 
 	GET_AUTOFILL_CREDIT_CARDS: {
-		handle: () => handleGetAutofillCreditCards(),
+		handle: (_payload, ctx) => handleGetAutofillCreditCards(ctx.runtime),
 	},
 
 	GET_AUTOFILL_IDENTITIES: {
-		handle: () => handleGetAutofillIdentities(),
+		handle: (_payload, ctx) => handleGetAutofillIdentities(ctx.runtime),
 	},
 
 	// Passkeys (dispatched through ctx.passkeyHandlers so tests can override
 	// individual handlers without mocking the whole passkey-handlers module).
 	PASSKEY_CREATE: {
-		handle: (payload, ctx) => ctx.passkeyHandlers.handlePasskeyCreate(payload),
+		handle: (payload, ctx) =>
+			ctx.passkeyHandlers.handlePasskeyCreate(
+				payload,
+				ctx.runtime,
+				ctx.itemCommands,
+			),
 	},
 
 	PASSKEY_GET: {
-		handle: (payload, ctx) => ctx.passkeyHandlers.handlePasskeyGet(payload),
+		handle: (payload, ctx) =>
+			ctx.passkeyHandlers.handlePasskeyGet(
+				payload,
+				ctx.runtime,
+				ctx.itemCommands,
+			),
 	},
 
 	PASSKEY_CANCEL: {
@@ -355,7 +367,8 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	UPDATE_ITEM_TOTP: {
-		handle: (payload) => handleUpdateItemTotp(payload),
+		handle: (payload, ctx) =>
+			handleUpdateItemTotp(payload, ctx.runtime, ctx.itemCommands),
 	},
 
 	/**
@@ -383,11 +396,11 @@ export const routeRegistry: RouteRegistry = {
 
 	// Desktop sync
 	CHECK_DESKTOP_STATUS: {
-		handle: async () => {
+		handle: async (_payload, ctx) => {
 			const status = await getDesktopStatus();
 			return {
 				success: true,
-				available: desktopSync.isDesktopAvailable(),
+				available: ctx.desktopSync.isDesktopAvailable(),
 				...status,
 			};
 		},

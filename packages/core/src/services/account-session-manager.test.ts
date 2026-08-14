@@ -6,12 +6,16 @@ import {
 	createTestItemCache,
 	seedAccountWithSession,
 } from "../testing/account-store-harness";
-import {
-	AccountSessionManager,
-	getAccountSessionManager,
-	peekAccountSessionManager,
-	resetAccountSessionManagerForTests,
-} from "./account-session-manager";
+import type { AccountSessionManagerOptions } from "./account-session-manager";
+import { ClientRuntime } from "./client-runtime";
+import type { VaultRepository } from "./vault-repository";
+
+function createManager(options: AccountSessionManagerOptions) {
+	return new ClientRuntime({
+		...options,
+		vaultRepository: {} as VaultRepository,
+	}).accounts;
+}
 
 /**
  * A real `AccountStore` over the in-memory platform port, seeded with two accounts:
@@ -45,7 +49,6 @@ let itemCache: ItemCache;
 
 describe("AccountSessionManager", () => {
 	beforeEach(async () => {
-		resetAccountSessionManagerForTests();
 		itemCache = (await createTestItemCache()).cache;
 	});
 
@@ -55,7 +58,7 @@ describe("AccountSessionManager", () => {
 		const verifyUnlockPolicy = mock(async () => {
 			throw new Error("network must not be consulted");
 		});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy,
@@ -75,7 +78,7 @@ describe("AccountSessionManager", () => {
 		});
 		const restore = spyOn(storage, "tryRestoreSessionWithoutPrompt");
 		const verifyUnlockPolicy = mock(async () => {});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy,
@@ -117,7 +120,7 @@ describe("AccountSessionManager", () => {
 			},
 		);
 		const lockAllAccounts = spyOn(storage, "lockAllAccounts");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -148,7 +151,7 @@ describe("AccountSessionManager", () => {
 			"acc-2",
 		);
 
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -167,7 +170,7 @@ describe("AccountSessionManager", () => {
 		const clearSession = spyOn(storage, "clearSession");
 		const setActiveAccount = spyOn(storage, "setActiveAccount");
 		const onActiveChanged = mock(async () => {});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			onActiveChanged,
@@ -195,7 +198,7 @@ describe("AccountSessionManager", () => {
 		const callbackEntered = new Promise<void>((resolve) => {
 			entered = resolve;
 		});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -219,7 +222,7 @@ describe("AccountSessionManager", () => {
 	it("switching to an already-unlocked account does not restore it again", async () => {
 		const storage = await createStore({ unlockAcc2: true });
 		const tryRestoreSession = spyOn(storage, "tryRestoreSession");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -236,7 +239,7 @@ describe("AccountSessionManager", () => {
 		const storage = await createStore();
 		const tryRestoreSession = spyOn(storage, "tryRestoreSession");
 		const clearSession = spyOn(storage, "clearSession");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -255,7 +258,7 @@ describe("AccountSessionManager", () => {
 	it("lockAll clears unlocked state for all accounts", async () => {
 		const storage = await createStore({ unlockAcc2: true });
 		const lockAllAccounts = spyOn(storage, "lockAllAccounts");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -275,7 +278,7 @@ describe("AccountSessionManager", () => {
 		spyOn(storage, "lockAllAccounts").mockImplementation(async () => {
 			order.push("storage");
 		});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			// A listener that unlocks again on the broadcast must find the locked
@@ -302,7 +305,7 @@ describe("AccountSessionManager", () => {
 		const callbackEntered = new Promise<void>((resolve) => {
 			entered = resolve;
 		});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -327,7 +330,7 @@ describe("AccountSessionManager", () => {
 		const storage = await createStore();
 		const clearAllStoredData = spyOn(storage, "clearAllStoredData");
 		const setActiveAccount = spyOn(storage, "setActiveAccount");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -352,7 +355,7 @@ describe("AccountSessionManager", () => {
 	it("removeAccount leaves in-memory state consistent with storage", async () => {
 		const storage = await createStore({ unlockAcc2: true });
 		const onActiveChanged = mock(async () => {});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			onActiveChanged,
@@ -376,7 +379,7 @@ describe("AccountSessionManager", () => {
 	it("removeAccount purges the injected credential mirror", async () => {
 		const storage = await createStore();
 		const purge = mock(async () => {});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			credentialMirror: { purge },
@@ -397,7 +400,7 @@ describe("AccountSessionManager", () => {
 		const storage = await createStore();
 		await storage.removeAccount("acc-2");
 		const setActiveAccount = spyOn(storage, "setActiveAccount");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -416,7 +419,7 @@ describe("AccountSessionManager", () => {
 	it("reconstruction after final-account removal does not restore a stale ID", async () => {
 		const storage = await createStore();
 		await storage.removeAccount("acc-2");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -424,7 +427,7 @@ describe("AccountSessionManager", () => {
 		await manager.initialize();
 		await manager.removeAccount("acc-1");
 
-		const reconstructed = new AccountSessionManager({
+		const reconstructed = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -438,7 +441,7 @@ describe("AccountSessionManager", () => {
 	it("removing a non-active account does not alter the active account", async () => {
 		const storage = await createStore();
 		const setActiveAccount = spyOn(storage, "setActiveAccount");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -456,7 +459,7 @@ describe("AccountSessionManager", () => {
 		// it against the account list.
 		const storage = await createStore();
 		await storage.setActiveAccount("a@test.com");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -471,7 +474,7 @@ describe("AccountSessionManager", () => {
 	it("keeps a stored active accountId that matches a known account", async () => {
 		const storage = await createStore();
 		await storage.setActiveAccount("acc-2");
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			verifyUnlockPolicy: async () => {},
@@ -486,7 +489,7 @@ describe("AccountSessionManager", () => {
 		const storage = await createStore();
 		const clearSession = spyOn(storage, "clearSession");
 		const purge = mock(async () => {});
-		const manager = new AccountSessionManager({
+		const manager = createManager({
 			storage,
 			itemCache,
 			credentialMirror: { purge },
@@ -504,38 +507,5 @@ describe("AccountSessionManager", () => {
 		]);
 		expect(clearSession).toHaveBeenCalledWith("acc-2");
 		expect(manager.isUnlocked("acc-2")).toBe(false);
-	});
-});
-
-describe("getAccountSessionManager", () => {
-	beforeEach(async () => {
-		resetAccountSessionManagerForTests();
-		itemCache = (await createTestItemCache()).cache;
-	});
-
-	it("rejects options once the manager exists, instead of dropping them", async () => {
-		const storage = await createStore();
-		getAccountSessionManager({ storage, itemCache });
-
-		expect(() =>
-			getAccountSessionManager({
-				storage,
-				itemCache,
-				onActiveChanged: () => {},
-			}),
-		).toThrow(/already constructed/);
-	});
-
-	it("returns the same instance for option-less calls", async () => {
-		const storage = await createStore();
-		const manager = getAccountSessionManager({ storage, itemCache });
-
-		expect(getAccountSessionManager()).toBe(manager);
-		expect(peekAccountSessionManager()).toBe(manager);
-	});
-
-	it("peek returns null before construction, get throws", () => {
-		expect(peekAccountSessionManager()).toBeNull();
-		expect(() => getAccountSessionManager()).toThrow(/not initialized/);
 	});
 });

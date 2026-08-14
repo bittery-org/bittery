@@ -3,10 +3,7 @@
  * Extracted for reuse in both React hooks and non-React contexts (e.g., extension service worker)
  */
 
-import {
-	type AppApiClient,
-	isApiErrorStatus,
-} from "@bittery/shared/api-client";
+import { type ApiClient, isApiErrorStatus } from "@bittery/api-contract";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import {
 	type ServerVaultListEntry,
@@ -17,10 +14,10 @@ import {
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import type { SyncEvent, SyncReplicaStore } from "./types";
 
-export type DeltaSyncApiClient = Pick<AppApiClient, "items" | "vaults">;
+export type DeltaSyncApiClient = Pick<ApiClient, "items" | "vaults">;
 
 function normalizeVaultSummary(
-	vault: Awaited<ReturnType<AppApiClient["vaults"]["get"]>>["data"],
+	vault: Awaited<ReturnType<ApiClient["vaults"]["get"]>>["data"],
 ): ServerVaultSummary {
 	return {
 		...vault,
@@ -30,7 +27,7 @@ function normalizeVaultSummary(
 }
 
 function normalizeVaultListEntry(
-	vault: Awaited<ReturnType<AppApiClient["vaults"]["list"]>>["data"][number],
+	vault: Awaited<ReturnType<ApiClient["vaults"]["list"]>>["data"][number],
 ): ServerVaultListEntry {
 	return {
 		...vault,

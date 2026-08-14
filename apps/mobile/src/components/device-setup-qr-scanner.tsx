@@ -1,7 +1,7 @@
 import {
 	type ParsedDeviceSetupPayload,
 	parseDeviceSetupUri,
-} from "@bittery/shared";
+} from "@bittery/shared/device-setup";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useCallback, useState } from "react";
 import { Alert, Modal, StyleSheet, View } from "react-native";

@@ -12,18 +12,3 @@ export const vaultRepository = createVaultRepository(
 	storage,
 	itemCache,
 );
-
-let vaultRuntime: AccountVaultRuntime | null = null;
-
-export function getMobileVaultRuntime(
-	manager: AccountVaultStateSource,
-): AccountVaultRuntime {
-	vaultRuntime ??= new AccountVaultRuntime(manager, vaultRepository);
-	vaultRuntime.start();
-	return vaultRuntime;
-}
-
-import {
-	AccountVaultRuntime,
-	type AccountVaultStateSource,
-} from "@bittery/core/services/account-vault-runtime";

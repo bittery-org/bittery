@@ -1,4 +1,4 @@
-import type { AppApiClient } from "@bittery/shared/api-client";
+import type { ApiClient } from "@bittery/api-contract";
 import { type SyncCursor, type SyncEvent, toClientTimestamp } from "./types";
 
 export interface CatchUpPageResponse {
@@ -8,7 +8,7 @@ export interface CatchUpPageResponse {
 	cursor: SyncCursor | null;
 }
 
-export type CatchUpApiClient = Pick<AppApiClient, "sync">;
+export type CatchUpApiClient = Pick<ApiClient, "sync">;
 
 export interface RunCatchUpOptions {
 	client: CatchUpApiClient;

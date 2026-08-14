@@ -7,7 +7,6 @@ use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     services::{
         auth::{self, FinishLoginInput},
         travel_mode::{self, EnableTravelModeInput, SetTravelModeHiddenVaultsInput},
@@ -113,7 +112,7 @@ async fn get_travel_mode(
     request: AuthenticatedRequest,
 ) -> Result<Json<TravelModeResponse>, ApiError> {
     Ok(Json(
-        travel_mode::get_travel_mode(db_pool(&state)?, &request.session.user_id)
+        travel_mode::get_travel_mode(&state.db_pool, &request.session.user_id)
             .await?
             .into(),
     ))
@@ -127,7 +126,7 @@ async fn set_hidden_vaults(
 ) -> Result<Json<TravelModeResponse>, ApiError> {
     enforce_hidden_vault_limit(&body.hidden_vault_ids)?;
     let response = travel_mode::set_travel_mode_hidden_vaults(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         request.effective_client_id().as_deref(),
         SetTravelModeHiddenVaultsInput {
@@ -147,7 +146,7 @@ async fn enable_travel_mode(
 ) -> Result<Json<TravelModeResponse>, ApiError> {
     enforce_hidden_vault_limit(&body.hidden_vault_ids)?;
     let response = travel_mode::enable_travel_mode(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         request.effective_client_id().as_deref(),
         EnableTravelModeInput {
@@ -165,7 +164,7 @@ async fn disable_travel_mode(
     request: AuthenticatedRequest,
     ApiJson(body): ApiJson<DisableTravelModeRequest>,
 ) -> Result<Json<TravelModeResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     auth::verify_login_proof_for_user(
         pool,
         &request.session.user_id,

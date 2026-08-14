@@ -1,12 +1,16 @@
 import "./styles.css";
+import type { ApiClient } from "@bittery/api-contract";
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";
 import { ApiProvider } from "@bittery/shared/api";
-import type { AppApiClient } from "@bittery/shared/api-client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { AccountProvider } from "./contexts/account-context";
+import {
+	AccountProvider,
+	createDesktopClientRuntime,
+} from "./contexts/account-context";
 import {
 	initCreateItemIntentBridge,
 	peekViewItemIntent,
@@ -22,12 +26,12 @@ import { ThemeSync } from "./providers/theme-sync";
 import { routeTree } from "./routeTree.gen";
 
 // Create a new router instance
-function createDesktopRouter(apiClient: AppApiClient) {
+function createDesktopRouter(apiClient: ApiClient, runtime: ClientRuntime) {
 	return createRouter({
 		routeTree,
 		scrollRestoration: true,
 		defaultPreloadStaleTime: 0,
-		context: { apiClient, queryClient },
+		context: { apiClient, queryClient, runtime },
 	});
 }
 
@@ -45,7 +49,9 @@ async function initializeApp() {
 	// Initialize storage adapter (loads Tauri plugins)
 	await initializeStorage();
 	const apiClient = await createDesktopApiClient();
-	router = createDesktopRouter(apiClient);
+	const runtime = createDesktopClientRuntime(queryClient);
+	await runtime.accounts.initialize();
+	router = createDesktopRouter(apiClient, runtime);
 	await setupMacOSResetMenu();
 	await initCreateItemIntentBridge(() => {
 		const viewIntent = peekViewItemIntent();
@@ -71,7 +77,7 @@ async function initializeApp() {
 				<I18nProvider>
 					<QueryClientProvider client={queryClient}>
 						<ApiProvider apiClient={apiClient}>
-							<AccountProvider router={router}>
+							<AccountProvider router={router} runtime={runtime}>
 								<DesktopSyncProvider queryClient={queryClient}>
 									<DesktopPlatformProvider>
 										<RouterProvider router={router} />

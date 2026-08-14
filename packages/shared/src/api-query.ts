@@ -1,4 +1,4 @@
-import type { AppApiClient } from "./api-client";
+import type { ApiClient } from "@bittery/api-contract";
 
 export const apiQueryKeys = {
 	auth: {
@@ -58,93 +58,93 @@ export const apiQueryKeys = {
 
 export const apiQueries = {
 	auth: {
-		registrationStatus: (api: AppApiClient) => ({
+		registrationStatus: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.auth.registrationStatus,
 			queryFn: async () => (await api.auth.registrationStatus()).data,
 		}),
-		me: (api: AppApiClient) => ({
+		me: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.auth.me,
 			queryFn: async () => (await api.auth.me()).data,
 		}),
-		sessions: (api: AppApiClient) => ({
+		sessions: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.auth.sessions,
 			queryFn: async () => (await api.auth.sessions.list()).data,
 		}),
 	},
 	vaults: {
-		list: (api: AppApiClient) => ({
+		list: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.vaults.list,
 			queryFn: async () => (await api.vaults.list()).data,
 		}),
-		stats: (api: AppApiClient) => ({
+		stats: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.vaults.stats,
 			queryFn: async () => (await api.vaults.stats()).data,
 		}),
-		members: (api: AppApiClient, vaultId: string) => ({
+		members: (api: ApiClient, vaultId: string) => ({
 			queryKey: apiQueryKeys.vaults.members(vaultId),
 			queryFn: async () => (await api.vaults.members.list(vaultId)).data,
 		}),
-		availableMembers: (api: AppApiClient, vaultId: string) => ({
+		availableMembers: (api: ApiClient, vaultId: string) => ({
 			queryKey: apiQueryKeys.vaults.availableMembers(vaultId),
 			queryFn: async () =>
 				(await api.teams.availableMembersForVault(vaultId)).data,
 		}),
 	},
 	teams: {
-		current: (api: AppApiClient) => ({
+		current: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.teams.current,
 			queryFn: async () => (await api.teams.current()).data,
 		}),
-		details: (api: AppApiClient, teamId: string) => ({
+		details: (api: ApiClient, teamId: string) => ({
 			queryKey: apiQueryKeys.teams.details(teamId),
 			queryFn: async () => (await api.teams.get(teamId)).data,
 		}),
-		members: (api: AppApiClient, teamId: string) => ({
+		members: (api: ApiClient, teamId: string) => ({
 			queryKey: apiQueryKeys.teams.members(teamId),
 			queryFn: async () => (await api.teams.members.list(teamId)).data,
 		}),
-		invitations: (api: AppApiClient, teamId: string) => ({
+		invitations: (api: ApiClient, teamId: string) => ({
 			queryKey: apiQueryKeys.teams.invitations(teamId),
 			queryFn: async () => (await api.teams.invitations.list(teamId)).data,
 		}),
-		pendingInvitations: (api: AppApiClient) => ({
+		pendingInvitations: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.teams.pendingInvitations,
 			queryFn: async () => (await api.teams.invitations.mine()).data,
 		}),
-		vaults: (api: AppApiClient, teamId: string) => ({
+		vaults: (api: ApiClient, teamId: string) => ({
 			queryKey: apiQueryKeys.teams.vaults(teamId),
 			queryFn: async () => (await api.teams.vaults(teamId)).data,
 		}),
-		memberAccess: (api: AppApiClient, teamId: string, userId: string) => ({
+		memberAccess: (api: ApiClient, teamId: string, userId: string) => ({
 			queryKey: apiQueryKeys.teams.memberAccess(teamId, userId),
 			queryFn: async () =>
 				(await api.teams.members.access(teamId, userId)).data,
 		}),
 	},
 	billing: {
-		entitlements: (api: AppApiClient) => ({
+		entitlements: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.billing.entitlements,
 			queryFn: async () => (await api.billing.entitlements()).data,
 		}),
-		status: (api: AppApiClient) => ({
+		status: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.billing.status,
 			queryFn: async () => (await api.billing.status()).data,
 		}),
-		attachmentUsage: (api: AppApiClient) => ({
+		attachmentUsage: (api: ApiClient) => ({
 			queryKey: apiQueryKeys.billing.attachmentUsage,
 			queryFn: async () => (await api.billing.attachmentUsage()).data,
 		}),
 	},
 	shares: {
-		list: (api: AppApiClient, itemId: string) => ({
+		list: (api: ApiClient, itemId: string) => ({
 			queryKey: apiQueryKeys.shares.list(itemId),
 			queryFn: async () => (await api.share.list(itemId)).data,
 		}),
-		accessLogs: (api: AppApiClient, linkId: string) => ({
+		accessLogs: (api: ApiClient, linkId: string) => ({
 			queryKey: apiQueryKeys.shares.accessLogs(linkId),
 			queryFn: async () => (await api.share.accessLogs(linkId)).data,
 		}),
-		public: (api: AppApiClient, token: string) => ({
+		public: (api: ApiClient, token: string) => ({
 			queryKey: apiQueryKeys.shares.public(token),
 			queryFn: async () => (await api.share.public(token)).data,
 		}),

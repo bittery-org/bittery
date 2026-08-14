@@ -106,7 +106,10 @@ import {
 	type ApiFetch,
 	type ApiHttpMethod,
 	type ApiRequestOrigin,
+	type ApiTransportData,
+	type ApiTransportPath,
 	type ApiTransportRequest,
+	type ApiTransportRequestArguments,
 	createApiTransport,
 	type InsecureTransportAuthorizer,
 	type InsecureTransportPolicy,
@@ -542,6 +545,19 @@ function writeHeaders(
 	return headers;
 }
 
+function writeHeaderParams(options: ApiWriteOptions | undefined): {
+	header: { "If-Match": string; "Idempotency-Key"?: string };
+} {
+	return {
+		header: {
+			"If-Match": options?.etag as string,
+			...(options?.idempotencyKey
+				? { "Idempotency-Key": options.idempotencyKey }
+				: {}),
+		},
+	};
+}
+
 function validateLoginAttempt(value: unknown): LoginAttempt {
 	const attempt = object(value, "/loginAttempt");
 	string(attempt.attemptId, "/loginAttempt/attemptId");
@@ -724,12 +740,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		onSessionRefreshRequired: options.onSessionRefreshRequired,
 	});
 
-	async function call<T>(
-		method: ApiHttpMethod,
-		path: string,
-		request?: ApiTransportRequest,
-	): Promise<ApiResult<T>> {
-		const result = await transport.request<T>(method, path, request);
+	async function call<
+		Method extends ApiHttpMethod,
+		Path extends ApiTransportPath<Method>,
+	>(
+		method: Method,
+		path: Path,
+		...request: ApiTransportRequestArguments<Method, Path>
+	): Promise<ApiResult<ApiTransportData<Method, Path>>> {
+		const result = await transport.request(method, path, ...request);
 		return {
 			data: result.data,
 			etag: result.etag,
@@ -737,27 +756,53 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
-	async function drainPages<T>(
-		path: string,
-		request?: ApiTransportRequest,
-	): Promise<ApiResult<readonly T[]>> {
+	type PaginatedPath = {
+		[Path in ApiTransportPath<"GET">]: ApiTransportData<"GET", Path> extends {
+			items: readonly unknown[];
+			hasMore: boolean;
+			nextCursor?: string | null;
+		}
+			? Path
+			: never;
+	}[ApiTransportPath<"GET">];
+	type PageItem<Path extends PaginatedPath> =
+		ApiTransportData<"GET", Path> extends { items: readonly (infer Item)[] }
+			? Item
+			: never;
+	type Page<Path extends PaginatedPath> = {
+		items: readonly PageItem<Path>[];
+		hasMore: boolean;
+		nextCursor?: string | null;
+	};
+
+	async function drainPages<Path extends PaginatedPath>(
+		path: Path,
+		...requestArguments: ApiTransportRequestArguments<"GET", Path>
+	): Promise<ApiResult<readonly PageItem<Path>[]>> {
+		const request = requestArguments[0];
 		const query = (request?.params?.query ?? {}) as Record<string, unknown>;
 		let cursor = typeof query.cursor === "string" ? query.cursor : undefined;
-		let latest: ApiResult<ApiPage<T>> | undefined;
-		const items: T[] = [];
+		let latest: ApiResult<ApiTransportData<"GET", Path>> | undefined;
+		const items: PageItem<Path>[] = [];
 		const seenCursors = new Set<string>();
 
 		do {
-			latest = await call<ApiPage<T>>("GET", path, {
+			const pageRequest = {
 				...request,
 				params: {
 					...request?.params,
 					query: { ...query, cursor },
 				},
-			});
-			items.push(...latest.data.items);
-			const nextCursor = latest.data.nextCursor ?? undefined;
-			if (latest.data.hasMore && !nextCursor) {
+			} as Exclude<ApiTransportRequest<"GET", Path>, undefined>;
+			latest = await call(
+				"GET",
+				path,
+				...([pageRequest] as ApiTransportRequestArguments<"GET", Path>),
+			);
+			const page = latest.data as Page<Path>;
+			items.push(...(page.items as readonly PageItem<Path>[]));
+			const nextCursor = page.nextCursor ?? undefined;
+			if (page.hasMore && !nextCursor) {
 				throw new TypeError(`${path} returned hasMore without a nextCursor.`);
 			}
 			if (nextCursor && seenCursors.has(nextCursor)) {
@@ -766,7 +811,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			if (nextCursor) {
 				seenCursors.add(nextCursor);
 			}
-			cursor = latest.data.hasMore ? nextCursor : undefined;
+			cursor = page.hasMore ? nextCursor : undefined;
 		} while (cursor);
 
 		return {
@@ -799,18 +844,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				);
 			}
 			seenCursors.add(cursor);
-			latest = await call<ApiPage<AuthVaultKey>>(
-				"GET",
-				"/api/v1/users/me/vault-keys",
-				{
-					headers: new Headers({
-						...Object.fromEntries(requestOriginHeaders(requestOrigin)),
-						Authorization: `Bearer ${accessToken}`,
-					}),
-					params: { query: { cursor } },
-				},
-			);
-			const page = validateVaultKeyPage(latest.data, "/users/me/vault-keys");
+			const wirePage = await call("GET", "/api/v1/users/me/vault-keys", {
+				headers: new Headers({
+					...Object.fromEntries(requestOriginHeaders(requestOrigin)),
+					Authorization: `Bearer ${accessToken}`,
+				}),
+				params: { query: { cursor } },
+			});
+			latest = wirePage;
+			const page = validateVaultKeyPage(wirePage.data, "/users/me/vault-keys");
 			items.push(...page.items);
 			cursor = page.hasMore ? (page.nextCursor ?? undefined) : undefined;
 			if (page.hasMore && !cursor) {
@@ -830,14 +872,16 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		attachments?: readonly Attachment[] | null;
 	};
 
-	async function drainActiveItems(
-		path: string,
-		request?: ApiTransportRequest,
+	type ActiveItemsPath = "/api/v1/items" | "/api/v1/vaults/{vaultId}/items";
+	async function drainActiveItems<Path extends ActiveItemsPath>(
+		path: Path,
+		...request: ApiTransportRequestArguments<"GET", Path>
 	): Promise<ApiResult<readonly VaultItem[]>> {
-		const result = await drainPages<WireActiveItem>(path, request);
+		const result = await drainPages(path, ...request);
+		const items = result.data as readonly WireActiveItem[];
 		return {
 			...result,
-			data: result.data.map((item, index) => {
+			data: items.map((item, index) => {
 				if (!Array.isArray(item.attachments)) {
 					throw new TypeError(
 						`${path}/items/${index}/attachments must be an array for an active item.`,
@@ -868,15 +912,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			checkEmail: (input) =>
 				call("POST", "/api/v1/auth/email-checks", { body: input }),
 			async startLogin(input) {
-				const result = await call<unknown>(
-					"POST",
-					"/api/v1/auth/login-attempts",
-					{ body: input },
-				);
+				const result = await call("POST", "/api/v1/auth/login-attempts", {
+					body: input,
+				});
 				return { ...result, data: validateLoginAttempt(result.data) };
 			},
 			async finishLogin(attemptId, input) {
-				const result = await call<unknown>(
+				const result = await call(
 					"POST",
 					"/api/v1/auth/login-attempts/{attemptId}/finish",
 					{ params: { path: { attemptId } }, body: input },
@@ -904,7 +946,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					body: input,
 				}),
 			async signUp(input, requestOrigin) {
-				const result = await call<unknown>("POST", "/api/v1/auth/signups", {
+				const result = await call("POST", "/api/v1/auth/signups", {
 					body: input,
 				});
 				const signup = object(result.data, "/signup");
@@ -951,7 +993,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			sessions: {
 				async list() {
-					const result = await drainPages<unknown>("/api/v1/sessions");
+					const result = await drainPages("/api/v1/sessions");
 					return { ...result, data: validateSessions(result.data) };
 				},
 				refresh: () => call("POST", "/api/v1/sessions/current/refresh"),
@@ -967,7 +1009,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 		},
 		vaults: {
-			list: () => drainPages<Vault>("/api/v1/vaults"),
+			list: () => drainPages("/api/v1/vaults"),
 			get: (vaultId) =>
 				call("GET", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },
@@ -990,7 +1032,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					headers: writeHeaders(write),
 				}),
 			async stats() {
-				const result = await call<unknown>("GET", "/api/v1/vault-stats");
+				const result = await call("GET", "/api/v1/vault-stats");
 				return { ...result, data: validateVaultStats(result.data) };
 			},
 			createImageUpload: (vaultId, input) =>
@@ -1033,7 +1075,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 						},
 					),
 				list: (vaultId) =>
-					drainPages<VaultMember>("/api/v1/vaults/{vaultId}/members", {
+					drainPages("/api/v1/vaults/{vaultId}/members", {
 						params: { path: { vaultId } },
 					}),
 				add: (vaultId, userId, input, write) =>
@@ -1052,13 +1094,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		items: {
 			list: () => drainActiveItems("/api/v1/items"),
-			listTrashed: () => drainPages<DeletedVaultItem>("/api/v1/items/trashed"),
+			listTrashed: () => drainPages("/api/v1/items/trashed"),
 			listInVault: (vaultId, page) =>
 				drainActiveItems("/api/v1/vaults/{vaultId}/items", {
 					params: { path: { vaultId }, query: page },
 				}),
 			listTrashedInVault: (vaultId, page) =>
-				drainPages<DeletedVaultItem>("/api/v1/vaults/{vaultId}/items/trashed", {
+				drainPages("/api/v1/vaults/{vaultId}/items/trashed", {
 					params: { path: { vaultId }, query: page },
 				}),
 			get: (itemId) =>
@@ -1071,41 +1113,41 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			update: (itemId, input, write) =>
 				call("PATCH", "/api/v1/items/{itemId}", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			setFavorite: (itemId, input, write) =>
 				call("PATCH", "/api/v1/items/{itemId}/favorite", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			move: (itemId, input, write) =>
 				call("POST", "/api/v1/items/{itemId}/moves", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			trash: (itemId, write) =>
 				call("DELETE", "/api/v1/items/{itemId}", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 			deletePermanently: (itemId, write) =>
 				call("DELETE", "/api/v1/items/{itemId}/permanent", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 			restore: (itemId, write) =>
 				call("POST", "/api/v1/items/{itemId}/restore", {
-					params: { path: { itemId } },
+					params: { path: { itemId }, ...writeHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 		},
 		attachments: {
 			list: (itemId) =>
-				drainPages<Attachment>("/api/v1/items/{itemId}/attachments", {
+				drainPages("/api/v1/items/{itemId}/attachments", {
 					params: { path: { itemId } },
 				}),
 			create: (itemId, input, write) =>
@@ -1176,13 +1218,12 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					body: input,
 				}),
 			availableMembersForVault: (vaultId) =>
-				drainPages<AvailableTeamMember>(
-					"/api/v1/vaults/{vaultId}/available-team-members",
-					{ params: { path: { vaultId } } },
-				),
+				drainPages("/api/v1/vaults/{vaultId}/available-team-members", {
+					params: { path: { vaultId } },
+				}),
 			invitations: {
 				list: (teamId) =>
-					drainPages<TeamInvitation>("/api/v1/teams/{teamId}/invitations", {
+					drainPages("/api/v1/teams/{teamId}/invitations", {
 						params: { path: { teamId } },
 					}),
 				send: (teamId, input) =>
@@ -1203,10 +1244,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 							params: { path: { teamId, invitationId } },
 						},
 					),
-				mine: () =>
-					drainPages<PendingTeamInvitation>(
-						"/api/v1/users/me/team-invitations",
-					),
+				mine: () => drainPages("/api/v1/users/me/team-invitations"),
 				acceptMine: (invitationId) =>
 					call(
 						"POST",
@@ -1261,7 +1299,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 						},
 					),
 				list: (teamId) =>
-					drainPages<TeamMember>("/api/v1/teams/{teamId}/members", {
+					drainPages("/api/v1/teams/{teamId}/members", {
 						params: { path: { teamId } },
 					}),
 				access: (teamId, userId) =>
@@ -1270,7 +1308,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					}),
 			},
 			vaults: (teamId) =>
-				drainPages<TeamVault>("/api/v1/teams/{teamId}/vaults", {
+				drainPages("/api/v1/teams/{teamId}/vaults", {
 					params: { path: { teamId } },
 				}),
 		},
@@ -1301,13 +1339,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		sync: {
 			async bootstrap(page) {
-				const result = await call<unknown>("GET", "/api/v1/sync/bootstrap", {
+				const result = await call("GET", "/api/v1/sync/bootstrap", {
 					params: { query: page },
 				});
 				return { ...result, data: validateBootstrap(result.data) };
 			},
 			async changes(input) {
-				const result = await call<unknown>("GET", "/api/v1/sync/changes", {
+				const result = await call("GET", "/api/v1/sync/changes", {
 					params: { query: input },
 				});
 				return { ...result, data: validateSyncChanges(result.data) };
@@ -1329,12 +1367,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					params: { path: { linkId } },
 				}),
 			accessLogs: (linkId) =>
-				drainPages<Final.ShareAccessLog>(
-					"/api/v1/share-links/{linkId}/access-logs",
-					{
-						params: { path: { linkId } },
-					},
-				),
+				drainPages("/api/v1/share-links/{linkId}/access-logs", {
+					params: { path: { linkId } },
+				}),
 			public: (token) =>
 				call("GET", "/api/v1/public/share-links/{token}", {
 					params: { path: { token } },
@@ -1356,18 +1391,12 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		billing: {
 			async entitlements() {
-				const result = await call<unknown>(
-					"GET",
-					"/api/v1/billing/entitlements",
-				);
+				const result = await call("GET", "/api/v1/billing/entitlements");
 				return { ...result, data: validateBillingEntitlements(result.data) };
 			},
 			status: () => call("GET", "/api/v1/billing/status"),
 			async attachmentUsage() {
-				const result = await call<unknown>(
-					"GET",
-					"/api/v1/billing/attachment-usage",
-				);
+				const result = await call("GET", "/api/v1/billing/attachment-usage");
 				return { ...result, data: validateAttachmentUsage(result.data) };
 			},
 			checkout: (input) =>

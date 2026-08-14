@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::{
-    http::api::{error::ApiError, error_code::ErrorCode},
+    http::api::error::ApiError,
     services::connection_registry::{resolve_connection_limit, ConnectionGuard},
     services::session::VerifiedSession,
     services::session_control::load_session_revocation,
@@ -37,13 +37,7 @@ pub(crate) async fn sync_events(
     let Some(Extension(session)) = session else {
         return ApiError::unauthorized("A valid bearer session is required.").into_response();
     };
-    let Some(ref pool) = state.db_pool else {
-        return ApiError::service_unavailable(
-            ErrorCode::ServiceUnavailable,
-            "Sync is temporarily unavailable.",
-        )
-        .into_response();
-    };
+    let pool = &state.db_pool;
 
     // Determine device identity for connection tracking
     let device_id = session
@@ -260,12 +254,10 @@ mod tests {
         body::to_bytes,
         extract::State,
         http::{header::CONTENT_TYPE, StatusCode},
-        Extension,
     };
     use serde_json::Value;
-    use time::OffsetDateTime;
 
-    use crate::{services::session::VerifiedSession, AppState};
+    use crate::AppState;
 
     use super::sync_events;
 
@@ -295,30 +287,8 @@ mod tests {
 
     #[tokio::test]
     async fn missing_session_uses_problem_details() {
-        let response = sync_events(State(AppState::default()), None).await;
+        let response = sync_events(State(AppState::database_free_test()), None).await;
 
         assert_problem(response, StatusCode::UNAUTHORIZED, "UNAUTHORIZED").await;
-    }
-
-    #[tokio::test]
-    async fn unavailable_sync_service_uses_retryable_problem_details() {
-        let session = VerifiedSession {
-            token: "test-token".to_string(),
-            session_id: "test-session".to_string(),
-            user_id: "test-user".to_string(),
-            expires_at: OffsetDateTime::now_utc(),
-            platform: "test".to_string(),
-            client_id: None,
-        };
-
-        let response = sync_events(State(AppState::default()), Some(Extension(session))).await;
-
-        assert_eq!(response.headers().get("retry-after").unwrap(), "1");
-        assert_problem(
-            response,
-            StatusCode::SERVICE_UNAVAILABLE,
-            "SERVICE_UNAVAILABLE",
-        )
-        .await;
     }
 }

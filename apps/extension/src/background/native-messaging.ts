@@ -18,7 +18,7 @@ import {
 	STALE_DESKTOP_UNLOCK_RESPONSE,
 } from "./biometric-transfer";
 import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
-import { desktopSync } from "./desktop-sync";
+import { getDesktopSync } from "./desktop-sync";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
 import { sendNativeMessage } from "./native-messaging-client";
@@ -220,7 +220,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		// Check if desktop is available and unlocked
-		const desktopStatus = desktopSync.getLastStatus();
+		const desktopStatus = getDesktopSync().getLastStatus();
 		const desktopAvailable = desktopStatus?.available;
 		const desktopLocked = desktopStatus?.locked ?? true;
 		const desktopUnlockedAccounts = desktopStatus?.unlockedAccounts ?? [];

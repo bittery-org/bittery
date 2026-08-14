@@ -1,5 +1,7 @@
+import type { ItemCommands } from "@bittery/core/services/item-commands";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
-import { core } from "./core-instance";
+
+export type ExtensionItemCommands = Pick<ItemCommands, "execute">;
 
 interface CreateItemInput {
 	vaultId: string;
@@ -17,8 +19,9 @@ interface UpdateItemInput {
 /** Background callers share the same semantic command application service as UI hooks. */
 export async function createExtensionItem(
 	input: CreateItemInput,
+	itemCommands: ExtensionItemCommands,
 ): Promise<{ itemId: string }> {
-	const result = await core.itemCommands.execute({
+	const result = await itemCommands.execute({
 		type: "create",
 		vaultId: input.vaultId,
 		category: input.category,
@@ -33,8 +36,9 @@ export async function createExtensionItem(
 
 export async function updateExtensionItem(
 	input: UpdateItemInput,
+	itemCommands: ExtensionItemCommands,
 ): Promise<void> {
-	await core.itemCommands.execute({
+	await itemCommands.execute({
 		type: "update",
 		itemId: input.itemId,
 		data: input.data,

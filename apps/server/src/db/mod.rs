@@ -34,6 +34,23 @@ pub async fn connect_from_env() -> Result<Option<PgPool>, sqlx::Error> {
     }
 }
 
+pub fn database_url_from_env() -> Result<String, &'static str> {
+    required_database_url(env::var("DATABASE_URL").ok())
+}
+
+fn required_database_url(value: Option<String>) -> Result<String, &'static str> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_owned())
+        .ok_or("DATABASE_URL is required")
+}
+
+pub async fn connect_required_from_env() -> Result<PgPool, Box<dyn std::error::Error + Send + Sync>>
+{
+    let database_url = database_url_from_env().map_err(std::io::Error::other)?;
+    Ok(connect(&database_url).await?)
+}
+
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrator = Migrator::new(resolve_migrations_dir()).await?;
     migrator.run(pool).await
@@ -48,4 +65,22 @@ fn resolve_migrations_dir() -> PathBuf {
     }
 
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::required_database_url;
+
+    #[test]
+    fn required_database_url_rejects_missing_or_blank_values_and_normalizes_valid_ones() {
+        assert_eq!(required_database_url(None), Err("DATABASE_URL is required"));
+        assert_eq!(
+            required_database_url(Some("  ".to_string())),
+            Err("DATABASE_URL is required")
+        );
+        assert_eq!(
+            required_database_url(Some(" postgres://localhost/bittery ".to_string())),
+            Ok("postgres://localhost/bittery".to_string())
+        );
+    }
 }

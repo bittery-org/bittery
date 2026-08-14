@@ -8,7 +8,6 @@ use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     db::enums::ShareLinkAccessMode,
     services::share,
     shapes::{
@@ -269,7 +268,7 @@ async fn list_share_links(
 ) -> Result<Json<ShareLinkListResponse>, ApiError> {
     Ok(Json(
         share::list_share_links_by_item(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             share::ItemIdInput { item_id },
         )
@@ -285,7 +284,7 @@ async fn revoke_share_link(
     Path(link_id): Path<String>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let response = share::revoke_share_link(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         share::LinkIdInput { link_id },
     )
@@ -311,7 +310,7 @@ async fn access_logs(
     .map(|key| timestamp_cursor_key(&key))
     .transpose()?;
     let values = share::get_share_access_logs(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         share::LinkIdInput {
             link_id: link_id.clone(),
@@ -337,7 +336,7 @@ async fn public_info(
     Path(token): Path<ShareToken>,
 ) -> Result<Json<PublicShareInfoResponse>, ApiError> {
     Ok(Json(
-        share::get_public_info(db_pool(&state)?, share::PublicTokenInput { token: token.0 })
+        share::get_public_info(&state.db_pool, share::PublicTokenInput { token: token.0 })
             .await?
             .into(),
     ))
@@ -349,7 +348,7 @@ async fn access_public(
     Path(token): Path<ShareToken>,
 ) -> Result<Json<PublicShareAccessResponse>, ApiError> {
     Ok(Json(
-        share::access_public(db_pool(&state)?, share::PublicTokenInput { token: token.0 })
+        share::access_public(&state.db_pool, share::PublicTokenInput { token: token.0 })
             .await?
             .into(),
     ))

@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { routeRuntimeMessage } from "../../src/background/router";
+import type { BackgroundRouteServices } from "../../src/background/router/types";
 
 const originalChrome = globalThis.chrome;
+const routeServices = {
+	runtime: {},
+	desktopSync: {},
+	itemCommands: { execute: async () => ({}) },
+} as unknown as BackgroundRouteServices;
 
 function createMockStorageArea(store: Record<string, unknown>) {
 	return {
@@ -63,6 +69,7 @@ describe("message-router passkey dispatch", () => {
 					selectedCredentialId: "cred_1",
 				},
 			},
+			routeServices,
 			{
 				handlePasskeyGet: async (payload) => {
 					receivedPayload = payload;
@@ -91,9 +98,10 @@ describe("message-router passkey dispatch", () => {
 	});
 
 	test("returns unknown message error for unsupported runtime types", async () => {
-		const response = (await routeRuntimeMessage({
-			type: "UNSUPPORTED_MESSAGE",
-		})) as { success: boolean; error: string };
+		const response = (await routeRuntimeMessage(
+			{ type: "UNSUPPORTED_MESSAGE" },
+			routeServices,
+		)) as { success: boolean; error: string };
 
 		expect(response.success).toBe(false);
 		expect(response.error).toBe("Unknown message type");
@@ -117,27 +125,29 @@ describe("message-router passkey dispatch", () => {
 		};
 
 		expect(
-			await routeRuntimeMessage({
-				type: "SET_PENDING_SAVE_PROMPT",
-				payload,
-			}),
+			await routeRuntimeMessage(
+				{ type: "SET_PENDING_SAVE_PROMPT", payload },
+				routeServices,
+			),
 		).toEqual({ success: true });
 		expect(Object.values(sessionStore)).toEqual([payload]);
 		expect(localStore).toEqual({});
 
 		expect(
-			await routeRuntimeMessage({
-				type: "GET_PENDING_SAVE_PROMPT",
-			}),
+			await routeRuntimeMessage(
+				{ type: "GET_PENDING_SAVE_PROMPT" },
+				routeServices,
+			),
 		).toEqual({
 			success: true,
 			data: payload,
 		});
 
 		expect(
-			await routeRuntimeMessage({
-				type: "CLEAR_PENDING_SAVE_PROMPT",
-			}),
+			await routeRuntimeMessage(
+				{ type: "CLEAR_PENDING_SAVE_PROMPT" },
+				routeServices,
+			),
 		).toEqual({ success: true });
 		expect(sessionStore).toEqual({});
 	});
@@ -161,6 +171,7 @@ describe("message-router passkey dispatch", () => {
 						},
 					},
 				},
+				routeServices,
 				{
 					handlePasskeyCreate: async () => {
 						throw new Error("forced handler failure");

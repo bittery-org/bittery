@@ -15,6 +15,7 @@
 		"test:e2e:debug": "playwright test --debug"
 	},
 	"dependencies": {
+		"@bittery/api-contract": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/crypto-port": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*",

@@ -1,5 +1,4 @@
 import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { getBiometricUnlockAvailability } from "@bittery/core/services/auth-service";
 import { unlockAllWithBiometric } from "@bittery/core/services/unlock";
 import {
@@ -22,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
+import { useDesktopAccountRuntime } from "@/contexts/account-context";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
@@ -50,6 +50,7 @@ export function UnlockPage() {
 	const navigate = useNavigate();
 	const { accounts, isInitialized } = useAccountSwitcher();
 	const queryClient = useQueryClient();
+	const { manager } = useDesktopAccountRuntime();
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
@@ -114,14 +115,14 @@ export function UnlockPage() {
 				failedCount: result.failed.length,
 			});
 
-			await peekAccountSessionManager()?.refresh();
+			await manager.refresh();
 			triggerAuthRevealToVault();
 		},
 		onPartialSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));
-			await peekAccountSessionManager()?.refresh();
+			await manager.refresh();
 			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
@@ -156,9 +157,9 @@ export function UnlockPage() {
 			biometric: true,
 		});
 
-		await peekAccountSessionManager()?.refresh();
+		await manager.refresh();
 		triggerAuthRevealToVault();
-	}, [m, queryClient, showUnlockToast]);
+	}, [m, manager, queryClient, showUnlockToast]);
 
 	const handleBiometricUnlockAll = async () => {
 		try {

@@ -59,6 +59,38 @@ function startRuntime(
 }
 
 describe("AccountVaultRuntime", () => {
+	it("ignores initialization from a disposed lifetime after restart", async () => {
+		const source = new Source();
+		const first = deferred();
+		const second = deferred();
+		let initialization = 0;
+		source.initializeLocalVaultState = () =>
+			initialization++ === 0 ? first.promise : second.promise;
+		let hydrations = 0;
+		const repository = {
+			setLocalActiveAccounts: () => {},
+			hydrateLocalAccounts: async () => {
+				hydrations++;
+			},
+		} as unknown as VaultRepository;
+		const runtime = new AccountVaultRuntime(source, repository);
+
+		runtime.start();
+		runtime.dispose();
+		runtime.start();
+		first.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(hydrations).toBe(0);
+		expect(runtime.getSnapshot().revision).toBe(0);
+
+		second.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(hydrations).toBe(1);
+		expect(runtime.getSnapshot().revision).toBe(2);
+	});
+
 	it("ignores a late local initialization failure after a successful retry", async () => {
 		const source = new Source();
 		const initialization = deferred();

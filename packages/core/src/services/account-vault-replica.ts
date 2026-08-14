@@ -1,5 +1,5 @@
+import type { ApiClient } from "@bittery/api-contract";
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
-import type { AppApiClient } from "@bittery/shared/api-client";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type {
 	EncryptedItemPayload,
@@ -67,7 +67,7 @@ export interface VaultRepositoryItem extends DecryptedItem {
  */
 export type EncryptedPayload = EncryptedItemPayload;
 
-type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
+type BootstrapRequest = Parameters<ApiClient["sync"]["bootstrap"]>[0];
 
 interface BootstrapItemPage {
 	/**

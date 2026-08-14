@@ -5,7 +5,7 @@ import {
 	type ImportProvider,
 	type ImportProviderId,
 	type ImportWarning,
-} from "@bittery/shared";
+} from "@bittery/shared/import";
 import {
 	Badge,
 	Button,

@@ -1,9 +1,9 @@
 import {
+	type ApiClient,
 	ApiError,
-	type AppApiClient,
 	isApiErrorStatus,
 	isApiTransportError,
-} from "@bittery/shared/api-client";
+} from "@bittery/api-contract";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import type {
 	CachedEncryptedItem,
@@ -25,7 +25,7 @@ export interface TempIdMapping {
 export type ItemCommandAcknowledgement = ItemSyncAcknowledgement;
 export type { ItemSyncReconciler };
 
-export type OutboundQueueApiClient = Pick<AppApiClient, "items">;
+export type OutboundQueueApiClient = Pick<ApiClient, "items">;
 
 const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 

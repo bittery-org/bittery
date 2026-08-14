@@ -13,8 +13,10 @@ import {
 	classifyCredentialError,
 } from "./credential-error";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
+import type { DesktopSyncService } from "./desktop-sync";
 import {
 	createExtensionItem,
+	type ExtensionItemCommands,
 	updateExtensionItem,
 } from "./extension-item-mutations";
 import type {
@@ -53,11 +55,14 @@ function describeCredentialError(
 /**
  * Handle CHECK_EXISTING_CREDENTIALS message - Check if credentials already exist for URL/username
  */
-export async function handleCheckExistingCredentials(payload: {
-	url: string;
-	username?: string;
-	password?: string;
-}): Promise<CheckExistingCredentialsResponse> {
+export async function handleCheckExistingCredentials(
+	payload: {
+		url: string;
+		username?: string;
+		password?: string;
+	},
+	runtime: ClientRuntime,
+): Promise<CheckExistingCredentialsResponse> {
 	updateActivity();
 
 	const { url, username, password } = payload;
@@ -77,7 +82,7 @@ export async function handleCheckExistingCredentials(payload: {
 		};
 	}
 
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	const resolvedItems = items.filter(
 		(item): item is NonNullable<(typeof items)[number]> => item !== null,
 	);
@@ -120,6 +125,8 @@ export async function handleCheckExistingCredentials(payload: {
  */
 export async function handleSaveNewCredential(
 	payload: CredentialCapture,
+	desktopSync: Pick<DesktopSyncService, "getLastStatus">,
+	itemCommands: ExtensionItemCommands,
 ): Promise<SaveNewCredentialResponse> {
 	updateActivity();
 
@@ -142,7 +149,7 @@ export async function handleSaveNewCredential(
 	}
 
 	try {
-		const accountId = await resolveAccountIdForVault(vaultId);
+		const accountId = await resolveAccountIdForVault(vaultId, desktopSync);
 		if (!accountId) {
 			return {
 				success: false,
@@ -162,17 +169,20 @@ export async function handleSaveNewCredential(
 		}
 		const hostname = extractHostname(url);
 
-		const result = await createExtensionItem({
-			vaultId,
-			category: "login",
-			data: {
-				title: hostname,
-				url,
-				username,
-				password,
+		const result = await createExtensionItem(
+			{
+				vaultId,
+				category: "login",
+				data: {
+					title: hostname,
+					url,
+					username,
+					password,
+				},
+				accountId,
 			},
-			accountId,
-		});
+			itemCommands,
+		);
 
 		return { success: true, itemId: result.itemId };
 	} catch (error) {
@@ -195,6 +205,7 @@ export async function handleSaveNewCredential(
  */
 export async function handleUpdateExistingCredential(
 	payload: CredentialCapture & { itemId: string },
+	itemCommands: ExtensionItemCommands,
 ): Promise<UpdateExistingCredentialResponse> {
 	updateActivity();
 
@@ -236,16 +247,19 @@ export async function handleUpdateExistingCredential(
 			};
 		}
 		const hostname = extractHostname(url);
-		await updateExtensionItem({
-			itemId,
-			data: {
-				title: hostname,
-				url,
-				username,
-				password,
+		await updateExtensionItem(
+			{
+				itemId,
+				data: {
+					title: hostname,
+					url,
+					username,
+					password,
+				},
+				accountId,
 			},
-			accountId,
-		});
+			itemCommands,
+		);
 
 		return { success: true };
 	} catch (error) {
@@ -262,3 +276,5 @@ export async function handleUpdateExistingCredential(
 		};
 	}
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";

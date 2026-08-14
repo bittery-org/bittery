@@ -32,6 +32,7 @@ import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { getDesktopStatus, isDesktopUnlockedNow } from "./desktop-status";
 import {
 	createExtensionItem,
+	type ExtensionItemCommands,
 	updateExtensionItem,
 } from "./extension-item-mutations";
 import {
@@ -244,8 +245,10 @@ function compareByMostRecent(
 	return rightTime - leftTime;
 }
 
-async function getLoginItems(): Promise<LoginItemWithAccount[]> {
-	const items = await getDecryptedItemsForCurrentMode();
+async function getLoginItems(
+	runtime: ClientRuntime,
+): Promise<LoginItemWithAccount[]> {
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	return items.filter((item): item is LoginItemWithAccount => {
 		if (item?.category !== "login") {
 			return false;
@@ -533,6 +536,7 @@ export function resolveCreateDecision(input: {
 async function attachPasskeyToExistingItem(input: {
 	item: LoginItemWithAccount;
 	passkey: Passkey;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	const accountId = await resolveItemAccountId(input.item);
 	if (!accountId) {
@@ -546,14 +550,17 @@ async function attachPasskeyToExistingItem(input: {
 	const existingData = toDecryptedData(input.item);
 	const nextPasskeys = [...(existingData.passkeys ?? []), input.passkey];
 
-	await updateExtensionItem({
-		itemId: input.item.id,
-		data: {
-			...existingData,
-			passkeys: nextPasskeys,
+	await updateExtensionItem(
+		{
+			itemId: input.item.id,
+			data: {
+				...existingData,
+				passkeys: nextPasskeys,
+			},
+			accountId,
 		},
-		accountId,
-	});
+		input.itemCommands,
+	);
 }
 
 async function createItemWithPasskey(input: {
@@ -561,6 +568,7 @@ async function createItemWithPasskey(input: {
 	username: string;
 	passkey: Passkey;
 	targetVault: PasskeyWritableVaultOption;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	const hasWriteCapability = await ensureDesktopWriteCapability(
 		input.targetVault.accountId,
@@ -569,17 +577,20 @@ async function createItemWithPasskey(input: {
 		throw new Error("No vault keys available for writable vault");
 	}
 
-	await createExtensionItem({
-		vaultId: input.targetVault.id,
-		category: "login",
-		data: {
-			title: input.rpId,
-			url: `https://${input.rpId}`,
-			username: input.username,
-			passkeys: [input.passkey],
+	await createExtensionItem(
+		{
+			vaultId: input.targetVault.id,
+			category: "login",
+			data: {
+				title: input.rpId,
+				url: `https://${input.rpId}`,
+				username: input.username,
+				passkeys: [input.passkey],
+			},
+			accountId: input.targetVault.accountId,
 		},
-		accountId: input.targetVault.accountId,
-	});
+		input.itemCommands,
+	);
 }
 
 function buildCreateResult(input: {
@@ -679,11 +690,14 @@ export function findMatchingPasskeysForItems(input: {
 	);
 }
 
-async function findMatchingPasskeys(input: {
-	rpId: string;
-	allowCredentials?: SerializedCredentialDescriptor[];
-}): Promise<MatchedPasskey[]> {
-	const items = await getLoginItems();
+async function findMatchingPasskeys(
+	input: {
+		rpId: string;
+		allowCredentials?: SerializedCredentialDescriptor[];
+	},
+	runtime: ClientRuntime,
+): Promise<MatchedPasskey[]> {
+	const items = await getLoginItems(runtime);
 	return findMatchingPasskeysForItems({
 		items,
 		rpId: input.rpId,
@@ -695,6 +709,7 @@ async function updateStoredPasskey(input: {
 	match: MatchedPasskey;
 	update: (current: Passkey) => Passkey;
 	allowBiometricPrompt?: boolean;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	const accountId = await resolveItemAccountId(input.match.item);
 	if (!accountId) {
@@ -715,22 +730,27 @@ async function updateStoredPasskey(input: {
 	}
 	nextPasskeys[input.match.passkeyIndex] = input.update(current);
 
-	await updateExtensionItem({
-		itemId: input.match.item.id,
-		data: {
-			...data,
-			passkeys: nextPasskeys,
+	await updateExtensionItem(
+		{
+			itemId: input.match.item.id,
+			data: {
+				...data,
+				passkeys: nextPasskeys,
+			},
+			accountId,
 		},
-		accountId,
-	});
+		input.itemCommands,
+	);
 }
 
 async function updateAssertionUsage(input: {
 	match: MatchedPasskey;
 	nextSignCount: number;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	const usedAt = new Date().toISOString();
 	await updateStoredPasskey({
+		itemCommands: input.itemCommands,
 		match: input.match,
 		update: (current) => ({
 			...current,
@@ -747,9 +767,11 @@ async function updateAssertionUsage(input: {
 async function markPasskeyAsSuspect(input: {
 	match: MatchedPasskey;
 	reason: NonNullable<Passkey["statusReason"]>;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	const statusUpdatedAt = new Date().toISOString();
 	await updateStoredPasskey({
+		itemCommands: input.itemCommands,
 		match: input.match,
 		update: (current) => ({
 			...current,
@@ -766,9 +788,11 @@ async function markPasskeyAsSuspectSafely(input: {
 	rpId: string;
 	match: MatchedPasskey;
 	reason: NonNullable<Passkey["statusReason"]>;
+	itemCommands: ExtensionItemCommands;
 }): Promise<void> {
 	try {
 		await markPasskeyAsSuspect({
+			itemCommands: input.itemCommands,
 			match: input.match,
 			reason: input.reason,
 		});
@@ -826,6 +850,8 @@ function buildCreatePromptPayload(input: {
 
 export async function handlePasskeyCreate(
 	payload: PasskeyCreateHandlerPayload,
+	runtime: ClientRuntime,
+	itemCommands: ExtensionItemCommands,
 ): Promise<PasskeyHandlerResponse> {
 	updateActivity();
 	logPasskeyEvent("create_intercepted", {
@@ -854,7 +880,7 @@ export async function handlePasskeyCreate(
 		rpId = deriveRpId(payload.origin, payload.publicKey.rp.id);
 		const user = payload.publicKey.user;
 
-		const loginItems = await getLoginItems();
+		const loginItems = await getLoginItems(runtime);
 		const candidateItems = loginItems.filter((item) =>
 			matchesCreationRpId(item, rpId),
 		);
@@ -931,6 +957,7 @@ export async function handlePasskeyCreate(
 		stage = "persist";
 		if (createResolution.kind === "attach-existing") {
 			await attachPasskeyToExistingItem({
+				itemCommands,
 				item: createResolution.item,
 				passkey,
 			});
@@ -943,6 +970,7 @@ export async function handlePasskeyCreate(
 			});
 		} else {
 			await createItemWithPasskey({
+				itemCommands,
 				rpId,
 				username: user.name,
 				passkey,
@@ -1000,6 +1028,8 @@ export async function handlePasskeyCreate(
 
 export async function handlePasskeyGet(
 	payload: PasskeyGetHandlerPayload,
+	runtime: ClientRuntime,
+	itemCommands: ExtensionItemCommands,
 ): Promise<PasskeyHandlerResponse> {
 	updateActivity();
 	logPasskeyEvent("get_intercepted", {
@@ -1025,10 +1055,13 @@ export async function handlePasskeyGet(
 	let selectedMatch: MatchedPasskey | null = null;
 	try {
 		rpId = deriveRpId(payload.origin, payload.publicKey.rpId);
-		const matches = await findMatchingPasskeys({
-			rpId,
-			allowCredentials: payload.publicKey.allowCredentials,
-		});
+		const matches = await findMatchingPasskeys(
+			{
+				rpId,
+				allowCredentials: payload.publicKey.allowCredentials,
+			},
+			runtime,
+		);
 		logPasskeyEvent("get_intercepted", {
 			requestId: payload.requestId,
 			origin: payload.origin,
@@ -1053,7 +1086,7 @@ export async function handlePasskeyGet(
 				matchCount: matches.length,
 			});
 			if (selection.reason === "no_match") {
-				const rpMatches = await findMatchingPasskeys({ rpId });
+				const rpMatches = await findMatchingPasskeys({ rpId }, runtime);
 				const suspectMatch = resolveUnknownCredentialSuspectMatch({
 					rpMatches,
 					allowCredentials: payload.publicKey.allowCredentials,
@@ -1061,6 +1094,7 @@ export async function handlePasskeyGet(
 				});
 				if (suspectMatch) {
 					await markPasskeyAsSuspectSafely({
+						itemCommands,
 						requestId: payload.requestId,
 						rpId,
 						match: suspectMatch,
@@ -1110,6 +1144,7 @@ export async function handlePasskeyGet(
 		stage = "persist";
 		try {
 			await updateAssertionUsage({
+				itemCommands,
 				match,
 				nextSignCount,
 			});
@@ -1146,6 +1181,7 @@ export async function handlePasskeyGet(
 		const message = error instanceof Error ? error.message : String(error);
 		if (stage === "signing" && selectedMatch) {
 			await markPasskeyAsSuspectSafely({
+				itemCommands,
 				requestId: payload.requestId,
 				rpId,
 				match: selectedMatch,
@@ -1181,3 +1217,5 @@ export async function handlePasskeyCancel(payload: {
 	});
 	return { success: true };
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";

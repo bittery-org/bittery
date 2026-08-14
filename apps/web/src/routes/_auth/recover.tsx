@@ -24,7 +24,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { loadRecoveredAccountBootstrap } from "@/lib/recovery-session";
-import { itemCache, refreshAccountRuntime, storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
+import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
 type RecoveryStep =
@@ -94,6 +95,7 @@ export const Route = createFileRoute("/_auth/recover")({
 });
 
 function RecoverRouteComponent() {
+	const { manager } = useAccountRuntime();
 	const navigate = useNavigate();
 	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
@@ -328,9 +330,12 @@ function RecoverRouteComponent() {
 					itemCache,
 					crypto,
 					bootstrap.user.email,
-					{ serverUrl, insecureTransportConfirmed },
+					{
+						serverUrl,
+						insecureTransportConfirmed,
+						onSessionStored: () => manager.refresh(),
+					},
 				);
-				await refreshAccountRuntime();
 			} catch (bootstrapError) {
 				console.error("Recovery session bootstrap failed:", bootstrapError);
 				// Bootstrap precedes local adoption, so only that failure still leaves the

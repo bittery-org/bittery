@@ -10,7 +10,8 @@
 
 import { PlatformProvider } from "@bittery/core/hooks";
 import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
-import type { IAutolockService, ISyncContext } from "@bittery/types";
+import type { IAutolockService } from "@bittery/core/services/autolock";
+import type { ISyncContext } from "@bittery/sync";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { crypto } from "@/lib/crypto";
@@ -48,7 +49,7 @@ interface WebPlatformProviderProps {
 export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 	const autolock = getAutolockService();
 	const syncContext = useSyncContext();
-	const { vaultRuntime } = useAccountRuntime();
+	const { manager, vaultRuntime } = useAccountRuntime();
 
 	// Map sync context to ISyncContext interface
 	const sync: ISyncContext = useMemo(
@@ -76,6 +77,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
+			accountManager={manager}
 			sync={sync}
 			autolock={autolock}
 		>

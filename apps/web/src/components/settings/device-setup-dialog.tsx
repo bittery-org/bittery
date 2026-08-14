@@ -1,9 +1,9 @@
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	buildDeviceSetupLinkUri,
 	buildDeviceSetupQrUri,
-} from "@bittery/shared";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+} from "@bittery/shared/device-setup";
 import {
 	Button,
 	copyWithToast,

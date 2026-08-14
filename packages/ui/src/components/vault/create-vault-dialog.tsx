@@ -1,4 +1,3 @@
-import type { CreateVaultInput } from "@bittery/core/hooks";
 import { useI18n } from "@bittery/i18n/react";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useRef, useState } from "react";
@@ -33,8 +32,17 @@ export interface AccountOption {
 interface CreateVaultDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSubmit: (data: CreateVaultInput) => Promise<void>;
-	accounts?: AccountOption[];
+	onSubmit: (data: CreateVaultFormValue) => Promise<void>;
+	accounts: AccountOption[];
+	defaultAccountId: string;
+}
+
+export interface CreateVaultFormValue {
+	name: string;
+	type: "personal" | "team";
+	icon: string;
+	imageFile?: File;
+	accountId: string;
 }
 
 export function CreateVaultDialog({
@@ -42,14 +50,13 @@ export function CreateVaultDialog({
 	onOpenChange,
 	onSubmit,
 	accounts,
+	defaultAccountId,
 }: CreateVaultDialogProps) {
-	const defaultAccountId = accounts?.[0]?.accountId;
-
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			{open ? (
 				<CreateVaultDialogForm
-					key={`${open ? "open" : "closed"}:${defaultAccountId ?? "none"}`}
+					key={`${open ? "open" : "closed"}:${defaultAccountId}`}
 					onOpenChange={onOpenChange}
 					onSubmit={onSubmit}
 					accounts={accounts}
@@ -66,7 +73,7 @@ function CreateVaultDialogForm({
 	accounts,
 	defaultAccountId,
 }: Omit<CreateVaultDialogProps, "open"> & {
-	defaultAccountId?: string;
+	defaultAccountId: string;
 }) {
 	const { m } = useI18n();
 	const [icon, setIcon] = useState("lock");
@@ -97,12 +104,15 @@ function CreateVaultDialogForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
+				if (!selectedAccountId) {
+					throw new Error("An account is required to create a vault");
+				}
 				await onSubmit({
 					name: value.name,
 					type: value.type,
 					icon,
 					imageFile,
-					accountId: selectedAccountId ?? "",
+					accountId: selectedAccountId,
 				});
 				resetForm();
 				onOpenChange(false);
@@ -286,7 +296,7 @@ function CreateVaultDialogForm({
 				</div>
 
 				{/* Account Selector (multi-account mode) */}
-				{accounts && accounts.length > 0 && (
+				{accounts.length > 0 && (
 					<div className="space-y-2">
 						<Label htmlFor="account" className="text-muted-foreground text-xs">
 							{m.vaults_create_dialog_field_account()}

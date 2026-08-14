@@ -1,5 +1,4 @@
-import type { SyncEvent } from "@bittery/sync";
-import type { IQueryInvalidator } from "@bittery/types";
+import type { IQueryInvalidator, SyncEvent } from "@bittery/sync";
 
 /**
  * Apply extension query invalidation for a background sync event.

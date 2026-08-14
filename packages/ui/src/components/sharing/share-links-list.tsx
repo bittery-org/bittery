@@ -1,7 +1,4 @@
-import { useQueryInvalidator } from "@bittery/core/hooks";
 import { useI18n } from "@bittery/i18n/react";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
 import {
 	IconCalendar,
 	IconCircleAlert,
@@ -15,7 +12,6 @@ import {
 	IconTrash,
 	IconUsers,
 } from "@bittery/ui/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
 	AlertDialog,
@@ -42,25 +38,36 @@ import { ScrollArea } from "../scroll-area";
 import { Skeleton } from "../skeleton";
 import { toast } from "../sonner";
 
-interface ShareLinksListProps {
-	itemId: string;
+export interface ShareLinksListProps {
+	links: readonly ShareLinkData[];
+	isLoading: boolean;
+	onRevoke: (linkId: string) => Promise<unknown>;
+	onLoadAccessLogs: (linkId: string) => Promise<readonly ShareAccessLog[]>;
 }
 
-interface ShareLinkData {
+export interface ShareLinkData {
 	id: string;
 	status: "active" | "expired" | "exhausted" | "revoked";
 	accessMode: "anyone" | "email-restricted";
 	isOneTimeUse: boolean;
 	accessCount: number;
-	maxAccessCount: number | null;
-	allowedEmails: { email: string; verified: boolean }[];
+	maxAccessCount?: number | null;
+	allowedEmails: readonly { email: string; verified: boolean }[];
 	expiresAt: string;
 	createdAt: string;
-	lastAccessedAt: string | null;
+	lastAccessedAt?: string | null;
+}
+
+export interface ShareAccessLog {
+	id: string;
+	success: boolean;
+	accessedByEmail?: string | null;
+	accessedAt: string;
+	ipAddress?: string | null;
+	failureReason?: string | null;
 }
 
 type ShareLinkStatus = ShareLinkData["status"];
-type ShareLinkAccessMode = ShareLinkData["accessMode"];
 
 const STATUS_COLORS: Record<string, string> = {
 	active: "bg-green-500",
@@ -69,55 +76,44 @@ const STATUS_COLORS: Record<string, string> = {
 	revoked: "bg-red-500",
 };
 
-function normalizeShareLinkStatus(status: string): ShareLinkStatus {
-	switch (status) {
-		case "active":
-		case "expired":
-		case "exhausted":
-		case "revoked":
-			return status;
-		default:
-			return "revoked";
-	}
-}
-
-function normalizeShareLinkAccessMode(accessMode: string): ShareLinkAccessMode {
-	return accessMode === "email-restricted"
-		? "email-restricted"
-		: "anyone";
-}
-
-export function ShareLinksList({ itemId }: ShareLinksListProps) {
+export function ShareLinksList({
+	links,
+	isLoading,
+	onRevoke,
+	onLoadAccessLogs,
+}: ShareLinksListProps) {
 	const { m } = useI18n();
-	const [selectedLink, setSelectedLink] = useState<ShareLinkData | null>(null);
 	const [showAccessLogs, setShowAccessLogs] = useState(false);
 	const [linkToRevoke, setLinkToRevoke] = useState<string | null>(null);
+	const [accessLogs, setAccessLogs] = useState<readonly ShareAccessLog[]>([]);
+	const [isLoadingAccessLogs, setIsLoadingAccessLogs] = useState(false);
+	const [isRevoking, setIsRevoking] = useState(false);
 
-	const api = useApiClient();
-	const invalidator = useQueryInvalidator();
-
-	const linksQuery = useQuery(apiQueries.shares.list(api, itemId));
-
-	const revokeMutation = useMutation({
-		mutationFn: (linkId: string) => api.share.remove(linkId),
-		onSuccess: async () => {
+	const handleRevoke = async (linkId: string) => {
+		setIsRevoking(true);
+		try {
+			await onRevoke(linkId);
 			toast.success(m.sharing_links_list_toast_revoke_success());
-			await invalidator.invalidateShare(itemId);
 			setLinkToRevoke(null);
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsRevoking(false);
+		}
+	};
 
-	const accessLogsQuery = useQuery({
-		...apiQueries.shares.accessLogs(api, selectedLink?.id || ""),
-		queryFn: async () => {
-			if (!selectedLink) return [];
-			return (await api.share.accessLogs(selectedLink.id)).data;
-		},
-		enabled: !!selectedLink && showAccessLogs,
-	});
+	const handleShowAccessLogs = async (link: ShareLinkData) => {
+		setShowAccessLogs(true);
+		setIsLoadingAccessLogs(true);
+		try {
+			setAccessLogs(await onLoadAccessLogs(link.id));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+			setAccessLogs([]);
+		} finally {
+			setIsLoadingAccessLogs(false);
+		}
+	};
 
 	const getStatusLabel = (status: ShareLinkStatus) => {
 		switch (status) {
@@ -186,7 +182,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		return m.sharing_links_list_relative_less_than_hour();
 	};
 
-	if (linksQuery.isLoading) {
+	if (isLoading) {
 		return (
 			<div className="space-y-2">
 				<Skeleton className="h-20" />
@@ -198,19 +194,6 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	// Mapped field-by-field on purpose: the share token must never be threaded
 	// into the client model. A token without its fragment key is a dead link,
 	// so there is nothing this list could usefully do with it.
-	const links: ShareLinkData[] = (linksQuery.data?.links || []).map((link) => ({
-		id: link.id,
-		status: normalizeShareLinkStatus(link.status),
-		accessMode: normalizeShareLinkAccessMode(link.accessMode),
-		isOneTimeUse: link.isOneTimeUse,
-		accessCount: link.accessCount,
-		maxAccessCount: link.maxAccessCount ?? null,
-		allowedEmails: [...link.allowedEmails],
-		expiresAt: link.expiresAt,
-		createdAt: link.createdAt,
-		lastAccessedAt: link.lastAccessedAt ?? null,
-	}));
-
 	if (links.length === 0) {
 		return (
 			<Card>
@@ -324,10 +307,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 									<Button
 										size="sm"
 										variant="ghost"
-										onClick={() => {
-											setSelectedLink(link);
-											setShowAccessLogs(true);
-										}}
+									onClick={() => handleShowAccessLogs(link)}
 										title={m.sharing_links_list_action_view_access_logs()}
 									>
 										<IconUsers className="h-4 w-4" />
@@ -362,15 +342,15 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 					</DialogHeader>
 
 					<ScrollArea className="max-h-96">
-						{accessLogsQuery.isLoading ? (
+						{isLoadingAccessLogs ? (
 							<div className="space-y-2">
 								<Skeleton className="h-12" />
 								<Skeleton className="h-12" />
 								<Skeleton className="h-12" />
 							</div>
-						) : accessLogsQuery.data && accessLogsQuery.data.length > 0 ? (
+						) : accessLogs.length > 0 ? (
 							<div className="space-y-2">
-								{accessLogsQuery.data.map((log) => (
+								{accessLogs.map((log) => (
 									<Card key={log.id}>
 										<CardContent className="p-3">
 											<div className="flex items-start justify-between">
@@ -440,12 +420,10 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							{m.sharing_links_list_action_cancel()}
 						</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={() =>
-								linkToRevoke && revokeMutation.mutate(linkToRevoke)
-							}
+								onClick={() => linkToRevoke && handleRevoke(linkToRevoke)}
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
-							{revokeMutation.isPending ? (
+							{isRevoking ? (
 								<IconLoaderCircle className="h-4 w-4 animate-spin" />
 							) : (
 								<IconTrash className="h-4 w-4" />

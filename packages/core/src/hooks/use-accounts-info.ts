@@ -6,10 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import {
 	useCoreContext,
-	usePlatformStorage,
+	usePlatformAccountManager,
 } from "../context/platform-context";
 import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
-import { peekAccountSessionManager } from "../services/account-session-manager";
 
 /**
  * Complete account information including metadata, credentials, and tAPI client
@@ -25,26 +24,16 @@ export interface UseAccountsInfoOptions {
  * Returns all data needed to make API calls and decrypt items.
  */
 export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
-	const storage = usePlatformStorage();
 	const core = useCoreContext();
-	const manager = peekAccountSessionManager();
+	const manager = usePlatformAccountManager();
 
 	useSyncExternalStore(
-		manager?.subscribe ?? (() => () => {}),
-		manager?.getSnapshot ?? (() => 0),
-		manager?.getSnapshot ?? (() => 0),
+		manager.subscribe,
+		manager.getSnapshot,
+		manager.getSnapshot,
 	);
 
-	const { data: activeAccount, isLoading: isLoadingActive } = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccount(),
-		staleTime: 5000,
-		enabled: options.enabled !== false && !manager,
-	});
-
-	const effectiveActiveAccount = manager
-		? manager.getActiveAccount()
-		: activeAccount;
+	const effectiveActiveAccount = manager.getActiveAccount();
 
 	const activeAccountKey = useMemo(
 		() => effectiveActiveAccount ?? "none",
@@ -74,7 +63,7 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 	return {
 		activeAccount: effectiveActiveAccount,
 		accountsInfo,
-		isLoading: (!manager && isLoadingActive) || isLoadingInfo,
+		isLoading: isLoadingInfo,
 		error,
 	};
 }

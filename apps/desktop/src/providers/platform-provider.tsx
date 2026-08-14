@@ -8,7 +8,7 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/types";
+import type { ISyncContext } from "@bittery/sync";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useDesktopAccountRuntime } from "@/contexts/account-context";
@@ -38,7 +38,7 @@ export function DesktopPlatformProvider({
 	children,
 }: DesktopPlatformProviderProps) {
 	const syncContext = useSyncContext();
-	const { vaultRuntime } = useDesktopAccountRuntime();
+	const { manager, vaultRuntime } = useDesktopAccountRuntime();
 
 	// Map sync context to ISyncContext interface
 	const sync: ISyncContext = useMemo(
@@ -66,6 +66,7 @@ export function DesktopPlatformProvider({
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
+			accountManager={manager}
 			sync={sync}
 		>
 			{children}

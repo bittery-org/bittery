@@ -170,6 +170,7 @@ pub(crate) async fn get_events_since(
 
 pub(crate) async fn bootstrap_items(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: BootstrapItemsInput,
 ) -> Result<BootstrapItemsResponse, AppError> {
@@ -257,7 +258,7 @@ pub(crate) async fn bootstrap_items(
                     image_url: vault
                         .vault_image_key
                         .as_deref()
-                        .and_then(storage::public_asset_url),
+                        .and_then(|key| object_storage.public_url(key)),
                     encrypted_vault_key: vault.encrypted_vault_key,
                     role: vault.role,
                 },

@@ -17,10 +17,12 @@ import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 /**
  * Handle GET_VAULT_ITEMS message - Get all vault items
  */
-export async function handleGetVaultItems(): Promise<VaultItemsResponse> {
+export async function handleGetVaultItems(
+	runtime: ClientRuntime,
+): Promise<VaultItemsResponse> {
 	updateActivity();
 
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	return {
 		success: true,
 		items,
@@ -30,13 +32,16 @@ export async function handleGetVaultItems(): Promise<VaultItemsResponse> {
 /**
  * Handle GET_VAULT_ITEM message - Get a specific vault item
  */
-export async function handleGetVaultItem(payload: {
-	itemId: string;
-}): Promise<VaultItemResponse> {
+export async function handleGetVaultItem(
+	payload: {
+		itemId: string;
+	},
+	runtime: ClientRuntime,
+): Promise<VaultItemResponse> {
 	updateActivity();
 
 	const { itemId } = payload;
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	const item = items.find((candidate) => candidate?.id === itemId) ?? null;
 	return { success: true, item };
 }
@@ -77,3 +82,5 @@ export async function handleGetWritableVaults(): Promise<WritableVaultsResponse>
 		return { success: false, error: String(error) };
 	}
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";

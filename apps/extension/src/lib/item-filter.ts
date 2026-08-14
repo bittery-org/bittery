@@ -1,4 +1,4 @@
-import type { DecryptedItemWithContext } from "@bittery/shared";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { rankByQuery } from "./autofill-ranking";
 
 /**

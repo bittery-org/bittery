@@ -7,11 +7,11 @@ import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforc
 import type { VaultRepositoryItemWithAccount } from "@bittery/core/services/vault-repository";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { itemCache, storage } from "../lib/storage";
-import { core } from "./core-instance";
+import { vaultRepository } from "../lib/vault-runtime";
 import { desktopClient } from "./desktop-client";
 import { parseDesktopSnapshotItem } from "./desktop-snapshot";
 import { isDesktopReadAvailable } from "./desktop-status";
-import { reconcileVaultRuntimeFromStorage } from "./vault-runtime";
+import { reconcileClientRuntime } from "./vault-runtime";
 
 type MultiAccountItem = VaultRepositoryItemWithAccount;
 
@@ -119,17 +119,19 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[] | null> {
 	return normalizedItems;
 }
 
-async function getLocalRepositoryItems(): Promise<MultiAccountItem[]> {
+async function getLocalRepositoryItems(
+	runtime: ClientRuntime,
+): Promise<MultiAccountItem[]> {
 	try {
-		await reconcileVaultRuntimeFromStorage();
-		const items = core.vaultRepository.getAll() as MultiAccountItem[];
+		await reconcileClientRuntime(runtime);
+		const items = vaultRepository.getAll() as MultiAccountItem[];
 		return filterItemsForTravelMode(items);
 	} catch (error) {
 		console.warn(
 			"[vault-utils] Failed to load local repository items for desktop merge:",
 			error,
 		);
-		const items = core.vaultRepository.getAll() as MultiAccountItem[];
+		const items = vaultRepository.getAll() as MultiAccountItem[];
 		return filterItemsForTravelMode(items);
 	}
 }
@@ -139,16 +141,16 @@ async function getLocalRepositoryItems(): Promise<MultiAccountItem[]> {
  * is typed accordingly so callers (and the `GET_VAULT_ITEMS` route) do not have
  * to defend against a null that cannot occur.
  */
-export async function getDecryptedItemsForCurrentMode(): Promise<
-	DecryptedItemWithContext[]
-> {
+export async function getDecryptedItemsForCurrentMode(
+	runtime: ClientRuntime,
+): Promise<DecryptedItemWithContext[]> {
 	const desktopReadAvailable = await isDesktopReadAvailable();
 
 	if (desktopReadAvailable) {
 		try {
 			const mergedItems = await mergeDesktopAndLocalItemSources(
 				getDesktopItemsSnapshot(),
-				getLocalRepositoryItems(),
+				getLocalRepositoryItems(runtime),
 			);
 			return mergedItems;
 		} catch (error) {
@@ -159,7 +161,9 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 		}
 	}
 
-	await reconcileVaultRuntimeFromStorage();
-	const localItems = core.vaultRepository.getAll() as MultiAccountItem[];
+	await reconcileClientRuntime(runtime);
+	const localItems = vaultRepository.getAll() as MultiAccountItem[];
 	return filterItemsForTravelMode(localItems);
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";

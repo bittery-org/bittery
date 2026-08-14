@@ -84,18 +84,17 @@ Object.assign(globalThis, {
 	},
 });
 
-mock.module(path.join(backgroundDir, "core-instance.ts"), () => ({
-	core: {
-		vaultRepository: {
-			applyItemCommand: async () => {},
-			executeSemanticItemCommand: async () => undefined,
-			discardItemCommandAcknowledgedElsewhere: async () => {},
-			preserveItemConflict: async () => undefined,
-			reconcileAuthoritative: async () => {},
-			acknowledgeItemCommand: async () => {},
-			replaceItemId: () => {},
-			setEncryptionContextMigrationPort: async () => {},
-		},
+mock.module(path.resolve(backgroundDir, "../lib/vault-runtime.ts"), () => ({
+	vaultCrypto: {},
+	vaultRepository: {
+		applyItemCommand: async () => {},
+		executeSemanticItemCommand: async () => undefined,
+		discardItemCommandAcknowledgedElsewhere: async () => {},
+		preserveItemConflict: async () => undefined,
+		reconcileAuthoritative: async () => {},
+		acknowledgeItemCommand: async () => {},
+		replaceItemId: () => {},
+		setEncryptionContextMigrationPort: async () => {},
 	},
 }));
 
@@ -112,10 +111,6 @@ mock.module(path.join(backgroundDir, "sync-client-id.ts"), () => ({
 mock.module(path.resolve(backgroundDir, "../lib/storage.ts"), () => ({
 	storage: { getAccountsList: async () => [] },
 	itemCache: {},
-}));
-
-mock.module(path.resolve(backgroundDir, "../lib/vault-runtime.ts"), () => ({
-	vaultCrypto: {},
 }));
 
 const {

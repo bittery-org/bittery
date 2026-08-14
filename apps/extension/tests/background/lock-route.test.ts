@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import type { BackgroundRouteServices } from "../../src/background/router/types";
 
 // Acceptance coverage for "a popup-initiated lock provably stops autofill".
 // The router seam is the only boundary where that is provable here: the popup's
@@ -19,6 +20,12 @@ let desktopStatus: {
 
 let lockAllAccountsCalls = 0;
 const syncDisconnects: string[] = [];
+const desktopSyncFixture = {
+	getLastStatus: () => desktopStatus,
+	checkDesktopStatus: async () => desktopStatus,
+	isDesktopAvailable: () => desktopStatus !== null,
+	initialize: async () => {},
+};
 
 const ACCOUNTS = [{ accountId: "acc-1", email: "a@example.com" }];
 const RESTORED_MUK = new Uint8Array(32).fill(7);
@@ -48,12 +55,7 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 }));
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
-	desktopSync: {
-		getLastStatus: () => desktopStatus,
-		checkDesktopStatus: async () => desktopStatus,
-		isDesktopAvailable: () => desktopStatus !== null,
-		initialize: async () => {},
-	},
+	getDesktopSync: () => desktopSyncFixture,
 }));
 
 // Recorded rather than executed so a lock that never happened cannot silently
@@ -125,11 +127,21 @@ async function settle(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+const runtime = {
+	start: () => {},
+	accounts: { unlockAccount: async () => true },
+};
+const routeServices = {
+	runtime,
+	desktopSync: desktopSyncFixture,
+	itemCommands: { execute: async () => ({}) },
+} as unknown as BackgroundRouteServices;
+
 beforeEach(async () => {
 	// The vault-session machine is a module singleton, so every test starts from
 	// an explicitly locked, desktop-free world rather than the previous state.
 	desktopStatus = null;
-	await routeRuntimeMessage({ type: "LOCK" });
+	await routeRuntimeMessage({ type: "LOCK" }, routeServices);
 	await settle();
 	lockAllAccountsCalls = 0;
 	syncDisconnects.length = 0;
@@ -141,7 +153,7 @@ describe("LOCK route without a desktop app", () => {
 		setMasterUnlockKey(new Uint8Array(32).fill(3));
 		expect(isUnlocked()).toBe(true);
 
-		const response = await routeRuntimeMessage({ type: "LOCK" });
+		const response = await routeRuntimeMessage({ type: "LOCK" }, routeServices);
 
 		expect(response).toEqual({ success: true });
 		expect(isUnlocked()).toBe(false);
@@ -166,10 +178,10 @@ describe("LOCK route with the desktop app reachable", () => {
 		// What the popup's session-status poll does; it is what makes the machine
 		// observe the desktop before the click arrives.
 		expect(
-			await routeRuntimeMessage({ type: "GET_SESSION_STATUS" }),
+			await routeRuntimeMessage({ type: "GET_SESSION_STATUS" }, routeServices),
 		).toMatchObject({ unlocked: true });
 
-		const response = await routeRuntimeMessage({ type: "LOCK" });
+		const response = await routeRuntimeMessage({ type: "LOCK" }, routeServices);
 
 		expect(response).toEqual({ success: false, code: "desktop_owns_lock" });
 		expect(isUnlocked()).toBe(true);
@@ -182,12 +194,12 @@ describe("LOCK route with the desktop app reachable", () => {
 
 describe("LOCK route on a cold service worker", () => {
 	test("locks a session that bootstrap had just restored", async () => {
-		await initializeBackgroundServices();
+		await initializeBackgroundServices(runtime);
 
 		expect(restoreCalls).toBe(1);
 		expect(isUnlocked()).toBe(true);
 
-		const response = await routeRuntimeMessage({ type: "LOCK" });
+		const response = await routeRuntimeMessage({ type: "LOCK" }, routeServices);
 
 		expect(response).toEqual({ success: true });
 		expect(isUnlocked()).toBe(false);

@@ -1,10 +1,11 @@
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
+import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
-import { type QueryClient, useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import type { QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
@@ -110,43 +111,33 @@ export function useWebSync(
 			}),
 		[],
 	);
-
-	/**
-	 * The accountId the item cache is namespaced under. `ItemCache` requires a real
-	 * accountId for every call, so it is read from the live active-account snapshot
-	 * instead of `null`. The snapshot is refreshed whenever the unlocked set changes
-	 * and explicitly after a login.
-	 */
-	useSyncExternalStore(
-		manager.subscribe,
-		manager.getSnapshot,
-		manager.getSnapshot,
-	);
-	const syncAccountId = manager.getActiveAccount();
-	const runtimeRevision = useSyncExternalStore(
-		vaultRuntime.subscribe,
-		() => vaultRuntime.getSnapshot().revision,
-		() => vaultRuntime.getSnapshot().revision,
-	);
-	const { data: assembly = null, isFetched } = useQuery({
-		queryKey: [
-			"account-sync-assembly",
-			clientId,
-			syncAccountId,
-			runtimeRevision,
-		],
-		queryFn: () =>
-			accountSync.assemble({
-				clientId,
-				activeAccountId: syncAccountId,
+	const lifecycle = useMemo(
+		() =>
+			new AccountSyncLifecycle({
+				resolveClientId: async () => clientId,
+				getActiveAccountId: () => manager.getActiveAccount(),
+				subscribeAccountChanges: manager.subscribe,
+				subscribeVaultChanges: vaultRuntime.subscribe,
+				assemble: (input) => accountSync.assemble(input),
 			}),
-	});
+		[accountSync, clientId, manager, vaultRuntime],
+	);
+	useEffect(() => {
+		lifecycle.start();
+		return () => lifecycle.dispose();
+	}, [lifecycle]);
+	const { assembly, initialized } = useSyncExternalStore(
+		lifecycle.subscribe,
+		lifecycle.getSnapshot,
+		lifecycle.getSnapshot,
+	);
 
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
 			// Server-side revocation is a sign-out, not a lock: the quick-unlock prompt must
 			// not reappear for a session the server has already killed.
 			await accountSync.invalidateSession(payload);
+			lifecycle.clear();
 			queryClient.clear();
 
 			if (
@@ -156,7 +147,7 @@ export function useWebSync(
 				window.location.href = "/login";
 			}
 		},
-		[accountSync, queryClient],
+		[accountSync, lifecycle, queryClient],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.error(m.sync_command_terminal_error(), {
@@ -169,7 +160,7 @@ export function useWebSync(
 		queryClient,
 		sources: assembly?.sources ?? [],
 		storage: syncStorage,
-		enabled: enabled && isFetched && assembly !== null,
+		enabled: enabled && initialized && assembly !== null,
 		replicaStore: assembly?.replicaStore,
 		commandProjection: assembly?.commandProjection,
 		semanticCommandExecutor: assembly?.semanticCommandExecutor,

@@ -4,7 +4,11 @@
  * extensions, or any other runtime.
  */
 
-import type { FinishLoginResponse, LoginAttempt } from "@bittery/api-contract";
+import type {
+	ApiClient,
+	FinishLoginResponse,
+	LoginAttempt,
+} from "@bittery/api-contract";
 import type {
 	CryptoPort,
 	EncryptedData,
@@ -12,7 +16,6 @@ import type {
 	KeyRef,
 } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
-import type { AppApiClient } from "@bittery/shared/api-client";
 import {
 	createAccountApiClient,
 	getDefaultServerUrl,
@@ -29,7 +32,6 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountApiClient } from "./api-client";
 import {
 	getTravelModeEnforcer,
@@ -58,6 +60,8 @@ export interface StoreAuthSessionOptions {
 	setActive?: boolean;
 	/** Called at the exact point `AccountStore` takes ownership of the login MUK. */
 	onMasterUnlockKeyTransferred?: () => void;
+	/** Reconciles an explicitly owned account runtime after direct storage writes. */
+	onSessionStored?: () => void | Promise<void>;
 }
 
 async function resolveAccountIdForLogin(
@@ -189,7 +193,7 @@ export interface SessionState {
 
 /** The React-free auth surface needed by login and unlock ceremonies. */
 type AuthClientMethods = Pick<
-	AppApiClient["auth"],
+	ApiClient["auth"],
 	"checkEmail" | "startLogin" | "finishLogin" | "drainVaultKeys"
 >;
 
@@ -572,7 +576,7 @@ export async function storeLoginSession(
 	options?.onMasterUnlockKeyTransferred?.();
 
 	try {
-		await peekAccountSessionManager()?.refresh();
+		await options?.onSessionStored?.();
 	} catch (error) {
 		console.error("[auth-service] session manager refresh failed:", error);
 	}

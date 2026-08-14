@@ -1,4 +1,4 @@
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use reqwest::{header::CONTENT_TYPE, redirect::Policy, Client};
@@ -14,6 +14,85 @@ const MIN_FAILURE_BACKOFF_MINUTES: i64 = 10;
 pub struct FaviconImage {
     pub data: Vec<u8>,
     pub content_type: String,
+}
+
+#[derive(Clone, Copy)]
+pub enum RemoteDocumentKind {
+    Html,
+    Image,
+}
+
+pub struct RemoteDocument {
+    pub data: Vec<u8>,
+    pub content_type: String,
+}
+
+#[async_trait::async_trait]
+pub trait RemoteDocumentFetcher: Send + Sync {
+    async fn fetch(
+        &self,
+        url: &str,
+        kind: RemoteDocumentKind,
+    ) -> Result<Option<RemoteDocument>, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+pub struct ReqwestRemoteDocumentFetcher {
+    client: Client,
+}
+
+impl ReqwestRemoteDocumentFetcher {
+    pub fn new() -> Self {
+        Self {
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECONDS))
+                .redirect(Policy::limited(5))
+                .build()
+                .expect("favicon http client should build"),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl RemoteDocumentFetcher for ReqwestRemoteDocumentFetcher {
+    async fn fetch(
+        &self,
+        url: &str,
+        kind: RemoteDocumentKind,
+    ) -> Result<Option<RemoteDocument>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut response = self.client.get(url).send().await?;
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+        let content_type = sanitize_content_type(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            url,
+        );
+        match kind {
+            RemoteDocumentKind::Html if !content_type.contains("text/html") => return Ok(None),
+            RemoteDocumentKind::Image if !content_type.starts_with("image/") => return Ok(None),
+            _ => {}
+        }
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_DOWNLOAD_BYTES as u64)
+        {
+            return Ok(None);
+        }
+        let mut data = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if data.len() + chunk.len() > MAX_DOWNLOAD_BYTES {
+                return Ok(None);
+            }
+            data.extend_from_slice(&chunk);
+        }
+        if data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(RemoteDocument { data, content_type }))
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -109,6 +188,7 @@ pub async fn list_domains_to_refresh(
 
 pub async fn fetch_and_store_favicon(
     pool: &PgPool,
+    fetcher: &dyn RemoteDocumentFetcher,
     domain: &str,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     let existing = sqlx::query_as::<_, DbFaviconRow>(
@@ -141,11 +221,13 @@ pub async fn fetch_and_store_favicon(
 
     upsert_pending(pool, domain).await?;
 
-    match resolve_candidate_urls(domain).await {
+    match resolve_candidate_urls(fetcher, domain).await {
         Ok(candidates) => {
             for candidate in candidates {
-                if let Ok(Some((data, content_type))) = fetch_with_limit(&candidate, false).await {
-                    mark_fetched(pool, domain, &data, &content_type).await?;
+                if let Ok(Some(document)) =
+                    fetcher.fetch(&candidate, RemoteDocumentKind::Image).await
+                {
+                    mark_fetched(pool, domain, &document.data, &document.content_type).await?;
                     return Ok(true);
                 }
             }
@@ -160,18 +242,8 @@ pub async fn fetch_and_store_favicon(
     }
 }
 
-fn http_client() -> &'static Client {
-    static CLIENT: OnceLock<Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        Client::builder()
-            .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECONDS))
-            .redirect(Policy::limited(5))
-            .build()
-            .expect("favicon http client should build")
-    })
-}
-
 async fn resolve_candidate_urls(
+    fetcher: &dyn RemoteDocumentFetcher,
     domain: &str,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
     let direct_favicon = format!("https://{domain}/favicon.ico");
@@ -179,8 +251,12 @@ async fn resolve_candidate_urls(
     let apple_touch_icon = format!("https://{domain}/apple-touch-icon.png");
 
     let mut html_icon_links = Vec::new();
-    if let Some((html_bytes, _)) = fetch_with_limit(&homepage_url, true).await? {
-        html_icon_links = extract_icon_links(&String::from_utf8_lossy(&html_bytes), &homepage_url);
+    if let Some(document) = fetcher
+        .fetch(&homepage_url, RemoteDocumentKind::Html)
+        .await?
+    {
+        html_icon_links =
+            extract_icon_links(&String::from_utf8_lossy(&document.data), &homepage_url);
     }
 
     let mut candidates = Vec::with_capacity(2 + html_icon_links.len());
@@ -188,39 +264,6 @@ async fn resolve_candidate_urls(
     candidates.extend(html_icon_links);
     candidates.push(apple_touch_icon);
     Ok(candidates)
-}
-
-async fn fetch_with_limit(
-    url: &str,
-    expect_html: bool,
-) -> Result<Option<(Vec<u8>, String)>, Box<dyn std::error::Error + Send + Sync>> {
-    let response = http_client().get(url).send().await?;
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-
-    let content_type = sanitize_content_type(
-        response
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        url,
-    );
-
-    if expect_html {
-        if !content_type.contains("text/html") {
-            return Ok(None);
-        }
-    } else if !content_type.starts_with("image/") {
-        return Ok(None);
-    }
-
-    let data = response.bytes().await?.to_vec();
-    if data.is_empty() || data.len() > MAX_DOWNLOAD_BYTES {
-        return Ok(None);
-    }
-
-    Ok(Some((data, content_type)))
 }
 
 fn extract_icon_links(html: &str, base_url: &str) -> Vec<String> {
@@ -341,7 +384,38 @@ async fn mark_failed(pool: &PgPool, domain: &str) -> Result<(), sqlx::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_favicon_domain;
+    use super::{
+        normalize_favicon_domain, resolve_candidate_urls, RemoteDocument, RemoteDocumentFetcher,
+        RemoteDocumentKind, ReqwestRemoteDocumentFetcher, MAX_DOWNLOAD_BYTES,
+    };
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
+    struct StubFetcher {
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl RemoteDocumentFetcher for StubFetcher {
+        async fn fetch(
+            &self,
+            _url: &str,
+            kind: RemoteDocumentKind,
+        ) -> Result<Option<RemoteDocument>, Box<dyn std::error::Error + Send + Sync>> {
+            if self.fail {
+                return Err("remote failure".into());
+            }
+            Ok(
+                matches!(kind, RemoteDocumentKind::Html).then(|| RemoteDocument {
+                    data: br#"<link rel="icon" href="/brand.png">"#.to_vec(),
+                    content_type: "text/html".into(),
+                }),
+            )
+        }
+    }
 
     #[test]
     fn normalizes_valid_domains() {
@@ -355,5 +429,70 @@ mod tests {
     fn rejects_invalid_domains() {
         assert_eq!(normalize_favicon_domain("not a domain"), None);
         assert_eq!(normalize_favicon_domain("-example.com"), None);
+    }
+
+    #[tokio::test]
+    async fn candidate_resolution_uses_injected_fetcher() {
+        let candidates = resolve_candidate_urls(&StubFetcher { fail: false }, "example.com")
+            .await
+            .expect("stub fetch should succeed");
+        assert!(candidates.contains(&"https://example.com/brand.png".to_string()));
+    }
+
+    #[tokio::test]
+    async fn candidate_resolution_propagates_fetch_failures() {
+        assert!(
+            resolve_candidate_urls(&StubFetcher { fail: true }, "example.com")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn production_fetcher_rejects_declared_oversized_documents() {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\r\n",
+            MAX_DOWNLOAD_BYTES + 1
+        );
+        let (url, server) = spawn_response(response.into_bytes());
+        let result = ReqwestRemoteDocumentFetcher::new()
+            .fetch(&url, RemoteDocumentKind::Image)
+            .await
+            .expect("request should complete");
+        assert!(result.is_none());
+        server.join().expect("server should finish");
+    }
+
+    #[tokio::test]
+    async fn production_fetcher_stops_streaming_oversized_chunked_documents() {
+        let chunk = vec![b'x'; MAX_DOWNLOAD_BYTES / 2 + 1];
+        let mut response =
+            b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\n\r\n"
+                .to_vec();
+        for _ in 0..2 {
+            response.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            response.extend_from_slice(&chunk);
+            response.extend_from_slice(b"\r\n");
+        }
+        response.extend_from_slice(b"0\r\n\r\n");
+        let (url, server) = spawn_response(response);
+        let result = ReqwestRemoteDocumentFetcher::new()
+            .fetch(&url, RemoteDocumentKind::Image)
+            .await
+            .expect("request should complete");
+        assert!(result.is_none());
+        server.join().expect("server should finish");
+    }
+
+    fn spawn_response(response: Vec<u8>) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let address = listener.local_addr().expect("test address should load");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request should connect");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(&response).expect("response should write");
+        });
+        (format!("http://{address}/document"), handle)
     }
 }

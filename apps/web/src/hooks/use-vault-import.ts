@@ -14,7 +14,7 @@ import {
 	type ImportSourceItem,
 	type ImportSourceVault,
 	type ImportSourceVaultNameCode,
-} from "@bittery/shared";
+} from "@bittery/shared/import";
 import { useCallback, useMemo, useState } from "react";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";

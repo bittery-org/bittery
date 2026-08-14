@@ -11,7 +11,7 @@ import {
 	type DesktopStatus,
 	isDesktopStatusUnlocked,
 } from "./desktop-protocol";
-import { desktopSync } from "./desktop-sync";
+import { getDesktopSync } from "./desktop-sync";
 
 /**
  * Get the current desktop status.
@@ -24,9 +24,10 @@ export async function getDesktopStatus(opts?: {
 	refresh?: boolean;
 }): Promise<DesktopStatus | null> {
 	if (opts?.refresh) {
-		return desktopSync.checkDesktopStatus();
+		return getDesktopSync().checkDesktopStatus();
 	}
 
+	const desktopSync = getDesktopSync();
 	return (
 		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus())
 	);

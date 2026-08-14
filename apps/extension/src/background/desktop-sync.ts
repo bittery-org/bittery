@@ -5,12 +5,9 @@
  * for real-time lock/unlock synchronization.
  */
 
-import {
-	getAccountSessionManager,
-	peekAccountSessionManager,
-} from "@bittery/core/services/account-session-manager";
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { AccountMetadata } from "@bittery/storage";
-import { itemCache, storage } from "../lib/storage";
+import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import type {
 	DesktopAccountEntry,
@@ -77,7 +74,8 @@ export type ActiveAccountChangedEvent =
 	DesktopEventOf<"active_account_changed">;
 export type ThemeChangedEvent = DesktopEventOf<"theme_changed">;
 
-class DesktopSyncService {
+export class DesktopSyncService {
+	constructor(private readonly accountManager: AccountSessionManager) {}
 	private lastDesktopStatus: DesktopStatus | null = null;
 	private desktopAvailable = false;
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -395,12 +393,7 @@ class DesktopSyncService {
 		// Update active account in extension storage to match desktop
 		try {
 			await storage.setActiveAccount(event.accountId);
-			// The background wires no platform callbacks, so whichever background caller
-			// runs first after a service-worker wake may construct the shared manager.
-			await (
-				peekAccountSessionManager() ??
-				getAccountSessionManager({ storage, itemCache })
-			).refresh();
+			await this.accountManager.refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 			return;
@@ -525,5 +518,16 @@ class DesktopSyncService {
 	}
 }
 
-// Export singleton instance
-export const desktopSync = new DesktopSyncService();
+let configuredDesktopSync: DesktopSyncService | undefined;
+
+/** Register the worker-owned desktop service before background handlers run. */
+export function configureDesktopSync(service: DesktopSyncService): void {
+	configuredDesktopSync = service;
+}
+
+export function getDesktopSync(): DesktopSyncService {
+	if (!configuredDesktopSync) {
+		throw new Error("Desktop sync is not configured");
+	}
+	return configuredDesktopSync;
+}

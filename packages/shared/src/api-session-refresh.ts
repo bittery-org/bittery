@@ -1,3 +1,4 @@
+import type { ApiClient } from "@bittery/api-contract";
 import {
 	type ApiClientMetadata,
 	type ApiClientPlatform,
@@ -5,7 +6,6 @@ import {
 	type ApiRequestOrigin,
 	createApiClient,
 } from "@bittery/api-contract";
-import type { AppApiClient } from "./api-client";
 import {
 	isRemoteHttpServer,
 	resolveInsecureTransportPolicy,
@@ -133,7 +133,7 @@ function metadata(options: SessionRefreshingApiClientOptions) {
 
 export function createSessionRefreshingApiClient(
 	options: SessionRefreshingApiClientOptions,
-): AppApiClient {
+): ApiClient {
 	const supportedApiMajors = options.supportedApiMajors ?? [1];
 	const thresholdRatio = options.thresholdRatio ?? 0.75;
 	const defaultServerUrl = requireServerUrl(options.defaultServerUrl);

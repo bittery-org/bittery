@@ -1,15 +1,15 @@
+import type { ApiClient } from "@bittery/api-contract";
 import {
 	createContext,
 	createElement,
 	type PropsWithChildren,
 	useContext,
 } from "react";
-import type { AppApiClient } from "./api-client";
 
-const ApiClientContext = createContext<AppApiClient | null>(null);
+const ApiClientContext = createContext<ApiClient | null>(null);
 
 export interface ApiProviderProps extends PropsWithChildren {
-	apiClient: AppApiClient;
+	apiClient: ApiClient;
 }
 
 /**
@@ -24,7 +24,7 @@ export function ApiProvider({ apiClient, children }: ApiProviderProps) {
 	);
 }
 
-export function useApiClient(): AppApiClient {
+export function useApiClient(): ApiClient {
 	const apiClient = useContext(ApiClientContext);
 	if (!apiClient) {
 		throw new Error("useApiClient must be used within ApiProvider");

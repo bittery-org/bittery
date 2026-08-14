@@ -9,7 +9,6 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     http::sync_sse,
     services::sync,
     shapes::{
@@ -269,11 +268,15 @@ async fn bootstrap(
     auth: AuthenticatedRequest,
     BootstrapApiQuery(query): BootstrapApiQuery,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
-    let pool = db_pool(&state)?;
-    let mut response: BootstrapItemsResponse =
-        sync::bootstrap_items(pool, &auth.session.user_id, query.into())
-            .await?
-            .into();
+    let pool = &state.db_pool;
+    let mut response: BootstrapItemsResponse = sync::bootstrap_items(
+        pool,
+        state.object_storage.as_ref(),
+        &auth.session.user_id,
+        query.into(),
+    )
+    .await?
+    .into();
     if truncate_serialized(&mut response.items, RESPONSE_PAGE_ITEMS_BYTES)? {
         response.has_more = true;
         response.next_cursor = response.items.last().map(|item| item.id.clone());
@@ -299,7 +302,7 @@ async fn changes(
     auth: AuthenticatedRequest,
     ChangesApiQuery(query): ChangesApiQuery,
 ) -> Result<Json<SyncChangesResponse>, ApiError> {
-    let pool = db_pool(&state)?;
+    let pool = &state.db_pool;
     let mut response: SyncChangesResponse =
         sync::get_events_since(pool, &auth.session.user_id, query.into())
             .await?

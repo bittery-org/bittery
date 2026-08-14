@@ -111,10 +111,10 @@ let desktopStatus: {
 } | null = null;
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
-	desktopSync: {
+	getDesktopSync: () => ({
 		getLastStatus: () => desktopStatus,
 		checkDesktopStatus: async () => desktopStatus,
-	},
+	}),
 }));
 
 let triggerDesktopUnlockResult = true;
@@ -149,11 +149,12 @@ mock.module("@bittery/core/services/auth-service", () => ({
 	storeLoginSessionOwned: async () => {},
 }));
 
-mock.module("@bittery/core/services/account-session-manager", () => ({
-	peekAccountSessionManager: () => null,
-	getAccountSessionManager: () => ({
-		unlockAccount: async () => true,
-	}),
+const runtime = { accounts: {}, vaultRuntime: {} };
+let reconciledRuntime: unknown;
+mock.module(path.join(bgDir, "vault-runtime.ts"), () => ({
+	reconcileClientRuntime: async (supplied: unknown) => {
+		reconciledRuntime = supplied;
+	},
 }));
 
 mock.module("@bittery/shared/api-client-factory", () => ({
@@ -173,6 +174,7 @@ beforeEach(() => {
 	getMasterUnlockKeyCalls.length = 0;
 	setMasterUnlockKeyCalls.length = 0;
 	forgetSessionCalls.length = 0;
+	reconciledRuntime = undefined;
 	clearItemCacheCalls.length = 0;
 	forgetSessionError = null;
 	desktopStatus = null;
@@ -184,13 +186,17 @@ describe("handleQuickUnlockAll", () => {
 	test("single account: sets active account by accountId, not email round-trip", async () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		expect(response.success).toBe(true);
 		expect(response.result).toEqual({
 			unlocked: ["acc-uuid-1"],
 			failed: [],
 		});
+		expect(reconciledRuntime).toBe(runtime);
 		// The active account must be the unlocked accountId, not undefined.
 		expect(setActiveAccountCalls).toEqual(["acc-uuid-1"]);
 		// MUK lookup must use the accountId directly.
@@ -204,7 +210,10 @@ describe("handleQuickUnlockAll", () => {
 			{ accountId: "acc-uuid-2", email: "b@example.com" },
 		];
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		expect(response.success).toBe(true);
 		// All accounts stay unlocked, but the active pointer is a single account.
@@ -220,7 +229,7 @@ describe("handleQuickUnlockAll", () => {
 		];
 		activeAccount = "acc-uuid-2";
 
-		await handleQuickUnlockAll({ password: "pw" });
+		await handleQuickUnlockAll({ password: "pw" }, runtime as never);
 
 		expect(setActiveAccountCalls).toEqual(["acc-uuid-2"]);
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-2"]);
@@ -234,7 +243,10 @@ describe("handleQuickUnlockAll", () => {
 		activeAccount = "acc-uuid-2";
 		unlockableAccountIds = ["acc-uuid-1"];
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		expect(response.result).toEqual({
 			unlocked: ["acc-uuid-1"],
@@ -253,9 +265,9 @@ describe("handleQuickUnlockAll", () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 		unlockableAccountIds = [];
 
-		await expect(handleQuickUnlockAll({ password: "pw" })).rejects.toThrow(
-			"Failed to unlock any accounts",
-		);
+		await expect(
+			handleQuickUnlockAll({ password: "pw" }, runtime as never),
+		).rejects.toThrow("Failed to unlock any accounts");
 		expect(setActiveAccountCalls).toEqual([]);
 	});
 });
@@ -265,7 +277,7 @@ describe("handleLogout", () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 		activeAccount = "acc-uuid-1";
 
-		const response = await handleLogout();
+		const response = await handleLogout(runtime as never);
 
 		expect(response).toEqual({ success: true });
 		expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
@@ -277,7 +289,7 @@ describe("handleLogout", () => {
 		activeAccount = "acc-uuid-1";
 		forgetSessionError = new Error("chrome.storage unavailable");
 
-		const response = await handleLogout();
+		const response = await handleLogout(runtime as never);
 
 		expect(response.success).toBe(false);
 		// Best effort is the module's contract: the ciphertext goes even when the
@@ -296,7 +308,10 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 		desktopStatus = { available: true, locked: true };
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		expect(response).toEqual({
 			success: true,
@@ -314,7 +329,10 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 		desktopStatus = { available: true, locked: true };
 		triggerDesktopUnlockResult = false;
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		// Falling back to a local unlock here is exactly the divergence bug: the
 		// desktop is still reachable and still locked. Report it instead.
@@ -334,7 +352,10 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 			unlockedAccounts: ["acc-uuid-1"],
 		};
 
-		const response = await handleQuickUnlockAll({ password: "pw" });
+		const response = await handleQuickUnlockAll(
+			{ password: "pw" },
+			runtime as never,
+		);
 
 		expect(triggerDesktopUnlockCalls).toBe(0);
 		expect(response.success).toBe(true);

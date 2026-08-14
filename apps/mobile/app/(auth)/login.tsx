@@ -3,7 +3,7 @@ import {
 	type DeviceSetupParamPayload,
 	type ParsedDeviceSetupPayload,
 	parseDeviceSetupParams,
-} from "@bittery/shared";
+} from "@bittery/shared/device-setup";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useQuery } from "@tanstack/react-query";

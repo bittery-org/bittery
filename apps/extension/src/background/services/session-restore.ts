@@ -30,12 +30,9 @@
  *   re-issues both the token and the vault keys.
  */
 
-import {
-	getAccountSessionManager,
-	peekAccountSessionManager,
-} from "@bittery/core/services/account-session-manager";
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { KeyRef } from "@bittery/crypto-port";
-import { itemCache, storage } from "../../lib/storage";
+import { storage } from "../../lib/storage";
 
 export interface RestoredSessions {
 	/** Restored accountIds; newest-first is not guaranteed. */
@@ -50,7 +47,9 @@ export interface RestoredSessions {
  * Reporting the key rather than installing it lets the caller hand the vault
  * session both the accounts and the key in one atomic event.
  */
-export async function restoreUnlockedSessions(): Promise<RestoredSessions> {
+export async function restoreUnlockedSessions(
+	sessions: AccountSessionManager,
+): Promise<RestoredSessions> {
 	const restoredAccountIds: string[] = [];
 	let muk: KeyRef | null = null;
 
@@ -59,12 +58,6 @@ export async function restoreUnlockedSessions(): Promise<RestoredSessions> {
 		if (accounts.length === 0) {
 			return { accountIds: restoredAccountIds, muk };
 		}
-
-		// The background wires no platform callbacks, so whichever background caller
-		// runs first after a service-worker wake may construct the shared manager.
-		const sessions =
-			peekAccountSessionManager() ??
-			getAccountSessionManager({ storage, itemCache });
 
 		for (const account of accounts) {
 			try {

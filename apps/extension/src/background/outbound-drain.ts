@@ -8,8 +8,7 @@ import type { ItemSyncCommand } from "@bittery/types";
 import { crypto } from "../lib/crypto";
 import { storage } from "../lib/storage";
 import { ChromeSyncStorage } from "../lib/sync-storage";
-import { vaultCrypto } from "../lib/vault-runtime";
-import { core } from "./core-instance";
+import { vaultCrypto, vaultRepository } from "../lib/vault-runtime";
 import { emitBackgroundEvent } from "./events";
 import { syncCacheService } from "./services/sync-cache-service";
 import { getOrCreateSyncClientId } from "./sync-client-id";
@@ -40,15 +39,15 @@ function getQueue(): Promise<ItemSyncEngine> {
 			new ChromeSyncStorage(),
 			await getOrCreateSyncClientId(),
 			{
-				apply: (command) => core.vaultRepository.applyItemCommand(command),
+				apply: (command) => vaultRepository.applyItemCommand(command),
 				executeSemanticCommand: (command) =>
 					semanticExecutor.executeSemanticItemCommand(command),
 				preserveConflict: (command) =>
-					core.vaultRepository.preserveItemConflict(command),
+					vaultRepository.preserveItemConflict(command),
 				reconcileAuthoritative: (command, item) =>
-					core.vaultRepository.reconcileAuthoritative(command, item),
+					vaultRepository.reconcileAuthoritative(command, item),
 				acknowledge: async (command, acknowledgement) => {
-					await core.vaultRepository.acknowledgeItemCommand(
+					await vaultRepository.acknowledgeItemCommand(
 						command,
 						acknowledgement,
 					);
@@ -151,7 +150,7 @@ async function runDrain(): Promise<void> {
 	}
 
 	for (const mapping of queue.consumeTempIdMappings()) {
-		core.vaultRepository.replaceItemId(
+		vaultRepository.replaceItemId(
 			mapping.tempId,
 			mapping.realId,
 			mapping.accountId,

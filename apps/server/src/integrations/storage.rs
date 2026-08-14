@@ -1,8 +1,4 @@
-use std::{
-    env,
-    sync::{LazyLock, OnceLock},
-    time::Duration,
-};
+use std::{env, sync::LazyLock, time::Duration};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
@@ -37,7 +33,77 @@ pub struct StorageConfig {
     pub secret_access_key: String,
 }
 
-static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+#[async_trait::async_trait]
+pub trait ObjectStorage: Send + Sync {
+    async fn presign_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: Option<i64>,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError>;
+    async fn presign_download(
+        &self,
+        key: &str,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<String, StorageError>;
+    async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError>;
+    async fn delete(&self, key: &str) -> Result<(), StorageError>;
+    fn public_url(&self, key: &str) -> Option<String>;
+}
+
+pub struct S3CompatibleStorage {
+    config: StorageConfig,
+    cdn_url: Option<String>,
+    client: reqwest::Client,
+}
+
+impl S3CompatibleStorage {
+    pub fn new(config: StorageConfig, cdn_url: Option<String>) -> Result<Self, StorageError> {
+        object_url(&config, "configuration-check")?;
+        Ok(Self {
+            config,
+            cdn_url: normalize_cdn_url(cdn_url),
+            client: reqwest::Client::new(),
+        })
+    }
+}
+
+pub struct UnavailableObjectStorage {
+    cdn_url: Option<String>,
+}
+
+impl UnavailableObjectStorage {
+    pub fn new(cdn_url: Option<String>) -> Self {
+        Self {
+            cdn_url: normalize_cdn_url(cdn_url),
+        }
+    }
+}
+
+pub fn object_storage_from_env() -> Result<std::sync::Arc<dyn ObjectStorage>, StorageError> {
+    let cdn_url = env::var("BITTERY_STORAGE_CDN_URL").ok();
+    match load_config()? {
+        Some(config) => Ok(std::sync::Arc::new(S3CompatibleStorage::new(
+            config, cdn_url,
+        )?)),
+        None => Ok(std::sync::Arc::new(UnavailableObjectStorage::new(cdn_url))),
+    }
+}
+
+fn normalize_cdn_url(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_public_url(cdn_url: Option<&str>, key: &str) -> Option<String> {
+    let key = key.trim().trim_start_matches('/');
+    if key.is_empty() || !(key.starts_with("teams/") || key.starts_with("vaults/")) {
+        return None;
+    }
+    Some(format!("{}/{key}", cdn_url?))
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,23 +118,6 @@ pub struct PresignedUploadResult {
 pub struct StorageObjectHead {
     pub size: i64,
     pub content_type: Option<String>,
-}
-
-pub fn public_asset_url(key: &str) -> Option<String> {
-    let normalized_key = key.trim().trim_start_matches('/');
-    if normalized_key.is_empty()
-        || !(normalized_key.starts_with("teams/") || normalized_key.starts_with("vaults/"))
-    {
-        return None;
-    }
-
-    let base_url = env::var("BITTERY_STORAGE_CDN_URL").ok()?;
-    let normalized_base = base_url.trim().trim_end_matches('/');
-    if normalized_base.is_empty() {
-        None
-    } else {
-        Some(format!("{normalized_base}/{normalized_key}"))
-    }
 }
 
 pub fn create_team_image_key(team_id: &str, file_name: &str) -> String {
@@ -144,15 +193,16 @@ pub fn is_valid_attachment_upload_key(
     )
 }
 
-pub async fn create_presigned_upload(
+async fn create_presigned_upload(
+    storage: &S3CompatibleStorage,
     key: &str,
     content_type: &str,
     content_length: Option<i64>,
     expires_in_seconds: Option<u64>,
 ) -> Result<PresignedUploadResult, StorageError> {
-    let config = get_config()?;
+    let config = &storage.config;
     let upload_url = presigned_url(
-        &config,
+        config,
         "PUT",
         key,
         Some(content_type),
@@ -163,13 +213,13 @@ pub async fn create_presigned_upload(
     Ok(PresignedUploadResult {
         key: key.to_string(),
         upload_url,
-        public_url: public_asset_url(key),
+        public_url: storage.public_url(key),
     })
 }
 
-pub async fn delete_object(key: &str) -> Result<(), StorageError> {
-    let config = get_config()?;
-    let response = signed_request(&config, Method::DELETE, key)?
+async fn delete_object(storage: &S3CompatibleStorage, key: &str) -> Result<(), StorageError> {
+    let config = &storage.config;
+    let response = signed_request(&storage.client, config, Method::DELETE, key)?
         .send()
         .await
         .map_err(|error| StorageError::DeleteObject(error.to_string()))?;
@@ -183,13 +233,14 @@ pub async fn delete_object(key: &str) -> Result<(), StorageError> {
     Ok(())
 }
 
-pub async fn create_presigned_download(
+async fn create_presigned_download(
+    storage: &S3CompatibleStorage,
     key: &str,
     expires_in_seconds: Option<u64>,
 ) -> Result<String, StorageError> {
-    let config = get_config()?;
+    let config = &storage.config;
     presigned_url(
-        &config,
+        config,
         "GET",
         key,
         None,
@@ -198,9 +249,12 @@ pub async fn create_presigned_download(
     )
 }
 
-pub async fn head_object(key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
-    let config = get_config()?;
-    let response = signed_request(&config, Method::HEAD, key)?
+async fn head_object(
+    storage: &S3CompatibleStorage,
+    key: &str,
+) -> Result<Option<StorageObjectHead>, StorageError> {
+    let config = &storage.config;
+    let response = signed_request(&storage.client, config, Method::HEAD, key)?
         .send()
         .await
         .map_err(|error| StorageError::HeadObject(error.to_string()))?;
@@ -245,13 +299,20 @@ fn object_url(config: &StorageConfig, key: &str) -> Result<Url, StorageError> {
     Ok(url)
 }
 
-fn get_config() -> Result<StorageConfig, StorageError> {
+fn load_config() -> Result<Option<StorageConfig>, StorageError> {
     let endpoint = env::var("BITTERY_STORAGE_ENDPOINT").ok();
     let bucket = env::var("BITTERY_STORAGE_BUCKET").ok();
     let access_key_id = env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
     let secret_access_key = env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok();
     let region = env::var("BITTERY_STORAGE_REGION").unwrap_or_else(|_| "auto".to_string());
 
+    if endpoint.is_none()
+        && bucket.is_none()
+        && access_key_id.is_none()
+        && secret_access_key.is_none()
+    {
+        return Ok(None);
+    }
     match (endpoint, bucket, access_key_id, secret_access_key) {
         (Some(endpoint), Some(bucket), Some(access_key_id), Some(secret_access_key))
             if !endpoint.trim().is_empty()
@@ -259,13 +320,13 @@ fn get_config() -> Result<StorageConfig, StorageError> {
                 && !access_key_id.trim().is_empty()
                 && !secret_access_key.trim().is_empty() =>
         {
-            Ok(StorageConfig {
+            Ok(Some(StorageConfig {
                 endpoint: endpoint.trim().to_string(),
                 region,
                 bucket: bucket.trim().to_string(),
                 access_key_id: access_key_id.trim().to_string(),
                 secret_access_key: secret_access_key.trim().to_string(),
-            })
+            }))
         }
         _ => Err(StorageError::MissingConfig),
     }
@@ -334,6 +395,7 @@ fn presigned_url(
 }
 
 fn signed_request(
+    client: &reqwest::Client,
     config: &StorageConfig,
     method: Method,
     key: &str,
@@ -373,7 +435,7 @@ fn signed_request(
         config.access_key_id,
     );
 
-    Ok(http_client()
+    Ok(client
         .request(method, url)
         .header(HOST, host_header(&object_url(config, key)?)?)
         .header("x-amz-content-sha256", payload_hash)
@@ -381,8 +443,62 @@ fn signed_request(
         .header("Authorization", authorization))
 }
 
-fn http_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(reqwest::Client::new)
+#[async_trait::async_trait]
+impl ObjectStorage for S3CompatibleStorage {
+    async fn presign_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: Option<i64>,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        create_presigned_upload(self, key, content_type, content_length, expires_in_seconds).await
+    }
+    async fn presign_download(
+        &self,
+        key: &str,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<String, StorageError> {
+        create_presigned_download(self, key, expires_in_seconds).await
+    }
+    async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
+        head_object(self, key).await
+    }
+    async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        delete_object(self, key).await
+    }
+    fn public_url(&self, key: &str) -> Option<String> {
+        resolve_public_url(self.cdn_url.as_deref(), key)
+    }
+}
+
+#[async_trait::async_trait]
+impl ObjectStorage for UnavailableObjectStorage {
+    async fn presign_upload(
+        &self,
+        _key: &str,
+        _content_type: &str,
+        _content_length: Option<i64>,
+        _expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+    async fn presign_download(
+        &self,
+        _key: &str,
+        _expires_in_seconds: Option<u64>,
+    ) -> Result<String, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+    async fn head(&self, _key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+    async fn delete(&self, _key: &str) -> Result<(), StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+    fn public_url(&self, key: &str) -> Option<String> {
+        resolve_public_url(self.cdn_url.as_deref(), key)
+    }
 }
 
 fn credential_scope(date: &str, region: &str) -> String {
@@ -531,7 +647,7 @@ fn random_uuid_like() -> String {
 	)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StorageError {
     MissingConfig,
     MissingAttachmentUploadSecret,
@@ -570,16 +686,22 @@ mod tests {
     };
 
     use super::{
-        create_attachment_key, create_presigned_download, create_presigned_upload,
-        create_team_image_key, create_vault_image_key, delete_object, head_object,
-        is_valid_attachment_upload_key, public_asset_url, sign_attachment_upload_intent,
-        StorageError,
+        create_attachment_key, create_team_image_key, create_vault_image_key,
+        is_valid_attachment_upload_key, object_storage_from_env, sign_attachment_upload_intent,
+        ObjectStorage, StorageError, UnavailableObjectStorage,
     };
     use crate::test_support::acquire_env_lock_async;
 
     #[test]
-    fn public_asset_url_rejects_private_attachment_keys() {
-        assert_eq!(public_asset_url("attachments/user/item/file.enc"), None);
+    fn public_urls_are_resolved_by_the_adapter() {
+        let storage =
+            UnavailableObjectStorage::new(Some("https://cdn.example.invalid/assets".into()));
+
+        assert_eq!(
+            storage.public_url("vaults/user/avatar.png").as_deref(),
+            Some("https://cdn.example.invalid/assets/vaults/user/avatar.png")
+        );
+        assert_eq!(storage.public_url("attachments/user/item/file.enc"), None);
     }
 
     #[test]
@@ -599,10 +721,11 @@ mod tests {
     #[tokio::test]
     async fn presigned_upload_uses_path_style_bucket_and_signed_content_type() {
         with_storage_env_async("https://storage.example.invalid", async {
-            let result =
-                create_presigned_upload("vaults/user_123/avatar file.png", "image/png", None, None)
-                    .await
-                    .expect("presigned upload should be created");
+            let storage = object_storage_from_env().expect("storage environment should be valid");
+            let result = storage
+                .presign_upload("vaults/user_123/avatar file.png", "image/png", None, None)
+                .await
+                .expect("presigned upload should be created");
             let url = Url::parse(&result.upload_url).expect("upload URL should parse");
             let params = url.query_pairs().collect::<Vec<_>>();
 
@@ -632,7 +755,9 @@ mod tests {
     #[tokio::test]
     async fn presigned_download_uses_custom_expiration() {
         with_storage_env_async("https://storage.example.invalid", async {
-            let url = create_presigned_download("attachments/user/item/file.enc", Some(900))
+            let storage = object_storage_from_env().expect("storage environment should be valid");
+            let url = storage
+                .presign_download("attachments/user/item/file.enc", Some(900))
                 .await
                 .expect("presigned download should be created");
             let url = Url::parse(&url).expect("download URL should parse");
@@ -651,10 +776,59 @@ mod tests {
     #[tokio::test]
     async fn storage_requires_config() {
         with_missing_storage_env_async(async {
-            let error = create_presigned_download("file.txt", None)
+            let storage =
+                object_storage_from_env().expect("absent storage environment should be valid");
+            let error = storage
+                .presign_download("file.txt", None)
                 .await
                 .expect_err("missing config should fail");
             assert!(matches!(error, StorageError::MissingConfig));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn absent_storage_selects_unavailable_adapter_with_cdn_resolution() {
+        with_missing_storage_env_async(async {
+            set_env_var(
+                "BITTERY_STORAGE_CDN_URL",
+                Some("https://cdn.example.invalid"),
+            );
+            let storage = object_storage_from_env().expect("absent object storage is intentional");
+            assert_eq!(
+                storage.public_url("teams/team/image.png").as_deref(),
+                Some("https://cdn.example.invalid/teams/team/image.png")
+            );
+            assert!(matches!(
+                storage.head("anything").await,
+                Err(StorageError::MissingConfig)
+            ));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn partial_storage_configuration_is_rejected() {
+        with_missing_storage_env_async(async {
+            set_env_var(
+                "BITTERY_STORAGE_ENDPOINT",
+                Some("https://storage.example.invalid"),
+            );
+            assert!(matches!(
+                object_storage_from_env(),
+                Err(StorageError::MissingConfig)
+            ));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn malformed_storage_endpoint_is_rejected() {
+        with_storage_env_async("not a url", async {
+            assert!(matches!(
+                object_storage_from_env(),
+                Err(StorageError::InvalidConfig(_))
+            ));
         })
         .await;
     }
@@ -744,7 +918,9 @@ mod tests {
         );
 
         with_storage_env_async(&endpoint, async {
-            let head = head_object("vaults/user/avatar.png")
+            let storage = object_storage_from_env().expect("storage environment should be valid");
+            let head = storage
+                .head("vaults/user/avatar.png")
                 .await
                 .expect("head request should succeed")
                 .expect("object should exist");
@@ -766,7 +942,9 @@ mod tests {
         let (endpoint, _request) = spawn_storage_response("HTTP/1.1 404 Not Found\r\n\r\n");
 
         with_storage_env_async(&endpoint, async {
-            let head = head_object("missing.txt")
+            let storage = object_storage_from_env().expect("storage environment should be valid");
+            let head = storage
+                .head("missing.txt")
                 .await
                 .expect("not found should not be an error");
 
@@ -780,7 +958,9 @@ mod tests {
         let (endpoint, request) = spawn_storage_response("HTTP/1.1 204 No Content\r\n\r\n");
 
         with_storage_env_async(&endpoint, async {
-            delete_object("attachments/user/item/file.enc")
+            let storage = object_storage_from_env().expect("storage environment should be valid");
+            storage
+                .delete("attachments/user/item/file.enc")
                 .await
                 .expect("delete request should succeed");
         })

@@ -1,5 +1,8 @@
-import type { ApiClientPlatform } from "@bittery/api-contract";
-import { type AppApiClient, createAppApiClient } from "./api-client";
+import {
+	type ApiClient,
+	type ApiClientPlatform,
+	createApiClient,
+} from "@bittery/api-contract";
 import { createSessionRefreshingApiClient } from "./api-session-refresh";
 import { resolveInsecureTransportPolicy } from "./server-transport-policy";
 import { normalizeServerUrl } from "./server-url";
@@ -70,12 +73,13 @@ function normalizePlatform(value?: string): ApiClientPlatform {
 }
 
 function getClientVersion(value?: string): string {
+	const processEnv = (
+		globalThis as { process?: { env?: Record<string, string | undefined> } }
+	).process?.env;
 	return (
 		value ??
 		import.meta.env?.VITE_APP_VERSION ??
-		(typeof process !== "undefined"
-			? process.env.VITE_APP_VERSION
-			: undefined) ??
+		processEnv?.VITE_APP_VERSION ??
 		"0.0.0"
 	);
 }
@@ -85,8 +89,9 @@ export function getDefaultServerUrl(): string {
 	if (configuredServerUrl?.trim()) {
 		return resolveServerUrl(configuredServerUrl);
 	}
-	const processServerUrl =
-		typeof process !== "undefined" ? process.env.VITE_SERVER_URL : null;
+	const processServerUrl = (
+		globalThis as { process?: { env?: Record<string, string | undefined> } }
+	).process?.env?.VITE_SERVER_URL;
 	if (processServerUrl?.trim()) {
 		return resolveServerUrl(processServerUrl);
 	}
@@ -118,7 +123,7 @@ export function createAccountApiClient(
 	clientId?: string,
 	sessionRefresh?: AccountSessionRefreshOptions,
 	metadata?: AccountApiClientMetadataOptions,
-): AppApiClient {
+): ApiClient {
 	const insecureTransportConfirmed =
 		metadata?.insecureTransportConfirmed === true;
 	const resolvedServerUrl = resolveServerUrl(serverUrl);
@@ -150,7 +155,7 @@ export function createAccountApiClient(
 				clientPlatform,
 				clientVersion,
 			})
-		: createAppApiClient({
+		: createApiClient({
 				serverUrl: resolvedServerUrl,
 				authorizeInsecureTransport: () =>
 					resolveInsecureTransportPolicy({
@@ -171,12 +176,12 @@ export function createApiClientForServer(
 	serverUrl: string,
 	clientId?: string,
 	metadata?: AccountApiClientMetadataOptions,
-): AppApiClient {
+): ApiClient {
 	const insecureTransportConfirmed =
 		metadata?.insecureTransportConfirmed === true;
 	const resolvedServerUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = resolveClientId(clientId);
-	return createAppApiClient({
+	return createApiClient({
 		serverUrl: resolvedServerUrl,
 		authorizeInsecureTransport: () =>
 			resolveInsecureTransportPolicy({
@@ -195,9 +200,9 @@ export function createApiClientForServer(
 export async function createAllAccountApiClients(
 	storage: AccountStoreLike,
 	clientId?: string,
-): Promise<Map<string, AppApiClient>> {
+): Promise<Map<string, ApiClient>> {
 	const accountIds = await storage.getUnlockedAccounts();
-	const clients = new Map<string, AppApiClient>();
+	const clients = new Map<string, ApiClient>();
 
 	for (const accountId of accountIds) {
 		const [authToken, account] = await Promise.all([

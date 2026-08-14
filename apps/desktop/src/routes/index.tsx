@@ -1,11 +1,9 @@
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/")({
-	beforeLoad: async () => {
+	beforeLoad: async ({ context }) => {
 		// Check for accounts
-		const accountsList = await storage.getAccountsList();
+		const accountsList = context.runtime.accounts.getAccounts();
 
 		const [firstAccount] = accountsList;
 		if (!firstAccount) {
@@ -14,21 +12,20 @@ export const Route = createFileRoute("/")({
 		}
 
 		// Get active account
-		let activeAccount = await storage.getActiveAccount();
+		let activeAccount = context.runtime.accounts.getActiveAccount();
 
 		if (!activeAccount) {
 			// Has accounts but none active, set first as active
-			await storage.setActiveAccount(firstAccount.accountId);
+			await context.runtime.accounts.switchAccount(firstAccount.accountId);
 			activeAccount = firstAccount.accountId;
 		}
 
 		// Single account mode: check if the active account has a valid session.
-		const sessionValid = await storage.isSessionValid(activeAccount);
+		const sessionValid =
+			await context.runtime.accounts.storage.isSessionValid(activeAccount);
 
 		if (sessionValid) {
-			// This guard can run before AccountProvider constructs the manager; with no
-			// manager there is no verified unlock, so fall through to /unlock.
-			const restored = await peekAccountSessionManager()?.unlockAccount(
+			const restored = await context.runtime.accounts.unlockAccount(
 				activeAccount,
 				true,
 			);

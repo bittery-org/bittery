@@ -10,6 +10,7 @@ use crate::{
     db::models::*,
     error::AppError,
     integrations::storage,
+    integrations::stripe::BillingGateway,
     repo::common::{generate_resource_id, hash_token},
     services::billing::sync_team_seats_best_effort,
     services::team_billing::team_management_enabled as shared_team_management_enabled,
@@ -258,6 +259,7 @@ pub(crate) async fn get_pending_invitations(
 
 pub(crate) async fn list_teams(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
 ) -> Result<TeamSummaryResponse, AppError> {
     let team = query_as::<_, DbTeamSummaryRow>(
@@ -280,13 +282,14 @@ pub(crate) async fn list_teams(
         image_url: team
             .image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
         created_at: format_timestamp(team.created_at),
     })
 }
 
 pub(crate) async fn get_team(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: TeamIdInput,
 ) -> Result<TeamDetailsResponse, AppError> {
@@ -330,7 +333,7 @@ pub(crate) async fn get_team(
         image_url: team
             .image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
         created_at: format_timestamp(team.created_at),
         updated_at: format_timestamp(team.updated_at),
     })
@@ -489,6 +492,7 @@ pub(crate) async fn update_team(
 
 pub(crate) async fn create_team_image_upload(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: CreateImageUploadInput,
 ) -> Result<storage::PresignedUploadResult, AppError> {
@@ -519,7 +523,8 @@ pub(crate) async fn create_team_image_upload(
     ensure_team_admin(current_user.role)?;
 
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
-    storage::create_presigned_upload(&key, &input.content_type, None, None)
+    object_storage
+        .presign_upload(&key, &input.content_type, None, None)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
@@ -806,27 +811,30 @@ async fn load_pending_invitation_by_id(
 
 pub(crate) async fn accept_invitation(
     pool: &PgPool,
+    billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     input: TokenInput,
 ) -> Result<AcceptInvitationResponse, AppError> {
     validate_token(&input.token)?;
     let invitation = load_pending_invitation_by_token(pool, &input.token).await?;
-    accept_loaded_invitation(pool, user_id, invitation).await
+    accept_loaded_invitation(pool, billing_gateway, user_id, invitation).await
 }
 
 /// Accepts an invitation the signed-in user already sees in their pending list.
 /// Exists because that list no longer exposes the raw token.
 pub(crate) async fn accept_invitation_by_id(
     pool: &PgPool,
+    billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     input: InvitationIdInput,
 ) -> Result<AcceptInvitationResponse, AppError> {
     let invitation = load_pending_invitation_by_id(pool, &input.invitation_id).await?;
-    accept_loaded_invitation(pool, user_id, invitation).await
+    accept_loaded_invitation(pool, billing_gateway, user_id, invitation).await
 }
 
 async fn accept_loaded_invitation(
     pool: &PgPool,
+    billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     invitation: DbTeamInvitationAcceptRow,
 ) -> Result<AcceptInvitationResponse, AppError> {
@@ -936,7 +944,13 @@ async fn accept_loaded_invitation(
         AppError::internal("Failed to commit invitation acceptance")
     })?;
 
-    sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
+    sync_team_seats_best_effort(
+        pool,
+        billing_gateway,
+        &invitation.team_id,
+        invitation.billing_plan,
+    )
+    .await;
 
     Ok(AcceptInvitationResponse {
         team_id: invitation.team_id,

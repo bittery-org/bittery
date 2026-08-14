@@ -14,7 +14,6 @@ import {
 	invalidateAccountSession,
 	removeAccount,
 } from "@bittery/core/services/account-lifecycle";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	type AccountStore,
 	createAccountStore,
@@ -59,9 +58,7 @@ function getOrCreateWebAccountId(): string {
 }
 
 /** Reconcile direct storage ceremonies with the process-owned account runtime. */
-export async function refreshAccountRuntime(): Promise<void> {
-	await peekAccountSessionManager()?.refresh();
-}
+export type RefreshAccountRuntime = () => void | Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -111,20 +108,24 @@ export async function initializeStorage(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Sign out of the active account: no quick-unlock offer and no cached ciphertext survive. */
-export async function forgetActiveSession(): Promise<void> {
+export async function forgetActiveSession(
+	refresh?: RefreshAccountRuntime,
+): Promise<void> {
 	await initializeStorage();
 	await invalidateAccountSession("active", lifecycleDeps);
-	await refreshAccountRuntime();
+	await refresh?.();
 }
 
 /** Wipe everything stored for the active account, including its encrypted item cache. */
-export async function clearActiveAccountData(): Promise<void> {
+export async function clearActiveAccountData(
+	refresh?: RefreshAccountRuntime,
+): Promise<void> {
 	await initializeStorage();
 	const accountId = await storage.getActiveAccount();
 	if (accountId) {
 		await removeAccount(accountId, lifecycleDeps);
 	}
-	await refreshAccountRuntime();
+	await refresh?.();
 }
 
 // Re-export types for convenience

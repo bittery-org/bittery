@@ -4,7 +4,10 @@ use std::sync::Arc;
 use fred::clients::SubscriberClient;
 use fred::prelude::*;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, RwLock};
+use tokio::{
+    sync::{broadcast, RwLock},
+    task::JoinHandle,
+};
 use tracing::{info, warn};
 
 /// Channel capacity for local broadcast fanout.
@@ -201,24 +204,18 @@ impl SyncPubSub {
     /// Start the Redis dispatch loop. Must be called once on startup.
     /// Listens for incoming Redis pub/sub messages and fans them out locally.
     /// Only needed when Redis is configured.
-    pub fn start_dispatch(self: &Arc<Self>) {
-        let Some(ref redis) = self.redis else {
-            return;
-        };
+    pub fn start_dispatch(self: &Arc<Self>) -> Option<JoinHandle<()>> {
+        let redis = self.redis.as_ref()?;
 
         let pubsub = Arc::clone(self);
 
         // Subscribe to global sync wake channel
         let subscriber = redis.subscriber.clone();
-        tokio::spawn(async move {
+        let mut message_rx = redis.subscriber.message_rx();
+        Some(tokio::spawn(async move {
             if let Err(error) = subscriber.subscribe("sync:wake").await {
                 warn!(error = %error, "failed to subscribe to sync:wake");
             }
-        });
-
-        let mut message_rx = redis.subscriber.message_rx();
-
-        tokio::spawn(async move {
             while let Ok(message) = message_rx.recv().await {
                 let channel = message.channel.to_string();
 
@@ -244,7 +241,7 @@ impl SyncPubSub {
             }
 
             info!("Redis pub/sub dispatch loop ended");
-        });
+        }))
     }
 }
 
