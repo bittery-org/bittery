@@ -4,6 +4,9 @@ use crate::{db::models::*, error::AppError};
 
 const BOOTSTRAP_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 
+// Deleting a vault nulls sync_event.vault_id, so its owner-targeted tombstone stays user-scoped.
+// Access revocations are already user-scoped for the same reason.
+
 pub struct BoundedBootstrapRows {
     pub rows: Vec<DbBootstrapItemRow>,
     pub has_more: bool,
@@ -55,7 +58,7 @@ pub async fn fetch_visible_cursor_event(
 ) -> Result<Option<DbSyncEventCursorRow>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventCursorRow>(
-			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) LIMIT 1",
+			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) LIMIT 1",
 		)
 		.bind(since_id)
 		.bind(user_id)
@@ -65,7 +68,7 @@ pub async fn fetch_visible_cursor_event(
     }
 
     query_as::<_, DbSyncEventCursorRow>(
-		"SELECT id, seq FROM sync_event WHERE id = $1 AND ((vault_id = ANY($2) AND event_type NOT IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $3 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
+		"SELECT id, seq FROM sync_event WHERE id = $1 AND ((vault_id = ANY($2) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $3 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
 	)
 	.bind(since_id)
 	.bind(target_vault_ids)
@@ -82,7 +85,7 @@ pub async fn fetch_latest_visible_event_id(
 ) -> Result<Option<String>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventIdRow>(
-			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) ORDER BY seq DESC LIMIT 1",
+			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) ORDER BY seq DESC LIMIT 1",
 		)
 		.bind(user_id)
 		.fetch_optional(pool)
@@ -92,7 +95,7 @@ pub async fn fetch_latest_visible_event_id(
     }
 
     query_as::<_, DbSyncEventIdRow>(
-		"SELECT id FROM sync_event WHERE (vault_id = ANY($1) AND event_type NOT IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
+		"SELECT id FROM sync_event WHERE (vault_id = ANY($1) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
 	)
 	.bind(target_vault_ids)
 	.bind(user_id)
@@ -119,7 +122,8 @@ pub async fn fetch_visible_events_since(
                         + octet_length(user_id) + coalesce(octet_length(metadata), 0))::bigint AS estimated_bytes
                 FROM sync_event
                 WHERE user_id = $1
-                  AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)
+                  AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
+                    'travel_mode_updated'::sync_event_type)
                   AND seq > $2 ORDER BY seq ASC LIMIT $3
             ), weighted AS (
                 SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
@@ -145,8 +149,10 @@ pub async fn fetch_visible_events_since(
                         + octet_length(user_id) + coalesce(octet_length(metadata), 0))::bigint AS estimated_bytes
                 FROM sync_event
                 WHERE ((vault_id = ANY($1) AND event_type NOT IN
-                  ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2
-                  AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)))
+                  ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
+                    'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN
+                  ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
+                    'travel_mode_updated'::sync_event_type)))
                   AND seq > $3 ORDER BY seq ASC LIMIT $4
             ), weighted AS (
                 SELECT id, position, count(*) OVER ()::bigint AS candidate_count,

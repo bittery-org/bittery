@@ -45,6 +45,26 @@ export type KeychainGetArgs = { key: string, };
 export type KeychainSetArgs = { key: string, value: string, };
 
 /**
+ * `record_store_apply(puts, deletes, clearPrefixes)`
+ */
+export type RecordStoreApplyArgs = { puts: Array<RecordStoreEntry>, deletes: Array<string>, clearPrefixes: Array<string>, };
+
+/**
+ * One string record stored under its fully-resolved `store.json` key.
+ */
+export type RecordStoreEntry = { key: string, value: string, };
+
+/**
+ * `record_store_get(key)`
+ */
+export type RecordStoreGetArgs = { key: string, };
+
+/**
+ * `record_store_list(prefix)`
+ */
+export type RecordStoreListArgs = { prefix: string, };
+
+/**
  * `set_ui_theme(theme)`
  */
 export type SetUiThemeArgs = { theme: DesktopTheme, };

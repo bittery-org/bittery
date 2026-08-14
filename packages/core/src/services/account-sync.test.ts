@@ -133,4 +133,32 @@ describe("account-aware Sync assembly", () => {
 
 		expect(second).toBe(first);
 	});
+
+	test("initializes its platform stores only once", async () => {
+		const { storage, itemCache, vaultRepository } = makeDependencies();
+		let storageInitializations = 0;
+		let cacheInitializations = 0;
+		storage.initialize = async () => {
+			storageInitializations++;
+		};
+		itemCache.initialize = async () => {
+			cacheInitializations++;
+		};
+		const sync = createAccountSync({
+			...semanticDeps,
+			vaultRepository,
+			lifecycle: {
+				storage,
+				itemCache,
+				credentialMirror: NO_CREDENTIAL_MIRROR,
+			},
+			clientFactory: async () => ({}) as DefaultApiClient,
+		});
+
+		await sync.assemble({ clientId: "device_1" });
+		await sync.assemble({ clientId: "device_1" });
+
+		expect(storageInitializations).toBe(1);
+		expect(cacheInitializations).toBe(1);
+	});
 });

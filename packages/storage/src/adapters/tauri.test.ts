@@ -12,6 +12,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
+import { cachedItem } from "@bittery/shared/testing/item-fixtures";
 import { createAccountStore } from "../account-store";
 import { createItemCache } from "../item-cache";
 import { runPortConformance } from "./port-conformance";
@@ -63,7 +64,7 @@ describe("tauri adapter — platform-specific mapping", () => {
 
 		expect(doubles.keychain.entries.get("bittery_device_key")).toBe("dk");
 		expect(await platform.kvGet("bittery_device_key", "device")).toBeNull();
-		expect([...doubles.store.entries.keys()]).toEqual([]);
+		expect([...doubles.store.contents.keys()]).toEqual([]);
 	});
 
 	test("publishes the record key prefix Rust prefix-scans store.json with", async () => {
@@ -77,7 +78,9 @@ describe("tauri adapter — platform-specific mapping", () => {
 		// is discoverable under the prefix ItemCache writes into its native-view metadata.
 		const prefix = `${platform.recordKeyPrefix}acct-a:items:`;
 		expect(
-			[...doubles.store.entries.keys()].filter((key) => key.startsWith(prefix)),
+			[...doubles.store.contents.keys()].filter((key) =>
+				key.startsWith(prefix),
+			),
 		).toEqual([`${prefix}item-1`]);
 	});
 
@@ -115,7 +118,7 @@ describe("tauri adapter — platform-specific mapping", () => {
 		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
 
 		const state = JSON.parse(
-			String(doubles.store.entries.get(stateKey ?? "")),
+			String(doubles.store.contents.get(stateKey ?? "")),
 		) as {
 			activeGeneration?: string;
 			nativeView?: { itemsKeyPrefix?: string; vaultsKeyPrefix?: string };
@@ -133,7 +136,7 @@ describe("tauri adapter — platform-specific mapping", () => {
 
 		await platform.kvSet("bittery_native_view", '{"v":1}', "device");
 
-		expect(doubles.store.entries.get("bittery_native_view")).toBe('{"v":1}');
+		expect(doubles.store.contents.get("bittery_native_view")).toBe('{"v":1}');
 	});
 
 	test("session-scope keys are namespaced away from device-scope keys", async () => {
@@ -141,8 +144,8 @@ describe("tauri adapter — platform-specific mapping", () => {
 
 		await platform.kvSet("bittery_jwt_token", "t", "session");
 
-		expect(doubles.store.entries.get("session:bittery_jwt_token")).toBe("t");
-		expect(doubles.store.entries.has("bittery_jwt_token")).toBe(false);
+		expect(doubles.store.contents.get("session:bittery_jwt_token")).toBe("t");
+		expect(doubles.store.contents.has("bittery_jwt_token")).toBe(false);
 		// kvListKeys reports the logical key, not the namespaced one.
 		expect(await platform.kvListKeys("bittery_")).toEqual([
 			"bittery_jwt_token",
@@ -167,7 +170,7 @@ describe("tauri adapter — platform-specific mapping", () => {
 
 		await record.recordPut("acct-1:items", "item-1", "blob");
 
-		expect(doubles.store.entries.get("record:acct-1:items:item-1")).toBe(
+		expect(doubles.store.contents.get("record:acct-1:items:item-1")).toBe(
 			"blob",
 		);
 	});
@@ -253,6 +256,81 @@ describe("tauri adapter — platform-specific mapping", () => {
 
 		expect(doubles.store.deletes).toHaveLength(10);
 		expect(doubles.store.saves).toBe(1);
+	});
+
+	test("recordList reads the whole collection in one call, not one get per record", async () => {
+		const { record, doubles } = await makeTauriPorts();
+		await record.recordPutMany(
+			"acct-1:items",
+			Array.from({ length: 20 }, (_unused, index) => ({
+				id: `item-${index}`,
+				value: `blob-${index}`,
+			})),
+		);
+		doubles.store.resetCallLog();
+
+		expect(await record.recordList("acct-1:items")).toHaveLength(20);
+		expect(doubles.store.gets).toEqual([]);
+	});
+
+	test("recordPutMany pays one fsync for N writes", async () => {
+		const { record, doubles } = await makeTauriPorts();
+		const records = Array.from({ length: 10 }, (_unused, index) => ({
+			id: `item-${index}`,
+			value: `blob-${index}`,
+		}));
+		doubles.store.resetCallLog();
+
+		await record.recordPutMany("acct-1:items", records);
+
+		expect(doubles.store.sets).toHaveLength(10);
+		expect(doubles.store.saves).toBe(1);
+		expect(await record.recordList("acct-1:items")).toHaveLength(10);
+	});
+
+	/**
+	 * The reason this matters: a full bootstrap copies the baseline, re-stages every
+	 * item and reconciles on promote. One fsync per record made deleting a vault cost
+	 * thousands of `store.save()` calls at 27-77ms each, which froze the dialog awaiting
+	 * it. The fsync bill for a refresh must depend on the number of *phases*, not on the
+	 * number of items.
+	 */
+	async function stagedRefreshFsyncs(itemCount: number): Promise<number> {
+		const { record, doubles } = await makeTauriPorts();
+		const cache = createItemCache({ port: record });
+		await cache.initialize();
+		const items = Array.from({ length: itemCount }, (_unused, index) =>
+			cachedItem({ id: `item-${index}`, vaultId: "vault-1" }),
+		);
+		await cache.setCachedItems(items, "acct-a");
+		doubles.store.resetCallLog();
+
+		const stage = await cache.beginStagedGeneration("acct-a");
+		await stage.upsertCachedItems(items);
+		await stage.promote({ lastFullSyncAt: 1, cacheVersion: 1 });
+
+		return doubles.store.saves;
+	}
+
+	test("a staged refresh pays the same fsyncs whatever the cache holds", async () => {
+		expect(await stagedRefreshFsyncs(40)).toBe(await stagedRefreshFsyncs(10));
+	});
+
+	test("a 324-item staged refresh uses 19 store IPC calls", async () => {
+		const { record, doubles } = await makeTauriPorts();
+		const cache = createItemCache({ port: record });
+		await cache.initialize();
+		const items = Array.from({ length: 324 }, (_unused, index) =>
+			cachedItem({ id: `item-${index}`, vaultId: "vault-1" }),
+		);
+		await cache.setCachedItems(items, "acct-a");
+		doubles.store.resetCallLog();
+
+		const stage = await cache.beginStagedGeneration("acct-a");
+		await stage.upsertCachedItems(items);
+		await stage.promote({ lastFullSyncAt: 1, cacheVersion: 1 });
+
+		expect(doubles.store.ipcCalls).toBe(19);
 	});
 
 	// ------------------------------------------------------------------

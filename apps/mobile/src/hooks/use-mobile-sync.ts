@@ -1,7 +1,6 @@
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
@@ -91,7 +90,6 @@ class ReactNativeSyncStorage implements SyncStorage {
 export function useMobileSync(
 	queryClient: QueryClient,
 	manager: AccountSessionManager,
-	vaultRuntime: AccountVaultRuntime,
 	enabled = true,
 ) {
 	const { m } = useI18n();
@@ -113,10 +111,9 @@ export function useMobileSync(
 				resolveClientId: getOrCreateMobileSyncClientId,
 				getActiveAccountId: () => manager.getActiveAccount(),
 				subscribeAccountChanges: manager.subscribe,
-				subscribeVaultChanges: vaultRuntime.subscribe,
 				assemble: (input) => accountSync.assemble(input),
 			}),
-		[accountSync, manager, vaultRuntime],
+		[accountSync, manager],
 	);
 	useEffect(() => {
 		lifecycle.start();

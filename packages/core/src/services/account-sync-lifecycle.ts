@@ -14,7 +14,6 @@ export interface AccountSyncLifecycleOptions<Assembly> {
 	resolveClientId(): Promise<string>;
 	getActiveAccountId(): ActiveAccountId;
 	subscribeAccountChanges: Subscribe;
-	subscribeVaultChanges: Subscribe;
 	assemble(input: {
 		clientId: string;
 		activeAccountId: ActiveAccountId;
@@ -32,6 +31,7 @@ const INITIAL_SNAPSHOT: AccountSyncLifecycleSnapshot<never> = {
 /** Owns client readiness and race-safe account-scoped Sync assembly. */
 export class AccountSyncLifecycle<Assembly> {
 	private snapshot: AccountSyncLifecycleSnapshot<Assembly> = INITIAL_SNAPSHOT;
+	private activeAccountId: ActiveAccountId | undefined;
 	private readonly listeners = new Set<() => void>();
 	private unsubscribers: (() => void)[] = [];
 	private generation = 0;
@@ -46,7 +46,6 @@ export class AccountSyncLifecycle<Assembly> {
 		this.started = true;
 		this.unsubscribers = [
 			this.options.subscribeAccountChanges(() => this.rebuild()),
-			this.options.subscribeVaultChanges(() => this.rebuild()),
 		];
 		const generation = ++this.generation;
 		void this.options.resolveClientId().then(
@@ -77,6 +76,7 @@ export class AccountSyncLifecycle<Assembly> {
 
 	clear(): void {
 		this.generation++;
+		this.activeAccountId = undefined;
 		this.publish({
 			...this.snapshot,
 			assembly: null,
@@ -96,21 +96,39 @@ export class AccountSyncLifecycle<Assembly> {
 	private rebuild(clientId = this.snapshot.clientId): void {
 		if (!this.started || !clientId) return;
 		const generation = ++this.generation;
-		this.publish({
-			clientId,
-			assembly: null,
-			initialized: false,
-			ready: false,
-			error: null,
-		});
+		const activeAccountId = this.options.getActiveAccountId();
+		const scopeChanged =
+			this.activeAccountId !== activeAccountId ||
+			this.snapshot.clientId !== clientId;
+		this.activeAccountId = activeAccountId;
+		// A real scope change must hide the previous account immediately. Reaffirming
+		// the same scope rebuilds in the background so its live SSE connection remains
+		// active until a genuinely different assembly replaces it.
+		if (scopeChanged || !this.snapshot.initialized) {
+			this.publish({
+				clientId,
+				assembly: null,
+				initialized: false,
+				ready: false,
+				error: null,
+			});
+		}
 		void this.options
 			.assemble({
 				clientId,
-				activeAccountId: this.options.getActiveAccountId(),
+				activeAccountId,
 			})
 			.then(
 				(assembly) => {
 					if (!this.isCurrent(generation)) return;
+					if (
+						this.snapshot.clientId === clientId &&
+						this.snapshot.assembly === assembly &&
+						this.snapshot.initialized &&
+						this.snapshot.error === null
+					) {
+						return;
+					}
 					this.publish({
 						clientId,
 						assembly,

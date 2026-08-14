@@ -10,7 +10,6 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "./alert-dialog";
-import { cn } from "../lib/utils";
 
 /**
  * The "are you sure?" shape, once.
@@ -102,10 +101,7 @@ export function ConfirmDialog({
 					<AlertDialogAction
 						onClick={onConfirm}
 						disabled={busy || confirmDisabled}
-						className={cn(
-							destructive &&
-								"bg-destructive text-destructive-foreground hover:bg-destructive/90",
-						)}
+						variant={destructive ? "destructive" : "default"}
 						data-testid={confirmTestId}
 					>
 						{confirmLabel}

@@ -35,6 +35,7 @@ import {
 	subscribeCreateItemIntent,
 } from "@/lib/create-item-intent";
 import { storage } from "@/lib/storage";
+import { resolveVaultRouteAccess } from "@/lib/vault-route-access";
 
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
@@ -43,26 +44,14 @@ import { VaultDndProvider } from "../../providers/dnd-provider";
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
 	beforeLoad: async ({ context }) => {
-		// Get active account
-		const activeAccount = context.runtime.accounts.getActiveAccount();
-		if (!activeAccount) {
+		const access = await resolveVaultRouteAccess(
+			context.runtime.accounts,
+			storage,
+		);
+		if (access === "login") {
 			throw redirect({ to: "/login" });
 		}
-
-		// Check if user has stored credentials for active account
-		const hasSecretKey = await storage.getStoredSecretKey(activeAccount);
-		const sessionValid = await storage.isSessionValid(activeAccount);
-
-		if (!hasSecretKey || !sessionValid) {
-			throw redirect({ to: "/unlock" });
-		}
-
-		const restored = await context.runtime.accounts.unlockAccount(
-			activeAccount,
-			true,
-		);
-
-		if (!restored) {
+		if (access === "unlock") {
 			throw redirect({ to: "/unlock" });
 		}
 
@@ -308,12 +297,15 @@ function RouteComponent() {
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={accounts.map(({ accountId, email, name, teamName }) => ({
-						accountId,
-						email,
-						name,
-						teamName,
-					}))}
+					accounts={accounts.map(
+						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
+							accountId,
+							email,
+							name,
+							teamName,
+							teamAvatarUrl,
+						}),
+					)}
 					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 

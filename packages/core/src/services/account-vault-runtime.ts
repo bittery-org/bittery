@@ -17,6 +17,28 @@ export interface AccountVaultRuntimeState {
 	error: Error | null;
 }
 
+function sameAccounts(
+	left: LocalVaultAccount[],
+	right: LocalVaultAccount[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((account, index) => {
+			const candidate = right[index];
+			return (
+				candidate !== undefined &&
+				account.accountId === candidate.accountId &&
+				account.email === candidate.email &&
+				account.userId === candidate.userId &&
+				account.name === candidate.name &&
+				account.serverUrl === candidate.serverUrl &&
+				account.teamName === candidate.teamName &&
+				account.teamAvatarUrl === candidate.teamAvatarUrl
+			);
+		})
+	);
+}
+
 /**
  * Owns the process-local Vault read lifetime. Account changes immediately define
  * the visible scope; cache opening then completes asynchronously for that scope.
@@ -64,7 +86,7 @@ export class AccountVaultRuntime {
 
 	retry = async (): Promise<void> => {
 		this.start();
-		await this.reconcile();
+		await this.reconcile(true);
 	};
 
 	dispose(): void {
@@ -86,7 +108,7 @@ export class AccountVaultRuntime {
 		this.publish({ ...this.state, isLoading: false, error });
 	}
 
-	private async reconcile(): Promise<void> {
+	private async reconcile(force = false): Promise<void> {
 		const generation = ++this.generation;
 		const activeId = this.source.getActiveAccount();
 		const all = this.source.getAccounts();
@@ -107,6 +129,17 @@ export class AccountVaultRuntime {
 		const unlockedAccounts = all
 			.filter((account) => unlocked.has(account.accountId))
 			.map(local);
+		// Desktop route guards can reaffirm the same unlocked account on child
+		// navigation. Reopening its durable cache would hide the live projection.
+		if (
+			!force &&
+			!this.state.isLoading &&
+			this.state.error === null &&
+			sameAccounts(this.state.accounts, activeAccounts) &&
+			sameAccounts(this.state.unlockedAccounts, unlockedAccounts)
+		) {
+			return;
+		}
 		// Scope is changed synchronously before any durable read can yield.
 		this.repository.setLocalActiveAccounts(activeAccounts);
 		this.publish({

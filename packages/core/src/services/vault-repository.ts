@@ -317,6 +317,19 @@ export class VaultRepository {
 		return verification;
 	}
 
+	/**
+	 * `afterInFlight` asks for a pass that *started after this call* — not to be the
+	 * last pass ever. The follow-up used to re-enter this branch, which is the second
+	 * of those: while any other caller keeps a pass in flight it queued another
+	 * follow-up and never settled. Desktop hit it every time, because one authoritative
+	 * pass there is ~1500 Tauri store round trips and the next one has almost always
+	 * started by the time the previous finishes — so `refreshFromServer` never
+	 * returned and the Vault mutation awaiting it left its dialog spinning forever.
+	 *
+	 * Joining the in-flight pass instead is exactly the contract: `serverRefreshes`
+	 * holds at most one entry per account, so a pass found here after the awaited one
+	 * finished was necessarily registered after this call began.
+	 */
 	private refreshAccountFromServer(
 		account: AccountInfo,
 		afterInFlight = false,
@@ -330,7 +343,7 @@ export class VaultRepository {
 				.catch(() => null)
 				.then(() => {
 					this.queuedServerRefreshes.delete(account.accountId);
-					return this.refreshAccountFromServer(account, true);
+					return this.refreshAccountFromServer(account);
 				});
 			this.queuedServerRefreshes.set(account.accountId, followUp);
 			return followUp;

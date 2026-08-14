@@ -9,8 +9,10 @@ const badgeVariants = cva(
 			variant: {
 				default: "border-transparent bg-primary text-primary-foreground",
 				secondary: "border-transparent bg-secondary text-secondary-foreground",
-				destructive:
-					"border-transparent bg-destructive text-destructive-foreground",
+				// `text-white`, not `text-destructive-foreground`: the theme defines no
+				// such token, so that utility never emitted a rule and the label kept
+				// the inherited colour. Matches the destructive Button.
+				destructive: "border-transparent bg-destructive text-white",
 				outline: "border-border text-foreground",
 			},
 		},

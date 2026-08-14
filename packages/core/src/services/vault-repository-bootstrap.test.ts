@@ -1368,3 +1368,83 @@ describe("VaultRepository Item sync projections", () => {
 		expect((await itemCache.getCachedItems(ACCOUNT_ID))?.[0]?.id).toBe(item.id);
 	});
 });
+
+/**
+ * `refreshFromServer` is what every Vault mutation awaits before its dialog closes.
+ * On desktop one authoritative pass is ~1500 store round trips, so a second pass is
+ * almost always already running by the time the first finishes — which is exactly
+ * the state the follow-up has to be able to terminate in.
+ */
+describe("VaultRepository coalesces authoritative refreshes without livelocking", () => {
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	it("settles once a pass that started after the call completes", async () => {
+		const { storage, itemCache, crypto } = await createLayers();
+		const vaultCrypto = createVaultCrypto({ crypto, storage });
+		await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const repository = new MultiAccountVaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		const client = createClient();
+		const account = {
+			...accountMetadata({ accountId: ACCOUNT_ID }),
+			authToken: "token",
+			serverUrl: "https://bittery.test",
+			apiClient: client as never,
+		};
+
+		// The coalescing rule under test is private, and driving it through a public
+		// entry point would mean reproducing whichever caller happens to re-bootstrap
+		// today rather than pinning the rule itself.
+		const startPass = (): Promise<unknown> =>
+			(
+				repository as unknown as {
+					refreshAccountFromServer(input: typeof account): Promise<unknown>;
+				}
+			).refreshAccountFromServer(account);
+
+		// Some other caller — on desktop, the sync orchestrator — always has the next
+		// pass ready: a new one starts the moment the previous one settles. Chained
+		// before the call under test, so its continuation always wins the race and a
+		// pass is genuinely in flight when the follow-up fires.
+		let stopped = false;
+		let passes = 0;
+		// The give-up signal is raised from inside the loop, not from a timer: the
+		// chain is pure microtasks and would starve one indefinitely.
+		let giveUp!: () => void;
+		const gaveUp = new Promise<"still-pending">((resolve) => {
+			giveUp = () => resolve("still-pending");
+		});
+		const keepBusy = (): Promise<unknown> => {
+			passes++;
+			if (passes > 6) {
+				stopped = true;
+				giveUp();
+			}
+			return startPass()
+				.catch(() => undefined)
+				.then(() => (stopped ? undefined : keepBusy()));
+		};
+		const busy = keepBusy();
+
+		try {
+			const settled = await Promise.race([
+				repository.refreshFromServer([account]).then(() => "settled" as const),
+				gaveUp,
+			]);
+
+			expect(settled).toBe("settled");
+		} finally {
+			stopped = true;
+			await busy.catch(() => undefined);
+		}
+	});
+});

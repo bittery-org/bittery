@@ -21,8 +21,8 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
-import { cn, getAccountInitials } from "../lib/utils.js";
-import { Avatar, AvatarFallback, AvatarImage } from "./avatar.js";
+import { cn, getAccountLabel, hasAccountChoice } from "../lib/utils.js";
+import { AccountAvatar } from "./account-avatar.js";
 import { Button } from "./button.js";
 import {
 	DropdownMenu,
@@ -109,9 +109,6 @@ export interface AccountSwitcherProps {
 	labels?: AccountSwitcherLabels;
 }
 
-const avatarFallbackClassName =
-	"bg-linear-to-br from-primary to-primary-deep font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]";
-
 /**
  * Account switcher dropdown for multi-account platforms.
  *
@@ -149,6 +146,7 @@ export function AccountSwitcher({
 }: AccountSwitcherProps) {
 	const [open, setOpen] = useState(false);
 	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
+	const canSwitchAccounts = hasAccountChoice(accounts);
 	const resolvedLabels: Required<AccountSwitcherLabels> = {
 		accountsLabel: "Accounts",
 		noAccountLabel: "No account",
@@ -190,24 +188,12 @@ export function AccountSwitcher({
 			className="flex items-center gap-2 px-2 text-foreground hover:bg-accent"
 			disabled={isLoading}
 		>
-			<Avatar className="size-8 rounded-md">
-				{activeAccount?.teamAvatarUrl && (
-					<AvatarImage
-						src={activeAccount.teamAvatarUrl}
-						alt={activeAccount.teamName || activeAccount.name}
-					/>
-				)}
-				<AvatarFallback
-					className={cn("rounded-md text-xs", avatarFallbackClassName)}
-				>
-					{activeAccount ? getAccountInitials(activeAccount) : "?"}
-				</AvatarFallback>
-			</Avatar>
+			<AccountAvatar account={activeAccount} size="md" />
 			<div className="flex flex-col items-start text-left">
 				<span className="font-medium text-sm">
-					{activeAccount?.name ||
-						activeAccount?.email ||
-						resolvedLabels.noAccountLabel}
+					{activeAccount
+						? getAccountLabel(activeAccount)
+						: resolvedLabels.noAccountLabel}
 				</span>
 				{activeAccount && (
 					<span className="text-muted-foreground text-xs">
@@ -242,40 +228,20 @@ export function AccountSwitcher({
 					{resolvedLabels.accountsLabel}
 				</DropdownMenuLabel>
 
-				{/* Account list */}
+				{/* Account list. A lone account is identity, not a choice — it reads
+				    the same but does not act like a switch target. */}
 				{accounts.map((account) => {
 					const isActive = account.accountId === activeAccountId;
 					const isUnlocked = unlockedAccountIds.includes(account.accountId);
-					const displayName =
-						account.teamName || account.name || account.email.split("@")[0];
 
-					return (
-						<DropdownMenuItem
-							key={account.accountId}
-							onClick={() => onAccountSelect(account.accountId)}
-							className="relative flex cursor-pointer items-center gap-2.5 py-1.5"
-						>
-							<Avatar className="size-6 rounded-md">
-								{account.teamAvatarUrl && (
-									<AvatarImage
-										src={account.teamAvatarUrl}
-										alt={account.teamName || account.name}
-									/>
-								)}
-								<AvatarFallback
-									className={cn(
-										"rounded-md text-[10px]",
-										avatarFallbackClassName,
-									)}
-								>
-									{getAccountInitials(account)}
-								</AvatarFallback>
-							</Avatar>
+					const row = (
+						<>
+							<AccountAvatar account={account} size="sm" />
 
 							<div className="flex min-w-0 flex-1 flex-col">
 								<div className="flex items-center gap-1.5">
 									<span className="truncate font-medium text-sm leading-tight">
-										{displayName}
+										{getAccountLabel(account)}
 									</span>
 									{isActive && (
 										<CheckIcon className="size-3.5 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
@@ -296,8 +262,24 @@ export function AccountSwitcher({
 										: "bg-muted-foreground/50",
 								)}
 							/>
+						</>
+					);
 
+					return canSwitchAccounts ? (
+						<DropdownMenuItem
+							key={account.accountId}
+							onClick={() => onAccountSelect(account.accountId)}
+							className="relative flex cursor-pointer items-center gap-2.5 py-1.5"
+						>
+							{row}
 						</DropdownMenuItem>
+					) : (
+						<div
+							key={account.accountId}
+							className="relative flex items-center gap-2.5 px-2 py-1.5"
+						>
+							{row}
+						</div>
 					);
 				})}
 

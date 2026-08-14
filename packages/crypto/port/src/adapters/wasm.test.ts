@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { CryptoError } from "@bittery/crypto-wasm";
 import { CryptoPortError } from "../errors";
+import type { CryptoWasmModule } from "../uniffi-bindings";
 import { runCryptoPortConformance } from "./port-conformance";
-import { createWasmCryptoPort } from "./wasm";
+import { createWasmCryptoPort, createWasmCryptoPortFromModule } from "./wasm";
 import {
 	createWasmDoubles,
 	type WasmDoublesOptions,
@@ -121,6 +122,60 @@ describe("wasm adapter — surviving a fresh instance (service-worker restart)",
 		await expect(
 			afterRestart.encrypt("plain", key, null),
 		).rejects.toMatchObject({ code: "invalid-key-ref" });
+	});
+});
+
+/**
+ * A stand-in for `@bittery/crypto-wasm` as a caller holds it after a static import:
+ * `uniffiInitAsync` plus the raw bindings. Only the members a test calls are real.
+ */
+function createModuleDouble(options: { initFailure?: unknown } = {}) {
+	let initCalls = 0;
+	let uuids = 0;
+	const module = {
+		uniffiInitAsync: async () => {
+			initCalls += 1;
+			if (options.initFailure !== undefined) {
+				throw options.initFailure;
+			}
+		},
+		generateUuid: async () => `uuid-${++uuids}`,
+	} as unknown as CryptoWasmModule;
+
+	return {
+		module,
+		get initCalls() {
+			return initCalls;
+		},
+	};
+}
+
+describe("wasm adapter — bindings from a static import", () => {
+	test("initialises the given module once, however many calls it serves", async () => {
+		const double = createModuleDouble();
+		const port = createWasmCryptoPortFromModule(double.module);
+		expect(double.initCalls).toBe(0);
+
+		expect(await port.generateUuid()).toBe("uuid-1");
+		expect(await port.generateUuid()).toBe("uuid-2");
+
+		expect(double.initCalls).toBe(1);
+	});
+
+	test("a module that will not initialise fails the call, and is retried on the next", async () => {
+		const options: { initFailure?: unknown } = {
+			initFailure: new Error("Failed to fetch index_bg.wasm"),
+		};
+		const double = createModuleDouble(options);
+		const port = createWasmCryptoPortFromModule(double.module);
+
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+
+		options.initFailure = undefined;
+		expect(await port.generateUuid()).toBe("uuid-1");
+		expect(double.initCalls).toBe(2);
 	});
 });
 

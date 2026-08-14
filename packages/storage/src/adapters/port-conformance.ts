@@ -400,6 +400,59 @@ export function runPortConformance(
 			]);
 		});
 
+		test("recordPutMany writes every record it is given", async () => {
+			const { record } = await make();
+
+			await record.recordPutMany("c1", [
+				{ id: "r1", value: "v1" },
+				{ id: "r2", value: "v2" },
+			]);
+
+			const listed = (await record.recordList("c1")).sort((a, b) =>
+				a.id.localeCompare(b.id),
+			);
+			expect(listed).toEqual([
+				{ id: "r1", value: "v1" },
+				{ id: "r2", value: "v2" },
+			]);
+		});
+
+		test("recordPutMany overwrites existing ids and leaves the rest alone", async () => {
+			const { record } = await make();
+
+			await record.recordPut("c1", "r1", "first");
+			await record.recordPut("c1", "keep", "untouched");
+			await record.recordPutMany("c1", [
+				{ id: "r1", value: "second" },
+				{ id: "r2", value: "new" },
+			]);
+
+			expect(await record.recordGet("c1", "r1")).toBe("second");
+			expect(await record.recordGet("c1", "r2")).toBe("new");
+			expect(await record.recordGet("c1", "keep")).toBe("untouched");
+		});
+
+		test("recordPutMany with no records is a no-op, not a throw", async () => {
+			const { record } = await make();
+
+			await record.recordPut("c1", "r1", "v1");
+			await record.recordPutMany("c1", []);
+
+			expect(await record.recordList("c1")).toEqual([
+				{ id: "r1", value: "v1" },
+			]);
+		});
+
+		test("recordPutMany writes only into the named collection", async () => {
+			const { record } = await make();
+
+			await record.recordPut("c2", "r1", "other");
+			await record.recordPutMany("c1", [{ id: "r1", value: "v1" }]);
+
+			expect(await record.recordGet("c1", "r1")).toBe("v1");
+			expect(await record.recordGet("c2", "r1")).toBe("other");
+		});
+
 		test("recordGet returns null for a missing id", async () => {
 			const { record } = await make();
 

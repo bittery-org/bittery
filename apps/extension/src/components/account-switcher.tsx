@@ -1,14 +1,7 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import {
-	AccountSwitcher,
-	Avatar,
-	AvatarFallback,
-	AvatarImage,
-	Button,
-	toast,
-} from "@bittery/ui";
+import { AccountAvatar, AccountSwitcher, Button, toast } from "@bittery/ui";
 import { IconChevronDown } from "@bittery/ui/icons";
-import { getAccountInitials } from "@bittery/ui/lib/utils";
+import { getAccountLabel } from "@bittery/ui/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -152,22 +145,10 @@ export function ExtensionAccountSwitcher() {
 		>
 			{activeAccount ? (
 				<>
-					<Avatar className="size-6 rounded-md text-[10px]">
-						{activeAccount.teamAvatarUrl && (
-							<AvatarImage
-								src={activeAccount.teamAvatarUrl}
-								alt={activeAccount.teamName || activeAccount.name}
-							/>
-						)}
-						<AvatarFallback className="size-6 rounded-md bg-linear-to-br from-primary to-primary-deep font-semibold text-[10px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]">
-							{getAccountInitials(activeAccount)}
-						</AvatarFallback>
-					</Avatar>
+					<AccountAvatar account={activeAccount} size="sm" />
 					<div className="flex flex-col items-start overflow-hidden">
 						<span className="max-w-32 truncate font-medium text-sm">
-							{activeAccount.teamName ||
-								activeAccount.name ||
-								activeAccount.email.split("@")[0]}
+							{getAccountLabel(activeAccount)}
 						</span>
 					</div>
 				</>

@@ -244,6 +244,7 @@ export function createInMemoryPlatformPort(
 export interface InMemoryRecordPortCalls {
 	initialize: number;
 	recordPut: number;
+	recordPutMany: number;
 	recordGet: number;
 	recordDelete: number;
 	recordList: number;
@@ -272,10 +273,20 @@ export function createInMemoryRecordPort(
 	const calls: InMemoryRecordPortCalls = {
 		initialize: 0,
 		recordPut: 0,
+		recordPutMany: 0,
 		recordGet: 0,
 		recordDelete: 0,
 		recordList: 0,
 		recordClear: 0,
+	};
+
+	const bucketFor = (collection: string): Map<string, string> => {
+		let bucket = store.get(collection);
+		if (bucket === undefined) {
+			bucket = new Map<string, string>();
+			store.set(collection, bucket);
+		}
+		return bucket;
 	};
 
 	return {
@@ -288,12 +299,20 @@ export function createInMemoryRecordPort(
 
 		recordPut: async (collection: string, id: string, value: string) => {
 			calls.recordPut += 1;
-			let bucket = store.get(collection);
-			if (bucket === undefined) {
-				bucket = new Map<string, string>();
-				store.set(collection, bucket);
+			bucketFor(collection).set(id, value);
+		},
+		recordPutMany: async (
+			collection: string,
+			records: ReadonlyArray<{ id: string; value: string }>,
+		) => {
+			calls.recordPutMany += 1;
+			if (records.length === 0) {
+				return;
 			}
-			bucket.set(id, value);
+			const bucket = bucketFor(collection);
+			for (const record of records) {
+				bucket.set(record.id, record.value);
+			}
 		},
 		recordGet: async (collection: string, id: string) => {
 			calls.recordGet += 1;
@@ -327,6 +346,7 @@ export function createInMemoryRecordPort(
 		resetCalls: () => {
 			calls.initialize = 0;
 			calls.recordPut = 0;
+			calls.recordPutMany = 0;
 			calls.recordGet = 0;
 			calls.recordDelete = 0;
 			calls.recordList = 0;

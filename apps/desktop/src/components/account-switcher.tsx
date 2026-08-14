@@ -6,6 +6,7 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import type { AccountMetadata } from "@bittery/storage/types";
 import {
+	AccountAvatar,
 	Button,
 	cn,
 	Dialog,
@@ -13,6 +14,7 @@ import {
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
+	getAccountLabel,
 	ScrollArea,
 	AccountSwitcher as SharedAccountSwitcher,
 	toast,
@@ -25,7 +27,6 @@ import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "@/providers/sync-provider";
-import { AccountAvatar } from "./account-avatar";
 import { AddAccountDialog } from "./add-account-dialog";
 import { DeviceSetupDialog } from "./device-setup-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
@@ -198,12 +199,10 @@ export function AccountSwitcher() {
 		>
 			{activeAccount ? (
 				<>
-					<AccountAvatar account={activeAccount} size="sm" />
+					<AccountAvatar account={activeAccount} size="xs" />
 					<div className="flex min-w-0 flex-1 flex-col items-start">
 						<span className="w-full truncate font-medium text-sm">
-							{activeAccount.teamName ||
-								activeAccount.name ||
-								activeAccount.email.split("@")[0]}
+							{getAccountLabel(activeAccount)}
 						</span>
 					</div>
 				</>
@@ -351,8 +350,7 @@ function ManageAccountCard({
 }: ManageAccountCardProps) {
 	const { m } = useI18n();
 
-	const displayName =
-		account.teamName || account.name || account.email.split("@")[0];
+	const displayName = getAccountLabel(account);
 	const serverUrl = account.serverUrl;
 
 	return (

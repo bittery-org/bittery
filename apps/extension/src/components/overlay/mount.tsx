@@ -13,6 +13,7 @@
 
 import type { ReactNode } from "react";
 import ReactDOM from "react-dom/client";
+import { getOrCreateRoot } from "@/lib/react-root";
 import { startOverlayTheme } from "@/lib/theme";
 import { I18nProvider } from "@/providers/i18n-provider";
 
@@ -23,5 +24,7 @@ export function mountOverlayApp(children: ReactNode): void {
 	const root = document.getElementById("root");
 	if (!root) return;
 
-	ReactDOM.createRoot(root).render(<I18nProvider>{children}</I18nProvider>);
+	getOrCreateRoot(root, (container) => ReactDOM.createRoot(container)).render(
+		<I18nProvider>{children}</I18nProvider>,
+	);
 }

@@ -40,7 +40,7 @@ export function MobilePlatformProvider({
 	const { manager, vaultRuntime } = useMobileAccountRuntime();
 
 	// Initialize real-time sync with WebSocket connection
-	const syncState = useMobileSync(queryClient, manager, vaultRuntime, true);
+	const syncState = useMobileSync(queryClient, manager, true);
 
 	// Create sync context with real-time sync state
 	const sync = useSyncCapability(syncState);

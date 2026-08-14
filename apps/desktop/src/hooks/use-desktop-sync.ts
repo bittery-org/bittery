@@ -3,7 +3,6 @@ import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle"
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
@@ -88,7 +87,6 @@ const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 export function useDesktopSync(
 	queryClient: QueryClient,
 	manager: AccountSessionManager,
-	vaultRuntime: AccountVaultRuntime,
 	enabled = true,
 ) {
 	const { m } = useI18n();
@@ -108,10 +106,9 @@ export function useDesktopSync(
 				resolveClientId: getOrCreateDesktopSyncClientId,
 				getActiveAccountId: () => manager.getActiveAccount(),
 				subscribeAccountChanges: manager.subscribe,
-				subscribeVaultChanges: vaultRuntime.subscribe,
 				assemble: (input) => accountSync.assemble(input),
 			}),
-		[accountSync, manager, vaultRuntime],
+		[accountSync, manager],
 	);
 	useEffect(() => {
 		lifecycle.start();

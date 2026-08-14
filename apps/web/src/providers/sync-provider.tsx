@@ -19,8 +19,8 @@ export function SyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const { manager, vaultRuntime } = useAccountRuntime();
-	const syncState = useWebSync(queryClient, manager, vaultRuntime, enabled);
+	const { manager } = useAccountRuntime();
+	const syncState = useWebSync(queryClient, manager, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

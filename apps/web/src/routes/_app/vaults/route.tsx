@@ -187,12 +187,15 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={accounts.map(({ accountId, email, name, teamName }) => ({
-						accountId,
-						email,
-						name,
-						teamName,
-					}))}
+					accounts={accounts.map(
+						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
+							accountId,
+							email,
+							name,
+							teamName,
+							teamAvatarUrl,
+						}),
+					)}
 					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 

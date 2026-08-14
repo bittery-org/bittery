@@ -8,8 +8,8 @@
  * formats nothing today, so this is the only binding that exists.
  */
 
+import { getLocale } from "@bittery/i18n/paraglide/runtime";
 import { createI18nFormatters } from "./formatters";
-import { getLocale } from "./paraglide/runtime.js";
 
 export const { formatDate, formatDateTime, formatNumber, formatCurrency } =
 	createI18nFormatters(getLocale);

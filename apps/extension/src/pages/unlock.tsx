@@ -1,4 +1,4 @@
-import { Button, toast, type VaultIconState } from "@bittery/ui";
+import { AccountAvatar, Button, toast, type VaultIconState } from "@bittery/ui";
 import {
 	IconEye,
 	IconEyeOff,
@@ -7,7 +7,6 @@ import {
 	IconLock,
 	IconTriangleAlert,
 } from "@bittery/ui/icons";
-import { getAccountInitials } from "@bittery/ui/lib/utils";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -319,12 +318,11 @@ export function UnlockPage() {
 				<div className="mt-1.5 mb-[18px] flex items-center gap-1.5 text-muted-foreground text-xs">
 					{isSingle && primaryAccount ? (
 						<>
-							<span
-								aria-hidden
-								className="flex size-4 items-center justify-center rounded-[4.5px] bg-linear-to-br from-primary to-primary-deep font-semibold text-[7.5px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.18)]"
-							>
-								{getAccountInitials(primaryAccount)}
-							</span>
+							<AccountAvatar
+								account={primaryAccount}
+								size="xs"
+								className="size-4 rounded-[4.5px] text-[7.5px]"
+							/>
 							<span className="max-w-[240px] truncate">
 								{primaryAccount.email}
 							</span>

@@ -413,6 +413,13 @@ export class AccountSessionManager {
 		accountId: string,
 		skipBiometric: boolean,
 	): Promise<boolean> {
+		// Route guards may reaffirm access while navigating inside an open Vault. Once
+		// full initialization has verified policy, restoring and publishing again would
+		// turn a read-only navigation into an account-state transition. Local-only boot
+		// restoration is deliberately excluded because it has not verified policy yet.
+		if (this.initialized && this.isUnlocked(accountId)) {
+			return true;
+		}
 		let restored = await this.storage.tryRestoreSession(
 			skipBiometric,
 			accountId,

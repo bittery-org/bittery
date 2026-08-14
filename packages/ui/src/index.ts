@@ -1,3 +1,4 @@
+export * from "./components/account-avatar";
 export * from "./components/account-switcher";
 export * from "./components/alert-dialog";
 export * from "./components/auth-doors-loader";

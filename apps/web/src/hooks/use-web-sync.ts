@@ -1,7 +1,6 @@
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
@@ -95,7 +94,6 @@ class WebSyncStorage implements SyncStorage {
 export function useWebSync(
 	queryClient: QueryClient,
 	manager: AccountSessionManager,
-	vaultRuntime: AccountVaultRuntime,
 	enabled = true,
 ) {
 	const { m } = useI18n();
@@ -117,10 +115,9 @@ export function useWebSync(
 				resolveClientId: async () => clientId,
 				getActiveAccountId: () => manager.getActiveAccount(),
 				subscribeAccountChanges: manager.subscribe,
-				subscribeVaultChanges: vaultRuntime.subscribe,
 				assemble: (input) => accountSync.assemble(input),
 			}),
-		[accountSync, clientId, manager, vaultRuntime],
+		[accountSync, clientId, manager],
 	);
 	useEffect(() => {
 		lifecycle.start();

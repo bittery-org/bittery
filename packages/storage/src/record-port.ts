@@ -26,6 +26,17 @@ export interface RecordPort {
 
 	initialize(): Promise<void>;
 	recordPut(collection: string, id: string, value: string): Promise<void>;
+	/**
+	 * The same writes as N `recordPut` calls, but the adapter pays its durability cost
+	 * once. A bootstrap stages the whole cache, and on desktop a per-record fsync there
+	 * costs tens of milliseconds each — enough to freeze the UI awaiting the refresh.
+	 *
+	 * Later records win over earlier ones with the same id, exactly as sequential puts.
+	 */
+	recordPutMany(
+		collection: string,
+		records: ReadonlyArray<{ id: string; value: string }>,
+	): Promise<void>;
 	recordGet(collection: string, id: string): Promise<string | null>;
 	recordDelete(collection: string, id: string): Promise<void>;
 	recordList(collection: string): Promise<Array<{ id: string; value: string }>>;

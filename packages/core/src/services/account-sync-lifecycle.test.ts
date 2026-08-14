@@ -33,7 +33,6 @@ const settle = async () => {
 describe("AccountSyncLifecycle", () => {
 	it("never publishes a stale rapid A to B to A assembly", async () => {
 		const accountChanges = source();
-		const vaultChanges = source();
 		let accountId: string | null = "a";
 		const builds = [deferred<string>(), deferred<string>(), deferred<string>()];
 		let build = 0;
@@ -41,7 +40,6 @@ describe("AccountSyncLifecycle", () => {
 			resolveClientId: async () => "client",
 			getActiveAccountId: () => accountId,
 			subscribeAccountChanges: accountChanges.subscribe,
-			subscribeVaultChanges: vaultChanges.subscribe,
 			assemble: () => builds[build++]?.promise ?? Promise.resolve("unexpected"),
 		});
 
@@ -66,15 +64,13 @@ describe("AccountSyncLifecycle", () => {
 		});
 	});
 
-	it("starts idempotently and keeps an unchanged snapshot stable", async () => {
+	it("starts idempotently and subscribes to account scope once", async () => {
 		const accountChanges = source();
-		const vaultChanges = source();
 		let builds = 0;
 		const lifecycle = new AccountSyncLifecycle({
 			resolveClientId: async () => "client",
 			getActiveAccountId: () => "a",
 			subscribeAccountChanges: accountChanges.subscribe,
-			subscribeVaultChanges: vaultChanges.subscribe,
 			assemble: async () => {
 				builds++;
 				return "assembly";
@@ -88,20 +84,100 @@ describe("AccountSyncLifecycle", () => {
 		await settle();
 		expect(builds).toBe(1);
 		expect(accountChanges.size).toBe(1);
-		expect(vaultChanges.size).toBe(1);
 		const ready = lifecycle.getSnapshot();
 		expect(lifecycle.getSnapshot()).toBe(ready);
 	});
 
+	it("keeps Sync ready when a same-scope rebuild returns the cached assembly", async () => {
+		const accountChanges = source();
+		const assembly = { source: "a" };
+		let builds = 0;
+		const lifecycle = new AccountSyncLifecycle({
+			resolveClientId: async () => "client",
+			getActiveAccountId: () => "a",
+			subscribeAccountChanges: accountChanges.subscribe,
+			assemble: async () => {
+				builds++;
+				return assembly;
+			},
+		});
+		lifecycle.start();
+		await settle();
+		const ready = lifecycle.getSnapshot();
+		const observed: Array<{ initialized: boolean; ready: boolean }> = [];
+		lifecycle.subscribe(() => {
+			const snapshot = lifecycle.getSnapshot();
+			observed.push({
+				initialized: snapshot.initialized,
+				ready: snapshot.ready,
+			});
+		});
+
+		accountChanges.emit();
+		expect(lifecycle.getSnapshot()).toBe(ready);
+		await settle();
+
+		expect(builds).toBe(2);
+		expect(lifecycle.getSnapshot()).toBe(ready);
+		expect(observed).toEqual([]);
+	});
+
+	it("replaces a changed same-scope assembly without disabling Sync first", async () => {
+		const accountChanges = source();
+		let assembly = { version: 1 };
+		const lifecycle = new AccountSyncLifecycle({
+			resolveClientId: async () => "client",
+			getActiveAccountId: () => "a",
+			subscribeAccountChanges: accountChanges.subscribe,
+			assemble: async () => assembly,
+		});
+		lifecycle.start();
+		await settle();
+		const first = lifecycle.getSnapshot();
+		const observed: Array<{ assembly: unknown; ready: boolean }> = [];
+		lifecycle.subscribe(() => {
+			const snapshot = lifecycle.getSnapshot();
+			observed.push({ assembly: snapshot.assembly, ready: snapshot.ready });
+		});
+
+		assembly = { version: 2 };
+		accountChanges.emit();
+		expect(lifecycle.getSnapshot()).toBe(first);
+		await settle();
+
+		expect(observed).toEqual([{ assembly, ready: true }]);
+	});
+
+	it("hides the previous assembly immediately when account scope changes", async () => {
+		const accountChanges = source();
+		let accountId: string | null = "a";
+		const lifecycle = new AccountSyncLifecycle({
+			resolveClientId: async () => "client",
+			getActiveAccountId: () => accountId,
+			subscribeAccountChanges: accountChanges.subscribe,
+			assemble: async ({ activeAccountId }) => activeAccountId,
+		});
+		lifecycle.start();
+		await settle();
+
+		accountId = "b";
+		accountChanges.emit();
+		expect(lifecycle.getSnapshot()).toMatchObject({
+			assembly: null,
+			initialized: false,
+			ready: false,
+		});
+		await settle();
+		expect(lifecycle.getSnapshot().assembly).toBe("b");
+	});
+
 	it("dispose unsubscribes and cancels pending assembly", async () => {
 		const accountChanges = source();
-		const vaultChanges = source();
 		const pending = deferred<string>();
 		const lifecycle = new AccountSyncLifecycle({
 			resolveClientId: async () => "client",
 			getActiveAccountId: () => "a",
 			subscribeAccountChanges: accountChanges.subscribe,
-			subscribeVaultChanges: vaultChanges.subscribe,
 			assemble: () => pending.promise,
 		});
 
@@ -109,7 +185,6 @@ describe("AccountSyncLifecycle", () => {
 		await settle();
 		lifecycle.dispose();
 		expect(accountChanges.size).toBe(0);
-		expect(vaultChanges.size).toBe(0);
 		pending.resolve("stale");
 		await settle();
 		expect(lifecycle.getSnapshot().assembly).toBeNull();
@@ -117,13 +192,11 @@ describe("AccountSyncLifecycle", () => {
 
 	it("does not republish the previous assembly when restarted", async () => {
 		const accountChanges = source();
-		const vaultChanges = source();
 		let accountId: string | null = "a";
 		const lifecycle = new AccountSyncLifecycle({
 			resolveClientId: async () => "client",
 			getActiveAccountId: () => accountId,
 			subscribeAccountChanges: accountChanges.subscribe,
-			subscribeVaultChanges: vaultChanges.subscribe,
 			assemble: async ({ activeAccountId }) => activeAccountId,
 		});
 
@@ -146,13 +219,11 @@ describe("AccountSyncLifecycle", () => {
 
 	it("clear hides the assembly until a revision rebuilds it", async () => {
 		const accountChanges = source();
-		const vaultChanges = source();
 		let assembly = "first";
 		const lifecycle = new AccountSyncLifecycle({
 			resolveClientId: async () => "client",
 			getActiveAccountId: () => "a",
 			subscribeAccountChanges: accountChanges.subscribe,
-			subscribeVaultChanges: vaultChanges.subscribe,
 			assemble: async () => assembly,
 		});
 
@@ -165,7 +236,7 @@ describe("AccountSyncLifecycle", () => {
 			ready: false,
 		});
 		assembly = "second";
-		vaultChanges.emit();
+		accountChanges.emit();
 		await settle();
 		expect(lifecycle.getSnapshot().assembly).toBe("second");
 	});

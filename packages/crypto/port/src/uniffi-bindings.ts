@@ -434,3 +434,24 @@ export const loadCryptoWebBindings: LoadCryptoUniffi = async () => {
 export const loadCryptoWebBackend = async (): Promise<
 	UniffiBackend<import("@bittery/crypto-wasm").KeyHandleLike>
 > => createCryptoUniffiBackend(await loadCryptoWebBindings());
+
+/** `@bittery/crypto-wasm` as a caller holds it after a static import. */
+export type CryptoWasmModule = CryptoUniffiBindings &
+	Pick<typeof import("@bittery/crypto-wasm"), "uniffiInitAsync">;
+
+/**
+ * A loader over a module the caller already imported.
+ *
+ * The HTML specification bans `import()` on `ServiceWorkerGlobalScope`, so an MV3
+ * background cannot use {@link loadCryptoWebBackend}: the call throws and every crypto
+ * operation in the worker fails with it. Such a caller imports the bindings statically
+ * and comes through here. Instantiating the WASM binary stays lazy either way.
+ */
+export const staticCryptoBackend =
+	(module: CryptoWasmModule) =>
+	async (): Promise<
+		UniffiBackend<import("@bittery/crypto-wasm").KeyHandleLike>
+	> => {
+		await module.uniffiInitAsync();
+		return createCryptoUniffiBackend(module);
+	};

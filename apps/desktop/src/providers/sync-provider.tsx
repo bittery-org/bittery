@@ -27,8 +27,8 @@ export function DesktopSyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const { manager, vaultRuntime } = useDesktopAccountRuntime();
-	const syncState = useDesktopSync(queryClient, manager, vaultRuntime, enabled);
+	const { manager } = useDesktopAccountRuntime();
+	const syncState = useDesktopSync(queryClient, manager, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

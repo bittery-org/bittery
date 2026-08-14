@@ -2,7 +2,6 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 // Deliberately unprefixed: this configures the dev server itself, not client
 // code, so it must not reach `import.meta.env`. Set by playwright.config.ts.
@@ -10,7 +9,6 @@ const isE2E = process.env.E2E === "1";
 
 export default defineConfig({
 	plugins: [
-		tsconfigPaths(),
 		tailwindcss(),
 		tanstackStart({
 			spa: {
@@ -24,9 +22,12 @@ export default defineConfig({
 		}),
 		viteReact(),
 	],
+	resolve: {
+		// `worker` inherits this, so the worker bundle resolves `@/*` too.
+		tsconfigPaths: true,
+	},
 	worker: {
 		format: "es",
-		plugins: () => [tsconfigPaths()],
 	},
 	server: {
 		host: true,

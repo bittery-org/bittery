@@ -421,7 +421,7 @@ export function ShareLinksList({
 						</AlertDialogCancel>
 						<AlertDialogAction
 								onClick={() => linkToRevoke && handleRevoke(linkToRevoke)}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							variant="destructive"
 						>
 							{isRevoking ? (
 								<IconLoaderCircle className="h-4 w-4 animate-spin" />

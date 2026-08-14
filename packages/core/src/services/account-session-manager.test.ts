@@ -71,6 +71,20 @@ describe("AccountSessionManager", () => {
 		expect(verifyUnlockPolicy).not.toHaveBeenCalled();
 	});
 
+	it("verifies a silently restored account before treating unlock as idempotent", async () => {
+		const storage = await createStore({ unlockAcc1: false });
+		const verifyUnlockPolicy = mock(async () => {});
+		const manager = createManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy,
+		});
+		await manager.initializeLocalVaultState();
+
+		expect(await manager.unlockAccount("acc-1", true)).toBe(true);
+		expect(verifyUnlockPolicy).toHaveBeenCalledWith("acc-1");
+	});
+
 	it("shares local restoration with full verified initialization", async () => {
 		const storage = await createStore({
 			unlockAcc1: false,
@@ -233,6 +247,32 @@ describe("AccountSessionManager", () => {
 
 		expect(tryRestoreSession).not.toHaveBeenCalled();
 		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
+	});
+
+	it("reaffirming an already-unlocked account is a silent no-op", async () => {
+		const storage = await createStore();
+		const tryRestoreSession = spyOn(storage, "tryRestoreSession");
+		const verifyUnlockPolicy = mock(async () => {});
+		const manager = createManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy,
+		});
+		await manager.initialize();
+		const revision = manager.getSnapshot();
+		const restorations = tryRestoreSession.mock.calls.length;
+		const verifications = verifyUnlockPolicy.mock.calls.length;
+		let notifications = 0;
+		manager.subscribe(() => {
+			notifications++;
+		});
+
+		expect(await manager.unlockAccount("acc-1", true)).toBe(true);
+
+		expect(tryRestoreSession).toHaveBeenCalledTimes(restorations);
+		expect(verifyUnlockPolicy).toHaveBeenCalledTimes(verifications);
+		expect(manager.getSnapshot()).toBe(revision);
+		expect(notifications).toBe(0);
 	});
 
 	it("switching to a locked account restores only the target", async () => {

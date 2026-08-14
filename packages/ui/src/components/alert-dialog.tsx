@@ -1,5 +1,6 @@
 "use client";
 
+import type { VariantProps } from "class-variance-authority";
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import type * as React from "react";
 import { cn } from "../lib/utils";
@@ -122,13 +123,24 @@ function AlertDialogDescription({
 	);
 }
 
+/**
+ * The variant has to be chosen here, not pasted over as a className: the default
+ * button paints a `bg-linear-to-b from-primary` gradient, and a background
+ * *image* and a background *colour* are different Tailwind groups, so a
+ * `bg-destructive` appended afterwards loses under the gradient rather than
+ * replacing it. Every destructive confirm button in the app was rendering
+ * primary purple because of it.
+ */
 function AlertDialogAction({
 	className,
+	variant,
+	size,
 	...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
+	VariantProps<typeof buttonVariants>) {
 	return (
 		<AlertDialogPrimitive.Action
-			className={cn(buttonVariants(), className)}
+			className={cn(buttonVariants({ variant, size }), className)}
 			{...props}
 		/>
 	);
@@ -136,11 +148,14 @@ function AlertDialogAction({
 
 function AlertDialogCancel({
 	className,
+	variant = "outline",
+	size,
 	...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> &
+	VariantProps<typeof buttonVariants>) {
 	return (
 		<AlertDialogPrimitive.Cancel
-			className={cn(buttonVariants({ variant: "outline" }), className)}
+			className={cn(buttonVariants({ variant, size }), className)}
 			{...props}
 		/>
 	);

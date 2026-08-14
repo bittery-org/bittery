@@ -4,9 +4,11 @@ import { CryptoPortError } from "../errors";
 import { createKeyRefTable, type KeyRefTable } from "../key-ref";
 import { CRYPTO_PORT_MEMBERS } from "../port-members";
 import {
+	type CryptoWasmModule,
 	classify,
 	loadCryptoWebBackend,
 	memoizedBackendLoader,
+	staticCryptoBackend,
 	type UniffiBackend,
 } from "../uniffi-bindings";
 
@@ -142,4 +144,17 @@ export function createWasmCryptoPort(
 	deps: HandleCryptoPortDeps = DEFAULT_DEPS,
 ): CryptoPort {
 	return createHandleCryptoPort(deps);
+}
+
+/**
+ * A port over bindings the caller already holds.
+ *
+ * For callers that cannot use {@link createWasmCryptoPort}'s dynamic default — an MV3
+ * service worker, where `import()` is banned. `./wasm-static` is that caller; the
+ * module stays a parameter here so this seam is testable without loading real WASM.
+ */
+export function createWasmCryptoPortFromModule(
+	module: CryptoWasmModule,
+): CryptoPort {
+	return createHandleCryptoPort({ loadBackend: staticCryptoBackend(module) });
 }

@@ -1,8 +1,6 @@
 import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
 import {
-	Avatar,
-	AvatarFallback,
-	AvatarImage,
+	AccountAvatar,
 	Button,
 	Command,
 	CommandGroup,
@@ -15,7 +13,7 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	getInitials,
+	getAccountLabel,
 	type MoveItemDialogProps,
 	toast,
 	VaultAvatar,
@@ -188,26 +186,20 @@ export function MoveItemDialog({
 								const [firstVault] = vaults;
 								if (!firstVault) return null;
 
+								const account = {
+									email: firstVault.accountEmail ?? "",
+									name: firstVault.accountName,
+									teamName: firstVault.accountTeamName,
+									teamAvatarUrl: firstVault.accountTeamAvatarUrl,
+								};
 								const accountName =
-									firstVault.accountTeamName ||
-									firstVault.accountName ||
-									firstVault.accountEmail ||
+									getAccountLabel(account) ||
 									m.vaults_detail_items_move_dialog_account_unknown();
-								const accountTeamAvatarUrl = firstVault.accountTeamAvatarUrl;
 
 								return (
 									<CommandGroup key={accountId} className="p-0 pb-1">
 										<div className="flex items-center gap-2 px-2.5 py-2">
-											<Avatar className="size-5 rounded-[5px]">
-												<AvatarImage
-													src={accountTeamAvatarUrl ?? undefined}
-													alt={accountName}
-													className="rounded-[5px]"
-												/>
-												<AvatarFallback className="rounded-[5px] bg-linear-to-br from-primary to-primary-deep font-semibold text-[9px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]">
-													{getInitials(accountName)}
-												</AvatarFallback>
-											</Avatar>
+											<AccountAvatar account={account} size="xs" />
 											<span className="truncate font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 												{accountName}
 											</span>

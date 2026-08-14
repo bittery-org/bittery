@@ -45,6 +45,38 @@ pub struct KeychainDeleteArgs {
     pub key: String,
 }
 
+/// One string record stored under its fully-resolved `store.json` key.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RecordStoreEntry {
+    pub key: String,
+    pub value: String,
+}
+
+/// `record_store_apply(puts, deletes, clearPrefixes)`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RecordStoreApplyArgs {
+    pub puts: Vec<RecordStoreEntry>,
+    pub deletes: Vec<String>,
+    pub clear_prefixes: Vec<String>,
+}
+
+/// `record_store_get(key)`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RecordStoreGetArgs {
+    pub key: String,
+}
+
+/// `record_store_list(prefix)`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RecordStoreListArgs {
+    pub prefix: String,
+}
+
 /// `broadcast_lock_event(reason)`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "../../src/generated/tauri-commands.ts")]

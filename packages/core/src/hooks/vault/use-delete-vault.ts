@@ -6,7 +6,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { useCoreContext } from "../../context/platform-context";
-import { useRefreshAfterVaultMutation } from "./mutation-utils";
+import { useRefreshAfterVaultDeletion } from "./mutation-utils";
 
 /**
  * Input for deleting a vault
@@ -21,12 +21,12 @@ export interface DeleteVaultInput {
  */
 export function useDeleteVault() {
 	const core = useCoreContext();
-	const refreshAfterMutation = useRefreshAfterVaultMutation();
+	const refreshAfterDeletion = useRefreshAfterVaultDeletion();
 
 	return useMutation({
 		mutationFn: async (input: DeleteVaultInput): Promise<void> => {
 			await core.vaults.deleteVault(input.vaultId, input.accountId);
 		},
-		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
+		onSuccess: (_data, variables) => refreshAfterDeletion(variables),
 	});
 }

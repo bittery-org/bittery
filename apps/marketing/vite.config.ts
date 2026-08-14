@@ -9,21 +9,19 @@ import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import { defineConfig } from "vite";
-import viteTsConfigPaths from "vite-tsconfig-paths";
 
 const config = defineConfig({
 	resolve: {
+		// The alias stays for `.mdx` files: they sit outside the tsconfig's
+		// `include`, so tsconfig paths resolution does not cover their imports.
 		alias: {
 			"@": fileURLToPath(new URL("./src", import.meta.url)),
 		},
+		tsconfigPaths: true,
 	},
 	plugins: [
 		devtools(),
 		nitro({}),
-		// this is the plugin that enables path aliases
-		viteTsConfigPaths({
-			projects: ["./tsconfig.json"],
-		}),
 		tailwindcss(),
 		tanstackStart(),
 		mdx({

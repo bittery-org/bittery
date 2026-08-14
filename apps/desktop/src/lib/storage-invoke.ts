@@ -20,20 +20,30 @@ import type {
 	KeychainDeleteArgs,
 	KeychainGetArgs,
 	KeychainSetArgs,
+	RecordStoreApplyArgs,
+	RecordStoreEntry,
+	RecordStoreGetArgs,
+	RecordStoreListArgs,
 } from "@/generated/tauri-commands";
 
-/** The same three commands, spelled from the generated argument types. */
-interface GeneratedKeychainInvoke {
+/** The same storage commands, spelled from the generated argument types. */
+interface GeneratedStorageInvoke {
 	(cmd: "keychain_set", args: KeychainSetArgs): Promise<void>;
 	(cmd: "keychain_get", args: KeychainGetArgs): Promise<string | null>;
 	(cmd: "keychain_delete", args: KeychainDeleteArgs): Promise<boolean>;
+	(cmd: "record_store_apply", args: RecordStoreApplyArgs): Promise<void>;
+	(cmd: "record_store_get", args: RecordStoreGetArgs): Promise<string | null>;
+	(
+		cmd: "record_store_list",
+		args: RecordStoreListArgs,
+	): Promise<RecordStoreEntry[]>;
 }
 
-declare const generated: GeneratedKeychainInvoke;
+declare const generated: GeneratedStorageInvoke;
 declare const restated: TauriInvoke;
 
 const _generatedSatisfiesRestated: TauriInvoke = generated;
-const _restatedSatisfiesGenerated: GeneratedKeychainInvoke = restated;
+const _restatedSatisfiesGenerated: GeneratedStorageInvoke = restated;
 
 void _generatedSatisfiesRestated;
 void _restatedSatisfiesGenerated;

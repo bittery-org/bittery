@@ -588,6 +588,9 @@ export function createReactNativePlatformPort(
 // RecordPort — one sqlite row per record
 // ============================================================================
 
+/** Rows per `recordPutMany` statement — three bound variables each, well under SQLite's cap. */
+const RECORD_PUT_MANY_CHUNK = 300;
+
 export function createReactNativeRecordPort(
 	deps: ReactNativeDeps = defaultDeps,
 ): RecordPort {
@@ -604,6 +607,28 @@ export function createReactNativeRecordPort(
 				"INSERT OR REPLACE INTO records (collection, id, value) VALUES (?, ?, ?)",
 				[collection, id, value],
 			);
+		},
+
+		recordPutMany: async (collection, records) => {
+			if (records.length === 0) {
+				return;
+			}
+			const handle = await database();
+			// One multi-row statement is one implicit transaction, so N rows cost one
+			// commit. Chunked because SQLite caps the bound variables per statement.
+			for (
+				let offset = 0;
+				offset < records.length;
+				offset += RECORD_PUT_MANY_CHUNK
+			) {
+				const chunk = records.slice(offset, offset + RECORD_PUT_MANY_CHUNK);
+				await handle.runAsync(
+					`INSERT OR REPLACE INTO records (collection, id, value) VALUES ${chunk
+						.map(() => "(?, ?, ?)")
+						.join(", ")}`,
+					chunk.flatMap((record) => [collection, record.id, record.value]),
+				);
+			}
 		},
 
 		recordGet: async (collection, id) => {

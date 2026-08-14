@@ -27,8 +27,8 @@ export function MobileSyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const { manager, vaultRuntime } = useMobileAccountRuntime();
-	const syncState = useMobileSync(queryClient, manager, vaultRuntime, enabled);
+	const { manager } = useMobileAccountRuntime();
+	const syncState = useMobileSync(queryClient, manager, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

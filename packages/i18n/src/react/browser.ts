@@ -18,15 +18,15 @@
  * share.
  */
 
-import type { LocaleRuntimeAdapter, LocaleStorageAdapter } from "../adapters";
-import { type AppLocale, defaultLocale, isAppLocale } from "../index";
-import { m } from "../paraglide/messages.js";
+import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,
 	overwriteGetLocale,
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
-} from "../paraglide/runtime.js";
+} from "@bittery/i18n/paraglide/runtime";
+import type { LocaleRuntimeAdapter, LocaleStorageAdapter } from "../adapters";
+import { type AppLocale, defaultLocale, isAppLocale } from "../index";
 import { I18nProvider, initializeI18nReact, useI18n } from "./shared";
 
 let currentLocale: AppLocale = defaultLocale;

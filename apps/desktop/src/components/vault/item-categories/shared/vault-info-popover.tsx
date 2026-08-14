@@ -1,4 +1,5 @@
 import {
+	AccountAvatar,
 	Button,
 	Popover,
 	PopoverContent,
@@ -12,8 +13,10 @@ interface VaultInfoPopoverProps {
 	vaultName: string;
 	vaultIcon?: string | null;
 	vaultImageUrl?: string | null;
+	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
+	accountTeamAvatarUrl?: string | null;
 	children?: React.ReactNode;
 }
 
@@ -21,8 +24,10 @@ export function VaultInfoPopover({
 	vaultName,
 	vaultIcon,
 	vaultImageUrl,
+	accountEmail,
 	accountName,
 	accountTeamName,
+	accountTeamAvatarUrl,
 	children,
 }: VaultInfoPopoverProps) {
 	const displayTeamName = accountTeamName || accountName;
@@ -58,8 +63,18 @@ export function VaultInfoPopover({
 						<div className="min-w-0 flex-1">
 							<p className="truncate font-medium text-sm">{vaultName}</p>
 							{displayTeamName && (
-								<p className="truncate text-muted-foreground text-xs">
-									{displayTeamName}
+								<p className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+									<AccountAvatar
+										account={{
+											email: accountEmail ?? "",
+											name: accountName,
+											teamName: accountTeamName,
+											teamAvatarUrl: accountTeamAvatarUrl,
+										}}
+										size="xs"
+										className="size-4 rounded-[4px] text-[8px]"
+									/>
+									<span className="truncate">{displayTeamName}</span>
 								</p>
 							)}
 						</div>

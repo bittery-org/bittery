@@ -3,6 +3,7 @@ mod ipc_security;
 mod keychain;
 mod native_host_crypto;
 mod native_messaging_installer;
+mod record_store;
 mod tauri_api;
 
 use base64::Engine;
@@ -1896,6 +1897,10 @@ pub fn run() {
             keychain::keychain_set,
             keychain::keychain_get,
             keychain::keychain_delete,
+            // Bulk disposable-record commands (one IPC per cache phase)
+            record_store::record_store_apply,
+            record_store::record_store_get,
+            record_store::record_store_list,
             // Lock event broadcasting
             broadcast_lock_event,
             broadcast_unlock_event,
