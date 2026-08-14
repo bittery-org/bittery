@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, str::FromStr};
+use std::{future::Future, pin::Pin, str::FromStr, sync::Arc};
 
 use chrono::Utc;
 use cron::Schedule;
@@ -10,12 +10,21 @@ use super::sql::{
     cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
     prune_rate_limit_state, prune_sync_events,
 };
-use crate::integrations::favicon::{fetch_and_store_favicon, list_domains_to_refresh};
+use crate::integrations::{
+    favicon::{fetch_and_store_favicon, list_domains_to_refresh, RemoteDocumentFetcher},
+    storage::ObjectStorage,
+};
 use crate::services::vault_key_rotation::{cleanup_rotation_plans, MAX_CLEANUP_BATCH};
 
 type JobError = Box<dyn std::error::Error + Send + Sync>;
 type JobFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;
-type JobFn = fn(PgPool) -> JobFuture;
+#[derive(Clone)]
+struct JobContext {
+    pool: PgPool,
+    storage: Arc<dyn ObjectStorage>,
+    remote_documents: Arc<dyn RemoteDocumentFetcher>,
+}
+type JobFn = fn(JobContext) -> JobFuture;
 const FAVICON_REFRESH_STALE_AFTER_DAYS: i64 = 30;
 const FAVICON_REFRESH_BATCH_SIZE: i64 = 200;
 
@@ -24,48 +33,57 @@ pub struct JobRunner {
 }
 
 impl JobRunner {
-    pub fn start(pool: PgPool) -> Result<Self, JobError> {
+    pub fn start(
+        pool: PgPool,
+        storage: Arc<dyn ObjectStorage>,
+        remote_documents: Arc<dyn RemoteDocumentFetcher>,
+    ) -> Result<Self, JobError> {
+        let context = JobContext {
+            pool,
+            storage,
+            remote_documents,
+        };
         let handles = vec![
             spawn_job(
                 "expired-session-cleanup",
                 "0 */30 * * * * *",
-                pool.clone(),
+                context.clone(),
                 run_expired_session_cleanup,
             )?,
             spawn_job(
                 "pending-attachment-upload-cleanup",
                 "0 */15 * * * * *",
-                pool.clone(),
+                context.clone(),
                 run_pending_attachment_cleanup,
             )?,
             spawn_job(
                 "sync-event-pruning",
                 "0 0 3 * * * *",
-                pool.clone(),
+                context.clone(),
                 run_sync_event_pruning,
             )?,
             spawn_job(
                 "tombstone-cleanup",
                 "0 15 3 * * * *",
-                pool.clone(),
+                context.clone(),
                 run_tombstone_cleanup,
             )?,
             spawn_job(
                 "rate-limit-state-pruning",
                 "0 30 3 * * * *",
-                pool.clone(),
+                context.clone(),
                 run_rate_limit_state_pruning,
             )?,
             spawn_job(
                 "vault-key-rotation-plan-cleanup",
                 "0 */15 * * * * *",
-                pool.clone(),
+                context.clone(),
                 run_rotation_plan_cleanup,
             )?,
             spawn_job(
                 "favicon-refresh",
                 "0 30 2 * * 1 *",
-                pool,
+                context,
                 run_favicon_refresh,
             )?,
         ];
@@ -86,7 +104,7 @@ impl Drop for JobRunner {
 fn spawn_job(
     job_name: &'static str,
     schedule_expression: &'static str,
-    pool: PgPool,
+    context: JobContext,
     job: JobFn,
 ) -> Result<JoinHandle<()>, JobError> {
     let schedule = Schedule::from_str(schedule_expression)?;
@@ -112,7 +130,7 @@ fn spawn_job(
             // process. `rand` 0.10 turned `ThreadRng` reseed failure into a
             // panic (`could not reseed ThreadRng`) where 0.8 only warned, and
             // tombstone cleanup mints sync event IDs from `rand::rng()`.
-            match tokio::spawn(job(pool.clone())).await {
+            match tokio::spawn(job(context.clone())).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     error!(job = job_name, error = %error, "scheduled job failed");
@@ -125,49 +143,55 @@ fn spawn_job(
     }))
 }
 
-fn run_expired_session_cleanup(pool: PgPool) -> JobFuture {
+fn run_expired_session_cleanup(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         cleanup_expired_sessions(&pool).await?;
         Ok(())
     })
 }
 
-fn run_sync_event_pruning(pool: PgPool) -> JobFuture {
+fn run_sync_event_pruning(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         prune_sync_events(&pool).await?;
         Ok(())
     })
 }
 
-fn run_pending_attachment_cleanup(pool: PgPool) -> JobFuture {
+fn run_pending_attachment_cleanup(context: JobContext) -> JobFuture {
     Box::pin(async move {
-        cleanup_pending_attachment_uploads(&pool).await?;
+        cleanup_pending_attachment_uploads(&context.pool, context.storage.as_ref()).await?;
         Ok(())
     })
 }
 
-fn run_rate_limit_state_pruning(pool: PgPool) -> JobFuture {
+fn run_rate_limit_state_pruning(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         prune_rate_limit_state(&pool).await?;
         Ok(())
     })
 }
 
-fn run_tombstone_cleanup(pool: PgPool) -> JobFuture {
+fn run_tombstone_cleanup(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         cleanup_tombstones(&pool).await?;
         Ok(())
     })
 }
 
-fn run_rotation_plan_cleanup(pool: PgPool) -> JobFuture {
+fn run_rotation_plan_cleanup(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         cleanup_rotation_plans(&pool, MAX_CLEANUP_BATCH).await?;
         Ok(())
     })
 }
 
-fn run_favicon_refresh(pool: PgPool) -> JobFuture {
+fn run_favicon_refresh(context: JobContext) -> JobFuture {
+    let pool = context.pool;
     Box::pin(async move {
         let stale_before = time::OffsetDateTime::now_utc()
             - time::Duration::days(FAVICON_REFRESH_STALE_AFTER_DAYS);
@@ -176,7 +200,7 @@ fn run_favicon_refresh(pool: PgPool) -> JobFuture {
 
         let mut refreshed = 0_u64;
         for domain in &domains {
-            if fetch_and_store_favicon(&pool, domain).await? {
+            if fetch_and_store_favicon(&pool, context.remote_documents.as_ref(), domain).await? {
                 refreshed += 1;
             }
         }

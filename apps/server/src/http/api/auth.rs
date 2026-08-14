@@ -523,6 +523,7 @@ async fn list_vault_keys(
         .transpose()?;
     let service_page = auth::load_auth_vault_keys_page(
         &state.db_pool,
+        state.object_storage.as_ref(),
         &request.session.user_id,
         cursor,
         query_limit(&page)?,

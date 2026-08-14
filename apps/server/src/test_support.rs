@@ -26,7 +26,85 @@ use sqlx::{query, PgPool};
 use tower::util::ServiceExt;
 use url::Url;
 
+use crate::integrations::storage::{
+    ObjectStorage, PresignedUploadResult, StorageError, StorageObjectHead,
+};
 use crate::{create_app, db, AppState, EdgeHttpConfig};
+
+#[derive(Default)]
+pub(crate) struct RecordingObjectStorage {
+    calls: std::sync::Mutex<Vec<String>>,
+    fail: bool,
+    public_base: Option<String>,
+}
+
+impl RecordingObjectStorage {
+    pub(crate) fn succeeding(public_base: Option<&str>) -> Self {
+        Self {
+            calls: std::sync::Mutex::new(Vec::new()),
+            fail: false,
+            public_base: public_base.map(str::to_owned),
+        }
+    }
+    pub(crate) fn failing() -> Self {
+        Self {
+            fail: true,
+            ..Self::default()
+        }
+    }
+    pub(crate) fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("storage calls lock").clone()
+    }
+    fn record(&self, call: String) -> Result<(), StorageError> {
+        self.calls.lock().expect("storage calls lock").push(call);
+        if self.fail {
+            Err(StorageError::MissingConfig)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ObjectStorage for RecordingObjectStorage {
+    async fn presign_upload(
+        &self,
+        key: &str,
+        _content_type: &str,
+        _content_length: Option<i64>,
+        _expires: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        self.record(format!("presign_upload:{key}"))?;
+        Ok(PresignedUploadResult {
+            key: key.into(),
+            upload_url: format!("https://upload.invalid/{key}"),
+            public_url: self.public_url(key),
+        })
+    }
+    async fn presign_download(
+        &self,
+        key: &str,
+        _expires: Option<u64>,
+    ) -> Result<String, StorageError> {
+        self.record(format!("presign_download:{key}"))?;
+        Ok(format!("https://download.invalid/{key}"))
+    }
+    async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
+        self.record(format!("head:{key}"))?;
+        Ok(Some(StorageObjectHead {
+            size: 1,
+            content_type: None,
+        }))
+    }
+    async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        self.record(format!("delete:{key}"))
+    }
+    fn public_url(&self, key: &str) -> Option<String> {
+        self.public_base
+            .as_ref()
+            .map(|base| format!("{}/{key}", base.trim_end_matches('/')))
+    }
+}
 
 const DATABASE_PREFIX: &str = "bittery_test_";
 const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
@@ -746,7 +824,10 @@ where
         .await
         .expect("test database migrations should run");
 
-    let state = AppState::from_pool(pool.clone());
+    let state = AppState::from_pool(pool.clone()).with_object_storage(
+        crate::integrations::storage::object_storage_from_env()
+            .expect("test storage configuration should be complete"),
+    );
     let router = create_test_router(state.clone());
 
     let result = std::panic::AssertUnwindSafe(test_fn(ApiTestApp {

@@ -631,6 +631,7 @@ async fn list_vaults(
     let cursor = decode_page_key(&page, &auth.session.user_id, "vaults", "")?;
     let values = vault::list_vaults_page(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         cursor.as_deref(),
         query_limit(&page)?,
@@ -659,6 +660,7 @@ async fn get_vault(
     Ok(Json(
         vault::get_vault(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::VaultIdInput { vault_id },
         )
@@ -707,6 +709,7 @@ async fn update_vault(
     let pool = &state.db_pool;
     let result = vault::update_vault(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::UpdateVaultInput {
@@ -755,6 +758,7 @@ async fn delete_vault(
     let pool = &state.db_pool;
     let result = vault::delete_vault(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::VaultIdInput { vault_id },
@@ -775,6 +779,7 @@ async fn create_image_upload(
     Ok(Json(
         vault::create_vault_image_upload(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::CreateVaultImageUploadInput {
                 vault_id: Some(vault_id),
@@ -841,6 +846,7 @@ async fn list_all_items(
                 .transpose()?;
             let values = vault::list_all_vault_items_page(
                 pool,
+                state.object_storage.as_ref(),
                 &auth.session.user_id,
                 cursor,
                 query_limit(&page)?,
@@ -866,6 +872,7 @@ async fn list_all_items(
                 .transpose()?;
             let values = vault::list_all_deleted_vault_items_page(
                 pool,
+                state.object_storage.as_ref(),
                 &auth.session.user_id,
                 cursor,
                 query_limit(&page)?,
@@ -909,6 +916,7 @@ async fn list_all_trashed_items(
         .transpose()?;
     let values = vault::list_all_deleted_vault_items_page(
         &state.db_pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         cursor,
         query_limit(&page)?,
@@ -1327,6 +1335,7 @@ async fn create_attachment_upload(
     let pool = &state.db_pool;
     let result = vault::create_vault_attachment_upload(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         vault::CreateAttachmentUploadInput {
             item_id,
@@ -1353,6 +1362,7 @@ async fn create_attachment(
     let pool = &state.db_pool;
     let result = vault::create_vault_attachment(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::CreateAttachmentInput {
@@ -1418,6 +1428,7 @@ async fn create_attachment_download_url(
     Ok(Json(
         vault::get_attachment_download_url(
             pool,
+            state.object_storage.as_ref(),
             &auth.session.user_id,
             vault::AttachmentIdInput { attachment_id },
         )
@@ -1459,6 +1470,7 @@ async fn delete_attachment(
     let pool = &state.db_pool;
     let result = vault::delete_vault_attachment(
         pool,
+        state.object_storage.as_ref(),
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::AttachmentIdInput { attachment_id },

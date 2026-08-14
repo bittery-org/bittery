@@ -98,6 +98,7 @@ pub async fn prune_rate_limit_state(pool: &PgPool) -> Result<u64, sqlx::Error> {
 
 pub async fn cleanup_pending_attachment_uploads(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let mut total_deleted = 0;
 
@@ -116,7 +117,7 @@ pub async fn cleanup_pending_attachment_uploads(
         }
 
         for reservation in &expired_reservations {
-            if let Err(error) = storage::delete_object(&reservation.storage_key).await {
+            if let Err(error) = object_storage.delete(&reservation.storage_key).await {
                 error!(
                     storage_key = %reservation.storage_key,
                     error = %error,

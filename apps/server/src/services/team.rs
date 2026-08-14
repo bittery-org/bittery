@@ -258,6 +258,7 @@ pub(crate) async fn get_pending_invitations(
 
 pub(crate) async fn list_teams(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
 ) -> Result<TeamSummaryResponse, AppError> {
     let team = query_as::<_, DbTeamSummaryRow>(
@@ -280,13 +281,14 @@ pub(crate) async fn list_teams(
         image_url: team
             .image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
         created_at: format_timestamp(team.created_at),
     })
 }
 
 pub(crate) async fn get_team(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: TeamIdInput,
 ) -> Result<TeamDetailsResponse, AppError> {
@@ -330,7 +332,7 @@ pub(crate) async fn get_team(
         image_url: team
             .image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
         created_at: format_timestamp(team.created_at),
         updated_at: format_timestamp(team.updated_at),
     })
@@ -489,6 +491,7 @@ pub(crate) async fn update_team(
 
 pub(crate) async fn create_team_image_upload(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: CreateImageUploadInput,
 ) -> Result<storage::PresignedUploadResult, AppError> {
@@ -519,7 +522,8 @@ pub(crate) async fn create_team_image_upload(
     ensure_team_admin(current_user.role)?;
 
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
-    storage::create_presigned_upload(&key, &input.content_type, None, None)
+    object_storage
+        .presign_upload(&key, &input.content_type, None, None)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");

@@ -410,6 +410,7 @@ struct AttachmentActor {
 
 pub(crate) async fn list_vaults_page(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     cursor_id: Option<&str>,
     limit: i64,
@@ -491,7 +492,7 @@ pub(crate) async fn list_vaults_page(
             image_url: vault
                 .image_key
                 .as_deref()
-                .and_then(storage::public_asset_url),
+                .and_then(|key| object_storage.public_url(key)),
             role: vault.role,
             item_count: vault.item_count.to_string(),
             encrypted_vault_key: vault.encrypted_vault_key,
@@ -503,6 +504,7 @@ pub(crate) async fn list_vaults_page(
 
 pub(crate) async fn get_vault(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: VaultIdInput,
 ) -> Result<VaultDetailsResponse, AppError> {
@@ -526,7 +528,7 @@ pub(crate) async fn get_vault(
         image_url: vault
             .image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
         user_role: vault.user_role,
         item_count: vault.item_count,
         member_count: vault.member_count,
@@ -536,6 +538,7 @@ pub(crate) async fn get_vault(
 
 pub(crate) async fn create_vault_image_upload(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: CreateVaultImageUploadInput,
 ) -> Result<storage::PresignedUploadResult, AppError> {
@@ -560,7 +563,8 @@ pub(crate) async fn create_vault_image_upload(
     }
 
     let key = storage::create_vault_image_key(user_id, input.vault_id.as_deref(), &input.file_name);
-    storage::create_presigned_upload(&key, &input.content_type, None, None)
+    object_storage
+        .presign_upload(&key, &input.content_type, None, None)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
@@ -570,6 +574,7 @@ pub(crate) async fn create_vault_image_upload(
 
 pub(crate) async fn create_vault_attachment_upload(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: CreateAttachmentUploadInput,
 ) -> Result<CreateAttachmentUploadResponse, AppError> {
@@ -659,17 +664,18 @@ pub(crate) async fn create_vault_attachment_upload(
         AppError::internal("Failed to commit attachment upload reservation")
     })?;
 
-    let upload = storage::create_presigned_upload(
-        &key,
-        &input.content_type,
-        Some(i64::from(storage_size)),
-        None,
-    )
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "Internal error");
-        AppError::internal("An internal error occurred")
-    })?;
+    let upload = object_storage
+        .presign_upload(
+            &key,
+            &input.content_type,
+            Some(i64::from(storage_size)),
+            None,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "Internal error");
+            AppError::internal("An internal error occurred")
+        })?;
     Ok(CreateAttachmentUploadResponse {
         attachment_id,
         storage_key: upload.key,
@@ -679,6 +685,7 @@ pub(crate) async fn create_vault_attachment_upload(
 
 pub(crate) async fn create_vault_attachment(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     request_client_id: Option<&str>,
     input: CreateAttachmentInput,
@@ -721,13 +728,13 @@ pub(crate) async fn create_vault_attachment(
             "Attachment metadata does not match the reserved upload.",
         ));
     }
-    let Some(uploaded_object) =
-        storage::head_object(&input.storage_key)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "Internal error");
-                AppError::internal("An internal error occurred")
-            })?
+    let Some(uploaded_object) = object_storage
+        .head(&input.storage_key)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "Internal error");
+            AppError::internal("An internal error occurred")
+        })?
     else {
         return Err(AppError::bad_request(
             "Uploaded attachment does not match the reserved encrypted size.",
@@ -824,12 +831,14 @@ pub(crate) async fn list_vault_attachments_page(
 
 pub(crate) async fn get_attachment_download_url(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     input: AttachmentIdInput,
 ) -> Result<AttachmentDownloadResponse, AppError> {
     let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
-    let download_url = storage::create_presigned_download(&attachment.storage_key, Some(300))
+    let download_url = object_storage
+        .presign_download(&attachment.storage_key, Some(300))
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
@@ -888,6 +897,7 @@ pub(crate) async fn update_vault_attachment(
 
 pub(crate) async fn delete_vault_attachment(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     request_client_id: Option<&str>,
     input: AttachmentIdInput,
@@ -904,7 +914,8 @@ pub(crate) async fn delete_vault_attachment(
         }
         VaultRole::ReadOnly => return Err(AppError::forbidden("Access denied")),
     }
-    storage::delete_object(&attachment.storage_key)
+    object_storage
+        .delete(&attachment.storage_key)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
@@ -1059,6 +1070,7 @@ pub(crate) async fn create_vault(
 
 pub(crate) async fn update_vault(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     request_client_id: Option<&str>,
     input: UpdateVaultInput,
@@ -1127,7 +1139,7 @@ pub(crate) async fn update_vault(
     insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(old_image_key) = old_image_key {
         if Some(old_image_key.as_str()) != updated_image_key.as_deref() {
-            let _ = storage::delete_object(&old_image_key).await;
+            let _ = object_storage.delete(&old_image_key).await;
         }
     }
 
@@ -1137,7 +1149,7 @@ pub(crate) async fn update_vault(
         icon: updated_icon,
         image_url: updated_image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| object_storage.public_url(key)),
     })
 }
 
@@ -1305,6 +1317,7 @@ pub(crate) async fn convert_vault_type(
 
 pub(crate) async fn delete_vault(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     request_client_id: Option<&str>,
     input: VaultIdInput,
@@ -1399,7 +1412,7 @@ pub(crate) async fn delete_vault(
 
     insert_vault_deleted_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(image_key) = vault.image_key {
-        let _ = storage::delete_object(&image_key).await;
+        let _ = object_storage.delete(&image_key).await;
     }
 
     Ok(SuccessResponse { success: true })
@@ -1511,6 +1524,7 @@ pub(crate) async fn list_vault_items_page(
 
 pub(crate) async fn list_all_vault_items_page(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
@@ -1589,6 +1603,7 @@ pub(crate) async fn list_all_vault_items_page(
     };
     let selected_vault_ids = distinct_item_vault_ids(&item_rows);
     let vault_map = build_vault_summary_map(
+        object_storage,
         load_user_vault_summaries(pool, user_id, &selected_vault_ids).await?,
     );
 
@@ -1611,6 +1626,7 @@ pub(crate) async fn list_all_vault_items_page(
 
 pub(crate) async fn list_all_deleted_vault_items_page(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
@@ -1677,6 +1693,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
     })?;
     let selected_vault_ids = distinct_item_vault_ids(&item_rows);
     let vault_map = build_vault_summary_map(
+        object_storage,
         load_user_vault_summaries(pool, user_id, &selected_vault_ids).await?,
     );
 
@@ -2827,6 +2844,7 @@ fn map_item_details(item: DbBootstrapItemRow) -> VaultItemDetailsResponse {
 }
 
 fn build_vault_summary_map(
+    object_storage: &dyn storage::ObjectStorage,
     vaults: Vec<DbBootstrapVaultAccessRow>,
 ) -> HashMap<String, VaultSummaryResponse> {
     vaults
@@ -2842,7 +2860,7 @@ fn build_vault_summary_map(
                     image_url: vault
                         .vault_image_key
                         .as_deref()
-                        .and_then(storage::public_asset_url),
+                        .and_then(|key| object_storage.public_url(key)),
                     encrypted_vault_key: vault.encrypted_vault_key,
                     role: vault.role,
                 },

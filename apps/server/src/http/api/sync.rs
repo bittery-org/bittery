@@ -269,10 +269,14 @@ async fn bootstrap(
     BootstrapApiQuery(query): BootstrapApiQuery,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
     let pool = &state.db_pool;
-    let mut response: BootstrapItemsResponse =
-        sync::bootstrap_items(pool, &auth.session.user_id, query.into())
-            .await?
-            .into();
+    let mut response: BootstrapItemsResponse = sync::bootstrap_items(
+        pool,
+        state.object_storage.as_ref(),
+        &auth.session.user_id,
+        query.into(),
+    )
+    .await?
+    .into();
     if truncate_serialized(&mut response.items, RESPONSE_PAGE_ITEMS_BYTES)? {
         response.has_more = true;
         response.next_cursor = response.items.last().map(|item| item.id.clone());

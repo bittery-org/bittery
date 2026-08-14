@@ -337,9 +337,13 @@ async fn current_team(
     request: AuthenticatedRequest,
 ) -> Result<Json<TeamSummaryResponse>, ApiError> {
     Ok(Json(
-        team::list_teams(&state.db_pool, &request.session.user_id)
-            .await?
-            .into(),
+        team::list_teams(
+            &state.db_pool,
+            state.object_storage.as_ref(),
+            &request.session.user_id,
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -352,6 +356,7 @@ async fn get_team(
     Ok(Json(
         team::get_team(
             &state.db_pool,
+            state.object_storage.as_ref(),
             &request.session.user_id,
             team::TeamIdInput { team_id },
         )
@@ -455,6 +460,7 @@ async fn create_image_upload(
     Ok(Json(
         team::create_team_image_upload(
             &state.db_pool,
+            state.object_storage.as_ref(),
             &request.session.user_id,
             team::CreateImageUploadInput {
                 team_id,

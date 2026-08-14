@@ -881,7 +881,9 @@ pub(crate) async fn signup(
     })?;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
+    let vault_keys =
+        load_auth_vault_keys_page(pool, app_state.object_storage.as_ref(), &user_id, None, 101)
+            .await?;
 
     Ok(SignupResponse {
         success: true,
@@ -1043,7 +1045,9 @@ pub(crate) async fn signup_with_invitation(
     sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
+    let vault_keys =
+        load_auth_vault_keys_page(pool, app_state.object_storage.as_ref(), &user_id, None, 101)
+            .await?;
 
     Ok(SignupResponse {
         success: true,
@@ -1064,7 +1068,7 @@ pub(crate) async fn signup_with_invitation(
             team_avatar_url: invitation
                 .team_image_key
                 .as_deref()
-                .and_then(storage::public_asset_url),
+                .and_then(|key| app_state.object_storage.public_url(key)),
             role: invitation.role,
         },
         vault_keys,
@@ -1254,7 +1258,14 @@ pub(crate) async fn finish_login(
         .sessions
         .create_session(&verified.user.id, request)
         .await?;
-    let vault_keys = load_auth_vault_keys_page(pool, &verified.user.id, None, 101).await?;
+    let vault_keys = load_auth_vault_keys_page(
+        pool,
+        app_state.object_storage.as_ref(),
+        &verified.user.id,
+        None,
+        101,
+    )
+    .await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
@@ -1273,7 +1284,7 @@ pub(crate) async fn finish_login(
                 .user
                 .team_image_key
                 .as_deref()
-                .and_then(storage::public_asset_url),
+                .and_then(|key| app_state.object_storage.public_url(key)),
         },
         vault_keys,
     })
@@ -1857,7 +1868,7 @@ pub(crate) async fn get_me(
         team_avatar_url: user
             .team_image_key
             .as_deref()
-            .and_then(storage::public_asset_url),
+            .and_then(|key| app_state.object_storage.public_url(key)),
         role: user.role,
         secret_key_hint: user.secret_key_hint,
         public_key: user.public_key,
@@ -2802,6 +2813,7 @@ async fn insert_personal_vault(
 
 pub(crate) async fn load_auth_vault_keys_page(
     pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
@@ -2877,7 +2889,7 @@ pub(crate) async fn load_auth_vault_keys_page(
             vault_image_url: row
                 .vault_image_key
                 .as_deref()
-                .and_then(storage::public_asset_url),
+                .and_then(|key| object_storage.public_url(key)),
             encrypted_vault_key: row.encrypted_vault_key,
             role: row.role,
             created_at: row.created_at,

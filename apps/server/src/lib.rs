@@ -17,6 +17,8 @@ use sqlx::PgPool;
 use std::sync::Arc;
 
 use fred::prelude::Pool as RedisPool;
+use integrations::favicon::{RemoteDocumentFetcher, ReqwestRemoteDocumentFetcher};
+use integrations::storage::{ObjectStorage, UnavailableObjectStorage};
 use services::rate_limit::PostgresRateLimiter;
 
 pub use app::create_app;
@@ -54,6 +56,8 @@ pub struct AppState {
     pub sync_pubsub: SyncPubSub,
     pub instance_id: String,
     pub rate_limiter: Arc<dyn RateLimiter>,
+    pub object_storage: Arc<dyn ObjectStorage>,
+    pub remote_documents: Arc<dyn RemoteDocumentFetcher>,
 }
 
 impl AppState {
@@ -66,6 +70,8 @@ impl AppState {
             sync_pubsub: SyncPubSub::new(),
             instance_id: uuid::Uuid::new_v4().to_string(),
             rate_limiter: Arc::new(PostgresRateLimiter::new(pool)),
+            object_storage: Arc::new(UnavailableObjectStorage::new(None)),
+            remote_documents: Arc::new(ReqwestRemoteDocumentFetcher::new()),
         }
     }
 
@@ -84,6 +90,16 @@ impl AppState {
 
     pub fn with_sync_pubsub(mut self, pubsub: SyncPubSub) -> Self {
         self.sync_pubsub = pubsub;
+        self
+    }
+
+    pub fn with_object_storage(mut self, storage: Arc<dyn ObjectStorage>) -> Self {
+        self.object_storage = storage;
+        self
+    }
+
+    pub fn with_remote_documents(mut self, fetcher: Arc<dyn RemoteDocumentFetcher>) -> Self {
+        self.remote_documents = fetcher;
         self
     }
 

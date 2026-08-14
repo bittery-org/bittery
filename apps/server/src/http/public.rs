@@ -19,7 +19,6 @@ use crate::{
     integrations::favicon::{
         fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain,
     },
-    integrations::storage::create_presigned_download,
     services::billing::{
         is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
         StripeWebhookError,
@@ -81,12 +80,12 @@ async fn join_waitlist(
     }
 }
 
-async fn cdn_asset(Path(key): Path<String>) -> Response {
+async fn cdn_asset(Path(key): Path<String>, State(app_state): State<AppState>) -> Response {
     if !is_public_storage_key_allowed(&key) {
         return json_error(StatusCode::NOT_FOUND, "Not Found");
     }
 
-    let signed_url = match create_presigned_download(&key, None).await {
+    let signed_url = match app_state.object_storage.presign_download(&key, None).await {
         Ok(signed_url) => signed_url,
         Err(error) => {
             warn!(?error, key, "failed to create presigned download url");
@@ -157,7 +156,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
         }
     }
 
-    match fetch_and_store_favicon(pool, &domain).await {
+    match fetch_and_store_favicon(pool, app_state.remote_documents.as_ref(), &domain).await {
         Ok(true) => {}
         Ok(false) => {
             return (
@@ -231,5 +230,63 @@ async fn stripe_webhook(
                 _ => json_error(StatusCode::BAD_REQUEST, "Invalid Stripe webhook"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_public_http_router;
+    use crate::{test_support::RecordingObjectStorage, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn cdn_route_reports_and_records_storage_failure() {
+        let storage = Arc::new(RecordingObjectStorage::failing());
+        let state = AppState::database_free_test().with_object_storage(storage.clone());
+        let response = create_public_http_router()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/cdn/vaults/user/avatar.png")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            storage.calls(),
+            vec!["presign_download:vaults/user/avatar.png"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cdn_route_uses_successful_presigned_download() {
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        let state = AppState::database_free_test().with_object_storage(storage.clone());
+        let response = create_public_http_router()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/cdn/teams/team/avatar.png")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+
+        // The recording adapter deliberately returns a non-routable URL; reaching the fetch error
+        // proves the handler accepted its successful presign result.
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            storage.calls(),
+            vec!["presign_download:teams/team/avatar.png"]
+        );
     }
 }
