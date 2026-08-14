@@ -4,7 +4,11 @@
  * extensions, or any other runtime.
  */
 
-import type { FinishLoginResponse, LoginAttempt } from "@bittery/api-contract";
+import type {
+	ApiClient,
+	FinishLoginResponse,
+	LoginAttempt,
+} from "@bittery/api-contract";
 import type {
 	CryptoPort,
 	EncryptedData,
@@ -12,7 +16,6 @@ import type {
 	KeyRef,
 } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
-import type { AppApiClient } from "@bittery/shared/api-client";
 import {
 	createAccountApiClient,
 	getDefaultServerUrl,
@@ -189,7 +192,7 @@ export interface SessionState {
 
 /** The React-free auth surface needed by login and unlock ceremonies. */
 type AuthClientMethods = Pick<
-	AppApiClient["auth"],
+	ApiClient["auth"],
 	"checkEmail" | "startLogin" | "finishLogin" | "drainVaultKeys"
 >;
 

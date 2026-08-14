@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ApiError } from "@bittery/shared/api-client";
+import { ApiError } from "@bittery/api-contract";
 import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import { type DeltaSyncApiClient, performDeltaSync } from "../delta-sync";

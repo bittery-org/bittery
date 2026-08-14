@@ -10,7 +10,8 @@
 
 import { PlatformProvider } from "@bittery/core/hooks";
 import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
-import type { IAutolockService, ISyncContext } from "@bittery/types";
+import type { IAutolockService } from "@bittery/core/services/autolock";
+import type { ISyncContext } from "@bittery/sync";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { crypto } from "@/lib/crypto";

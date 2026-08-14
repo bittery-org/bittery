@@ -5,13 +5,13 @@ import {
 	unwrapAttachmentKey,
 } from "@bittery/core/services/attachment-crypto";
 import type { KeyRef } from "@bittery/crypto-port";
+import { useApiClient } from "@bittery/shared/api";
 import type {
 	ExportedAttachment,
 	ExportedItem,
 	ExportedVault,
 	VaultExportPayload,
-} from "@bittery/shared";
-import { useApiClient } from "@bittery/shared/api";
+} from "@bittery/shared/export-types";
 import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";

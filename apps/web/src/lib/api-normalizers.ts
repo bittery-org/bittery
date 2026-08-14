@@ -1,9 +1,9 @@
-import type { ItemCategory } from "@bittery/shared";
 import type {
 	CloudPlanId,
 	EntitlementLimits,
 	Entitlements,
 } from "@bittery/shared/billing";
+import type { ItemCategory } from "@bittery/shared/types";
 
 /**
  * What the two billing normalizers accept: the wire's own shapes, with every field

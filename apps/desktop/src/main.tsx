@@ -1,6 +1,6 @@
 import "./styles.css";
+import type { ApiClient } from "@bittery/api-contract";
 import { ApiProvider } from "@bittery/shared/api";
-import type { AppApiClient } from "@bittery/shared/api-client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
@@ -22,7 +22,7 @@ import { ThemeSync } from "./providers/theme-sync";
 import { routeTree } from "./routeTree.gen";
 
 // Create a new router instance
-function createDesktopRouter(apiClient: AppApiClient) {
+function createDesktopRouter(apiClient: ApiClient) {
 	return createRouter({
 		routeTree,
 		scrollRestoration: true,

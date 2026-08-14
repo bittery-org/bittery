@@ -1,5 +1,5 @@
+import { ApiError, isApiErrorStatus } from "@bittery/api-contract";
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
-import { ApiError, isApiErrorStatus } from "@bittery/shared/api-client";
 import type { ItemSyncAcknowledgement, ItemSyncCommand } from "@bittery/types";
 import type { DefaultApiClient } from "./account-resolver";
 import type { DecryptedAttachmentParts } from "./attachment-crypto";

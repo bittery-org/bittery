@@ -8,7 +8,7 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/types";
+import type { ISyncContext } from "@bittery/sync";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { lifecycleDeps } from "@/background/lifecycle";

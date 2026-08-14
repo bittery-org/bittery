@@ -5,7 +5,7 @@ import {
 	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
-import type { IAutolockService } from "@bittery/types";
+import type { IAutolockService } from "@bittery/core/services/autolock";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Router } from "@tanstack/react-router";
 import {

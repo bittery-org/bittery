@@ -211,60 +211,6 @@ export interface ItemSyncReconciler {
 }
 
 // ============================================================================
-// Hook/Platform Integration Types
-// ============================================================================
-
-/**
- * Query invalidator interface for cache invalidation after mutations.
- * Matches the return type of createQueryInvalidator() from @bittery/sync.
- */
-export interface IQueryInvalidator {
-	invalidateItem(itemId: string, vaultId: string): Promise<void>;
-	invalidateVaultList(vaultId: string): Promise<void>;
-	invalidateVaultKeys(): Promise<void>;
-	invalidateDeletedItems(vaultId: string): Promise<void>;
-	invalidateTeam(): Promise<void>;
-	invalidateTeamInvitations(): Promise<void>;
-	invalidateShare(itemId: string): Promise<void>;
-	invalidateVaultMembers(vaultId: string): Promise<void>;
-}
-
-export interface IPendingMutationQueue {
-	enqueue(
-		mutation: ItemSyncCommand,
-		applyOptimistic?: () => Promise<void>,
-	): Promise<void>;
-	getPendingCount?(): number;
-	hasPendingForItem?(itemId: string): boolean;
-	getCommands?(accountId?: string): ItemSyncCommand[];
-}
-
-/**
- * Sync context - subset of sync state needed by shared hooks.
- */
-export interface ISyncContext {
-	clientId: string;
-	isConnected: boolean;
-	isOnline: boolean;
-	invalidator: IQueryInvalidator;
-	outboundQueue: IPendingMutationQueue;
-}
-
-/**
- * Autolock service interface used by platform providers.
- */
-export interface IAutolockService {
-	initialize(): Promise<void>;
-	recordActivity(): void;
-	shouldLock(): Promise<boolean>;
-	lock(): Promise<void>;
-	onLock(callback: () => void): () => void;
-	getTimeout(): Promise<number>;
-	setTimeout(ms: number): Promise<void>;
-	dispose(): void;
-}
-
-// ============================================================================
 // Raw Item Payload Types
 // ============================================================================
 

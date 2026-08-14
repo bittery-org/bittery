@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError } from "@bittery/shared/api-client";
+import { ApiError } from "@bittery/api-contract";
 import type { ItemSyncCommand } from "@bittery/types";
 import { CrossAccountItemCommandExecutor } from "./cross-account-item-command-executor";
 

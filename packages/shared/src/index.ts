@@ -1,5 +1,4 @@
 export * from "./api";
-export * from "./api-client";
 export * from "./api-query";
 export * from "./api-session-refresh";
 export * from "./credit-card";

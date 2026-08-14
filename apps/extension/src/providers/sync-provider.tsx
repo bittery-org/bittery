@@ -1,9 +1,9 @@
+import type { IPendingMutationQueue, IQueryInvalidator } from "@bittery/sync";
 import {
 	type ConnectionStatus,
 	getNewTerminalCommandCount,
 	type SyncCommandSummary,
 } from "@bittery/sync";
-import type { IPendingMutationQueue, IQueryInvalidator } from "@bittery/types";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import {

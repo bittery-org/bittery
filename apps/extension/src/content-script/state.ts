@@ -16,5 +16,5 @@ export const contentState = {
 	isAutofilling: false,
 	processedForms: new WeakSet<HTMLFormElement>(),
 	observedShadowRoots: new WeakSet<ShadowRoot>(),
-	detectionTimeout: null as NodeJS.Timeout | null,
+	detectionTimeout: null as ReturnType<typeof setTimeout> | null,
 };

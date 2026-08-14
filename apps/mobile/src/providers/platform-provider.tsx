@@ -8,7 +8,7 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/types";
+import type { ISyncContext } from "@bittery/sync";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";

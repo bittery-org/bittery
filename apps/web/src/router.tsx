@@ -1,9 +1,9 @@
-import { m } from "@bittery/i18n/paraglide/messages";
-import { ApiProvider } from "@bittery/shared/api";
 import {
 	isApiTransportError,
 	isUnauthorizedApiError,
-} from "@bittery/shared/api-client";
+} from "@bittery/api-contract";
+import { m } from "@bittery/i18n/paraglide/messages";
+import { ApiProvider } from "@bittery/shared/api";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";

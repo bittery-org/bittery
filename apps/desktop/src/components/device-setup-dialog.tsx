@@ -1,8 +1,8 @@
 import {
 	buildDeviceSetupLinkUri,
 	buildDeviceSetupQrUri,
-	normalizeServerUrl,
-} from "@bittery/shared";
+} from "@bittery/shared/device-setup";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	cn,
 	copyWithToast,

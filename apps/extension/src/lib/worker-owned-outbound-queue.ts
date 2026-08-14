@@ -1,4 +1,5 @@
-import type { IPendingMutationQueue, ItemSyncCommand } from "@bittery/types";
+import type { IPendingMutationQueue } from "@bittery/sync";
+import type { ItemSyncCommand } from "@bittery/types";
 import type {
 	OutboundCommandClaim,
 	RoutePayload,

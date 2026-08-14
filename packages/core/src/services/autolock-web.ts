@@ -8,7 +8,7 @@
  */
 
 import type { AccountStore } from "@bittery/storage";
-import type { IAutolockService } from "@bittery/types";
+import type { IAutolockService } from "./autolock";
 
 /**
  * Activity events to track for resetting the inactivity timer

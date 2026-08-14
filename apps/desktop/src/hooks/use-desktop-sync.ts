@@ -1,3 +1,4 @@
+import { isUnauthorizedApiError } from "@bittery/api-contract";
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
@@ -5,7 +6,6 @@ import {
 	createAccountSync,
 } from "@bittery/core/services/account-sync";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
-import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";

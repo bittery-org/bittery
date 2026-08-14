@@ -7,15 +7,12 @@
 
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import type {
-	IAutolockService,
-	IQueryInvalidator,
-	ISyncContext,
-} from "@bittery/types";
+import type { IQueryInvalidator, ISyncContext } from "@bittery/sync";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { type CoreContext, createCoreContext } from "../core-context";
 import type { CredentialMirror } from "../services/account-lifecycle";
 import type { AccountVaultRuntime } from "../services/account-vault-runtime";
+import type { IAutolockService } from "../services/autolock";
 import type { VaultCrypto } from "../services/vault-crypto";
 
 /**

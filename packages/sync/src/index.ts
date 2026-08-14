@@ -1,6 +1,12 @@
 // Query invalidation helpers
 
 export type {
+	IPendingMutationQueue,
+	IQueryInvalidator,
+	ISyncContext,
+} from "./capabilities";
+
+export type {
 	CatchUpApiClient,
 	CatchUpPageResponse,
 	RunCatchUpOptions,

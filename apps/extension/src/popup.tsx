@@ -1,6 +1,6 @@
 import "./index.css";
+import { createApiClient } from "@bittery/api-contract";
 import { ApiProvider } from "@bittery/shared/api";
-import { createAppApiClient } from "@bittery/shared/api-client";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -62,7 +62,7 @@ async function resolveServerRequest(request: Request): Promise<Response> {
 	return fetch(new Request(target, request), { headers });
 }
 
-const apiClient = createAppApiClient({
+const apiClient = createApiClient({
 	serverUrl: fallbackServerUrl,
 	supportedApiMajors: [1],
 	getClientMetadata: async () => {

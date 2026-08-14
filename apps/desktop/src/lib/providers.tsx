@@ -1,6 +1,6 @@
+import { isUnauthorizedApiError } from "@bittery/api-contract";
 import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
-import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";

@@ -1,4 +1,4 @@
-import type { AppApiClient } from "@bittery/shared/api-client";
+import type { ApiClient } from "@bittery/api-contract";
 import { Toaster } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -15,7 +15,7 @@ import { initializeStorage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
 export interface RouterAppContext {
-	api: AppApiClient;
+	api: ApiClient;
 	queryClient: QueryClient;
 }
 
