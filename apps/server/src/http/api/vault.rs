@@ -1488,7 +1488,7 @@ async fn list_members(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultMemberResponse>>, ApiError> {
     let pool = &state.db_pool;
-    let values = vault::member_handlers::list_vault_members(
+    let values = vault::list_vault_members(
         pool,
         &auth.session.user_id,
         vault::VaultIdInput {
@@ -1515,7 +1515,7 @@ async fn available_team_members(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultAvailableMemberResponse>>, ApiError> {
     let pool = &state.db_pool;
-    let values = vault::member_handlers::available_team_members(
+    let values = vault::available_team_members(
         pool,
         &auth.session.user_id,
         vault::VaultIdInput {
@@ -1542,7 +1542,7 @@ async fn add_member(
     ApiJson(body): ApiJson<AddVaultMemberBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let pool = &state.db_pool;
-    let result = vault::member_handlers::add_vault_member(
+    let result = vault::add_vault_member(
         pool,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
@@ -1567,7 +1567,7 @@ async fn update_member_role(
     ApiMergePatch(body): ApiMergePatch<UpdateVaultMemberRoleBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let pool = &state.db_pool;
-    let result = vault::member_handlers::update_vault_member_role(
+    let result = vault::update_vault_member_role(
         pool,
         &auth.session.user_id,
         vault::UpdateVaultMemberRoleInput {
