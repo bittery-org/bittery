@@ -1,7 +1,8 @@
 import { useItemListFilters, useItems } from "@bittery/core/hooks";
-import { Badge, VaultItemListControls } from "@bittery/ui";
+import { ActiveRail, Badge, VaultItemListControls } from "@bittery/ui";
 import { IconStar } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
+import { useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
@@ -11,6 +12,7 @@ export const Route = createFileRoute("/vault/favorites")({
 
 function RouteComponent() {
 	const { m } = useI18n();
+	const listScrollRef = useRef<HTMLDivElement>(null);
 	const { itemId } = useParams({ strict: false });
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
@@ -64,7 +66,8 @@ function RouteComponent() {
 					onSortDirectionChange={setSortDirection}
 				/>
 
-				<div className="flex-1 overflow-y-auto">
+				<div ref={listScrollRef} className="relative flex-1 overflow-y-auto">
+					<ActiveRail containerRef={listScrollRef} />
 					{favoriteItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">

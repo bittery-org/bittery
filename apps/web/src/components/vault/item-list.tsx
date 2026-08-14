@@ -2,8 +2,8 @@ import { useItemListFilters } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import {
+	ActiveRail,
 	Checkbox,
-	cn,
 	type DragItemData,
 	Skeleton,
 	VaultItemListControls,
@@ -14,7 +14,7 @@ import {
 	IconSmartphone as Smartphone,
 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { useVaultDnd } from "@/providers/vault-dnd-provider";
 import { Favicon } from "./favicon";
@@ -39,6 +39,7 @@ export function ItemList({
 	onSelectionChange,
 }: ItemListProps) {
 	const { m } = useI18n();
+	const listScrollRef = useRef<HTMLDivElement>(null);
 	const {
 		searchQuery,
 		setSearchQuery,
@@ -147,9 +148,11 @@ export function ItemList({
 				</div>
 			) : (
 				<div
-					className="min-h-0 flex-1 overflow-y-auto"
+					ref={listScrollRef}
+					className="relative min-h-0 flex-1 overflow-y-auto"
 					data-testid="vault-items-scroll-area"
 				>
+					<ActiveRail containerRef={listScrollRef} />
 					<div className="space-y-1 p-2">
 						{/* Favorites Section */}
 						{favoriteItems.length > 0 && (
@@ -269,14 +272,9 @@ function ItemRow({
 			indicators={
 				item.category === "login" && item.totpSecret ? (
 					<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
-						<Smartphone
-							className={cn(
-								"h-3 w-3 shrink-0",
-								isSelected
-									? "text-primary-foreground"
-									: "text-muted-foreground",
-							)}
-						/>
+						{/* PROTOTYPE: most variants have no purple fill, so the flipped
+						    foreground colour would be invisible in light mode. */}
+						<Smartphone className="h-3 w-3 shrink-0 text-muted-foreground" />
 					</span>
 				) : null
 			}

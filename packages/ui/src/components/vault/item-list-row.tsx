@@ -1,6 +1,7 @@
 import type * as React from "react";
 import { forwardRef } from "react";
 import { cn } from "../../lib/utils";
+import { activeRailTarget } from "../active-rail";
 import { Checkbox } from "../checkbox";
 
 interface VaultItemListRowProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -48,10 +49,13 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 		return (
 			<div
 				ref={ref}
+				{...activeRailTarget(isSelected)}
 				className={cn(
 					"relative flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors",
+					// Selection is the list's `ActiveRail` plus the absence of hover —
+					// the row itself stays untinted, so hover never outweighs it.
 					isSelected
-						? "bg-selected shadow-[inset_0_0_0_1px_oklch(0.70_0.165_288/0.16)]"
+						? ""
 						: isChecked
 							? "border border-primary/30 bg-selected"
 							: isAnyItemDragging
@@ -62,9 +66,6 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 				)}
 				{...props}
 			>
-				{isSelected && (
-					<div className="pointer-events-none absolute top-[7px] bottom-[7px] left-0 z-10 w-[2px] rounded-full bg-primary shadow-[0_0_8px] shadow-primary/50" />
-				)}
 
 				{selectionMode && (
 					<div className="relative z-10">

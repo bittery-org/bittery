@@ -1,5 +1,7 @@
 import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
 import {
+	ActiveRail,
+	activeRailTarget,
 	Button,
 	cn,
 	type DragItemData,
@@ -23,8 +25,19 @@ import {
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
+import { useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { useVaultDnd } from "@/providers/vault-dnd-provider";
+
+/**
+ * Nav rows carry selection with weight and colour only; the moving `ActiveRail`
+ * in the surrounding list draws the indicator bar. Active rows drop their hover
+ * background so hover never reads stronger than selection.
+ */
+const navRowClass = (isActive: boolean) =>
+	isActive
+		? "font-medium text-foreground"
+		: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground";
 
 /**
  * What one sidebar row renders: the vault fields of a held vault key, and nothing else.
@@ -109,20 +122,13 @@ function DroppableVaultEntry({
 	return (
 		<div
 			ref={setNodeRef}
+			{...activeRailTarget(isActive)}
 			className={cn(
 				"group relative mb-0.5 w-full rounded-sm text-left text-sm transition-colors",
-				isActive
-					? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
-					: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+				navRowClass(isActive),
 				dropBackgroundStyle,
 			)}
 		>
-			{isActive && (
-				<span
-					aria-hidden
-					className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-				/>
-			)}
 			{dropIndicatorStyle && (
 				<div
 					className={cn(
@@ -250,12 +256,12 @@ export function VaultNavSidebar({
 	const activeTagName =
 		isTagActive && params.tagName ? decodeURIComponent(params.tagName) : null;
 
+	const navScrollRef = useRef<HTMLDivElement>(null);
+	const trashRef = useRef<HTMLDivElement>(null);
 	const navLinkClass = (active: boolean) =>
 		cn(
 			"relative flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors",
-			active
-				? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
-				: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+			navRowClass(active),
 		);
 
 	return (
@@ -265,23 +271,21 @@ export function VaultNavSidebar({
 				className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_65%)] dark:bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_65%)]"
 			/>
 			<div
+				ref={navScrollRef}
 				className={cn(
 					"relative flex-1 overflow-y-auto p-2",
 					hasHeaderInset && "pt-11 xl:pt-12",
 				)}
 			>
+				<ActiveRail containerRef={navScrollRef} />
+
 				{/* All Objects */}
 				<Link
 					to="/vaults"
 					className={cn(navLinkClass(isAllItemsActive), "mb-1")}
 					onClick={onNavigate}
+					{...activeRailTarget(isAllItemsActive)}
 				>
-					{isAllItemsActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<Grid
 						className={cn(
 							"size-3.5",
@@ -297,13 +301,8 @@ export function VaultNavSidebar({
 					to="/vaults/favorites"
 					className={cn(navLinkClass(isFavoritesActive), "mb-1")}
 					onClick={onNavigate}
+					{...activeRailTarget(isFavoritesActive)}
 				>
-					{isFavoritesActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<Star className="size-3.5 text-yellow-500" fill="currentColor" />
 					<span>{m.vaults_favorites_title()}</span>
 					<SidebarCount count={itemCounts?.favorites} />
@@ -361,13 +360,8 @@ export function VaultNavSidebar({
 										onClick={onNavigate}
 										data-testid="tag-filter"
 										data-tag-name={tagName}
+										{...activeRailTarget(isActive)}
 									>
-										{isActive && (
-											<span
-												aria-hidden
-												className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-											/>
-										)}
 										<span
 											aria-hidden
 											className="mx-[3.5px] size-[7px] shrink-0 rounded-full"
@@ -383,18 +377,16 @@ export function VaultNavSidebar({
 			</div>
 
 			{/* Trash — pinned at the bottom */}
-			<div className="relative border-t p-2">
+			<div ref={trashRef} className="relative border-t p-2">
+				{/* Its own rail: a divider cuts it off from the scroller above, so the
+				    line has nothing to travel across. */}
+				<ActiveRail containerRef={trashRef} />
 				<Link
 					to="/vaults/trash"
 					className={navLinkClass(isTrashActive)}
 					onClick={onNavigate}
+					{...activeRailTarget(isTrashActive)}
 				>
-					{isTrashActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<Trash
 						className={cn(
 							"size-3.5",

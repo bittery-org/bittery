@@ -1,5 +1,6 @@
 import { useItemListFilters, useItems } from "@bittery/core/hooks";
 import {
+	ActiveRail,
 	Badge,
 	Button,
 	getTagColorFromName,
@@ -12,6 +13,7 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
+import { useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
 
@@ -21,6 +23,7 @@ export const Route = createFileRoute("/vault/tag/$tagName")({
 
 function CrossVaultTagRouteComponent() {
 	const { m } = useI18n();
+	const listScrollRef = useRef<HTMLDivElement>(null);
 	const { tagName } = Route.useParams();
 	const { itemId } = useParams({ strict: false });
 	const navigate = useNavigate();
@@ -88,7 +91,8 @@ function CrossVaultTagRouteComponent() {
 					onSortDirectionChange={setSortDirection}
 				/>
 
-				<div className="flex-1 overflow-y-auto">
+				<div ref={listScrollRef} className="relative flex-1 overflow-y-auto">
+					<ActiveRail containerRef={listScrollRef} />
 					{sortedItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">

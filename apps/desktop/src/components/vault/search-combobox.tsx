@@ -98,7 +98,9 @@ export function SearchCombobox() {
 
 	return (
 		<div ref={containerRef} className="relative w-full">
-			<Command shouldFilter={false} className="overflow-visible">
+			{/* bg-transparent: the Command root defaults to bg-popover, which would
+			    paint a level-3 slab behind a field that sits on the level-0 header. */}
+			<Command shouldFilter={false} className="overflow-visible bg-transparent">
 				<div className="flex h-8 w-full items-center rounded-md border border-input bg-foreground/2 px-2.5 text-sm transition-[border-color,box-shadow] duration-120 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 hover:border-border-strong">
 					<IconSearch className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
 					<input

@@ -1,5 +1,7 @@
 import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
 import {
+	ActiveRail,
+	activeRailTarget,
 	Button,
 	cn,
 	type DragItemData,
@@ -23,6 +25,7 @@ import {
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
+import { useRef } from "react";
 import { useVaultDnd } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
@@ -123,6 +126,7 @@ function DroppableVaultEntry({
 	return (
 		<div
 			ref={setNodeRef}
+			{...activeRailTarget(isActive)}
 			className={cn(
 				"group",
 				"relative",
@@ -133,17 +137,11 @@ function DroppableVaultEntry({
 				"text-sm",
 				"transition-colors",
 				isActive
-					? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+					? "font-medium text-foreground"
 					: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 				dropBackgroundStyle,
 			)}
 		>
-			{isActive && (
-				<span
-					aria-hidden
-					className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-				/>
-			)}
 			{dropIndicatorStyle && (
 				<div
 					className={cn(
@@ -238,6 +236,8 @@ export function VaultSidebar({
 	const { m } = useI18n();
 	const location = useLocation();
 	const pathname = location.pathname;
+	const navScrollRef = useRef<HTMLDivElement>(null);
+	const trashRef = useRef<HTMLDivElement>(null);
 
 	// Check which section is active
 	const isAllItemsActive = pathname.startsWith("/vault/all-items");
@@ -278,10 +278,15 @@ export function VaultSidebar({
 			</div>
 
 			{/* Scrollable sidebar content */}
-			<div className="relative flex flex-1 flex-col overflow-y-auto p-2">
+			<div
+				ref={navScrollRef}
+				className="relative flex flex-1 flex-col overflow-y-auto p-2"
+			>
+				<ActiveRail containerRef={navScrollRef} />
 				{/* All Objects */}
 				<Link
 					to="/vault/all-items"
+					{...activeRailTarget(isAllItemsActive)}
 					className={cn(
 						"relative",
 						"mb-1",
@@ -296,16 +301,10 @@ export function VaultSidebar({
 						"text-sm",
 						"transition-colors",
 						isAllItemsActive
-							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							? "font-medium text-foreground"
 							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
-					{isAllItemsActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<IconLayoutGrid
 						className={cn(
 							"size-3.5",
@@ -319,6 +318,7 @@ export function VaultSidebar({
 				{/* Favorites */}
 				<Link
 					to="/vault/favorites"
+					{...activeRailTarget(isFavoritesActive)}
 					className={cn(
 						"relative",
 						"mb-1",
@@ -333,16 +333,10 @@ export function VaultSidebar({
 						"text-sm",
 						"transition-colors",
 						isFavoritesActive
-							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							? "font-medium text-foreground"
 							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
-					{isFavoritesActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<IconStar className="size-3.5 text-yellow-500" fill="currentColor" />
 					<span>{m.vaults_favorites_title()}</span>
 					<SidebarCount count={itemCounts?.favorites} />
@@ -375,6 +369,7 @@ export function VaultSidebar({
 									<Link
 										key={tagName}
 										to="/vault/tag/$tagName"
+										{...activeRailTarget(isActive)}
 										params={{ tagName: encodeURIComponent(tagName) }}
 										className={cn(
 											"relative",
@@ -390,16 +385,10 @@ export function VaultSidebar({
 											"text-sm",
 											"transition-colors",
 											isActive
-												? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+												? "font-medium text-foreground"
 												: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 										)}
 									>
-										{isActive && (
-											<span
-												aria-hidden
-												className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-											/>
-										)}
 										<span
 											aria-hidden
 											className="mx-[3.5px] size-[7px] shrink-0 rounded-full"
@@ -415,9 +404,13 @@ export function VaultSidebar({
 			</div>
 
 			{/* Trash — pinned at the bottom */}
-			<div className="relative border-t p-2">
+			<div ref={trashRef} className="relative border-t p-2">
+				{/* Its own rail: a divider cuts it off from the scroller above, so the
+				    line has nothing to travel across. */}
+				<ActiveRail containerRef={trashRef} />
 				<Link
 					to="/vault/trash"
+					{...activeRailTarget(isTrashActive)}
 					className={cn(
 						"relative",
 						"flex",
@@ -431,16 +424,10 @@ export function VaultSidebar({
 						"text-sm",
 						"transition-colors",
 						isTrashActive
-							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							? "font-medium text-foreground"
 							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
-					{isTrashActive && (
-						<span
-							aria-hidden
-							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-						/>
-					)}
 					<IconTrash
 						className={cn(
 							"size-3.5",

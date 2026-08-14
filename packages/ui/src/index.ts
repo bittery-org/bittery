@@ -1,5 +1,6 @@
 export * from "./components/account-avatar";
 export * from "./components/account-switcher";
+export * from "./components/active-rail";
 export * from "./components/alert-dialog";
 export * from "./components/auth-doors-loader";
 export * from "./components/avatar";
