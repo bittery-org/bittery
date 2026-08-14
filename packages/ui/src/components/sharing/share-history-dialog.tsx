@@ -1,6 +1,6 @@
 import { useI18n } from "@bittery/i18n/react";
 import { IconHistory } from "@bittery/ui/icons";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "../button";
 import {
@@ -14,14 +14,20 @@ import {
 import { ShareLinksList } from "./share-links-list";
 
 interface ShareHistoryDialogProps {
-	itemId: string;
+	links: ComponentProps<typeof ShareLinksList>["links"];
+	isLoading: boolean;
+	onRevoke: ComponentProps<typeof ShareLinksList>["onRevoke"];
+	onLoadAccessLogs: ComponentProps<typeof ShareLinksList>["onLoadAccessLogs"];
 	trigger?: ReactNode;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
 }
 
 export function ShareHistoryDialog({
-	itemId,
+	links,
+	isLoading,
+	onRevoke,
+	onLoadAccessLogs,
 	trigger,
 	open: controlledOpen,
 	onOpenChange: controlledOnOpenChange,
@@ -57,7 +63,12 @@ export function ShareHistoryDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex-1 overflow-y-auto pr-2">
-					<ShareLinksList itemId={itemId} />
+					<ShareLinksList
+						links={links}
+						isLoading={isLoading}
+						onRevoke={onRevoke}
+						onLoadAccessLogs={onLoadAccessLogs}
+					/>
 				</div>
 			</DialogContent>
 		</Dialog>

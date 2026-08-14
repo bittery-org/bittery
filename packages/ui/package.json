@@ -17,7 +17,6 @@
 		"test": "bun test src/__tests__"
 	},
 	"dependencies": {
-		"@bittery/core": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@radix-ui/react-separator": "^1.1.15",

@@ -1,7 +1,5 @@
 import { useI18n } from "@bittery/i18n/react";
-import type { AttachmentMeta } from "@bittery/core/hooks";
-import { getAttachmentUploadErrorCode, useItemAttachments } from "@bittery/core/hooks";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import {
 	IconCheck as Check,
@@ -16,10 +14,43 @@ import { Button } from "../../button";
 import { Input } from "../../input";
 import { toast } from "../../sonner";
 
-interface ItemAttachmentsProps {
+export interface AttachmentItem {
+	id: string;
 	itemId: string;
 	vaultId: string;
-	accountId: string;
+	storageKey: string;
+	encryptedAttachmentKey: string;
+	attachmentKeyIv: string;
+	attachmentKeyAlgorithm: string;
+	envelopeVersion: number;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string;
+	encryptionAlgorithm: string;
+	fileSize: number;
+	uploadedBy: string;
+	createdAt: Date | string;
+}
+
+export type AttachmentUploadErrorCode =
+	| "file-too-large"
+	| "storage-limit-reached"
+	| "unknown";
+
+export interface ItemAttachmentsProps {
+	attachments: AttachmentItem[];
+	isLoading: boolean;
+	attachmentMaxFileSizeBytes: number | bigint | null;
+	onDecryptMeta: (attachment: AttachmentItem) => Promise<{ name: string }>;
+	onUpload: (file: File & { displayName?: string }) => Promise<unknown>;
+	onDownload: (attachment: AttachmentItem) => Promise<{
+		bytes: Uint8Array;
+		fileName: string;
+	}>;
+	onRename: (attachmentId: string, newName: string) => Promise<unknown>;
+	onDelete: (attachmentId: string) => Promise<unknown>;
+	getUploadErrorCode: (error: unknown) => AttachmentUploadErrorCode;
 	canEdit?: boolean;
 	handleDownloadedFile?: (bytes: Uint8Array, fileName: string) => void;
 }
@@ -51,6 +82,19 @@ function formatBytes(bytes: number): string {
 	}).format(bytes / (1024 * 1024));
 }
 
+export function getAttachmentRenameInitialValue(
+	currentName: string | null | undefined,
+): string {
+	return currentName ?? "";
+}
+
+export function shouldRenameAttachment(
+	currentName: string | null | undefined,
+	nextName: string,
+): boolean {
+	return nextName.length > 0 && nextName !== currentName;
+}
+
 function defaultHandleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	const blob = new Blob([bytes as any]);
 	const url = URL.createObjectURL(blob);
@@ -65,76 +109,60 @@ function defaultHandleDownloadedFile(bytes: Uint8Array, fileName: string) {
 
 function AttachmentRow({
 	attachment,
+	onDecryptMeta,
+	onRename,
 	onDownload,
 	onDelete,
 	canEdit,
-	accountId,
 }: {
-	attachment: AttachmentMeta;
-	onDownload: (attachment: AttachmentMeta) => void;
+	attachment: AttachmentItem;
+	onDecryptMeta: (attachment: AttachmentItem) => Promise<{ name: string }>;
+	onRename: (attachmentId: string, newName: string) => Promise<unknown>;
+	onDownload: (attachment: AttachmentItem) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
-	accountId: string;
 }) {
 	const { m } = useI18n();
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
 	const [isEditing, setIsEditing] = useState(false);
 	const [editValue, setEditValue] = useState("");
 	const [isRenaming, setIsRenaming] = useState(false);
-	const queryClient = useQueryClient();
-	const { decryptMeta, rename } = useItemAttachments(
-		attachment.itemId,
-		attachment.vaultId,
-		accountId,
-	);
-
 	const decryptedNameQuery = useQuery({
 		queryKey: [
 			"attachment",
 			attachment.vaultId,
 			attachment.itemId,
 			attachment.id,
-			accountId,
 		],
 		queryFn: async () => {
-			const decrypted = await decryptMeta(attachment);
+			const decrypted = await onDecryptMeta(attachment);
 			return decrypted.name;
 		},
 		retry: false,
 	});
 
+	const currentName = decryptedName ?? decryptedNameQuery.data;
 	const displayName =
-		decryptedName ??
-		decryptedNameQuery.data ??
+		currentName ??
 		(decryptedNameQuery.isError
 			? m.vaults_detail_items_attachments_row_encrypted_file()
 			: m.vaults_detail_items_attachments_row_loading());
 
 	function startEdit() {
-		setEditValue(decryptedName ?? "");
+		setEditValue(getAttachmentRenameInitialValue(currentName));
 		setIsEditing(true);
 	}
 
 	async function confirmRename() {
 		const trimmed = editValue.trim();
-		if (!trimmed || trimmed === decryptedName) {
+		if (!shouldRenameAttachment(currentName, trimmed)) {
 			setIsEditing(false);
 			return;
 		}
 		setIsRenaming(true);
 		try {
-			await rename.mutateAsync({ attachmentId: attachment.id, newName: trimmed });
+			await onRename(attachment.id, trimmed);
 			setDecryptedName(trimmed);
-			queryClient.setQueryData(
-				[
-					"attachment",
-					attachment.vaultId,
-					attachment.itemId,
-					attachment.id,
-					accountId,
-				],
-				trimmed,
-			);
 			setIsEditing(false);
 		} catch {
 			toast.error(m.vaults_detail_items_attachments_toast_rename_attachment_failed());
@@ -215,9 +243,15 @@ function AttachmentRow({
 }
 
 export function ItemAttachments({
-	itemId,
-	vaultId,
-	accountId,
+	attachments,
+	isLoading,
+	attachmentMaxFileSizeBytes,
+	onDecryptMeta,
+	onUpload,
+	onDownload,
+	onRename,
+	onDelete,
+	getUploadErrorCode,
 	canEdit = false,
 	handleDownloadedFile,
 }: ItemAttachmentsProps) {
@@ -227,15 +261,6 @@ export function ItemAttachments({
 	const [pendingFile, setPendingFile] = useState<File | null>(null);
 	const [pendingName, setPendingName] = useState("");
 
-	const {
-		attachments,
-		isLoading,
-		upload,
-		download,
-		remove,
-		attachmentMaxFileSizeBytes,
-	} = useItemAttachments(itemId, vaultId, accountId);
-
 	const handleFileChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
 			const file = e.target.files?.[0];
@@ -243,7 +268,7 @@ export function ItemAttachments({
 
 			if (
 				attachmentMaxFileSizeBytes !== null &&
-				file.size > attachmentMaxFileSizeBytes
+				file.size > Number(attachmentMaxFileSizeBytes)
 			) {
 				toast.error(
 					m.vaults_detail_items_attachments_toast_file_too_large({
@@ -265,14 +290,14 @@ export function ItemAttachments({
 		if (!pendingFile) return;
 		setIsUploading(true);
 		try {
-			await upload.mutateAsync(
+			await onUpload(
 				Object.assign(pendingFile, {
 					displayName: pendingName.trim() || pendingFile.name,
 				}),
 			);
 			toast.success(m.vaults_detail_items_attachments_toast_uploaded());
 		} catch (error) {
-			const uploadErrorCode = getAttachmentUploadErrorCode(error);
+			const uploadErrorCode = getUploadErrorCode(error);
 			if (uploadErrorCode === "storage-limit-reached") {
 				toast.error(m.vaults_detail_items_attachments_toast_storage_limit_reached());
 			} else if (
@@ -292,30 +317,30 @@ export function ItemAttachments({
 			setPendingFile(null);
 			setPendingName("");
 		}
-	}, [attachmentMaxFileSizeBytes, m, pendingFile, pendingName, upload]);
+	}, [attachmentMaxFileSizeBytes, getUploadErrorCode, m, onUpload, pendingFile, pendingName]);
 
 	const handleDownload = useCallback(
-		async (attachment: AttachmentMeta) => {
+		async (attachment: AttachmentItem) => {
 			try {
-				const { bytes, fileName } = await download.mutateAsync(attachment);
+				const { bytes, fileName } = await onDownload(attachment);
 				(handleDownloadedFile ?? defaultHandleDownloadedFile)(bytes, fileName);
 			} catch {
 				toast.error(m.vaults_detail_items_attachments_toast_download_failed());
 			}
 		},
-		[download, handleDownloadedFile, m],
+		[handleDownloadedFile, m, onDownload],
 	);
 
 	const handleDelete = useCallback(
 		async (attachmentId: string) => {
 			try {
-				await remove.mutateAsync(attachmentId);
+				await onDelete(attachmentId);
 				toast.success(m.vaults_detail_items_attachments_toast_deleted());
 			} catch {
 				toast.error(m.vaults_detail_items_attachments_toast_delete_failed());
 			}
 		},
-		[m, remove],
+		[m, onDelete],
 	);
 
 	return (
@@ -403,10 +428,11 @@ export function ItemAttachments({
 						<AttachmentRow
 							key={attachment.id}
 							attachment={attachment}
+							onDecryptMeta={onDecryptMeta}
+							onRename={onRename}
 							onDownload={handleDownload}
 							onDelete={handleDelete}
 							canEdit={canEdit}
-							accountId={accountId}
 						/>
 					))}
 				</div>

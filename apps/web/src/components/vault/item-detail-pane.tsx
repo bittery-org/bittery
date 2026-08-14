@@ -1,8 +1,14 @@
 import {
+	getAttachmentUploadErrorCode,
 	type UnifiedItem,
+	useCreateShare,
+	useItemAttachments,
+	useQueryInvalidator,
 	useToggleFavorite,
 	useUpdateItem,
 } from "@bittery/core/hooks";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { detectCardBrand } from "@bittery/shared/credit-card";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import {
@@ -31,6 +37,7 @@ import {
 	IconStar as Star,
 	IconTrash as Trash,
 } from "@bittery/ui/icons";
+import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { MoveItemDialog } from "@/components/vault/move-item-dialog";
@@ -87,6 +94,18 @@ export function ItemDetailPane({
 	const { m } = useI18n();
 	const toggleFavorite = useToggleFavorite();
 	const updateItem = useUpdateItem();
+	const createShare = useCreateShare();
+	const api = useApiClient();
+	const invalidator = useQueryInvalidator();
+	const itemAttachments = useItemAttachments(
+		selectedItem?.id,
+		selectedItem?.vaultId,
+		selectedItem?.accountId ?? "",
+	);
+	const shareLinks = useQuery({
+		...apiQueries.shares.list(api, selectedItem?.id ?? ""),
+		enabled: Boolean(selectedItem),
+	});
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
@@ -277,9 +296,23 @@ export function ItemDetailPane({
 							isUpdatingTags={isUpdatingTags}
 						/>
 						<ItemAttachments
-							itemId={selectedItem.id}
-							vaultId={selectedItem.vaultId}
-							accountId={selectedItem.accountId}
+							attachments={itemAttachments.attachments}
+							isLoading={itemAttachments.isLoading}
+							attachmentMaxFileSizeBytes={
+								itemAttachments.attachmentMaxFileSizeBytes
+							}
+							onDecryptMeta={itemAttachments.decryptMeta}
+							onUpload={(file) => itemAttachments.upload.mutateAsync(file)}
+							onDownload={(attachment) =>
+								itemAttachments.download.mutateAsync(attachment)
+							}
+							onRename={(attachmentId, newName) =>
+								itemAttachments.rename.mutateAsync({ attachmentId, newName })
+							}
+							onDelete={(attachmentId) =>
+								itemAttachments.remove.mutateAsync(attachmentId)
+							}
+							getUploadErrorCode={getAttachmentUploadErrorCode}
 							canEdit={canWriteItems}
 							handleDownloadedFile={handleDownloadedFile}
 						/>
@@ -287,11 +320,20 @@ export function ItemDetailPane({
 
 					<ShareItemDialog
 						item={selectedItem}
+						onCreateShare={(request) => createShare.mutateAsync(request)}
 						open={isShareDialogOpen}
 						onOpenChange={setIsShareDialogOpen}
 					/>
 					<ShareHistoryDialog
-						itemId={selectedItem.id}
+						links={shareLinks.data?.links ?? []}
+						isLoading={shareLinks.isLoading}
+						onRevoke={async (linkId) => {
+							await api.share.remove(linkId);
+							await invalidator.invalidateShare(selectedItem.id);
+						}}
+						onLoadAccessLogs={async (linkId) =>
+							(await api.share.accessLogs(linkId)).data
+						}
 						open={isShareHistoryOpen}
 						onOpenChange={setIsShareHistoryOpen}
 					/>

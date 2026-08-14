@@ -1,11 +1,17 @@
 import {
+	getAttachmentUploadErrorCode,
 	useCreateItem,
+	useCreateShare,
 	useDeleteItem,
 	useItem,
+	useItemAttachments,
+	useQueryInvalidator,
 	useToggleFavorite,
 	useUpdateItem,
 	type VaultInfoWithAccount,
 } from "@bittery/core/hooks";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { detectCardBrand } from "@bittery/shared/credit-card";
 import { getItemServerUrl } from "@bittery/shared/favicon";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
@@ -40,6 +46,7 @@ import {
 	IconStar,
 	IconTrash,
 } from "@bittery/ui/icons";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useState } from "react";
@@ -82,6 +89,18 @@ export function ItemDetailPage({
 	const deleteItem = useDeleteItem();
 	const toggleFavorite = useToggleFavorite();
 	const createItem = useCreateItem();
+	const createShare = useCreateShare();
+	const api = useApiClient();
+	const invalidator = useQueryInvalidator();
+	const itemAttachments = useItemAttachments(
+		rawItem?.id,
+		rawItem?.vaultId,
+		itemAccountId ?? "",
+	);
+	const shareLinks = useQuery({
+		...apiQueries.shares.list(api, rawItem?.id ?? ""),
+		enabled: Boolean(rawItem),
+	});
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {
@@ -412,9 +431,23 @@ export function ItemDetailPage({
 					/>
 					{rawItem && (
 						<ItemAttachments
-							itemId={rawItem.id}
-							vaultId={rawItem.vaultId}
-							accountId={rawItem.accountId}
+							attachments={itemAttachments.attachments}
+							isLoading={itemAttachments.isLoading}
+							attachmentMaxFileSizeBytes={
+								itemAttachments.attachmentMaxFileSizeBytes
+							}
+							onDecryptMeta={itemAttachments.decryptMeta}
+							onUpload={(file) => itemAttachments.upload.mutateAsync(file)}
+							onDownload={(attachment) =>
+								itemAttachments.download.mutateAsync(attachment)
+							}
+							onRename={(attachmentId, newName) =>
+								itemAttachments.rename.mutateAsync({ attachmentId, newName })
+							}
+							onDelete={(attachmentId) =>
+								itemAttachments.remove.mutateAsync(attachmentId)
+							}
+							getUploadErrorCode={getAttachmentUploadErrorCode}
 							canEdit
 						/>
 					)}
@@ -505,13 +538,22 @@ export function ItemDetailPage({
 							...decryptedData,
 						} as DecryptedItem
 					}
+					onCreateShare={(request) => createShare.mutateAsync(request)}
 				/>
 			)}
 
 			{/* Share History Dialog */}
 			{rawItem && (
 				<ShareHistoryDialog
-					itemId={rawItem.id}
+					links={shareLinks.data?.links ?? []}
+					isLoading={shareLinks.isLoading}
+					onRevoke={async (linkId) => {
+						await api.share.remove(linkId);
+						await invalidator.invalidateShare(rawItem.id);
+					}}
+					onLoadAccessLogs={async (linkId) =>
+						(await api.share.accessLogs(linkId)).data
+					}
 					open={isShareHistoryOpen}
 					onOpenChange={setIsShareHistoryOpen}
 				/>

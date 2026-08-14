@@ -1,6 +1,7 @@
 import {
 	type CreateVaultInput,
 	useAccountMetadataSyncAll,
+	useAccountSwitcher,
 	useAllVaultKeys,
 	useCreateItem,
 	useCreateVault,
@@ -93,6 +94,7 @@ function RouteComponent() {
 	const updateVaultMutation = useUpdateVault();
 	const deleteVaultMutation = useDeleteVault();
 	const createItemMutation = useCreateItem();
+	const { accounts, activeAccount } = useAccountSwitcher();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	// Pending "new item" request from the browser extension (via native
@@ -138,31 +140,8 @@ function RouteComponent() {
 
 	// Vault operation handlers
 	const handleCreateVault = async (data: CreateVaultInput) => {
-		try {
-			let accountId = data.accountId;
-
-			// If no account provided, use the active account.
-			if (!accountId) {
-				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount) {
-					accountId = activeAccount;
-				}
-			}
-
-			// Hook handles image upload internally if imageFile is provided
-			const result = await createVaultMutation.mutateAsync({
-				...data,
-				accountId,
-			});
-
-			toast.success("Vault created successfully");
-			navigate({ to: "/vault/$id", params: { id: result.vaultId } });
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to create vault";
-			toast.error(errorMessage);
-			throw error;
-		}
+		const result = await createVaultMutation.mutateAsync(data);
+		navigate({ to: "/vault/$id", params: { id: result.vaultId } });
 	};
 
 	const handleOpenEditVault = (vault: {
@@ -328,6 +307,13 @@ function RouteComponent() {
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
 					onSubmit={handleCreateVault}
+					accounts={accounts.map(({ accountId, email, name, teamName }) => ({
+						accountId,
+						email,
+						name,
+						teamName,
+					}))}
+					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 
 				<EditVaultDialog

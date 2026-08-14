@@ -984,9 +984,6 @@ importers:
 
   packages/ui:
     dependencies:
-      '@bittery/core':
-        specifier: workspace:*
-        version: link:../core
       '@bittery/i18n':
         specifier: workspace:*
         version: link:../i18n

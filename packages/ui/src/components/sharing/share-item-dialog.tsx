@@ -1,9 +1,3 @@
-import { useCreateShare } from "@bittery/core/hooks";
-import {
-	SHARE_EXPIRATION_OPTIONS,
-	type ShareAccessMode,
-	type ShareExpirationOption,
-} from "@bittery/core/services/share-service";
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -49,14 +43,35 @@ import {
 } from "../select";
 import { toast } from "../sonner";
 
-interface ShareItemDialogProps {
+export const SHARE_EXPIRATION_OPTIONS = [
+	"1hour",
+	"1day",
+	"7days",
+	"14days",
+	"30days",
+] as const;
+
+export type ShareExpirationOption = (typeof SHARE_EXPIRATION_OPTIONS)[number];
+export type ShareAccessMode = "anyone" | "email-restricted";
+
+export interface CreateShareRequest {
 	item: DecryptedItem;
+	accessMode: ShareAccessMode;
+	expiresIn: ShareExpirationOption;
+	isOneTimeUse: boolean;
+	allowedEmails?: string[];
+}
+
+export interface ShareItemDialogProps {
+	item: DecryptedItem;
+	onCreateShare: (request: CreateShareRequest) => Promise<{ shareUrl: string }>;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
 }
 
 export function ShareItemDialog({
 	item,
+	onCreateShare,
 	open: controlledOpen,
 	onOpenChange: controlledOnOpenChange,
 }: ShareItemDialogProps) {
@@ -79,7 +94,7 @@ export function ShareItemDialog({
 	const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
 	const [emailInput, setEmailInput] = useState("");
 
-	const createShare = useCreateShare();
+	const [isCreating, setIsCreating] = useState(false);
 
 	const expirationLabels: Record<ShareExpirationOption, string> = {
 		"1hour": m.sharing_item_dialog_expiration_1hour(),
@@ -90,8 +105,9 @@ export function ShareItemDialog({
 	};
 
 	const handleCreateShare = async () => {
+		setIsCreating(true);
 		try {
-			const result = await createShare.mutateAsync({
+			const result = await onCreateShare({
 				item,
 				accessMode,
 				expiresIn,
@@ -108,6 +124,8 @@ export function ShareItemDialog({
 					? error.message
 					: m.sharing_item_dialog_toast_create_error();
 			toast.error(errorMessage);
+		} finally {
+			setIsCreating(false);
 		}
 	};
 
@@ -370,12 +388,12 @@ export function ShareItemDialog({
 									onClick={handleCreateLink}
 									data-testid="share-create-button"
 									disabled={
-										createShare.isPending ||
+										isCreating ||
 										(accessMode === "email-restricted" &&
 											allowedEmails.length === 0)
 									}
 								>
-									{createShare.isPending ? (
+									{isCreating ? (
 										<>
 											<IconLoaderCircle className="h-4 w-4 animate-spin" />
 											{m.sharing_item_dialog_action_creating()}
