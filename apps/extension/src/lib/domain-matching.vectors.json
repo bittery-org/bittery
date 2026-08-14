@@ -1,0 +1,120 @@
+{
+	"$comment": [
+		"Cross-language contract for credential domain matching. There is no generator",
+		"between TypeScript and Kotlin here, so this file is the seam: both sides",
+		"implement the algorithm independently and both assert against these vectors.",
+		"",
+		"Read by:",
+		"  apps/extension/tests/lib/hostname.test.ts",
+		"  apps/mobile/modules/credential-provider/android/src/test/java/",
+		"    expo/modules/credentialprovider/domain/DomainMatchVectorsTest.kt",
+		"",
+		"Changing a vector is a product decision about which saved credential may be",
+		"offered on which site. Change it here first, then make both sides pass."
+	],
+
+	"normalizeHost": [
+		{ "input": "example.com", "expected": "example.com" },
+		{ "input": "  Example.COM  ", "expected": "example.com" },
+		{ "input": "https://example.com", "expected": "example.com" },
+		{ "input": "http://example.com/login?next=/x", "expected": "example.com" },
+		{ "input": "https://www.example.com/login", "expected": "www.example.com" },
+		{ "input": "https://example.com:8443/app", "expected": "example.com" },
+		{ "input": "example.com:8443", "expected": "example.com" },
+		{ "input": "example.com.", "expected": "example.com" },
+		{ "input": ".example.com", "expected": "example.com" },
+		{ "input": "https://user:pw@example.com/x", "expected": "example.com" },
+		{ "input": "example.com?a=b", "expected": "example.com" },
+		{ "input": "example.com#frag", "expected": "example.com" },
+		{ "input": "", "expected": "" },
+		{ "input": "   ", "expected": "" },
+		{ "input": "com.android.chrome", "expected": "com.android.chrome" }
+	],
+
+	"registrableDomain": [
+		{ "input": "example.com", "expected": "example.com" },
+		{ "input": "www.example.com", "expected": "example.com" },
+		{ "input": "a.b.c.example.com", "expected": "example.com" },
+		{ "input": "com", "expected": "com" },
+		{ "input": "localhost", "expected": "localhost" },
+
+		{ "input": "bbc.co.uk", "expected": "bbc.co.uk" },
+		{ "input": "www.bbc.co.uk", "expected": "bbc.co.uk" },
+		{ "input": "news.sport.bbc.co.uk", "expected": "bbc.co.uk" },
+		{ "input": "co.uk", "expected": "co.uk" },
+		{ "input": "example.com.au", "expected": "example.com.au" },
+		{ "input": "shop.example.com.au", "expected": "example.com.au" },
+		{ "input": "example.co.jp", "expected": "example.co.jp" },
+		{ "input": "example.com.br", "expected": "example.com.br" },
+		{ "input": "example.co.za", "expected": "example.co.za" },
+		{ "input": "example.co.in", "expected": "example.co.in" },
+
+		{
+			"$why": "An IPv4 literal has no registrable domain; splitting labels off it would make 192.168.0.1 and 10.168.0.1 look related.",
+			"input": "192.168.0.1",
+			"expected": "192.168.0.1"
+		},
+		{ "input": "", "expected": "" }
+	],
+
+	"matches": [
+		{ "left": "example.com", "right": "example.com", "expected": true },
+		{
+			"left": "https://example.com/login",
+			"right": "example.com",
+			"expected": true
+		},
+		{ "left": "Example.com", "right": "example.com", "expected": true },
+
+		{ "left": "www.example.com", "right": "example.com", "expected": true },
+		{ "left": "example.com", "right": "login.example.com", "expected": true },
+		{ "left": "a.example.com", "right": "b.example.com", "expected": true },
+		{ "left": "deep.a.example.com", "right": "example.com", "expected": true },
+
+		{ "left": "example.com", "right": "example.org", "expected": false },
+		{ "left": "example.com", "right": "notexample.com", "expected": false },
+		{
+			"left": "example.com",
+			"right": "example.com.evil.net",
+			"expected": false
+		},
+		{ "left": "evil-example.com", "right": "example.com", "expected": false },
+
+		{
+			"$why": "The multi-level-suffix bug this contract exists for: last-two-labels made every .co.uk site share a base domain.",
+			"left": "bbc.co.uk",
+			"right": "itv.co.uk",
+			"expected": false
+		},
+		{ "left": "www.bbc.co.uk", "right": "bbc.co.uk", "expected": true },
+		{ "left": "news.bbc.co.uk", "right": "sport.bbc.co.uk", "expected": true },
+		{ "left": "example.com.au", "right": "other.com.au", "expected": false },
+		{
+			"left": "shop.example.com.au",
+			"right": "example.com.au",
+			"expected": true
+		},
+		{ "left": "example.co.jp", "right": "other.co.jp", "expected": false },
+
+		{ "left": "", "right": "example.com", "expected": false },
+		{ "left": "example.com", "right": "", "expected": false },
+		{
+			"$why": "Android passes package names through the same predicate when the caller is a native app.",
+			"left": "com.android.chrome",
+			"right": "example.com",
+			"expected": false
+		}
+	],
+
+	"lookupKeys": [
+		{
+			"$why": "Android indexes and queries item_domains with these keys, which reproduces `matches` at the SQL layer.",
+			"input": "www.example.com",
+			"expected": ["www.example.com", "example.com"]
+		},
+		{ "input": "example.com", "expected": ["example.com"] },
+		{ "input": "news.bbc.co.uk", "expected": ["news.bbc.co.uk", "bbc.co.uk"] },
+		{ "input": "bbc.co.uk", "expected": ["bbc.co.uk"] },
+		{ "input": "", "expected": [] }
+	]
+}

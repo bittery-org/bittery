@@ -6,7 +6,11 @@ import type {
 } from "@bittery/shared/types";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { crypto } from "../lib/crypto";
-import { getBaseDomain, normalizeHost, parseHostname } from "../lib/hostname";
+import {
+	normalizeHost,
+	parseHostname,
+	registrableDomain,
+} from "../lib/hostname";
 import { storage } from "../lib/storage";
 import {
 	base64ToBytes,
@@ -208,7 +212,7 @@ function getItemCandidateRpIds(item: LoginItemWithAccount): string[] {
 		}
 
 		hosts.add(host);
-		hosts.add(getBaseDomain(host));
+		hosts.add(registrableDomain(host));
 	};
 
 	addHost(item.url);

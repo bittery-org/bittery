@@ -29,6 +29,7 @@ import androidx.fragment.app.FragmentActivity
 import expo.modules.credentialprovider.crypto.MukEscrowManager
 import expo.modules.credentialprovider.crypto.NativeCrypto
 import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.domain.DomainMatch
 import expo.modules.credentialprovider.passkey.CreateRequestContext
 import expo.modules.credentialprovider.passkey.PasskeyUtils
 import expo.modules.credentialprovider.passkey.StoredPasskey
@@ -839,16 +840,20 @@ class GetCredentialsActivity : FragmentActivity() {
                     encryptedByUserId = vaultKeyEntity.userId
                 )
 
+                // One row per lookup key, matching how sync indexes items in
+                // CredentialProviderModule - a passkey registered at
+                // login.example.com would otherwise never be found from an
+                // example.com origin.
                 database.passkeyMutationDao().createItemAndQueue(
                     createdItem,
-                    listOf(
+                    DomainMatch.lookupKeys(requestedRpId).mapIndexed { index, domain ->
                         ItemDomainEntity(
                             itemId = createdItem.id,
-                            domain = requestedRpId,
-                            isPrimary = true,
+                            domain = domain,
+                            isPrimary = index == 0,
                             fullUrl = primaryUrl
                         )
-                    ),
+                    },
                     pendingPasskeyMutation(
                         userId = createdItem.userId,
                         vaultId = createdItem.vaultId,
@@ -931,9 +936,7 @@ class GetCredentialsActivity : FragmentActivity() {
         val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
         if (normalizedRpId.isBlank()) return emptyList()
 
-        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
-        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId)
-            .filter { it.isNotBlank() }
+        val domainsToQuery = DomainMatch.lookupKeys(normalizedRpId)
         val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
         for (userId in userIds) {
             for (domain in domainsToQuery) {
@@ -955,7 +958,7 @@ class GetCredentialsActivity : FragmentActivity() {
         }
         Log.d(
             TAG,
-            "Passkey candidate lookup complete (rpId=$normalizedRpId, canonicalRpId=$canonicalRpId, requestedUser=$normalizedRequestedUser, total=${candidates.size}, userMatches=${exactUserMatches.size})"
+            "Passkey candidate lookup complete (rpId=$normalizedRpId, domains=$domainsToQuery, requestedUser=$normalizedRequestedUser, total=${candidates.size}, userMatches=${exactUserMatches.size})"
         )
         return if (exactUserMatches.isNotEmpty()) exactUserMatches else candidates
     }
@@ -967,9 +970,7 @@ class GetCredentialsActivity : FragmentActivity() {
         val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
         if (normalizedRpId.isBlank()) return emptyList()
 
-        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
-        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId)
-            .filter { it.isNotBlank() }
+        val domainsToQuery = DomainMatch.lookupKeys(normalizedRpId)
         val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
 
         val byDomain = database.itemDao().getLoginItemsByDomainsAnyUser(domainsToQuery)
@@ -1136,37 +1137,14 @@ class GetCredentialsActivity : FragmentActivity() {
         )
     }
 
-    private fun extractDomain(origin: String): String {
-        return try {
-            if (origin.startsWith("http")) {
-                java.net.URL(origin).host
-            } else {
-                origin.removePrefix("www.")
-            }
-        } catch (e: Exception) {
-            origin
-        }
-    }
-
     private fun extractPasskeyRpIdFromOrigin(origin: String): String {
-        return try {
-            if (!origin.startsWith("http")) {
-                ""
-            } else {
-                java.net.URI(origin).host?.lowercase()?.trimEnd('.') ?: ""
-            }
-        } catch (_: Exception) {
-            ""
-        }
+        if (!origin.startsWith("http")) return ""
+        return DomainMatch.normalizeHost(origin)
     }
 
-    private fun canonicalDomainForLookup(domain: String): String {
-        return PasskeyUtils.normalizeHost(domain).removePrefix("www.")
-    }
-
-    private fun domainsEquivalent(left: String, right: String): Boolean {
-        return canonicalDomainForLookup(left) == canonicalDomainForLookup(right)
-    }
+    /** Passkey rpId identity, not the wider password-matching rule. */
+    private fun domainsEquivalent(left: String, right: String): Boolean =
+        DomainMatch.sameRelyingParty(left, right)
 
     private fun normalizeUsername(value: String?): String {
         return value.orEmpty().trim().lowercase()

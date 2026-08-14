@@ -1,6 +1,7 @@
 package expo.modules.credentialprovider.passkey
 
 import android.util.Base64
+import expo.modules.credentialprovider.domain.DomainMatch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,16 +34,13 @@ data class CreateRequestContext(
 
 object PasskeyUtils {
 
-    fun normalizeHost(value: String?): String {
-        if (value.isNullOrBlank()) return ""
-        return value
-            .trim()
-            .lowercase()
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .substringBefore("/")
-            .trimEnd('.')
-    }
+    /**
+     * Kept as the passkey-facing name for [DomainMatch.normalizeHost] - a stored
+     * `rpId` is a protocol value whose hash is signed, so it is normalized once
+     * here and used verbatim everywhere after. This deliberately does not strip
+     * `www.`: changing an rpId would invalidate the signature.
+     */
+    fun normalizeHost(value: String?): String = DomainMatch.normalizeHost(value)
 
     fun parseRpIdFromGetRequestJson(requestJson: String): String? {
         val source = parseRequestSource(requestJson)
