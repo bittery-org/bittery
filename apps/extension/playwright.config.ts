@@ -17,7 +17,7 @@ import { E2E_SERVER_RATE_LIMITS } from "../web/tests/e2e-server-env";
  *   pnpm run test:e2e:headed    - Run in headed mode (see browser)
  *
  * Prerequisites:
- * - Extension must be built: pnpm run build
+ * - Extension must be built: pnpm run build:release
  * - Database must be running: pnpm run db:start (from root)
  * - Server must be running or will be started automatically
  */
@@ -66,8 +66,12 @@ export default defineConfig({
 	],
 	webServer: [
 		{
-			// Start the API server
-			command: "cd ../server && pnpm run dev",
+			// Start the API server. `dev` runs under cargo watch, which no CI
+			// runner has and which buys nothing for a single non-interactive run,
+			// so CI takes the plain `cargo run` path instead.
+			command: process.env.CI
+				? "cd ../server && pnpm run dev:once"
+				: "cd ../server && pnpm run dev",
 			url: "http://localhost:3000",
 			reuseExistingServer: !process.env.CI,
 			timeout: 120000,

@@ -516,6 +516,76 @@ jobs:
         working-directory: apps/mobile
         run: npx expo-doctor
 
+  # The Android credential provider is the only place DomainMatch runs, and its
+  # vectors are the seam pinning it to apps/extension/src/lib/hostname.ts - so
+  # without this job the Kotlin half of a user-visible matching bug is unguarded.
+  # No workflow invoked Gradle before, and PasskeyMutationDaoTest (Room
+  # transaction atomicity across a process restart) was equally unreachable.
+  #
+  # JVM unit tests only: `test`, never `connectedAndroidTest`. Instrumentation
+  # needs an emulator, which is minutes of boot per PR for the one DAO suite that
+  # requires it (PasskeyMutationDaoTest), so that one stays manual.
+  # apps/mobile/android is gitignored and generated, so the job prebuilds it;
+  # --no-install skips the dependency sync Expo would otherwise run.
+  android-unit:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # mobile imports the generated messages, and prebuild type-resolves the app.
+      - run: pnpm run i18n:generate
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # Generates apps/mobile/android, including the settings.gradle that
+      # autolinks :credential-provider and the crypto bindings.
+      - name: Expo prebuild (Android)
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
+
+      # Filtered to the domain package on purpose. The module's other JVM test,
+      # CryptoTestVectors, calls android.util.Base64 (a throwing stub in the
+      # unit-test android.jar) and KeyDerivation, which JNIs into the Rust
+      # library that is not loaded here - so it cannot pass as a unit test today
+      # and would take the job red. Widening this filter means fixing that file
+      # first. Everything in `domain` is pure Kotlin stdlib.
+      - name: Android unit tests
+        working-directory: apps/mobile/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          ./gradlew --no-daemon :credential-provider:testDebugUnitTest \
+            --tests 'expo.modules.credentialprovider.domain.*'
+          elapsed="$(( $(date +%s) - start ))"
+          echo "android unit tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: android-unit-test-report
+          path: apps/mobile/android/**/build/reports/tests/**
+          retention-days: 7
+          if-no-files-found: ignore
+
   server:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -792,6 +862,107 @@ jobs:
 
   # Report aggregation stays separate so the required `web-e2e` check remains
   # stable as the shard implementation changes.
+  # 531 LOC of Playwright covering the "not saved while locked" invariant was
+  # wired to no workflow at all, which is worse than having no suite: it looked
+  # covered and never ran. Gated exactly like web-e2e-run - schedule, manual
+  # dispatch, and release/v* PRs - because it builds the server from source and
+  # boots two dev servers, which is not ordinary-PR cost.
+  #
+  # Single job, no sharding: playwright.config.ts pins `workers: 1` because
+  # Chromium loads one unpacked extension per browser context and the specs
+  # share a save-prompt surface.
+  extension-e2e-run:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v'))
+    needs: crypto-bindings
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports:
+          # 5436, matching web-e2e-run and apps/server/docker-compose.yml.
+          - 5436:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSTC_WRAPPER: sccache
+      DATABASE_URL: postgresql://postgres:password@localhost:5436/postgres
+      JWT_SECRET: ci-test-secret
+      CORS_ORIGIN: http://localhost:3001
+      BITTERY_MODE: self-hosted
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/server
+          key: extension-e2e
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run i18n:generate
+
+      # playwright.config.ts starts `apps/server`'s dev script inside its
+      # webServer timeout; a cold cargo build does not fit in it.
+      - name: Build server binaries
+        run: cargo build --manifest-path apps/server/Cargo.toml --bin bittery-server --bin migrate
+
+      - name: Migrate database
+        run: cargo run --manifest-path apps/server/Cargo.toml --bin migrate
+
+      # Chromium loads the unpacked extension from apps/extension/dist, so the
+      # build has to exist before Playwright launches.
+      - name: Build extension
+        run: pnpm --filter extension run build:release
+
+      - name: Install Chromium
+        run: pnpm --filter extension exec playwright install --with-deps chromium
+
+      - name: Extension E2E tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm --filter extension run test:e2e
+          elapsed="$(( $(date +%s) - start ))"
+          echo "extension e2e: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: extension-e2e-report
+          path: apps/extension/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
   web-e2e-report:
     if: always() && needs.web-e2e-run.result != 'skipped' && needs.web-e2e-run.result != 'cancelled'
     needs: web-e2e-run
@@ -856,6 +1027,34 @@ jobs:
           if [ "$run_result" != "success" ] || [ "$report_result" != "success" ]; then
             echo "web-e2e-run: $run_result"
             echo "web-e2e-report: $report_result"
+            exit 1
+          fi
+
+  # Mirrors the web-e2e gate: a job skipped by its own `if` reports "skipped",
+  # which branch protection reads as passing, so the stable required check has to
+  # be this aggregate rather than extension-e2e-run itself.
+  extension-e2e:
+    if: always()
+    needs:
+      - extension-e2e-run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check extension E2E suite
+        shell: bash
+        env:
+          E2E_REQUIRED: >-
+            ${{ github.event_name == 'schedule' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')) }}
+        run: |
+          set -euo pipefail
+          if [ "$E2E_REQUIRED" != "true" ]; then
+            echo "Extension E2E is required only for releases, scheduled runs, and manual verification."
+            exit 0
+          fi
+          run_result="${{ needs.extension-e2e-run.result }}"
+          if [ "$run_result" != "success" ]; then
+            echo "extension-e2e-run: $run_result"
             exit 1
           fi
 
