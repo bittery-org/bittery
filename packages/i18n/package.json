@@ -9,7 +9,6 @@
 		".": "./src/index.ts",
 		"./react": "./src/react/index.ts",
 		"./react/browser": "./src/react/browser.ts",
-		"./format": "./src/format.ts",
 		"./format/browser": "./src/format-browser.ts",
 		"./paraglide/messages": {
 			"types": "./src/paraglide/messages.d.ts",

@@ -50,6 +50,12 @@ export interface ConfirmDialogProps {
 	 * Blocks confirmation without hiding it — an in-flight mutation, or a
 	 * typed-confirmation field that does not match yet. Also disables Cancel,
 	 * so the dialog cannot be dismissed out from under a running action.
+	 *
+	 * This is the normalization, and it is a behaviour change at four of the
+	 * adopting sites: leave-team, delete-team, team member removal and vault
+	 * member removal all previously left Cancel live during the request, while
+	 * delete-vault did not. Disabling is the safer of the two, because every one
+	 * of those actions is mid-flight against the server when the dialog closes.
 	 */
 	busy?: boolean;
 	/** Independent of `busy`: the action is invalid, but Cancel stays live. */
