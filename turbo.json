@@ -32,16 +32,6 @@
 		},
 		"tauri": {
 			"cache": false
-		},
-		"tauri:dev": {
-			"cache": false,
-			"persistent": true,
-			"dependsOn": ["^build"]
-		},
-		"tauri:build": {
-			"cache": false,
-			"dependsOn": ["^build"],
-			"outputs": ["src-tauri/target/**"]
 		}
 	}
 }

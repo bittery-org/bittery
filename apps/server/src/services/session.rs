@@ -1383,7 +1383,10 @@ fn handler_unauthorized_error(message: &str) -> AppError {
 }
 
 // ---------------------------------------------------------------------------
-// User-Agent parsing (mirrors packages/device/src/index.ts)
+// User-Agent parsing. This is the only implementation: the TypeScript original
+// it once mirrored (packages/device) was deleted with no consumers. The client
+// only ever renders what the server derives here, plus the localised labels in
+// apps/web/src/components/settings/device-management.tsx.
 // ---------------------------------------------------------------------------
 
 struct ParsedDeviceInfo {

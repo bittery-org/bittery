@@ -2,14 +2,11 @@
 	"name": "@bittery/shared",
 	"version": "0.1.0",
 	"type": "module",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
 	"scripts": {
 		"check-types": "tsc --noEmit",
 		"test": "bun test src/__tests__"
 	},
 	"exports": {
-		".": "./src/index.ts",
 		"./billing": "./src/billing.ts",
 		"./credit-card": "./src/credit-card.ts",
 		"./device-setup": "./src/device-setup.ts",
@@ -40,7 +37,6 @@
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",
 		"@bittery/crypto-port": "workspace:*",
-		"@bittery/device": "workspace:*",
 		"@bittery/types": "workspace:*",
 		"@tanstack/react-query": "^5.101.4",
 		"jszip": "^3.10.1"

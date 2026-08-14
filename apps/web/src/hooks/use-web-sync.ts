@@ -170,10 +170,3 @@ export function useWebSync(
 		onTerminalCommandFailure,
 	});
 }
-
-/**
- * Get the client ID for use in mutations
- */
-export function useSyncClientId(): string {
-	return useMemo(() => getClientId(), []);
-}

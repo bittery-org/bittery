@@ -9,13 +9,7 @@ import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useState,
-	useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
@@ -258,17 +252,4 @@ export function useDesktopSync(
 		clientId,
 		isInitialized,
 	};
-}
-
-/**
- * Get the client ID for use in mutations
- */
-export function useDesktopClientId(): string {
-	const [clientId, setClientId] = useState<string>("");
-
-	useEffect(() => {
-		getOrCreateDesktopSyncClientId().then(setClientId);
-	}, []);
-
-	return clientId;
 }

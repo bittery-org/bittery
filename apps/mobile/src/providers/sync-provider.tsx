@@ -2,7 +2,7 @@ import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useMobileAccountRuntime } from "../contexts/account-context";
-import { useMobileClientId, useMobileSync } from "../hooks/use-mobile-sync";
+import { useMobileSync } from "../hooks/use-mobile-sync";
 
 /**
  * Mobile resolves its client id and active account asynchronously at boot, so like desktop it
@@ -44,14 +44,6 @@ export function useSyncContext() {
 		throw new Error("useSyncContext must be used within a MobileSyncProvider");
 	}
 	return context;
-}
-
-/**
- * Hook to get client ID without needing the full context
- * Useful for mutations that need to pass clientId
- */
-export function useClientId(): string {
-	return useMobileClientId();
 }
 
 /**

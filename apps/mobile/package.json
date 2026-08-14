@@ -26,7 +26,6 @@
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/sync": "workspace:*",
-		"@bittery/types": "workspace:*",
 		"@craftzdog/react-native-buffer": "^6.1.2",
 		"@expo/metro-runtime": "^57.0.8",
 		"@gorhom/bottom-sheet": "^5.2.9",

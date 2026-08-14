@@ -7,13 +7,7 @@ import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useToast } from "heroui-native";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useState,
-	useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
 import {
@@ -191,17 +185,4 @@ export function useMobileSync(
 		clientId,
 		isInitialized,
 	};
-}
-
-/**
- * Get the client ID for use in mutations
- */
-export function useMobileClientId(): string {
-	const [clientId, setClientId] = useState<string>("");
-
-	useEffect(() => {
-		getOrCreateMobileSyncClientId().then(setClientId);
-	}, []);
-
-	return clientId;
 }

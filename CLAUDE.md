@@ -34,7 +34,7 @@ it for `tests/e2e` changes.
 - New server route: `write-openapi`, `@bittery/api-contract generate`, bump the `assert_eq!` counts.
 - Rust-defined type? Generate it, never re-type it — ADR 0012. Closed sets live in `db/enums.rs`.
 - Migrations: `pnpm run db:create -- <name>`, and frozen once merged.
-- `react`, `zod`, `hono`, `@types/react*` come from the `catalog:`.
+- `react`, `zod`, `@types/react*` come from the `catalog:`.
 
 ## Style
 

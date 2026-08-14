@@ -240,15 +240,6 @@ export function usePlatformCredentialMirror(): CredentialMirror {
 }
 
 /**
- * Hook to access just the autolock service from platform context.
- * Returns undefined if autolock is not configured.
- * Convenience wrapper around usePlatform().
- */
-export function usePlatformAutolock(): IAutolockService | undefined {
-	return usePlatform().autolock;
-}
-
-/**
  * Hook to access the sync context from platform context.
  * Returns undefined if sync is not configured.
  * Convenience wrapper around usePlatform().
