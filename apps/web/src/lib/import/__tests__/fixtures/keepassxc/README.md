@@ -6,7 +6,7 @@
 | `keepassxc-2.6.2-six-column.csv` | `8060db28b2d4d7d24cb9dc72e3f62accde63e5661146e2f9a82e090b16baf183` |
 | `source-database.xml` | `99861f21308270d32d945da1bcf7f6e0e0e181c42453cfbbb3f5e8b96fc89e68` |
 
-Both CSVs are parsed byte-for-byte by `../../import-keepassxc.test.ts`.
+Both CSVs are parsed byte-for-byte by `../../keepassxc.test.ts`.
 
 ## Provenance
 
@@ -204,7 +204,7 @@ formatter cannot rewrite byte-sensitive content.
 - [ ] **A GUI export**, as opposed to `keepassxc-cli export`. Both call
       `CsvExporter::exportDatabase`; only the CLI path is exercised here.
 - [ ] **A group name containing a `/`**, which is ambiguous by construction. The
-      case is covered synthetically in `../../import-keepassxc.test.ts`.
+      case is covered synthetically in `../../keepassxc.test.ts`.
 - [ ] **An entry with a file attachment**, to pin that attachments leave no trace
       in the CSV.
 

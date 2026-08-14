@@ -213,6 +213,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Stage intent-to-add first: `git diff` ignores untracked paths, so a
+          # brand-new #[ts(export_to = ...)] target would otherwise pass.
+          git add --intent-to-add -- apps/desktop/src/generated
           if ! git diff --exit-code -- apps/desktop/src/generated; then
             echo "::error::apps/desktop/src/generated is out of date. Re-run \`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml\` locally and commit the updated files."
             exit 1
@@ -582,9 +585,12 @@ jobs:
         if: failure()
         with:
           name: android-unit-test-report
-          path: apps/mobile/android/**/build/reports/tests/**
+          # The Gradle project's projectDir is the module directory, not a
+          # subdirectory of the generated apps/mobile/android, so that is where
+          # the HTML/XML report lands.
+          path: apps/mobile/modules/credential-provider/android/build/reports/tests/**
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   server:
     if: github.event_name != 'schedule'

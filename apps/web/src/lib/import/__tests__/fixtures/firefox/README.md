@@ -102,7 +102,7 @@ than a credential. Bitwarden's importer filters the same row.
 - [ ] **A newline inside a quoted value.** Firefox's login manager rejects
       newlines in usernames and passwords, so no export can contain one. The
       parser handles it and the case is covered synthetically in
-      `../../import-firefox.test.ts`.
+      `../../firefox.test.ts`.
 - [ ] **`chrome://` extension logins** (`chrome://example_extension` in
       Mozilla's own test data) are not represented here.
 

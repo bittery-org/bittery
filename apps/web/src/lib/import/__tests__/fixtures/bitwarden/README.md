@@ -7,7 +7,7 @@
 
 Both are real exports of the same Bitwarden vault, taken minutes apart, parsed
 byte-for-byte by the `real sanitized export` suite in
-`../../import-bitwarden.test.ts`. The inline synthetic fixtures in that file stay
+`../../bitwarden.test.ts`. The inline synthetic fixtures in that file stay
 for the cases a real free-plan vault cannot produce — see the gap list below.
 
 ## Provenance

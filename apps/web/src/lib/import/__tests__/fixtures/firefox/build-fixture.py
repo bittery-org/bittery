@@ -157,7 +157,7 @@ def main():
     text = "\r\n".join(",".join(row) for row in rows)
 
     target = pathlib.Path(
-        "packages/shared/src/__tests__/fixtures/firefox/logins.csv"
+        "apps/web/src/lib/import/__tests__/fixtures/firefox/logins.csv"
     ).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     data = text.encode("utf-8")

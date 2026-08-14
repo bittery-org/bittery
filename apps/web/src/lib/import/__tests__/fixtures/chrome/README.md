@@ -9,7 +9,7 @@
 | `bitwarden-spec-simple-password.csv` | `2bb891ebb4d4a499d651017faaddb79bc3ee29777831265bc9c18264289b2bf4` |
 | `bitwarden-spec-android.csv` | `b65e3e55150b23fdedb0750e3601862f9328e174b77afbc3c30838c4a0e03927` |
 
-All six are parsed byte-for-byte by `../../import-chrome.test.ts`. Unlike the
+All six are parsed byte-for-byte by `../../chrome.test.ts`. Unlike the
 Bitwarden fixtures next door, none of these came out of an export this project
 ran itself — see **Provenance** and **Known gaps**.
 
@@ -41,7 +41,7 @@ writes:
 Escaping in these files follows
 `components/password_manager/core/browser/export/csv_writer.cc`: a field is
 quoted only when it contains `\r`, `\n`, `"` or `,`, and an inner `"` is doubled.
-The inline synthetic rows in `import-chrome.test.ts` are built to the same rule
+The inline synthetic rows in `chrome.test.ts` are built to the same rule
 for the cases Chromium's tests do not cover.
 
 ### `bitwarden-spec-*.csv` — Chrome exports vendored from Bitwarden's importer suite
