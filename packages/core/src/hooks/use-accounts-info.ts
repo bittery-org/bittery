@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import {
 	useCoreContext,
+	usePlatformAccountManager,
 	usePlatformStorage,
 } from "../context/platform-context";
 import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
@@ -27,7 +28,7 @@ export interface UseAccountsInfoOptions {
 export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 	const storage = usePlatformStorage();
 	const core = useCoreContext();
-	const manager = peekAccountSessionManager();
+	const manager = usePlatformAccountManager() ?? peekAccountSessionManager();
 
 	useSyncExternalStore(
 		manager?.subscribe ?? (() => () => {}),

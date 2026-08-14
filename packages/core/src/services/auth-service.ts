@@ -61,6 +61,8 @@ export interface StoreAuthSessionOptions {
 	setActive?: boolean;
 	/** Called at the exact point `AccountStore` takes ownership of the login MUK. */
 	onMasterUnlockKeyTransferred?: () => void;
+	/** Reconciles an explicitly owned account runtime after direct storage writes. */
+	onSessionStored?: () => void | Promise<void>;
 }
 
 async function resolveAccountIdForLogin(
@@ -575,7 +577,9 @@ export async function storeLoginSession(
 	options?.onMasterUnlockKeyTransferred?.();
 
 	try {
-		await peekAccountSessionManager()?.refresh();
+		await (
+			options?.onSessionStored ?? (() => peekAccountSessionManager()?.refresh())
+		)();
 	} catch (error) {
 		console.error("[auth-service] session manager refresh failed:", error);
 	}

@@ -46,7 +46,11 @@ export class AccountVaultRuntime {
 		this.unsubscribe = this.source.subscribe(() => void this.reconcile());
 		const initializationGeneration = this.generation;
 		void this.source.initializeLocalVaultState().then(
-			() => this.reconcile(),
+			() => {
+				if (this.started && initializationGeneration === this.generation) {
+					void this.reconcile();
+				}
+			},
 			(error) => this.fail(initializationGeneration, error),
 		);
 	}

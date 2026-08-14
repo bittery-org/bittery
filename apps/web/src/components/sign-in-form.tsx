@@ -21,12 +21,8 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import {
-	forgetActiveSession,
-	itemCache,
-	refreshAccountRuntime,
-	storage,
-} from "@/lib/storage";
+import { forgetActiveSession, itemCache, storage } from "@/lib/storage";
+import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
 export default function SignInForm({
@@ -177,6 +173,7 @@ function SignInFormContent({
 	onSwitchToSignUp: () => void;
 	redirectTo?: string;
 }) {
+	const { manager } = useAccountRuntime();
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const crypto = usePlatformCrypto();
@@ -231,12 +228,15 @@ function SignInFormContent({
 				itemCache,
 				crypto,
 				normalizedEmail,
-				{ serverUrl, insecureTransportConfirmed },
+				{
+					serverUrl,
+					insecureTransportConfirmed,
+					onSessionStored: () => manager.refresh(),
+				},
 			);
 			// `storeLoginSession` sets the master unlock key before it moves the
 			// active-account pointer, so the unlock notification alone would publish the
 			// pre-login id. Re-read it once the pointer is final.
-			await refreshAccountRuntime();
 			return result;
 		},
 		onSuccess: () => {
@@ -469,7 +469,7 @@ function SignInFormContent({
 						onClick={async () => {
 							// "Use a different account" must remove the quick-unlock offer,
 							// which a lock would keep.
-							await forgetActiveSession();
+							await forgetActiveSession(() => manager.refresh());
 							window.location.reload();
 						}}
 						className="w-full text-muted-foreground"

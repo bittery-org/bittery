@@ -36,6 +36,7 @@ import {
 	normalizeTeamRole,
 } from "@/lib/api-normalizers";
 import { clearActiveAccountData } from "@/lib/storage";
+import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
 function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
@@ -60,6 +61,7 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 }
 
 function UserNav() {
+	const { manager } = useAccountRuntime();
 	const api = useApiClient();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
@@ -80,7 +82,7 @@ function UserNav() {
 	// `localStorage`, so leaving `secret_key` behind on a shared machine is worse, and
 	// web has no UI to manage a left-behind account.
 	const handleRemoveAccount = async () => {
-		await clearActiveAccountData();
+		await clearActiveAccountData(() => manager.refresh());
 		queryClient.clear();
 		navigate({ to: "/login" });
 	};

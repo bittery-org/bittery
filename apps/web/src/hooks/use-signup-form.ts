@@ -18,7 +18,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { itemCache, refreshAccountRuntime, storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
+import { useAccountRuntime } from "@/providers/account-runtime-provider";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
 
@@ -76,6 +77,7 @@ export function useSignupForm({
 	onVerificationRequested?: () => void;
 	initialInsecureTransportConfirmed?: boolean;
 }) {
+	const { manager } = useAccountRuntime();
 	const navigate = useNavigate();
 	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
@@ -404,9 +406,12 @@ export function useSignupForm({
 				itemCache,
 				crypto,
 				email,
-				{ serverUrl, insecureTransportConfirmed },
+				{
+					serverUrl,
+					insecureTransportConfirmed,
+					onSessionStored: () => manager.refresh(),
+				},
 			);
-			await refreshAccountRuntime();
 
 			toast.success(m.auth_signup_toast_account_created());
 			toast.success(

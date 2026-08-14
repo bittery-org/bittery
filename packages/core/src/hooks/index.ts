@@ -44,6 +44,7 @@ export {
 	type PlatformProviderProps,
 	useCoreContext,
 	usePlatform,
+	usePlatformAccountManager,
 	usePlatformAutolock,
 	usePlatformCrypto,
 	usePlatformItemCache,

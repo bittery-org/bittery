@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
+	usePlatformAccountManager,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
@@ -42,10 +43,12 @@ export interface UseAccountSwitcherResult {
 function useAccountSessionManager(): AccountSessionManager {
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
+	const ownedManager = usePlatformAccountManager();
 	const queryClient = useQueryClient();
 
 	return useMemo(
 		() =>
+			ownedManager ??
 			// Several components use this hook, and on desktop/mobile the account
 			// provider owns construction — so only construct when nobody else has.
 			peekAccountSessionManager() ??
@@ -58,7 +61,7 @@ function useAccountSessionManager(): AccountSessionManager {
 					);
 				},
 			}),
-		[storage, itemCache, queryClient],
+		[ownedManager, storage, itemCache, queryClient],
 	);
 }
 

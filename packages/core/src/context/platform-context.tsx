@@ -11,6 +11,7 @@ import type { IQueryInvalidator, ISyncContext } from "@bittery/sync";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { type CoreContext, createCoreContext } from "../core-context";
 import type { CredentialMirror } from "../services/account-lifecycle";
+import type { AccountSessionManager } from "../services/account-session-manager";
 import type { AccountVaultRuntime } from "../services/account-vault-runtime";
 import type { IAutolockService } from "../services/autolock";
 import type { VaultCrypto } from "../services/vault-crypto";
@@ -42,6 +43,9 @@ export interface PlatformContextValue {
 
 	/** Shared framework-agnostic business logic services */
 	core: CoreContext;
+
+	/** Explicit account runtime when the app owns one. */
+	accountManager?: AccountSessionManager;
 
 	/** Autolock service (optional - may not be available on all platforms) */
 	autolock?: IAutolockService;
@@ -77,11 +81,14 @@ export interface PlatformProviderProps {
 	/** The process-local Vault lifetime and projection shared by reads and Sync. */
 	vaultRuntime: AccountVaultRuntime;
 
+	/** Explicit account runtime when the app owns one. */
+	accountManager?: AccountSessionManager;
+
 	/** Autolock service (optional) */
 	autolock?: IAutolockService;
 
-	/** Sync context with query invalidator (optional) */
-	sync?: ISyncContext;
+	/** Mutation-capable providers require a real outbound Sync queue. */
+	sync: ISyncContext;
 
 	/** Child components */
 	children: ReactNode;
@@ -126,6 +133,7 @@ export function PlatformProvider({
 	credentialMirror,
 	vaultCrypto,
 	vaultRuntime,
+	accountManager,
 	autolock,
 	sync,
 	children,
@@ -138,20 +146,9 @@ export function PlatformProvider({
 				crypto,
 				vaultCrypto,
 				vaultRuntime,
-				commandQueue: sync?.outboundQueue ?? {
-					enqueue: async () => {
-						throw new Error("Item mutations require an outbound Sync queue");
-					},
-				},
+				commandQueue: sync.outboundQueue,
 			}),
-		[
-			storage,
-			itemCache,
-			crypto,
-			vaultCrypto,
-			vaultRuntime,
-			sync?.outboundQueue,
-		],
+		[storage, itemCache, crypto, vaultCrypto, vaultRuntime, sync.outboundQueue],
 	);
 
 	const value = useMemo(
@@ -161,10 +158,20 @@ export function PlatformProvider({
 			crypto,
 			credentialMirror,
 			core,
+			accountManager,
 			autolock,
 			sync,
 		}),
-		[storage, itemCache, crypto, credentialMirror, core, autolock, sync],
+		[
+			storage,
+			itemCache,
+			crypto,
+			credentialMirror,
+			core,
+			accountManager,
+			autolock,
+			sync,
+		],
 	);
 
 	return (
@@ -212,6 +219,11 @@ export function usePlatformItemCache(): ItemCache {
  */
 export function useCoreContext(): CoreContext {
 	return usePlatform().core;
+}
+
+/** Returns the account manager explicitly supplied by the app runtime, if present. */
+export function usePlatformAccountManager(): AccountSessionManager | undefined {
+	return usePlatform().accountManager;
 }
 
 /**

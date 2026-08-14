@@ -22,15 +22,13 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { lifecycleDeps } from "@/lib/lifecycle";
-import {
-	initializeStorage,
-	refreshAccountRuntime,
-	storage,
-} from "@/lib/storage";
+import { initializeStorage, storage } from "@/lib/storage";
+import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const { m } = useI18n();
+	const { manager } = useAccountRuntime();
 	const [open, setOpen] = useState(false);
 	const [confirmEmail, setConfirmEmail] = useState("");
 	const [confirmText, setConfirmText] = useState("");
@@ -59,7 +57,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				{ accountId, confirmEmail: input.confirmEmail },
 				deletionDeps,
 			);
-			await refreshAccountRuntime();
+			await manager.refresh();
 
 			// The module reports instead of throwing, and a failed server delete aborts the
 			// local wipe — the account still exists, so this has to reach the error toast.

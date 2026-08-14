@@ -12,6 +12,7 @@ import {
 } from "@bittery/shared/api-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
+	usePlatformAccountManager,
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
@@ -89,6 +90,7 @@ export function useLogin(
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
+	const accountManager = usePlatformAccountManager();
 
 	return useMutation({
 		mutationFn: async (input: LoginInput) => {
@@ -129,6 +131,7 @@ export function useLogin(
 				{
 					serverUrl,
 					insecureTransportConfirmed: input.insecureTransportConfirmed === true,
+					onSessionStored: () => accountManager?.refresh(),
 				},
 			);
 

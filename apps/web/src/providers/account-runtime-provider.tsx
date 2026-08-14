@@ -1,23 +1,19 @@
-import {
-	type AccountSessionManager,
-	getAccountSessionManager,
-	peekAccountSessionManager,
-} from "@bittery/core/services/account-session-manager";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
+import { ClientRuntime } from "@bittery/core/services/client-runtime";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createContext,
 	type ReactNode,
 	useContext,
 	useEffect,
-	useMemo,
+	useState,
 } from "react";
 import { itemCache, storage } from "@/lib/storage";
-import { getWebVaultRuntime } from "@/lib/vault-runtime";
+import { vaultRepository } from "@/lib/vault-runtime";
 
 interface AccountRuntimeContextValue {
-	manager: AccountSessionManager;
-	vaultRuntime: AccountVaultRuntime;
+	runtime: ClientRuntime;
+	manager: ClientRuntime["accounts"];
+	vaultRuntime: ClientRuntime["vaultRuntime"];
 }
 
 const AccountRuntimeContext = createContext<AccountRuntimeContextValue | null>(
@@ -31,24 +27,31 @@ function BrowserAccountRuntimeProvider({
 	children: ReactNode;
 	queryClient: QueryClient;
 }) {
-	const value = useMemo(() => {
-		const manager =
-			peekAccountSessionManager() ??
-			getAccountSessionManager({
+	const [runtime] = useState(
+		() =>
+			new ClientRuntime({
 				storage,
 				itemCache,
+				vaultRepository,
 				invalidateQueries: async (keys) => {
 					await Promise.all(
 						keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
 					);
 				},
-			});
-		return { manager, vaultRuntime: getWebVaultRuntime(manager) };
-	}, [queryClient]);
+			}),
+	);
+	const value = {
+		runtime,
+		manager: runtime.accounts,
+		vaultRuntime: runtime.vaultRuntime,
+	};
 
 	// Durable browser reads begin only after hydration commits. The server and the
 	// first client render therefore share the runtime's inert initial snapshot.
-	useEffect(() => value.vaultRuntime.start(), [value]);
+	useEffect(() => {
+		runtime.start();
+		return () => runtime.dispose();
+	}, [runtime]);
 
 	return (
 		<AccountRuntimeContext.Provider value={value}>

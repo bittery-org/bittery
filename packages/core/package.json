@@ -18,6 +18,7 @@
 		"./services/account-vault-runtime": "./src/services/account-vault-runtime.ts",
 		"./services/account-sync": "./src/services/account-sync.ts",
 		"./services/account-sync-lifecycle": "./src/services/account-sync-lifecycle.ts",
+		"./services/client-runtime": "./src/services/client-runtime.ts",
 		"./services/autolock": "./src/services/autolock.ts",
 		"./services/account-resolver": "./src/services/account-resolver.ts",
 		"./services/api-client": "./src/services/api-client.ts",

@@ -49,7 +49,7 @@ interface WebPlatformProviderProps {
 export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 	const autolock = getAutolockService();
 	const syncContext = useSyncContext();
-	const { vaultRuntime } = useAccountRuntime();
+	const { manager, vaultRuntime } = useAccountRuntime();
 
 	// Map sync context to ISyncContext interface
 	const sync: ISyncContext = useMemo(
@@ -77,6 +77,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
+			accountManager={manager}
 			sync={sync}
 			autolock={autolock}
 		>
