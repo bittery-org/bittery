@@ -204,6 +204,20 @@ jobs:
       - name: Desktop tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+      # `cargo test` above regenerates apps/desktop/src/generated (ts-rs writes
+      # the bindings from a #[test]), so the diff has to come after it. ADR 0012
+      # claims CI diffs these; until now only the local check:ci:rust script did,
+      # and a Rust wire-format change could land with a stale TypeScript mirror
+      # that breaks apps/extension at runtime instead of here.
+      - name: Check generated desktop bindings are committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- apps/desktop/src/generated; then
+            echo "::error::apps/desktop/src/generated is out of date. Re-run \`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml\` locally and commit the updated files."
+            exit 1
+          fi
+
   # The IPC layer has a substantial #[cfg(windows)] surface (pipe security
   # descriptor, peer process identity) that no other job compiles — the release
   # workflow was previously the first thing to build it. A compile-only check is
@@ -283,6 +297,12 @@ jobs:
 
       - name: i18n keys
         run: pnpm run i18n:check
+
+      # The package layering ADR 0012 rests on (ui ↛ core, sync ↛ storage,
+      # packages ↛ apps) ran in the local check:ci script only, so on CI it was
+      # maintained by discipline rather than enforced.
+      - name: Architecture layering
+        run: pnpm run architecture:check
 
       - name: Version sync
         run: pnpm run version:check
@@ -541,6 +561,20 @@ jobs:
 
       - name: Server fmt
         run: cargo fmt --check --manifest-path apps/server/Cargo.toml
+
+      # The other half of `contracts:check`. js-static proves openapi.v1.json and
+      # the generated TypeScript agree; only this proves the committed spec still
+      # matches the live Axum routes. openapi-diff is not a substitute - it
+      # compares the committed spec against the base branch, so a route change
+      # with a stale spec passed CI green.
+      - name: OpenAPI spec matches routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo run --quiet --manifest-path apps/server/Cargo.toml --bin write-openapi -- --check
+          elapsed="$(( $(date +%s) - start ))"
+          echo "openapi spec check: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compile server tests
         shell: bash
