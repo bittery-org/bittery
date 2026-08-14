@@ -8,9 +8,8 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/sync";
+import { useSyncCapability } from "@bittery/sync";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { lifecycleDeps } from "@/background/lifecycle";
 import { crypto } from "@/lib/crypto";
 import type { PopupAccountVaultRuntime } from "@/lib/popup-account-vault-runtime";
@@ -41,23 +40,7 @@ export function ExtensionPlatformProvider({
 }: ExtensionPlatformProviderProps) {
 	const syncContext = useSyncContext();
 
-	// Map sync context to ISyncContext interface
-	const sync: ISyncContext = useMemo(
-		() => ({
-			clientId: syncContext.clientId,
-			isConnected: syncContext.isConnected,
-			isOnline: syncContext.isOnline,
-			invalidator: syncContext.invalidator,
-			outboundQueue: syncContext.outboundQueue,
-		}),
-		[
-			syncContext.clientId,
-			syncContext.isConnected,
-			syncContext.isOnline,
-			syncContext.invalidator,
-			syncContext.outboundQueue,
-		],
-	);
+	const sync = useSyncCapability(syncContext);
 
 	return (
 		<PlatformProvider

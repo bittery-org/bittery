@@ -5,7 +5,6 @@ export type {
 	IQueryInvalidator,
 	ISyncContext,
 } from "./capabilities";
-
 export type {
 	CatchUpApiClient,
 	CatchUpPageResponse,
@@ -65,3 +64,4 @@ export {
 	getOrCreateClientId,
 	useSync,
 } from "./use-sync";
+export { useSyncCapability } from "./use-sync-capability";

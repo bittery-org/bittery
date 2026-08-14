@@ -8,10 +8,9 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/sync";
+import { useSyncCapability } from "@bittery/sync";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { useMobileAccountRuntime } from "../contexts/account-context";
 import { useMobileSync } from "../hooks/use-mobile-sync";
 import { crypto } from "../lib/crypto";
@@ -44,22 +43,7 @@ export function MobilePlatformProvider({
 	const syncState = useMobileSync(queryClient, manager, vaultRuntime, true);
 
 	// Create sync context with real-time sync state
-	const sync: ISyncContext = useMemo(
-		() => ({
-			clientId: syncState.clientId,
-			isConnected: syncState.isConnected,
-			isOnline: syncState.isOnline,
-			invalidator: syncState.invalidator,
-			outboundQueue: syncState.outboundQueue,
-		}),
-		[
-			syncState.clientId,
-			syncState.isConnected,
-			syncState.isOnline,
-			syncState.invalidator,
-			syncState.outboundQueue,
-		],
-	);
+	const sync = useSyncCapability(syncState);
 
 	return (
 		<PlatformProvider
