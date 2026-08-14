@@ -8,6 +8,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { IconChevronDown } from "@bittery/ui/icons";
+import { getAccountInitials } from "@bittery/ui/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -141,25 +142,6 @@ export function ExtensionAccountSwitcher() {
 		(a) => a.accountId === activeAccountId,
 	);
 
-	// Same initials precedence as the desktop app's AccountAvatar:
-	// team name → personal name → email prefix.
-	const getInitials = (account: {
-		teamName?: string;
-		name?: string;
-		email: string;
-	}) => {
-		const source = account.teamName || account.name;
-		if (source) {
-			return source
-				.split(" ")
-				.map((part) => part[0])
-				.join("")
-				.toUpperCase()
-				.slice(0, 2);
-		}
-		return account.email.substring(0, 2).toUpperCase();
-	};
-
 	// Custom trigger with AvatarGroup support
 	const trigger = (
 		<Button
@@ -178,7 +160,7 @@ export function ExtensionAccountSwitcher() {
 							/>
 						)}
 						<AvatarFallback className="size-6 rounded-md bg-linear-to-br from-primary to-primary-deep font-semibold text-[10px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]">
-							{getInitials(activeAccount)}
+							{getAccountInitials(activeAccount)}
 						</AvatarFallback>
 					</Avatar>
 					<div className="flex flex-col items-start overflow-hidden">

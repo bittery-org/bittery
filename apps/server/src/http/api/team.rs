@@ -3,7 +3,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -22,8 +22,8 @@ use crate::{
 
 use super::{
     dto::{
-        CursorPage, DecimalString, PageRequest, PatchField, PresignedUploadResponse,
-        ProblemDetails, SuccessResponse,
+        request_dto, response_dto, CursorPage, DecimalString, PageRequest, PatchField,
+        PresignedUploadResponse, ProblemDetails, SuccessResponse,
     },
     error::ApiError,
     error_code::ErrorCode,
@@ -32,32 +32,6 @@ use super::{
     pagination::{page_values, ApiPageQuery},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
-
-macro_rules! request_dto {
-    ($name:ident { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
-        #[derive(Debug, Deserialize, ToSchema)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct $name {
-            $($(#[$meta])* $field: $type),*
-        }
-    };
-}
-
-macro_rules! response_dto {
-    ($name:ident from $source:ty { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
-        #[derive(Debug, Serialize, ToSchema)]
-        #[serde(rename_all = "camelCase")]
-        struct $name {
-            $($(#[$meta])* $field: $type),*
-        }
-
-        impl From<$source> for $name {
-            fn from(value: $source) -> Self {
-                Self { $($field: value.$field),* }
-            }
-        }
-    };
-}
 
 request_dto!(CreateTeamRequest {
     name: String,

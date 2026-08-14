@@ -21,16 +21,6 @@ import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeApiClient } from "./travel-mode-service";
 import type { VaultCrypto } from "./vault-crypto";
 
-export interface VaultRepositoryItemAccount {
-	accountId: string;
-	email: string;
-	userId: string;
-	name: string;
-	serverUrl: string;
-	teamName?: string;
-	teamAvatarUrl?: string | null;
-}
-
 /** Local account identity. Deliberately carries no token or HTTP client. */
 export interface LocalVaultAccount {
 	accountId: string;
@@ -41,6 +31,13 @@ export interface LocalVaultAccount {
 	teamName?: string;
 	teamAvatarUrl?: string | null;
 }
+
+/**
+ * The account an item is attributed to. Structurally identical to
+ * {@link LocalVaultAccount} and kept as an alias so call sites still read in the
+ * vocabulary of their own layer.
+ */
+export type VaultRepositoryItemAccount = LocalVaultAccount;
 
 export type VaultRepositoryItemWithAccount = VaultRepositoryItem & {
 	account?: VaultRepositoryItemAccount;

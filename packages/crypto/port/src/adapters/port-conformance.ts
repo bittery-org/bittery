@@ -30,53 +30,8 @@ import {
 	CryptoPortError,
 	type CryptoPortErrorCode,
 } from "../errors";
+import { CRYPTO_PORT_MEMBERS } from "../port-members";
 import type { ItemData, KdfProfile } from "../types";
-
-/**
- * Named so a port that grew a member without growing the suite fails to compile. The
- * `satisfies` catches a name that no longer exists; `NoMemberMissing` catches the reverse.
- */
-export const CRYPTO_PORT_MEMBERS = [
-	"initialize",
-	"generateEncryptionKey",
-	"importKey",
-	"exportKey",
-	"cloneKey",
-	"destroyKey",
-	"deriveKeys",
-	"deriveMasterKey",
-	"deriveKeysFromMasterKey",
-	"deriveSrpPassword",
-	"encrypt",
-	"decrypt",
-	"decryptMany",
-	"wrapKey",
-	"unwrapKey",
-	"generateRsaKeyPair",
-	"rsaEncrypt",
-	"rsaDecrypt",
-	"decryptRsaWrappedKey",
-	"encryptVaultKeyForMember",
-	"encryptVaultKeyWithMuk",
-	"reEncryptItem",
-	"rewrapAttachmentKey",
-	"generateSecretKey",
-	"validateSecretKey",
-	"generateRecoveryKey",
-	"validateRecoveryKey",
-	"encryptMasterKey",
-	"decryptMasterKey",
-	"generateSrpRegistration",
-	"generateClientEphemeral",
-	"deriveClientSession",
-	"verifyServerSession",
-	"generatePasskeyKeypair",
-	"generatePasskeyCredentialId",
-	"buildPasskeyAttestationObject",
-	"signPasskeyAssertion",
-	"generateTotp",
-	"generateUuid",
-] as const satisfies readonly (keyof CryptoPort)[];
 
 type MissingMember = Exclude<
 	keyof CryptoPort,

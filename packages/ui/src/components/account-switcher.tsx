@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
-import { cn } from "../lib/utils.js";
+import { cn, getAccountInitials } from "../lib/utils.js";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar.js";
 import { Button } from "./button.js";
 import {
@@ -107,20 +107,6 @@ export interface AccountSwitcherProps {
 
 	/** Optional: localized/overridden labels */
 	labels?: AccountSwitcherLabels;
-}
-
-// Same initials + gradient treatment as the desktop trigger avatar
-// (apps/desktop AccountAvatar) so the open menu matches the trigger.
-function getAccountInitials(account: AccountSwitcherAccount): string {
-	const source = account.teamName || account.name;
-	if (source) {
-		const parts = source.trim().split(/\s+/);
-		if (parts.length >= 2) {
-			return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-		}
-		return source.slice(0, 2).toUpperCase();
-	}
-	return account.email.slice(0, 2).toUpperCase();
 }
 
 const avatarFallbackClassName =

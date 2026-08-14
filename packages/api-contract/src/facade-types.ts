@@ -227,14 +227,14 @@ export type HiddenVaultsInput = Schema<"HiddenVaultsRequest">;
 export type DisableTravelModeInput = Schema<"DisableTravelModeRequest">;
 export type AuditEvents = Schema<"AuditEventsResponse">;
 export type AuditEvent = Schema<"TeamEvent">;
-export interface AuditEventsRequest extends ApiPageRequest {
-	from?: string;
-	to?: string;
-	actionGroup?: "auth" | "team" | "vault" | "item" | "share" | "other" | "all";
-	actorUserId?: string;
-	result?: "success" | "failure" | "all";
-	search?: string;
-}
+/**
+ * Derived rather than restated: the filter vocabulary (`actionGroup`, `result`)
+ * is server-owned, so a new group added in Rust arrives here instead of failing
+ * as an unknown query value at runtime. ADR 0012.
+ */
+export type AuditEventsRequest = NonNullable<
+	operations["listAuditEvents"]["parameters"]["query"]
+>;
 
 export type SyncBootstrapPage = Schema<"BootstrapItemsResponse">;
 export type SyncBootstrapItem = Schema<"BootstrapItemResponse">;

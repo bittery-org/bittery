@@ -15,6 +15,49 @@ pub use super::limits::{
 
 pub const API_MAJOR: u16 = 1;
 
+/// One `#[derive]` + `#[serde]` recipe per DTO direction, so a request DTO cannot
+/// accidentally ship without `deny_unknown_fields` and a response DTO cannot ship
+/// without `camelCase`. `auth.rs` and `team.rs` each carried their own copy; the
+/// only difference was visibility, and nothing needs these to be module-private.
+///
+/// `mod.rs`'s `every_schema_type_name_is_declared_once` scans for the literal
+/// `request_dto!(`/`response_dto!(` prefixes, so the invocation form has to stay
+/// `name {` / `name from Source {`.
+macro_rules! request_dto {
+    ($name:ident { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
+        #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        pub(crate) struct $name {
+            $($(#[$meta])* pub(crate) $field: $type),*
+        }
+    };
+}
+
+macro_rules! response_dto {
+    ($name:ident { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
+        #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+        #[serde(rename_all = "camelCase")]
+        pub(crate) struct $name {
+            $($(#[$meta])* pub(crate) $field: $type),*
+        }
+    };
+    ($name:ident from $source:ty { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
+        #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+        #[serde(rename_all = "camelCase")]
+        pub(crate) struct $name {
+            $($(#[$meta])* pub(crate) $field: $type),*
+        }
+
+        impl From<$source> for $name {
+            fn from(value: $source) -> Self {
+                Self { $($field: value.$field),* }
+            }
+        }
+    };
+}
+
+pub(crate) use {request_dto, response_dto};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiMetadata {

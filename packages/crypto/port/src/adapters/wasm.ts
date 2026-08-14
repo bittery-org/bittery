@@ -2,6 +2,7 @@ import type { KeyHandleLike } from "@bittery/crypto-wasm";
 import type { CryptoPort, KeyRef } from "../crypto-port";
 import { CryptoPortError } from "../errors";
 import { createKeyRefTable, type KeyRefTable } from "../key-ref";
+import { CRYPTO_PORT_MEMBERS } from "../port-members";
 import {
 	classify,
 	loadCryptoWebBackend,
@@ -9,57 +10,15 @@ import {
 	type UniffiBackend,
 } from "../uniffi-bindings";
 
-const FORWARDED_MEMBERS = [
-	"initialize",
-	"generateEncryptionKey",
-	"importKey",
-	"exportKey",
-	"cloneKey",
-	"destroyKey",
-	"deriveKeys",
-	"deriveMasterKey",
-	"deriveKeysFromMasterKey",
-	"deriveSrpPassword",
-	"encrypt",
-	"decrypt",
-	"decryptMany",
-	"wrapKey",
-	"unwrapKey",
-	"generateRsaKeyPair",
-	"rsaEncrypt",
-	"rsaDecrypt",
-	"decryptRsaWrappedKey",
-	"encryptVaultKeyForMember",
-	"encryptVaultKeyWithMuk",
-	"reEncryptItem",
-	"rewrapAttachmentKey",
-	"generateSecretKey",
-	"validateSecretKey",
-	"generateRecoveryKey",
-	"validateRecoveryKey",
-	"encryptMasterKey",
-	"decryptMasterKey",
-	"generateSrpRegistration",
-	"generateClientEphemeral",
-	"deriveClientSession",
-	"verifyServerSession",
-	"generatePasskeyKeypair",
-	"generatePasskeyCredentialId",
-	"buildPasskeyAttestationObject",
-	"signPasskeyAssertion",
-	"generateTotp",
-	"generateUuid",
-] as const satisfies readonly (keyof CryptoPort)[];
-
 type UnforwardedMember = Exclude<
 	keyof CryptoPort,
-	(typeof FORWARDED_MEMBERS)[number]
+	(typeof CRYPTO_PORT_MEMBERS)[number]
 >;
 
 /** Fails to compile when the port grows a member this adapter does not forward. */
 export type EveryMemberIsForwarded = [UnforwardedMember] extends [never]
 	? true
-	: ["port member missing from FORWARDED_MEMBERS", UnforwardedMember];
+	: ["port member missing from CRYPTO_PORT_MEMBERS", UnforwardedMember];
 
 export const everyMemberIsForwarded: EveryMemberIsForwarded = true;
 
@@ -149,7 +108,7 @@ export function createHandleCryptoPort<Key extends object>(
 	}
 
 	const forwarded = Object.fromEntries(
-		FORWARDED_MEMBERS.map((member) => [
+		CRYPTO_PORT_MEMBERS.map((member) => [
 			member,
 			(...args: readonly unknown[]) => call(member, args),
 		]),

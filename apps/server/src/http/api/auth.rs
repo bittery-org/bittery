@@ -2,9 +2,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
-use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
@@ -17,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    dto::{CursorPage, PageRequest, SuccessResponse},
+    dto::{request_dto, response_dto, CursorPage, PageRequest, SuccessResponse},
     error::ApiError,
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest, PublicRequest},
     pagination::{
@@ -26,26 +24,6 @@ use super::{
     },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
-
-macro_rules! request_dto {
-    ($name:ident { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
-        #[derive(Debug, Deserialize, ToSchema)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        pub(crate) struct $name {
-            $($(#[$meta])* pub(crate) $field: $type),*
-        }
-    };
-}
-
-macro_rules! response_dto {
-    ($name:ident { $($(#[$meta:meta])* $field:ident: $type:ty),* $(,)? }) => {
-        #[derive(Debug, Serialize, ToSchema)]
-        #[serde(rename_all = "camelCase")]
-        pub(crate) struct $name {
-            $($(#[$meta])* pub(crate) $field: $type),*
-        }
-    };
-}
 
 request_dto!(EmailCheckRequest { email: String });
 request_dto!(SignupVerificationRequest {
