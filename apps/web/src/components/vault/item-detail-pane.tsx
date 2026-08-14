@@ -97,6 +97,11 @@ export function ItemDetailPane({
 	const createShare = useCreateShare();
 	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
+	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
+	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 	const itemAttachments = useItemAttachments(
 		selectedItem?.id,
 		selectedItem?.vaultId,
@@ -104,13 +109,9 @@ export function ItemDetailPane({
 	);
 	const shareLinks = useQuery({
 		...apiQueries.shares.list(api, selectedItem?.id ?? ""),
-		enabled: Boolean(selectedItem),
+		enabled: Boolean(selectedItem) && isShareHistoryOpen,
+		staleTime: 0,
 	});
-	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
-	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
-	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {

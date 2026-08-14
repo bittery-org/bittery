@@ -99,7 +99,8 @@ export function ItemDetailPage({
 	);
 	const shareLinks = useQuery({
 		...apiQueries.shares.list(api, rawItem?.id ?? ""),
-		enabled: Boolean(rawItem),
+		enabled: Boolean(rawItem) && isShareHistoryOpen,
+		staleTime: 0,
 	});
 
 	const handleTagsChange = useCallback(

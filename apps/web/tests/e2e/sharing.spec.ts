@@ -403,11 +403,6 @@ test("share history counts the access and the access log records it", async ({
 		await recipient.close();
 	}
 
-	// Reloaded rather than reopened: the share queries are never invalidated, so
-	// a second open of the dialog would replay the counts read above. Reported
-	// as a product bug for this step.
-	await page.reload();
-	await openItem(page, item.title);
 	const reopened = await openShareHistory(page);
 	await expect(
 		reopened.getByText(
