@@ -202,7 +202,7 @@ async fn create_presigned_upload(
 ) -> Result<PresignedUploadResult, StorageError> {
     let config = &storage.config;
     let upload_url = presigned_url(
-        &config,
+        config,
         "PUT",
         key,
         Some(content_type),
@@ -240,7 +240,7 @@ async fn create_presigned_download(
 ) -> Result<String, StorageError> {
     let config = &storage.config;
     presigned_url(
-        &config,
+        config,
         "GET",
         key,
         None,

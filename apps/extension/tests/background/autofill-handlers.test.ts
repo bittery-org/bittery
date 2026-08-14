@@ -18,10 +18,10 @@ let desktopStatus: {
 } | null = null;
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
-	desktopSync: {
+	getDesktopSync: () => ({
 		getLastStatus: () => desktopStatus,
 		checkDesktopStatus: async () => desktopStatus,
-	},
+	}),
 }));
 
 let extensionUnlocked = false;

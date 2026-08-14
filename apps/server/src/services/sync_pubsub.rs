@@ -205,9 +205,7 @@ impl SyncPubSub {
     /// Listens for incoming Redis pub/sub messages and fans them out locally.
     /// Only needed when Redis is configured.
     pub fn start_dispatch(self: &Arc<Self>) -> Option<JoinHandle<()>> {
-        let Some(ref redis) = self.redis else {
-            return None;
-        };
+        let redis = self.redis.as_ref()?;
 
         let pubsub = Arc::clone(self);
 

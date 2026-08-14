@@ -73,7 +73,7 @@ mock.module(path.join(libDir, "crypto.ts"), () => ({
 }));
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
-	desktopSync: { getLastStatus: () => null },
+	getDesktopSync: () => ({ getLastStatus: () => null }),
 }));
 
 mock.module(path.join(bgDir, "desktop-unlock.ts"), () => ({

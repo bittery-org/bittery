@@ -139,10 +139,10 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 }));
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
-	desktopSync: {
+	getDesktopSync: () => ({
 		getLastStatus: () => null,
 		checkDesktopStatus: async () => null,
-	},
+	}),
 }));
 
 mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
