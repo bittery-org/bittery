@@ -1,4 +1,5 @@
 import type { AuditEvent, TeamMember } from "@bittery/api-contract";
+import { formatDate, formatDateTime } from "@bittery/i18n/format/browser";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
@@ -48,7 +49,6 @@ import {
 	normalizeDeploymentMode,
 	normalizeEntitlements,
 } from "@/lib/api-normalizers";
-import { formatDate, formatDateTime } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =

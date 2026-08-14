@@ -1,3 +1,4 @@
+import { formatDate } from "@bittery/i18n/format/browser";
 import { useApiClient } from "@bittery/shared/api";
 import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
 import {
@@ -8,7 +9,6 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { formatDate } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

@@ -1,4 +1,5 @@
 import type { TeamMember } from "@bittery/api-contract";
+import { formatDate } from "@bittery/i18n/format/browser";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -18,7 +19,6 @@ import {
 import { IconUser as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
-import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
