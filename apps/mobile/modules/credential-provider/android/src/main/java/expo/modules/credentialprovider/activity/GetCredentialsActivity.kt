@@ -936,7 +936,7 @@ class GetCredentialsActivity : FragmentActivity() {
         val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
         if (normalizedRpId.isBlank()) return emptyList()
 
-        val domainsToQuery = DomainMatch.lookupKeys(normalizedRpId)
+        val domainsToQuery = DomainMatch.relyingPartyLookupKeys(normalizedRpId)
         val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
         for (userId in userIds) {
             for (domain in domainsToQuery) {
@@ -970,7 +970,7 @@ class GetCredentialsActivity : FragmentActivity() {
         val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
         if (normalizedRpId.isBlank()) return emptyList()
 
-        val domainsToQuery = DomainMatch.lookupKeys(normalizedRpId)
+        val domainsToQuery = DomainMatch.relyingPartyLookupKeys(normalizedRpId)
         val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
 
         val byDomain = database.itemDao().getLoginItemsByDomainsAnyUser(domainsToQuery)

@@ -28,7 +28,14 @@
 		{ "input": "example.com#frag", "expected": "example.com" },
 		{ "input": "", "expected": "" },
 		{ "input": "   ", "expected": "" },
-		{ "input": "com.android.chrome", "expected": "com.android.chrome" }
+		{ "input": "com.android.chrome", "expected": "com.android.chrome" },
+		{
+			"$why": "IDNA ToASCII. Every caller supplies the punycode form (window.location.hostname, Android's origin), so a Unicode host has to normalize to the same string or an item never matches its own site.",
+			"input": "https://bücher.de/x",
+			"expected": "xn--bcher-kva.de"
+		},
+		{ "input": "BÜCHER.DE", "expected": "xn--bcher-kva.de" },
+		{ "input": "xn--bcher-kva.de", "expected": "xn--bcher-kva.de" }
 	],
 
 	"registrableDomain": [
@@ -103,6 +110,26 @@
 			"left": "com.android.chrome",
 			"right": "example.com",
 			"expected": false
+		},
+
+		{
+			"$why": "A public suffix is not a site. The subdomain rule would otherwise make an item saved with URL co.uk match every UK domain - the same over-matching the registrable-domain rule exists to stop, arriving by the other door.",
+			"left": "co.uk",
+			"right": "bbc.co.uk",
+			"expected": false
+		},
+		{ "left": "com", "right": "example.com", "expected": false },
+		{ "left": "co.uk", "right": "co.uk", "expected": true },
+		{
+			"$why": "Unicode and punycode spellings of one host are one host.",
+			"left": "bücher.de",
+			"right": "xn--bcher-kva.de",
+			"expected": true
+		},
+		{
+			"left": "https://bücher.de/konto",
+			"right": "shop.xn--bcher-kva.de",
+			"expected": true
 		}
 	],
 
@@ -115,6 +142,8 @@
 		{ "input": "example.com", "expected": ["example.com"] },
 		{ "input": "news.bbc.co.uk", "expected": ["news.bbc.co.uk", "bbc.co.uk"] },
 		{ "input": "bbc.co.uk", "expected": ["bbc.co.uk"] },
+		{ "input": "co.uk", "expected": ["co.uk"] },
+		{ "input": "bücher.de", "expected": ["xn--bcher-kva.de"] },
 		{ "input": "", "expected": [] }
 	]
 }

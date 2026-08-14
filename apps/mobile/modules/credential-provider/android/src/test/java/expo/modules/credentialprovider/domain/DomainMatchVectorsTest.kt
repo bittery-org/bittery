@@ -105,21 +105,59 @@ class DomainMatchVectorsTest {
 
     /**
      * The Room queries match by intersecting an item's indexed domain keys with
-     * the requesting origin's queried keys. That is only equivalent to
-     * [DomainMatch.matches] if every matching pair shares a key.
+     * the requesting origin's queried keys, and three comments in this module
+     * claim that is exactly [DomainMatch.matches]. Checking that only against
+     * the `matches` vectors proves nothing - the vectors and the code have the
+     * same author - so this runs the full cross product of a corpus chosen to
+     * include the shapes that broke it. Mirrors the same corpus in
+     * `apps/extension/tests/lib/hostname.test.ts`.
      */
+    private val corpus = listOf(
+        "example.com", "www.example.com", "login.example.com", "a.b.example.com",
+        "other.com", "com", "co.uk", "bbc.co.uk", "www.bbc.co.uk", "news.bbc.co.uk",
+        "itv.co.uk", "example.com.au", "shop.example.com.au", "com.au", "localhost",
+        "192.168.0.1", "bücher.de", "xn--bcher-kva.de", "shop.bücher.de",
+        "com.android.chrome",
+    )
+
     @Test
-    fun `lookupKeys intersection agrees with matches`() {
-        for (case in cases("matches")) {
-            val left = case.getString("left")
-            val right = case.getString("right")
-            val indexed = DomainMatch.lookupKeys(left).toSet()
-            val queried = DomainMatch.lookupKeys(right)
-            assertEquals(
-                "SQL-shaped lookup for ${quote(left)} / ${quote(right)}",
-                case.getBoolean("expected"),
-                queried.any { indexed.contains(it) },
-            )
+    fun `lookupKeys intersection agrees with matches over the whole corpus`() {
+        val disagreements = mutableListOf<String>()
+        for (left in corpus) {
+            for (right in corpus) {
+                val indexed = DomainMatch.lookupKeys(left).toSet()
+                val intersects = DomainMatch.lookupKeys(right).any { indexed.contains(it) }
+                if (intersects != DomainMatch.matches(left, right)) {
+                    disagreements +=
+                        "$left / $right: matches=${DomainMatch.matches(left, right)} keys=$intersects"
+                }
+            }
+        }
+        assertEquals(emptyList<String>(), disagreements)
+    }
+
+    @Test
+    fun `matches is symmetric over the whole corpus`() {
+        val asymmetric = mutableListOf<String>()
+        for (left in corpus) {
+            for (right in corpus) {
+                if (DomainMatch.matches(left, right) != DomainMatch.matches(right, left)) {
+                    asymmetric += "$left / $right"
+                }
+            }
+        }
+        assertEquals(emptyList<String>(), asymmetric)
+    }
+
+    @Test
+    fun `a public suffix is never the same site as a domain under it`() {
+        for ((suffix, host) in listOf(
+            "com" to "example.com",
+            "co.uk" to "bbc.co.uk",
+            "com.au" to "example.com.au",
+        )) {
+            assertEquals("matches($suffix, $host)", false, DomainMatch.matches(suffix, host))
+            assertEquals("matches($host, $suffix)", false, DomainMatch.matches(host, suffix))
         }
     }
 

@@ -1,5 +1,7 @@
 package expo.modules.credentialprovider.domain
 
+import java.net.IDN
+
 /**
  * The one answer to "may this saved credential be offered on this site?" for
  * Android.
@@ -93,7 +95,17 @@ object DomainMatch {
             }
         }
 
-        return host.trim('.')
+        host = host.trim('.')
+
+        // Punycode, so a Unicode host compares equal to the ASCII form Android
+        // and the extension both supply. Mirrors `new URL(...).hostname` on the
+        // TypeScript side; IDN.toASCII throws on a malformed label, and a value
+        // that is not a host at all (an Android package name) is left alone.
+        return try {
+            IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)
+        } catch (_: IllegalArgumentException) {
+            host
+        }
     }
 
     /**
@@ -121,11 +133,31 @@ object DomainMatch {
     }
 
     /**
+     * A host nobody can own: a bare TLD, or a listed multi-label suffix.
+     *
+     * Without this, the superdomain rule in [matches] treats `co.uk` as the
+     * parent site of every UK domain. A single label counts because there is no
+     * way to tell `com` from `localhost` without the full Public Suffix List,
+     * and the safe direction is to offer a credential too rarely.
+     */
+    private fun isPublicSuffix(host: String): Boolean =
+        !host.contains(".") || MULTI_LABEL_PUBLIC_SUFFIXES.contains(host)
+
+    /**
      * The domain keys a host is indexed and queried under in `item_domains`.
      *
      * Sync writes these rows for an item's URLs; a lookup queries these keys for
      * the requesting origin. Matching is then a key intersection, which is
-     * exactly [matches] expressed in SQL — see the `lookupKeys` vectors.
+     * exactly [matches] expressed in SQL — asserted over a full corpus cross
+     * product, not just the vectors, in `DomainMatchVectorsTest`.
+     *
+     * This is a deliberate widening of Android's old behaviour, which indexed
+     * one `www.`-stripped host per URL and could only widen the *query* by one
+     * label. A credential saved at `login.example.com` is now offered on
+     * `shop.example.com`, because that is what the extension has always done and
+     * the point of this class is that the two agree. Existing installs keep
+     * their old single-key rows until each item next syncs; there is no
+     * backfill, because sync replaces an item's rows wholesale.
      */
     fun lookupKeys(host: String?): List<String> {
         val normalized = normalizeHost(host)
@@ -151,6 +183,23 @@ object DomainMatch {
     }
 
     /**
+     * The `item_domains` keys to query when looking for the item a passkey
+     * belongs to.
+     *
+     * Narrower than [lookupKeys] for the same reason [sameRelyingParty] is
+     * narrower than [matches]: a create flow that widened to the registrable
+     * domain would offer `shop.example.com`'s item as the home for a passkey
+     * being registered at `login.example.com`, and the create path auto-selects
+     * when exactly one candidate comes back.
+     */
+    fun relyingPartyLookupKeys(rpId: String?): List<String> {
+        val normalized = normalizeHost(rpId)
+        if (normalized.isEmpty()) return emptyList()
+        val bare = normalized.removePrefix("www.")
+        return linkedSetOf(normalized, bare, "www.$bare").toList()
+    }
+
+    /**
      * True when the two hosts are the same site: identical, one a subdomain of
      * the other, or siblings under one registrable domain. Symmetric.
      *
@@ -162,8 +211,10 @@ object DomainMatch {
         if (a.isEmpty() || b.isEmpty()) return false
 
         if (a == b) return true
-        if (a.endsWith(".$b") || b.endsWith(".$a")) return true
+        if (a.endsWith(".$b") && !isPublicSuffix(b)) return true
+        if (b.endsWith(".$a") && !isPublicSuffix(a)) return true
 
+        if (isPublicSuffix(a) || isPublicSuffix(b)) return false
         return registrableDomain(a) == registrableDomain(b)
     }
 }

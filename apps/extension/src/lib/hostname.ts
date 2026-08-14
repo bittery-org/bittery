@@ -146,7 +146,17 @@ export function normalizeHost(value: string | null | undefined): string {
 		}
 	}
 
-	return host.replace(/^\.+/, "").replace(/\.+$/, "");
+	host = host.replace(/^\.+/, "").replace(/\.+$/, "");
+
+	// Punycode, so a Unicode host compares equal to the ASCII form every caller
+	// supplies. `window.location.hostname` and `extractHostname` both hand back
+	// IDNA ToASCII output; an item saved as `bücher.de` would otherwise never
+	// match its own site. `URL` is the only IDNA implementation available here.
+	try {
+		return new URL(`https://${host}`).hostname;
+	} catch {
+		return host;
+	}
 }
 
 /**
@@ -204,6 +214,19 @@ export function registrableDomain(host: string): string {
 }
 
 /**
+ * A host nobody can own: a bare TLD, or a listed multi-label suffix.
+ *
+ * Without this, the superdomain rule in {@link hostnameMatches} treats `co.uk`
+ * as the parent site of every UK domain, so an item saved with URL `co.uk` is
+ * offered on all of them. A single label is included because there is no way to
+ * tell `com` from `localhost` without the full Public Suffix List, and the safe
+ * direction here is to offer a credential too rarely rather than too often.
+ */
+function isPublicSuffix(host: string): boolean {
+	return !host.includes(".") || MULTI_LABEL_PUBLIC_SUFFIXES.has(host);
+}
+
+/**
  * The domain keys a host is indexed and queried under. Android's `item_domains`
  * table matches by intersecting an item's indexed keys with a target's queried
  * keys, which reproduces `hostnameMatches` in SQL; the extension has no such
@@ -231,7 +254,9 @@ export function hostnameMatches(
 	if (!item || !target) return false;
 
 	if (item === target) return true;
-	if (item.endsWith(`.${target}`) || target.endsWith(`.${item}`)) return true;
+	if (item.endsWith(`.${target}`) && !isPublicSuffix(target)) return true;
+	if (target.endsWith(`.${item}`) && !isPublicSuffix(item)) return true;
 
+	if (isPublicSuffix(item) || isPublicSuffix(target)) return false;
 	return registrableDomain(item) === registrableDomain(target);
 }
