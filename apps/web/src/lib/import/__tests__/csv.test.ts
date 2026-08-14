@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildColumnIndex, parseCsv, readCsvColumn } from "../import/csv";
-import { ImportProviderError } from "../import/types";
+import { buildColumnIndex, parseCsv, readCsvColumn } from "../csv";
+import { ImportProviderError } from "../types";
 
 const REQUIRED = ["a", "b", "c"];
 

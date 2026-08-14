@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	applyPasswordHistoryOnPasswordChange,
 	normalizePasswordHistory,
-} from "../password-history";
+} from "./password-history";
 
 function entry(password: string, changedAt: string) {
 	return { password, changedAt };

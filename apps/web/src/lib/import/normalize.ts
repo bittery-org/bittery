@@ -1,5 +1,5 @@
-import { isValidBase32, parseOtpAuthUri } from "../totp";
-import type { TotpAlgorithm, TotpDigits } from "../types";
+import { isValidBase32, parseOtpAuthUri } from "@bittery/shared/totp";
+import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 
 /**
  * Shared normalization helpers for import providers.

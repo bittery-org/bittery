@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { keepassxcImportProvider } from "../import/providers/keepassxc";
-import type { ImportPreview, ImportSourceItem } from "../import/types";
-import { ImportProviderError } from "../import/types";
-import { generateTotpAt } from "../totp";
+import { generateTotpAt } from "@bittery/shared/totp";
+import { keepassxcImportProvider } from "../providers/keepassxc";
+import type { ImportPreview, ImportSourceItem } from "../types";
+import { ImportProviderError } from "../types";
 
 /**
  * KeePassXC's exporter header, verbatim from `CsvExporter::exportHeader`. Every

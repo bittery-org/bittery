@@ -1,4 +1,4 @@
-import type { PasswordHistoryEntry } from "./types";
+import type { PasswordHistoryEntry } from "@bittery/shared/types";
 
 export const PASSWORD_HISTORY_LIMIT = 10;
 

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { chromeImportProvider } from "../import/providers/chrome";
-import type { ImportPreview, ImportSourceItem } from "../import/types";
-import { ImportProviderError } from "../import/types";
+import { chromeImportProvider } from "../providers/chrome";
+import type { ImportPreview, ImportSourceItem } from "../types";
+import { ImportProviderError } from "../types";
 
 const CURRENT_HEADER = "name,url,username,password,note";
 const LEGACY_HEADER = "name,url,username,password";

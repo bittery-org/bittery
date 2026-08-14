@@ -10,13 +10,10 @@
 		"./billing": "./src/billing.ts",
 		"./credit-card": "./src/credit-card.ts",
 		"./device-setup": "./src/device-setup.ts",
-		"./export-types": "./src/export-types.ts",
 		"./password": "./src/password.ts",
 		"./password-analysis": "./src/password-analysis.ts",
-		"./password-history": "./src/password-history.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
-		"./import": "./src/import/index.ts",
 		"./api": "./src/api.ts",
 		"./api-client-factory": "./src/api-client-factory.ts",
 		"./api-query": "./src/api-query.ts",
@@ -38,8 +35,7 @@
 		"@bittery/api-contract": "workspace:*",
 		"@bittery/crypto-port": "workspace:*",
 		"@bittery/types": "workspace:*",
-		"@tanstack/react-query": "^5.101.4",
-		"jszip": "^3.10.1"
+		"@tanstack/react-query": "^5.101.4"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

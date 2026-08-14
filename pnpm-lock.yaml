@@ -869,9 +869,6 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@19.2.8)
-      jszip:
-        specifier: ^3.10.1
-        version: 3.10.1
     devDependencies:
       '@bittery/config':
         specifier: workspace:*

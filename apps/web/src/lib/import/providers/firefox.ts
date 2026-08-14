@@ -1,4 +1,4 @@
-import type { CustomField, DecryptedItemData } from "../../types";
+import type { CustomField, DecryptedItemData } from "@bittery/shared/types";
 import { buildColumnIndex, parseCsv, readCsvColumn } from "../csv";
 import { buildCustomFieldId, normalizeUrl } from "../normalize";
 import type {

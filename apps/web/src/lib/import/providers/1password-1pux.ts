@@ -1,11 +1,11 @@
-import JSZip, { type JSZipObject } from "jszip";
-import type { Address, PhoneNumber } from "../../identity";
+import type { Address, PhoneNumber } from "@bittery/shared/identity";
 import type {
 	DecryptedItemData,
 	ItemCategory,
 	TotpAlgorithm,
 	TotpDigits,
-} from "../../types";
+} from "@bittery/shared/types";
+import JSZip, { type JSZipObject } from "jszip";
 import type {
 	ImportDecryptedItem,
 	ImportPreview,

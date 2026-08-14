@@ -2,7 +2,7 @@
  * Types for encrypted vault export/import
  */
 
-import type { DecryptedItemData, ItemCategory } from "./types";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 
 /**
  * Vault metadata in the export (items stored flat at the top level)

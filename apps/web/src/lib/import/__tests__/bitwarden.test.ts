@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { bitwardenImportProvider } from "../import/providers/bitwarden";
-import type { ImportPreview, ImportSourceItem } from "../import/types";
-import { ImportProviderError } from "../import/types";
-import { generateTotpAt } from "../totp";
+import { generateTotpAt } from "@bittery/shared/totp";
+import { bitwardenImportProvider } from "../providers/bitwarden";
+import type { ImportPreview, ImportSourceItem } from "../types";
+import { ImportProviderError } from "../types";
 
 const CSV_HEADER =
 	"folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";

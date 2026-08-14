@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { onePassword1puxImportProvider } from "../import/providers/1password-1pux";
+import { onePassword1puxImportProvider } from "../providers/1password-1pux";
 
 const ZIP_LOCAL_FILE_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_DIR_SIGNATURE = 0x02014b50;

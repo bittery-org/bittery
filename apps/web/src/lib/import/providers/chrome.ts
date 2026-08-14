@@ -1,4 +1,4 @@
-import type { DecryptedItemData } from "../../types";
+import type { DecryptedItemData } from "@bittery/shared/types";
 import { buildColumnIndex, parseCsv, readCsvColumn } from "../csv";
 import { normalizeUrl } from "../normalize";
 import type {

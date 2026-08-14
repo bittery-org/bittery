@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { firefoxImportProvider } from "../import/providers/firefox";
-import type { ImportPreview, ImportSourceItem } from "../import/types";
-import { ImportProviderError } from "../import/types";
+import { firefoxImportProvider } from "../providers/firefox";
+import type { ImportPreview, ImportSourceItem } from "../types";
+import { ImportProviderError } from "../types";
 
 /**
  * Firefox's exporter header, verbatim from `LoginExport.sys.mjs`. Every cell is

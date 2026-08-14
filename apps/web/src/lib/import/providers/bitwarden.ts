@@ -1,10 +1,10 @@
-import type { Address, PhoneNumber } from "../../identity";
+import type { Address, PhoneNumber } from "@bittery/shared/identity";
 import type {
 	CustomField,
 	DecryptedItemData,
 	ItemCategory,
 	PasswordHistoryEntry,
-} from "../../types";
+} from "@bittery/shared/types";
 import { buildColumnIndex, parseCsv, readCsvColumn } from "../csv";
 import {
 	buildCustomFieldId,

@@ -1,4 +1,4 @@
-import type { DecryptedItemData, ItemCategory } from "../types";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 
 /**
  * Import providers currently supported by the shared import domain.
