@@ -1,10 +1,8 @@
 import { isUnauthorizedApiError } from "@bittery/api-contract";
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
-import {
-	type AccountSyncAssembly,
-	createAccountSync,
-} from "@bittery/core/services/account-sync";
+import { createAccountSync } from "@bittery/core/services/account-sync";
+import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
@@ -100,9 +98,6 @@ export function useDesktopSync(
 	enabled = true,
 ) {
 	const { m } = useI18n();
-	const [clientId, setClientId] = useState<string>("");
-	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
-	const [isInitialized, setIsInitialized] = useState(false);
 	const accountSync = useMemo(
 		() =>
 			createAccountSync({
@@ -113,48 +108,30 @@ export function useDesktopSync(
 			}),
 		[],
 	);
-
-	useSyncExternalStore(
-		vaultRuntime.subscribe,
-		vaultRuntime.getSnapshot,
-		vaultRuntime.getSnapshot,
+	const lifecycle = useMemo(
+		() =>
+			new AccountSyncLifecycle({
+				resolveClientId: getOrCreateDesktopSyncClientId,
+				getActiveAccountId: () => manager.getActiveAccount(),
+				subscribeAccountChanges: manager.subscribe,
+				subscribeVaultChanges: vaultRuntime.subscribe,
+				assemble: (input) => accountSync.assemble(input),
+			}),
+		[accountSync, manager, vaultRuntime],
 	);
-	const accountRevision = useSyncExternalStore(
-		manager.subscribe,
-		manager.getSnapshot,
-		manager.getSnapshot,
+	useEffect(() => {
+		lifecycle.start();
+		return () => lifecycle.dispose();
+	}, [lifecycle]);
+	const {
+		assembly,
+		clientId,
+		initialized: isInitialized,
+	} = useSyncExternalStore(
+		lifecycle.subscribe,
+		lifecycle.getSnapshot,
+		lifecycle.getSnapshot,
 	);
-	const activeAccountId = manager.getActiveAccount();
-
-	// Client identity is process-stable; account changes drive assembly separately.
-	useEffect(() => {
-		let mounted = true;
-		void getOrCreateDesktopSyncClientId().then((id) => {
-			if (mounted) setClientId(id);
-		});
-
-		return () => {
-			mounted = false;
-		};
-	}, []);
-
-	// Generation cancellation prevents a slow A→B assembly from overwriting B→A.
-	useEffect(() => {
-		void accountRevision;
-		if (!clientId) return;
-		let current = true;
-		setIsInitialized(false);
-		void accountSync
-			.assemble({ clientId, activeAccountId })
-			.then((resolved) => {
-				if (!current) return;
-				setAssembly(resolved);
-				setIsInitialized(true);
-			});
-		return () => {
-			current = false;
-		};
-	}, [accountSync, accountRevision, activeAccountId, clientId]);
 
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
@@ -180,9 +157,9 @@ export function useDesktopSync(
 			await applyInvalidatedSession(
 				await accountSync.invalidateSession({ sessionId }),
 			);
-			setAssembly(null);
+			lifecycle.clear();
 		},
-		[accountSync, applyInvalidatedSession],
+		[accountSync, applyInvalidatedSession, lifecycle],
 	);
 
 	const onSessionRevoked = useCallback(
@@ -193,9 +170,9 @@ export function useDesktopSync(
 			if (!revoked) {
 				return;
 			}
-			setAssembly(null);
+			lifecycle.clear();
 		},
-		[accountSync, applyInvalidatedSession],
+		[accountSync, applyInvalidatedSession, lifecycle],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.

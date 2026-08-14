@@ -1,8 +1,6 @@
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
-import {
-	type AccountSyncAssembly,
-	createAccountSync,
-} from "@bittery/core/services/account-sync";
+import { createAccountSync } from "@bittery/core/services/account-sync";
+import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
@@ -105,9 +103,6 @@ export function useMobileSync(
 	const { m } = useI18n();
 	const { toast } = useToast();
 	const router = useRouter();
-	const [clientId, setClientId] = useState<string>("");
-	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
-	const [isInitialized, setIsInitialized] = useState(false);
 	const accountSync = useMemo(
 		() =>
 			createAccountSync({
@@ -118,30 +113,30 @@ export function useMobileSync(
 			}),
 		[],
 	);
-
-	useSyncExternalStore(
-		vaultRuntime.subscribe,
-		vaultRuntime.getSnapshot,
-		vaultRuntime.getSnapshot,
+	const lifecycle = useMemo(
+		() =>
+			new AccountSyncLifecycle({
+				resolveClientId: getOrCreateMobileSyncClientId,
+				getActiveAccountId: () => manager.getActiveAccount(),
+				subscribeAccountChanges: manager.subscribe,
+				subscribeVaultChanges: vaultRuntime.subscribe,
+				assemble: (input) => accountSync.assemble(input),
+			}),
+		[accountSync, manager, vaultRuntime],
 	);
-	const accountRevision = useSyncExternalStore(
-		manager.subscribe,
-		manager.getSnapshot,
-		manager.getSnapshot,
-	);
-	const activeAccountId = manager.getActiveAccount();
-
-	// Client identity is process-stable; account changes drive assembly separately.
 	useEffect(() => {
-		let mounted = true;
-		void getOrCreateMobileSyncClientId().then((id) => {
-			if (mounted) setClientId(id);
-		});
-
-		return () => {
-			mounted = false;
-		};
-	}, []);
+		lifecycle.start();
+		return () => lifecycle.dispose();
+	}, [lifecycle]);
+	const {
+		assembly,
+		clientId,
+		initialized: isInitialized,
+	} = useSyncExternalStore(
+		lifecycle.subscribe,
+		lifecycle.getSnapshot,
+		lifecycle.getSnapshot,
+	);
 
 	// Native account state may change while JavaScript is suspended.
 	useEffect(() => {
@@ -150,24 +145,6 @@ export function useMobileSync(
 		});
 		return () => subscription.remove();
 	}, [manager]);
-
-	// Ignore obsolete async results during rapid account switches.
-	useEffect(() => {
-		void accountRevision;
-		if (!clientId) return;
-		let current = true;
-		setIsInitialized(false);
-		void accountSync
-			.assemble({ clientId, activeAccountId })
-			.then((resolved) => {
-				if (!current) return;
-				setAssembly(resolved);
-				setIsInitialized(true);
-			});
-		return () => {
-			current = false;
-		};
-	}, [accountSync, accountRevision, activeAccountId, clientId]);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const onSessionRevoked = useCallback(
@@ -178,11 +155,11 @@ export function useMobileSync(
 			}
 			await queryClient.cancelQueries();
 			queryClient.clear();
-			setAssembly(null);
+			lifecycle.clear();
 			await manager.refresh();
 			router.replace("/(auth)/login");
 		},
-		[accountSync, manager, queryClient, router],
+		[accountSync, lifecycle, manager, queryClient, router],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.show({
