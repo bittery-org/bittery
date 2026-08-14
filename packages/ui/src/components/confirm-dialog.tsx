@@ -30,8 +30,13 @@ import { cn } from "../lib/utils";
  * click. That is not a gap to close later; it is where this component stops.
  */
 export interface ConfirmDialogProps {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
+	/**
+	 * Both optional so a row-level "remove this member" dialog can stay
+	 * uncontrolled and let its own trigger open it, which is how two of the call
+	 * sites already worked. Radix reads an undefined `open` as uncontrolled.
+	 */
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
 	/** Renders inside `AlertDialogTrigger`. Omit for a controlled dialog. */
 	trigger?: ReactNode;
 	title: ReactNode;

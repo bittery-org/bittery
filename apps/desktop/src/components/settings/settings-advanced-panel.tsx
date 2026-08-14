@@ -1,16 +1,5 @@
 import { useCoreContext } from "@bittery/core/hooks";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	Button,
-	toast,
-} from "@bittery/ui";
+import { Button, ConfirmDialog, toast } from "@bittery/ui";
 import { IconLoaderCircle } from "@bittery/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -91,40 +80,26 @@ export function SettingsAdvancedPanel({
 				</SettingsField>
 			</div>
 
-			<AlertDialog
+			<ConfirmDialog
 				open={isClearCacheConfirmOpen}
 				onOpenChange={setIsClearCacheConfirmOpen}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>
-							{m.settings_dialog_clear_cache_confirm_title()}
-						</AlertDialogTitle>
-						<AlertDialogDescription>
-							{m.settings_dialog_clear_cache_confirm_description()}
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel disabled={clearCacheMutation.isPending}>
-							{m.settings_common_action_cancel()}
-						</AlertDialogCancel>
-						<AlertDialogAction
-							onClick={() => clearCacheMutation.mutate()}
-							disabled={clearCacheMutation.isPending}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-						>
-							{clearCacheMutation.isPending ? (
-								<>
-									<IconLoaderCircle className="h-4 w-4 animate-spin" />
-									{m.settings_dialog_clear_cache_confirm_action_clearing()}
-								</>
-							) : (
-								m.settings_dialog_clear_cache_confirm_action_confirm()
-							)}
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+				title={m.settings_dialog_clear_cache_confirm_title()}
+				description={m.settings_dialog_clear_cache_confirm_description()}
+				cancelLabel={m.settings_common_action_cancel()}
+				confirmLabel={
+					clearCacheMutation.isPending ? (
+						<>
+							<IconLoaderCircle className="h-4 w-4 animate-spin" />
+							{m.settings_dialog_clear_cache_confirm_action_clearing()}
+						</>
+					) : (
+						m.settings_dialog_clear_cache_confirm_action_confirm()
+					)
+				}
+				onConfirm={() => clearCacheMutation.mutate()}
+				busy={clearCacheMutation.isPending}
+				destructive
+			/>
 		</>
 	);
 }
