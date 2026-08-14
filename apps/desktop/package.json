@@ -6,7 +6,7 @@
 	"scripts": {
 		"check-types": "tsc --noEmit",
 		"generate:bindings": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings",
-		"test": "node --test scripts/*.test.mjs",
+		"test": "bun test src && node --test scripts/*.test.mjs",
 		"dev": "tauri dev",
 		"dev:vite": "vite",
 		"build:native-host:dev": "cd src-tauri && cargo build --bin bittery-native-host",

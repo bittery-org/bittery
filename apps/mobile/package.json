@@ -16,7 +16,8 @@
 		"build:eas": "eas build",
 		"build:preview": "eas build --profile preview",
 		"build:production": "eas build --profile production",
-		"check-types": "tsc --noEmit"
+		"check-types": "tsc --noEmit",
+		"test": "bun test src"
 	},
 	"dependencies": {
 		"@bittery/core": "workspace:*",
