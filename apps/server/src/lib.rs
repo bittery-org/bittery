@@ -6,6 +6,7 @@ pub(crate) mod http;
 pub(crate) mod integrations;
 mod jobs;
 pub(crate) mod repo;
+mod runtime;
 pub(crate) mod services;
 pub(crate) mod shapes;
 #[cfg(test)]
@@ -16,7 +17,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 
 use fred::prelude::Pool as RedisPool;
-use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
+use services::rate_limit::PostgresRateLimiter;
 
 pub use app::create_app;
 pub(crate) use http::api::create_api_router;
@@ -36,6 +37,7 @@ pub use http::middleware::{
 };
 pub use http::public::create_public_http_router;
 pub use jobs::JobRunner;
+pub use runtime::ServerRuntime;
 pub use services::auth::request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
 pub use services::rate_limit::{build_rate_limiter, RateLimiter};
@@ -45,7 +47,7 @@ pub use services::sync_pubsub::SyncPubSub;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db_pool: Option<PgPool>,
+    pub db_pool: PgPool,
     pub redis: Option<RedisPool>,
     pub sessions: SessionService,
     pub connection_registry: ConnectionRegistry,
@@ -54,24 +56,10 @@ pub struct AppState {
     pub rate_limiter: Arc<dyn RateLimiter>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            db_pool: None,
-            redis: None,
-            sessions: SessionService::default(),
-            connection_registry: ConnectionRegistry::none(),
-            sync_pubsub: SyncPubSub::new(),
-            instance_id: uuid::Uuid::new_v4().to_string(),
-            rate_limiter: Arc::new(NoopRateLimiter),
-        }
-    }
-}
-
 impl AppState {
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
-            db_pool: Some(pool.clone()),
+            db_pool: pool.clone(),
             redis: None,
             sessions: SessionService::from_pool(pool.clone()),
             connection_registry: ConnectionRegistry::none(),
@@ -104,11 +92,15 @@ impl AppState {
         self.sync_pubsub.notify_sync();
     }
 
-    pub async fn from_env() -> Result<Self, sqlx::Error> {
-        match db::connect_from_env().await? {
-            Some(pool) => Ok(Self::from_pool(pool)),
-            _ => Ok(Self::default()),
-        }
+    #[cfg(test)]
+    pub(crate) fn database_free_test() -> Self {
+        use services::rate_limit::NoopRateLimiter;
+        use sqlx::postgres::PgPoolOptions;
+
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@127.0.0.1:1/bittery_router_shape")
+            .expect("fixed database-free test URL should parse");
+        Self::from_pool(pool).with_rate_limiter(Arc::new(NoopRateLimiter))
     }
 }
 

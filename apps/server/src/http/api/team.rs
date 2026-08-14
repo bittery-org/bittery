@@ -8,7 +8,6 @@ use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     db::enums::{
         InvitationStatus, ShareLinkAccessMode, ShareLinkStatus, TeamRole, TeamType, VaultRole,
         VaultType,
@@ -338,7 +337,7 @@ async fn current_team(
     request: AuthenticatedRequest,
 ) -> Result<Json<TeamSummaryResponse>, ApiError> {
     Ok(Json(
-        team::list_teams(db_pool(&state)?, &request.session.user_id)
+        team::list_teams(&state.db_pool, &request.session.user_id)
             .await?
             .into(),
     ))
@@ -352,7 +351,7 @@ async fn get_team(
 ) -> Result<Json<TeamDetailsResponse>, ApiError> {
     Ok(Json(
         team::get_team(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::TeamIdInput { team_id },
         )
@@ -369,7 +368,7 @@ async fn list_team_vaults(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<TeamVaultResponse>>, ApiError> {
     let values: Vec<TeamVaultResponse> = team::get_team_vaults(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         team::TeamIdInput {
             team_id: team_id.clone(),
@@ -397,7 +396,7 @@ async fn create_team(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::create_team(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::CreateTeamInput {
                 name: body.name,
@@ -433,7 +432,7 @@ async fn update_team(
     };
     Ok(Json(
         team::update_team(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::UpdateTeamInput {
                 team_id,
@@ -455,7 +454,7 @@ async fn create_image_upload(
 ) -> Result<Json<PresignedUploadResponse>, ApiError> {
     Ok(Json(
         team::create_team_image_upload(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::CreateImageUploadInput {
                 team_id,
@@ -476,7 +475,7 @@ async fn delete_team(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::delete_team(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::TeamIdInput { team_id },
         )
@@ -491,7 +490,7 @@ async fn invitation_by_token(
     Path(token): Path<String>,
 ) -> Result<Json<InvitationDetailsResponse>, ApiError> {
     Ok(Json(
-        team::get_invitation_by_token(db_pool(&state)?, team::TokenInput { token })
+        team::get_invitation_by_token(&state.db_pool, team::TokenInput { token })
             .await?
             .into(),
     ))
@@ -504,7 +503,7 @@ async fn pending_invitations(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<PendingInvitationResponse>>, ApiError> {
     let values: Vec<PendingInvitationResponse> =
-        team::get_pending_invitations(db_pool(&state)?, &request.session.user_id)
+        team::get_pending_invitations(&state.db_pool, &request.session.user_id)
             .await?
             .into_iter()
             .map(Into::into)
@@ -527,7 +526,7 @@ async fn list_invitations(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<InvitationListResponse>>, ApiError> {
     let values: Vec<InvitationListResponse> = invitation_handlers::list_team_invitations(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         team::TeamIdInput {
             team_id: team_id.clone(),
@@ -567,7 +566,7 @@ async fn send_invitation(
     });
     Ok(Json(
         team::send_invitation(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::SendInvitationInput {
                 team_id,
@@ -589,7 +588,7 @@ async fn accept_invitation(
 ) -> Result<Json<AcceptInvitationResponse>, ApiError> {
     Ok(Json(
         team::accept_invitation(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::TokenInput { token },
         )
@@ -606,7 +605,7 @@ async fn accept_invitation_by_id(
 ) -> Result<Json<AcceptInvitationResponse>, ApiError> {
     Ok(Json(
         team::accept_invitation_by_id(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -623,7 +622,7 @@ async fn decline_invitation(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::decline_invitation(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::TokenInput { token },
         )
@@ -640,7 +639,7 @@ async fn decline_invitation_by_id(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::decline_invitation_by_id(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -657,7 +656,7 @@ async fn cancel_invitation(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::cancel_invitation(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -676,7 +675,7 @@ async fn resend_invitation(
     idempotency::reject_one_time_secret(&headers)?;
     Ok(Json(
         team::resend_invitation(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -693,7 +692,7 @@ async fn list_members(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<TeamMemberResponse>>, ApiError> {
     let values: Vec<TeamMemberResponse> = member_handlers::list_team_members(
-        db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         team::TeamIdInput {
             team_id: team_id.clone(),
@@ -721,7 +720,7 @@ async fn member_access(
 ) -> Result<Json<MemberAccessResponse>, ApiError> {
     Ok(Json(
         access::get_member_access(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             MemberAccessInput { user_id },
         )

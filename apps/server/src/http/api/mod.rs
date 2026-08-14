@@ -464,7 +464,7 @@ mod tests {
         expected_code: &str,
     ) -> axum::http::HeaderMap {
         let response = super::create_api_router()
-            .with_state(AppState::default())
+            .with_state(AppState::database_free_test())
             .oneshot(
                 Request::builder()
                     .method(method)
@@ -509,7 +509,7 @@ mod tests {
         .await;
 
         let response = super::create_api_router()
-            .with_state(AppState::default())
+            .with_state(AppState::database_free_test())
             .oneshot(
                 Request::builder()
                     .uri("/does-not-exist")

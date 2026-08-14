@@ -556,6 +556,17 @@ impl EnvVarGuard {
         }
         Self { previous }
     }
+
+    pub(crate) fn remove(keys: &[&str]) -> Self {
+        let previous = keys
+            .iter()
+            .map(|key| ((*key).to_string(), std::env::var(key).ok()))
+            .collect();
+        for key in keys {
+            unsafe { std::env::remove_var(key) };
+        }
+        Self { previous }
+    }
 }
 
 impl Drop for EnvVarGuard {

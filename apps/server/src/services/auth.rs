@@ -21,8 +21,7 @@ use tracing::info;
 
 use crate::{
     config::{
-        self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool,
-        TrustProxyMode,
+        self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, TrustProxyMode,
     },
     db::{
         enums::{BillingPlan, BillingStatus, TeamRole, TeamType, VaultRole, VaultType},
@@ -624,10 +623,7 @@ pub(crate) async fn request_signup_verification(
     request: &RequestMetadata,
     input: RequestSignupVerificationInput,
 ) -> Result<LogoutResponse, AppError> {
-    let pool = app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| AppError::internal("Database is not configured"))?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
 
     // Two independent counters, as in `request_recovery_verification`: a composite
@@ -682,10 +678,7 @@ pub(crate) async fn verify_signup_verification(
     request: &RequestMetadata,
     input: VerifySignupVerificationInput,
 ) -> Result<VerifySignupVerificationResponse, AppError> {
-    let pool = app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| AppError::internal("Database is not configured"))?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
     let limiter = app_state.rate_limiter.as_ref();
 
@@ -753,7 +746,7 @@ pub(crate) async fn signup(
     input: SignupInput,
 ) -> Result<SignupResponse, AppError> {
     let kdf_profile = validate_signup_input(&input)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
 
     let limiter = app_state.rate_limiter.as_ref();
@@ -919,7 +912,7 @@ pub(crate) async fn signup_with_invitation(
     input: SignupWithInvitationInput,
 ) -> Result<SignupResponse, AppError> {
     let kdf_profile = validate_signup_with_invitation_input(&input)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     // Unauthenticated endpoint: apply the generic per-IP throttle so it cannot be
     // hammered to probe invitation tokens / emails.
     enforce_window_limit(
@@ -1084,7 +1077,7 @@ pub(crate) async fn start_login(
     input: StartLoginInput,
 ) -> Result<StartLoginResponse, AppError> {
     validate_hex_string(&input.client_public_key, "Invalid client public key")?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
     let normalized_email_hash = hash_normalized_email(&normalized_email);
 
@@ -1248,7 +1241,7 @@ pub(crate) async fn finish_login(
     request: &RequestMetadata,
     input: FinishLoginInput,
 ) -> Result<FinishLoginResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
@@ -1291,7 +1284,7 @@ pub(crate) async fn request_recovery_verification(
     request: &RequestMetadata,
     input: RequestRecoveryVerificationInput,
 ) -> Result<LogoutResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
 
     // Two independent counters rather than one composite `email:ip` key: a composite
@@ -1339,7 +1332,7 @@ pub(crate) async fn verify_recovery_code(
     request: &RequestMetadata,
     input: VerifyRecoveryCodeInput,
 ) -> Result<VerifyRecoveryCodeResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let normalized_email = normalize_email(&input.email);
     let limiter = app_state.rate_limiter.as_ref();
 
@@ -1425,7 +1418,7 @@ pub(crate) async fn get_recovery_data(
     request: &RequestMetadata,
     input: GetRecoveryDataInput,
 ) -> Result<GetRecoveryDataResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
@@ -1464,7 +1457,7 @@ pub(crate) async fn reset_password(
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
@@ -1529,7 +1522,7 @@ pub(crate) async fn update_email(
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let normalized_new_email = normalize_email(&input.new_email);
     let existing_user_id =
         query_scalar::<_, String>("SELECT id FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1")
@@ -1594,7 +1587,7 @@ pub(crate) async fn change_password(
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
 
     update_user_password_data(pool, &session.user_id, &input, kdf_profile).await?;
     let revoked_session_ids = app_state
@@ -1639,7 +1632,7 @@ pub(crate) async fn regenerate_secret_key(
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
 
     update_user_secret_key_data(pool, &session.user_id, &input, kdf_profile).await?;
     let revoked_session_ids = app_state
@@ -1680,7 +1673,7 @@ pub(crate) async fn store_recovery_key(
     session: &VerifiedSession,
     input: StoreRecoveryKeyInput,
 ) -> Result<LogoutResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let user = query_as::<_, DbAccountMutationUserRow>(
 		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
@@ -1719,7 +1712,7 @@ pub(crate) async fn delete_account(
     session: &VerifiedSession,
     input: DeleteAccountInput,
 ) -> Result<LogoutResponse, AppError> {
-    let pool = db_pool(app_state)?;
+    let pool = &app_state.db_pool;
     let user = query_as::<_, DbAccountMutationUserRow>(
 		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
@@ -1801,10 +1794,7 @@ pub(crate) async fn registration_status(
         });
     }
 
-    let allow_public_signup = match app_state.db_pool.as_ref() {
-        Some(pool) => !has_any_registered_user(pool).await?,
-        None => true,
-    };
+    let allow_public_signup = !has_any_registered_user(&app_state.db_pool).await?;
 
     Ok(RegistrationStatusResponse {
         mode,
@@ -1824,21 +1814,18 @@ pub(crate) async fn check_email(
     input: CheckEmailInput,
 ) -> Result<CheckEmailResponse, AppError> {
     let normalized_email = normalize_email(&input.email);
-    let secret_key_hint = match app_state.db_pool.as_ref() {
-        Some(pool) => query_as::<_, DbCheckEmailRow>(
-            "SELECT secret_key_hint FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
-        )
-        .bind(&normalized_email)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load account");
-            AppError::internal("Failed to load account")
-        })?
-        .and_then(|row| row.secret_key_hint)
-        .unwrap_or_else(|| deterministic_fake_hint(&normalized_email)),
-        None => deterministic_fake_hint(&normalized_email),
-    };
+    let secret_key_hint = query_as::<_, DbCheckEmailRow>(
+        "SELECT secret_key_hint FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
+    )
+    .bind(&normalized_email)
+    .fetch_optional(&app_state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load account");
+        AppError::internal("Failed to load account")
+    })?
+    .and_then(|row| row.secret_key_hint)
+    .unwrap_or_else(|| deterministic_fake_hint(&normalized_email));
 
     Ok(CheckEmailResponse {
         exists: true,
@@ -1850,10 +1837,7 @@ pub(crate) async fn get_me(
     app_state: &AppState,
     session: &VerifiedSession,
 ) -> Result<MeResponse, AppError> {
-    let pool = app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| AppError::internal("Database is not configured"))?;
+    let pool = &app_state.db_pool;
     let user = query_as::<_, DbMeRow>(
 		"SELECT u.id, u.email, u.name, u.team_id, t.name AS team_name, t.type::text AS team_type, t.image_key AS team_image_key, u.role::text AS role, u.secret_key_hint, u.public_key, u.encrypted_private_key, u.encrypted_master_key, u.created_at FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
@@ -1938,36 +1922,34 @@ pub(crate) async fn revoke_device(
             );
         }
 
-        if let Some(pool) = app_state.db_pool.as_ref() {
-            record_session_revocations(
-                pool,
-                &session.user_id,
-                &revoked_session_ids,
-                "device_revoked",
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record session revocations");
-                AppError::internal("Failed to record session revocations")
-            })?;
-            insert_audit_event(
-                pool,
-                &format!(
-                    "audit_{}",
-                    &hash_token(&generate_opaque_session_token())[..16]
-                ),
-                &session.user_id,
-                "device_revoked",
-                "session",
-                &input.session_id,
-                None,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record device revoke audit event");
-                AppError::internal("Failed to record device revoke audit event")
-            })?;
-        }
+        record_session_revocations(
+            &app_state.db_pool,
+            &session.user_id,
+            &revoked_session_ids,
+            "device_revoked",
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to record session revocations");
+            AppError::internal("Failed to record session revocations")
+        })?;
+        insert_audit_event(
+            &app_state.db_pool,
+            &format!(
+                "audit_{}",
+                &hash_token(&generate_opaque_session_token())[..16]
+            ),
+            &session.user_id,
+            "device_revoked",
+            "session",
+            &input.session_id,
+            None,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to record device revoke audit event");
+            AppError::internal("Failed to record device revoke audit event")
+        })?;
     }
 
     Ok(LogoutResponse { success: true })

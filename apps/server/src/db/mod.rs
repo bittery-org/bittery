@@ -34,6 +34,20 @@ pub async fn connect_from_env() -> Result<Option<PgPool>, sqlx::Error> {
     }
 }
 
+pub fn database_url_from_env() -> Result<String, &'static str> {
+    env::var("DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_owned())
+        .ok_or("DATABASE_URL is required")
+}
+
+pub async fn connect_required_from_env() -> Result<PgPool, Box<dyn std::error::Error + Send + Sync>>
+{
+    let database_url = database_url_from_env().map_err(std::io::Error::other)?;
+    Ok(connect(&database_url).await?)
+}
+
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrator = Migrator::new(resolve_migrations_dir()).await?;
     migrator.run(pool).await
@@ -48,4 +62,18 @@ fn resolve_migrations_dir() -> PathBuf {
     }
 
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::database_url_from_env;
+    use crate::test_support::{acquire_env_lock, EnvVarGuard};
+
+    #[test]
+    fn database_url_is_required() {
+        let _lock = acquire_env_lock();
+        let _database_url = EnvVarGuard::remove(&["DATABASE_URL"]);
+
+        assert_eq!(database_url_from_env(), Err("DATABASE_URL is required"));
+    }
 }

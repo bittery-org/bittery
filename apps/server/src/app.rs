@@ -122,8 +122,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_support_matches_production_router_shape() {
-        let production = create_app(AppState::default(), EdgeHttpConfig::default());
-        let test_support = create_test_router(AppState::default());
+        let production = create_app(AppState::database_free_test(), EdgeHttpConfig::default());
+        let test_support = create_test_router(AppState::database_free_test());
 
         let root = assert_matching_response(&production, &test_support, || {
             Request::builder()

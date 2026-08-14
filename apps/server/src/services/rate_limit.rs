@@ -226,10 +226,11 @@ pub trait RateLimiter: Send + Sync {
 // No-op backend (used when no database/redis is configured)
 // ---------------------------------------------------------------------------
 
-/// Always-allow limiter. Only used by `AppState::default()` where no database is
-/// configured (in which case the endpoints themselves fail before any real work).
+/// Always-allow limiter for database-free router and middleware tests.
+#[cfg(test)]
 pub struct NoopRateLimiter;
 
+#[cfg(test)]
 #[async_trait]
 impl RateLimiter for NoopRateLimiter {
     async fn check_and_increment(

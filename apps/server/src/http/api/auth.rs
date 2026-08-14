@@ -522,7 +522,7 @@ async fn list_vault_keys(
         .map(timestamp_cursor_key)
         .transpose()?;
     let service_page = auth::load_auth_vault_keys_page(
-        crate::config::db_pool(&state)?,
+        &state.db_pool,
         &request.session.user_id,
         cursor,
         query_limit(&page)?,
@@ -1097,7 +1097,7 @@ mod tests {
 
     #[tokio::test]
     async fn email_check_rejects_unknown_fields_as_problem_json() {
-        let response = create_app(AppState::default(), EdgeHttpConfig::default())
+        let response = create_app(AppState::database_free_test(), EdgeHttpConfig::default())
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -1121,7 +1121,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticated_routes_reject_missing_sessions() {
-        let response = create_app(AppState::default(), EdgeHttpConfig::default())
+        let response = create_app(AppState::database_free_test(), EdgeHttpConfig::default())
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/users/me")

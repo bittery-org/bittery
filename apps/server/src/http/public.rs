@@ -65,12 +65,7 @@ async fn join_waitlist(
     State(app_state): State<AppState>,
     Json(input): Json<crate::services::waitlist::WaitlistSignupInput>,
 ) -> Response {
-    let Some(pool) = app_state.db_pool.as_ref() else {
-        return json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Database is not configured",
-        );
-    };
+    let pool = &app_state.db_pool;
 
     match crate::services::waitlist::join_beta_waitlist(pool, input).await {
         Ok(response) => Json(response).into_response(),
@@ -144,13 +139,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
             .into_response();
     };
 
-    let Some(pool) = app_state.db_pool.as_ref() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            cache_control_header(FAVICON_CACHE_CONTROL),
-        )
-            .into_response();
-    };
+    let pool = &app_state.db_pool;
 
     match get_fetched_favicon(pool, &domain).await {
         Ok(Some(icon)) => {
@@ -221,12 +210,7 @@ async fn stripe_webhook(
         );
     }
 
-    let Some(pool) = app_state.db_pool.as_ref() else {
-        return json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Database is not configured",
-        );
-    };
+    let pool = &app_state.db_pool;
 
     let signature_header = headers
         .get("stripe-signature")

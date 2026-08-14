@@ -4,7 +4,6 @@ use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    config::db_pool,
     services::audit::{self, TeamEventsInput},
     AppState,
 };
@@ -300,7 +299,7 @@ async fn list_audit_events(
     validate_query(&query)?;
     Ok(Json(
         audit::get_team_events(
-            db_pool(&state)?,
+            &state.db_pool,
             &request.session.user_id,
             TeamEventsInput {
                 cursor: query.cursor,

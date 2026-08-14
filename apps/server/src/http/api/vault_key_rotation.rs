@@ -79,7 +79,6 @@ enum RotationErrorResponses {
     ServiceUnavailable(ProblemDetails),
 }
 use crate::{
-    config::db_pool,
     db::enums::VaultKeyRotationManifestKind,
     services::{
         member_departure,
@@ -171,7 +170,7 @@ async fn page(
 ) -> Result<Json<PreparationPage>, ApiError> {
     Ok(Json(
         vault_key_rotation::read_preparation_page(
-            db_pool(&state)?,
+            &state.db_pool,
             &plan_id,
             &auth.session.user_id,
             kind(&raw_kind)?,
@@ -198,7 +197,7 @@ async fn stage(
         })
         .collect();
     vault_key_rotation::stage_outputs(
-        db_pool(&state)?,
+        &state.db_pool,
         &plan_id,
         &auth.session.user_id,
         kind(&raw_kind)?,
@@ -214,7 +213,7 @@ async fn abandon(
     auth: AuthenticatedRequest,
     Path(plan_id): Path<String>,
 ) -> Result<(), ApiError> {
-    vault_key_rotation::abandon_plan(db_pool(&state)?, &plan_id, &auth.session.user_id).await?;
+    vault_key_rotation::abandon_plan(&state.db_pool, &plan_id, &auth.session.user_id).await?;
     Ok(())
 }
 
@@ -225,7 +224,7 @@ async fn start_vault_member_removal(
     headers: HeaderMap,
     Path((vault_id, user_id)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let route = format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans");
     idempotency::execute(
         pool,
@@ -258,7 +257,7 @@ async fn finalize_vault_member_removal(
         ));
     }
     let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let plan_id = body.plan_ids[0].clone();
     let route =
         format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans/finalize");
@@ -292,7 +291,7 @@ async fn start_team_leave(
     headers: HeaderMap,
     Path(team_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let route = format!("/api/v1/teams/{team_id}/leave-rotation-plans");
     idempotency::execute(
         pool,
@@ -319,7 +318,7 @@ async fn start_team_member_removal(
     headers: HeaderMap,
     Path((team_id, user_id)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    let pool = db_pool(&state)?.clone();
+    let pool = state.db_pool.clone();
     let route = format!("/api/v1/teams/{team_id}/members/{user_id}/removal-rotation-plans");
     idempotency::execute(
         pool,
@@ -351,7 +350,7 @@ async fn finalize_departure(
     administrative: bool,
 ) -> Result<Response, ApiError> {
     let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
-    let pool = db_pool(state)?.clone();
+    let pool = state.db_pool.clone();
     let route = if administrative {
         format!("/api/v1/teams/{team_id}/members/{target_id}/removal-rotation-plans/finalize")
     } else {

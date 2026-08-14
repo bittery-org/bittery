@@ -138,15 +138,12 @@ pub(crate) async fn get_billing_status(
 }
 
 pub(crate) async fn get_billing_entitlements(
-    db_pool: Option<&PgPool>,
+    db_pool: &PgPool,
     user_id: &str,
 ) -> Result<BillingEntitlementsResponse, AppError> {
     let mode = bittery_mode().to_string();
     if mode == "self-hosted" {
-        let state = match db_pool {
-            Some(pool) => load_optional_billing_state(pool, user_id).await?,
-            None => None,
-        };
+        let state = load_optional_billing_state(db_pool, user_id).await?;
         let plan = state
             .as_ref()
             .and_then(|actor| actor.billing_plan)
@@ -179,8 +176,7 @@ pub(crate) async fn get_billing_entitlements(
             limits: snapshot.limits,
         });
     }
-    let pool = db_pool.ok_or_else(|| AppError::internal("Database is not configured"))?;
-    let actor = load_billing_actor(pool, user_id).await?;
+    let actor = load_billing_actor(db_pool, user_id).await?;
     actor
         .team_id
         .clone()
