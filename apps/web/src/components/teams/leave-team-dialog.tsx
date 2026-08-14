@@ -1,16 +1,4 @@
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-	Button,
-	toast,
-} from "@bittery/ui";
+import { Button, ConfirmDialog, toast } from "@bittery/ui";
 import { IconLogOut as LogOut } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -83,31 +71,30 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	};
 
 	return (
-		<AlertDialog open={open} onOpenChange={setOpen}>
-			<AlertDialogTrigger asChild>
+		<ConfirmDialog
+			open={open}
+			onOpenChange={setOpen}
+			trigger={
 				<Button variant="outline">
 					<LogOut className="mr-2 h-4 w-4" />
 					{m.team_leave_dialog_trigger()}
 				</Button>
-			</AlertDialogTrigger>
-			<AlertDialogContent>
-				<AlertDialogHeader>
-					<AlertDialogTitle>{m.team_leave_dialog_title()}</AlertDialogTitle>
-					<AlertDialogDescription>
-						{m.team_leave_dialog_description_prefix()}{" "}
-						<strong>{teamName}</strong>{" "}
-						{m.team_leave_dialog_description_suffix()}
-					</AlertDialogDescription>
-				</AlertDialogHeader>
-				<AlertDialogFooter>
-					<AlertDialogCancel>{m.team_common_action_cancel()}</AlertDialogCancel>
-					<AlertDialogAction onClick={handleLeave} disabled={isLeaving}>
-						{isLeaving
-							? m.team_leave_dialog_action_leaving()
-							: m.team_leave_dialog_action_confirm()}
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
+			}
+			title={m.team_leave_dialog_title()}
+			description={
+				<>
+					{m.team_leave_dialog_description_prefix()} <strong>{teamName}</strong>{" "}
+					{m.team_leave_dialog_description_suffix()}
+				</>
+			}
+			cancelLabel={m.team_common_action_cancel()}
+			confirmLabel={
+				isLeaving
+					? m.team_leave_dialog_action_leaving()
+					: m.team_leave_dialog_action_confirm()
+			}
+			onConfirm={handleLeave}
+			busy={isLeaving}
+		/>
 	);
 }

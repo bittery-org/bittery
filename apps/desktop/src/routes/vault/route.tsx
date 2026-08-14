@@ -15,6 +15,7 @@ import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
 	CreateItemSheet,
 	CreateVaultDialog,
+	DeleteVaultDialog,
 	EditVaultDialog,
 	toast,
 } from "@bittery/ui";
@@ -34,7 +35,7 @@ import {
 	subscribeCreateItemIntent,
 } from "@/lib/create-item-intent";
 import { storage } from "@/lib/storage";
-import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
+
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { VaultDndProvider } from "../../providers/dnd-provider";
