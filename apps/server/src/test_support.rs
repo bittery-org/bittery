@@ -816,6 +816,19 @@ where
     F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
+    with_api_test_app_state(test_name, |state| state, test_fn).await
+}
+
+pub(crate) async fn with_api_test_app_state<T, C, F, Fut>(
+    test_name: &str,
+    configure_state: C,
+    test_fn: F,
+) -> T
+where
+    C: FnOnce(AppState) -> AppState,
+    F: FnOnce(ApiTestApp) -> Fut,
+    Fut: Future<Output = T>,
+{
     let database = TestDatabase::create(test_name).await;
     let pool = db::connect(&database.database_url)
         .await
@@ -824,9 +837,11 @@ where
         .await
         .expect("test database migrations should run");
 
-    let state = AppState::from_pool(pool.clone()).with_object_storage(
-        crate::integrations::storage::object_storage_from_env()
-            .expect("test storage configuration should be complete"),
+    let state = configure_state(
+        AppState::from_pool(pool.clone()).with_object_storage(
+            crate::integrations::storage::object_storage_from_env()
+                .expect("test storage configuration should be complete"),
+        ),
     );
     let router = create_test_router(state.clone());
 

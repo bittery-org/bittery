@@ -5,6 +5,7 @@ use axum::Router;
 use tokio::task::JoinHandle;
 
 use crate::integrations::storage::object_storage_from_env;
+use crate::integrations::stripe::StripeBillingGateway;
 use crate::{
     build_rate_limiter, create_app, db, init_redis, load_edge_http_config,
     validate_sync_fanout_requirement, AppState, JobRunner, SyncPubSub,
@@ -33,10 +34,14 @@ impl ServerRuntime {
             .map_err(std::io::Error::other)?;
 
         let object_storage = object_storage_from_env()?;
+        let billing_gateway = StripeBillingGateway::from_env()?;
         let mut state = AppState::from_pool(pool.clone())
             .with_object_storage(object_storage)
             .with_rate_limiter(rate_limiter)
             .with_redis(redis.clone());
+        if let Some(gateway) = billing_gateway {
+            state = state.with_billing_gateway(Arc::new(gateway));
+        }
         let mut redis_dispatch = None;
         if let Some(redis) = redis {
             state.connection_registry.load_scripts().await?;

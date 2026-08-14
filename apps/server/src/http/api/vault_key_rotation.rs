@@ -351,6 +351,7 @@ async fn finalize_departure(
 ) -> Result<Response, ApiError> {
     let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
     let pool = state.db_pool.clone();
+    let billing_gateway = state.billing_gateway.clone();
     let route = if administrative {
         format!("/api/v1/teams/{team_id}/members/{target_id}/removal-rotation-plans/finalize")
     } else {
@@ -367,6 +368,7 @@ async fn finalize_departure(
             let result = if administrative {
                 member_departure::finalize_administrative(
                     &pool,
+                    billing_gateway.as_deref(),
                     &team_id,
                     &actor,
                     &target_id,
@@ -374,8 +376,14 @@ async fn finalize_departure(
                 )
                 .await?
             } else {
-                member_departure::finalize_voluntary(&pool, &team_id, &actor, &body.plan_ids)
-                    .await?
+                member_departure::finalize_voluntary(
+                    &pool,
+                    billing_gateway.as_deref(),
+                    &team_id,
+                    &actor,
+                    &body.plan_ids,
+                )
+                .await?
             };
             Ok(Json(FinalizePlanSetResponse {
                 personal_team_id: Some(result.personal_team_id),

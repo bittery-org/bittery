@@ -11,6 +11,7 @@ use crate::{
     config::bittery_mode,
     db::enums::{BillingPlan, BillingStatus, KeyRotationReason, TeamRole, TeamType},
     error::AppError,
+    integrations::stripe::BillingGateway,
     services::{
         billing::sync_team_seats_best_effort,
         team_billing::team_management_enabled,
@@ -317,17 +318,19 @@ async fn finalize(
 
 pub(crate) async fn finalize_voluntary(
     pool: &PgPool,
+    billing_gateway: Option<&dyn BillingGateway>,
     team_id: &str,
     user_id: &str,
     plan_ids: &[String],
 ) -> Result<DepartureResult, AppError> {
     let (result, billing) =
         finalize(pool, team_id, user_id, user_id, Intent::Voluntary, plan_ids).await?;
-    sync_team_seats_best_effort(pool, team_id, billing).await;
+    sync_team_seats_best_effort(pool, billing_gateway, team_id, billing).await;
     Ok(result)
 }
 pub(crate) async fn finalize_administrative(
     pool: &PgPool,
+    billing_gateway: Option<&dyn BillingGateway>,
     team_id: &str,
     actor_id: &str,
     target_id: &str,
@@ -342,7 +345,7 @@ pub(crate) async fn finalize_administrative(
         plan_ids,
     )
     .await?;
-    sync_team_seats_best_effort(pool, team_id, billing).await;
+    sync_team_seats_best_effort(pool, billing_gateway, team_id, billing).await;
     Ok(result)
 }
 
@@ -525,10 +528,16 @@ mod tests {
                 .await
                 .expect("billing should lapse");
 
-            let finalization_error =
-                finalize_administrative(pool, "lapsed_team", "lapsed_owner", "lapsed_member", &[])
-                    .await
-                    .expect_err("lapsed billing must block administrative finalization");
+            let finalization_error = finalize_administrative(
+                pool,
+                Some(&crate::integrations::stripe::TestBillingGateway::default()),
+                "lapsed_team",
+                "lapsed_owner",
+                "lapsed_member",
+                &[],
+            )
+            .await
+            .expect_err("lapsed billing must block administrative finalization");
             assert_eq!(
                 finalization_error.code,
                 crate::error::AppErrorCode::Forbidden
@@ -679,6 +688,7 @@ mod tests {
             let plan_ids: Vec<_> = plan_set.plans.iter().map(|plan| plan.id.clone()).collect();
             let error = finalize_administrative(
                 pool,
+                Some(&crate::integrations::stripe::TestBillingGateway::default()),
                 "team_rotation",
                 "user_owner",
                 "user_member",

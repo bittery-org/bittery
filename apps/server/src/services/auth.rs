@@ -1042,7 +1042,13 @@ pub(crate) async fn signup_with_invitation(
         AppError::internal("Failed to commit invited signup")
     })?;
 
-    sync_team_seats_best_effort(pool, &invitation.team_id, invitation.billing_plan).await;
+    sync_team_seats_best_effort(
+        pool,
+        app_state.billing_gateway.as_deref(),
+        &invitation.team_id,
+        invitation.billing_plan,
+    )
+    .await;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys =

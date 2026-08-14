@@ -595,6 +595,7 @@ async fn accept_invitation(
     Ok(Json(
         team::accept_invitation(
             &state.db_pool,
+            state.billing_gateway.as_deref(),
             &request.session.user_id,
             team::TokenInput { token },
         )
@@ -612,6 +613,7 @@ async fn accept_invitation_by_id(
     Ok(Json(
         team::accept_invitation_by_id(
             &state.db_pool,
+            state.billing_gateway.as_deref(),
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )

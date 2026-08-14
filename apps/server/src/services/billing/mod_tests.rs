@@ -1,19 +1,21 @@
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::{
     assert_cloud_billing_enabled, bittery_mode, format_timestamp, get_billing_snapshot,
-    is_stripe_api_configured, replace_stripe_mock_state, self_hosted_billing_status,
-    stripe_mock_calls, web_app_url, StripeMockCall, StripeMockState, GB,
+    self_hosted_billing_status, web_app_url, GB,
 };
 use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
+use crate::integrations::stripe::{
+    BillingGatewayCall, CheckoutSessionInput, StripeBillingGateway, TestBillingGateway,
+};
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, with_api_test_app,
+    seed_item, seed_team, seed_user, seed_vault, with_api_test_app, with_api_test_app_state,
 };
 
 struct BillingTestEnv<'a> {
@@ -24,7 +26,6 @@ struct BillingTestEnv<'a> {
     stripe_price_personal: Option<&'a str>,
     stripe_price_family: Option<&'a str>,
     stripe_price_team: Option<&'a str>,
-    stripe_mock: Option<StripeMockState>,
 }
 
 impl Default for BillingTestEnv<'_> {
@@ -37,7 +38,6 @@ impl Default for BillingTestEnv<'_> {
             stripe_price_personal: None,
             stripe_price_family: None,
             stripe_price_team: None,
-            stripe_mock: None,
         }
     }
 }
@@ -121,7 +121,6 @@ where
         std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok(),
         std::env::var("STRIPE_PRICE_FAMILY_MONTHLY").ok(),
         std::env::var("STRIPE_PRICE_TEAM_SEAT_MONTHLY").ok(),
-        replace_stripe_mock_state(env.stripe_mock),
     );
     set_env_var("BITTERY_MODE", env.bittery_mode);
     set_env_var("BITTERY_CLOUD_BILLING_ENABLED", env.cloud_billing_enabled);
@@ -141,7 +140,6 @@ where
         previous_personal_price,
         previous_family_price,
         previous_team_price,
-        previous_stripe_mock,
     ) = previous;
     restore_env_var("BITTERY_MODE", previous_mode);
     restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
@@ -150,7 +148,6 @@ where
     restore_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", previous_personal_price);
     restore_env_var("STRIPE_PRICE_FAMILY_MONTHLY", previous_family_price);
     restore_env_var("STRIPE_PRICE_TEAM_SEAT_MONTHLY", previous_team_price);
-    replace_stripe_mock_state(previous_stripe_mock);
 
     result
 }
@@ -426,13 +423,13 @@ fn stripe_configuration_and_web_app_url_use_trimmed_env_values() {
         Some("  sk_test_123  "),
         Some(" https://app.example.com/  "),
         || {
-            assert!(is_stripe_api_configured());
+            assert!(StripeBillingGateway::from_env().unwrap().is_some());
             assert_eq!(web_app_url(), "https://app.example.com/");
         },
     );
 
     with_env_vars(None, Some("   "), Some("   "), || {
-        assert!(!is_stripe_api_configured());
+        assert!(StripeBillingGateway::from_env().unwrap().is_none());
         assert_eq!(web_app_url(), "http://localhost:3001");
     });
 }
@@ -440,21 +437,21 @@ fn stripe_configuration_and_web_app_url_use_trimmed_env_values() {
 #[test]
 fn cloud_billing_guard_rejects_self_hosted_and_missing_stripe_configuration() {
     with_env_vars(Some("self-hosted"), Some("sk_test_123"), None, || {
-        let error = assert_cloud_billing_enabled()
+        let error = assert_cloud_billing_enabled(true)
             .expect_err("self-hosted mode should disable cloud billing handlers");
         assert_eq!(error.code, AppErrorCode::Forbidden);
         assert_eq!(error.message, "Billing is disabled in self-hosted mode");
     });
 
     with_env_vars(None, None, None, || {
-        let error =
-            assert_cloud_billing_enabled().expect_err("missing Stripe config should be rejected");
+        let error = assert_cloud_billing_enabled(false)
+            .expect_err("missing Stripe config should be rejected");
         assert_eq!(error.code, AppErrorCode::InternalServerError);
         assert_eq!(error.message, "Stripe is not configured");
     });
 
     with_env_vars(None, Some("sk_test_123"), None, || {
-        assert!(assert_cloud_billing_enabled().is_ok());
+        assert!(assert_cloud_billing_enabled(true).is_ok());
     });
 }
 
@@ -494,125 +491,129 @@ async fn billing_handlers_require_authentication() {
 
 #[tokio::test]
 async fn billing_query_handlers_return_expected_status_entitlements_and_attachment_usage() {
+    let gateway = Arc::new(TestBillingGateway::default());
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
             web_app_url: Some("https://app.example.com"),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app("billing_query_handlers_success", |app| async move {
-                let fixture = build_billing_router_fixture(&app.pool).await;
-                let period_end = datetime!(2026-05-22 12:00 UTC);
-                update_team_billing_state(
-                    &app.pool,
-                    &fixture.team_id,
-                    "team",
-                    "active",
-                    Some("cus_team_123"),
-                    Some("sub_team_123"),
-                    Some("si_team_123"),
-                    Some("price_team_123"),
-                    Some(3),
-                    true,
-                    Some(period_end),
-                )
-                .await;
-                seed_attachment(
-                    &app.pool,
-                    "attachment_billing_1",
-                    &fixture.item_id,
-                    &fixture.vault_id,
-                    &fixture.owner_user_id,
-                    1024,
-                )
-                .await;
-                seed_attachment(
-                    &app.pool,
-                    "attachment_billing_2",
-                    &fixture.item_id,
-                    &fixture.vault_id,
-                    &fixture.admin_user_id,
-                    2048,
-                )
-                .await;
-
-                let session = app.issue_session(&fixture.owner_user_id).await;
-                let headers = authenticated_json_headers(&session.token);
-
-                let status_response = app
-                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
-                    .await;
-                status_response.assert_contract_status();
-                assert_eq!(status_response.body["enabled"], json!(true));
-                assert_eq!(status_response.body["plan"], json!("team"));
-                assert_eq!(status_response.body["status"], json!("active"));
-                assert_eq!(status_response.body["isActive"], json!(true));
-                assert_eq!(status_response.body["requiresPayment"], json!(true));
-                assert_eq!(status_response.body["isStripeConfigured"], json!(true));
-                assert_eq!(
-                    status_response.body["stripeCustomerId"],
-                    json!("cus_team_123")
-                );
-                assert_eq!(
-                    status_response.body["stripeSubscriptionId"],
-                    json!("sub_team_123")
-                );
-                assert_eq!(
-                    status_response.body["stripePriceId"],
-                    json!("price_team_123")
-                );
-                assert_eq!(
-                    status_response.body["currentPeriodEnd"],
-                    json!(format_timestamp(period_end))
-                );
-                assert_eq!(status_response.body["cancelAtPeriodEnd"], json!(true));
-                assert_eq!(status_response.body["seatsPurchased"], json!(3));
-
-                let entitlements_response = app
-                    .api_json(
-                        Method::GET,
-                        "/api/v1/billing/entitlements",
-                        None,
-                        headers.clone(),
+        async move {
+            with_api_test_app_state(
+                "billing_query_handlers_success",
+                |state| state.with_billing_gateway(gateway),
+                |app| async move {
+                    let fixture = build_billing_router_fixture(&app.pool).await;
+                    let period_end = datetime!(2026-05-22 12:00 UTC);
+                    update_team_billing_state(
+                        &app.pool,
+                        &fixture.team_id,
+                        "team",
+                        "active",
+                        Some("cus_team_123"),
+                        Some("sub_team_123"),
+                        Some("si_team_123"),
+                        Some("price_team_123"),
+                        Some(3),
+                        true,
+                        Some(period_end),
                     )
                     .await;
-                entitlements_response.assert_contract_status();
-                assert_eq!(entitlements_response.body["mode"], json!("cloud"));
-                assert_eq!(entitlements_response.body["billingEnabled"], json!(true));
-                assert_eq!(entitlements_response.body["plan"], json!("team"));
-                assert_eq!(entitlements_response.body["status"], json!("active"));
-                assert_eq!(entitlements_response.body["isActive"], json!(true));
-                assert_eq!(
-                    entitlements_response.body["entitlements"]["teamManagement"],
-                    json!(true)
-                );
-                assert_eq!(
-                    entitlements_response.body["entitlements"]["attachments"],
-                    json!(true)
-                );
-                assert_eq!(
-                    entitlements_response.body["limits"]["attachmentStorageBytes"],
-                    json!((2 * GB).to_string())
-                );
-
-                let usage_response = app
-                    .api_json(
-                        Method::GET,
-                        "/api/v1/billing/attachment-usage",
-                        None,
-                        headers,
+                    seed_attachment(
+                        &app.pool,
+                        "attachment_billing_1",
+                        &fixture.item_id,
+                        &fixture.vault_id,
+                        &fixture.owner_user_id,
+                        1024,
                     )
                     .await;
-                usage_response.assert_contract_status();
-                assert_eq!(usage_response.body["mode"], json!("cloud"));
-                assert_eq!(usage_response.body["attachmentsEnabled"], json!(true));
-                assert_eq!(
-                    usage_response.body["quotaBytes"],
-                    json!((2 * GB).to_string())
-                );
-                assert_eq!(usage_response.body["committedStorageBytes"], json!("3072"));
-            })
+                    seed_attachment(
+                        &app.pool,
+                        "attachment_billing_2",
+                        &fixture.item_id,
+                        &fixture.vault_id,
+                        &fixture.admin_user_id,
+                        2048,
+                    )
+                    .await;
+
+                    let session = app.issue_session(&fixture.owner_user_id).await;
+                    let headers = authenticated_json_headers(&session.token);
+
+                    let status_response = app
+                        .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
+                        .await;
+                    status_response.assert_contract_status();
+                    assert_eq!(status_response.body["enabled"], json!(true));
+                    assert_eq!(status_response.body["plan"], json!("team"));
+                    assert_eq!(status_response.body["status"], json!("active"));
+                    assert_eq!(status_response.body["isActive"], json!(true));
+                    assert_eq!(status_response.body["requiresPayment"], json!(true));
+                    assert_eq!(status_response.body["isStripeConfigured"], json!(true));
+                    assert_eq!(
+                        status_response.body["stripeCustomerId"],
+                        json!("cus_team_123")
+                    );
+                    assert_eq!(
+                        status_response.body["stripeSubscriptionId"],
+                        json!("sub_team_123")
+                    );
+                    assert_eq!(
+                        status_response.body["stripePriceId"],
+                        json!("price_team_123")
+                    );
+                    assert_eq!(
+                        status_response.body["currentPeriodEnd"],
+                        json!(format_timestamp(period_end))
+                    );
+                    assert_eq!(status_response.body["cancelAtPeriodEnd"], json!(true));
+                    assert_eq!(status_response.body["seatsPurchased"], json!(3));
+
+                    let entitlements_response = app
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/entitlements",
+                            None,
+                            headers.clone(),
+                        )
+                        .await;
+                    entitlements_response.assert_contract_status();
+                    assert_eq!(entitlements_response.body["mode"], json!("cloud"));
+                    assert_eq!(entitlements_response.body["billingEnabled"], json!(true));
+                    assert_eq!(entitlements_response.body["plan"], json!("team"));
+                    assert_eq!(entitlements_response.body["status"], json!("active"));
+                    assert_eq!(entitlements_response.body["isActive"], json!(true));
+                    assert_eq!(
+                        entitlements_response.body["entitlements"]["teamManagement"],
+                        json!(true)
+                    );
+                    assert_eq!(
+                        entitlements_response.body["entitlements"]["attachments"],
+                        json!(true)
+                    );
+                    assert_eq!(
+                        entitlements_response.body["limits"]["attachmentStorageBytes"],
+                        json!((2 * GB).to_string())
+                    );
+
+                    let usage_response = app
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/attachment-usage",
+                            None,
+                            headers,
+                        )
+                        .await;
+                    usage_response.assert_contract_status();
+                    assert_eq!(usage_response.body["mode"], json!("cloud"));
+                    assert_eq!(usage_response.body["attachmentsEnabled"], json!(true));
+                    assert_eq!(
+                        usage_response.body["quotaBytes"],
+                        json!((2 * GB).to_string())
+                    );
+                    assert_eq!(usage_response.body["committedStorageBytes"], json!("3072"));
+                },
+            )
             .await;
         },
     )
@@ -932,15 +933,16 @@ async fn billing_create_checkout_session_rejects_invalid_payload_shape() {
 
 #[tokio::test]
 async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
+    let gateway = Arc::new(TestBillingGateway::default());
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
             stripe_price_team: Some("price_team_123"),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app(
+        async move {
+            with_api_test_app_state(
                 "billing_create_checkout_access_and_validation_v2",
+                |state| state.with_billing_gateway(gateway),
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let member_session = app.issue_session(&fixture.member_user_id).await;
@@ -999,66 +1001,114 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
 
 #[tokio::test]
 async fn billing_create_checkout_session_success_persists_incomplete_state_and_stripe_customer() {
+    let gateway = Arc::new(TestBillingGateway::default());
+    let configured_gateway = gateway.clone();
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
             web_app_url: Some("https://app.example.com"),
             stripe_price_team: Some("price_team_123"),
-            stripe_mock: Some(StripeMockState::default()),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app("billing_create_checkout_success", |app| async move {
-                let fixture = build_billing_router_fixture(&app.pool).await;
-                let session = app.issue_session(&fixture.owner_user_id).await;
+        async move {
+            with_api_test_app_state(
+                "billing_create_checkout_success",
+                |state| state.with_billing_gateway(configured_gateway),
+                |app| async move {
+                    let fixture = build_billing_router_fixture(&app.pool).await;
+                    let session = app.issue_session(&fixture.owner_user_id).await;
 
-                let response = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/billing/checkout-sessions",
-                        Some(json!({ "plan": "team" })),
-                        authenticated_json_headers(&session.token),
-                    )
-                    .await;
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": "team" })),
+                            authenticated_json_headers(&session.token),
+                        )
+                        .await;
 
-                response.assert_contract_status();
-                assert_eq!(
-                    response.body["url"],
-                    json!("https://checkout.stripe.test/session/cs_test_123")
-                );
-                assert_eq!(response.body["sessionId"], json!("cs_test_123"));
+                    response.assert_contract_status();
+                    assert_eq!(
+                        response.body["url"],
+                        json!("https://checkout.stripe.test/session/cs_test_123")
+                    );
+                    assert_eq!(response.body["sessionId"], json!("cs_test_123"));
 
-                let team_row = load_team_billing_row(&app.pool, &fixture.team_id).await;
-                assert_eq!(team_row.billing_plan, "team");
-                assert_eq!(team_row.billing_status, "incomplete");
-                assert_eq!(team_row.stripe_customer_id.as_deref(), Some("cus_test_123"));
+                    let team_row = load_team_billing_row(&app.pool, &fixture.team_id).await;
+                    assert_eq!(team_row.billing_plan, "team");
+                    assert_eq!(team_row.billing_status, "incomplete");
+                    assert_eq!(team_row.stripe_customer_id.as_deref(), Some("cus_test_123"));
 
-                let calls = stripe_mock_calls();
-                assert_eq!(calls.len(), 2);
-                assert_eq!(
-                    calls[0],
-                    StripeMockCall::CreateCustomer {
-                        email: "billing-owner@example.com".to_string(),
-                        name: "Billing Owner".to_string(),
-                        team_id: fixture.team_id.clone(),
-                        user_id: fixture.owner_user_id.clone(),
-                    },
-                );
-                assert_eq!(
-                    calls[1],
-                    StripeMockCall::CreateCheckoutSession {
-                        team_id: fixture.team_id,
-                        user_id: fixture.owner_user_id,
-                        customer_id: Some("cus_test_123".to_string()),
-                        customer_email: "billing-owner@example.com".to_string(),
-                        plan: "team".to_string(),
-                        price_id: "price_team_123".to_string(),
-                        quantity: 3,
-                        success_url: "https://app.example.com/billing?checkout=success".to_string(),
-                        cancel_url: "https://app.example.com/billing?checkout=cancel".to_string(),
-                    },
-                );
-            })
+                    let calls = gateway.calls();
+                    assert_eq!(calls.len(), 2);
+                    assert_eq!(
+                        calls[0],
+                        BillingGatewayCall::CreateCustomer {
+                            email: "billing-owner@example.com".to_string(),
+                            name: "Billing Owner".to_string(),
+                            team_id: fixture.team_id.clone(),
+                            user_id: fixture.owner_user_id.clone(),
+                        },
+                    );
+                    assert_eq!(
+                        calls[1],
+                        BillingGatewayCall::CreateCheckoutSession(CheckoutSessionInput {
+                            team_id: fixture.team_id,
+                            user_id: fixture.owner_user_id,
+                            customer_id: Some("cus_test_123".to_string()),
+                            customer_email: "billing-owner@example.com".to_string(),
+                            plan: "team".to_string(),
+                            price_id: "price_team_123".to_string(),
+                            quantity: 3,
+                            success_url: "https://app.example.com/billing?checkout=success"
+                                .to_string(),
+                            cancel_url: "https://app.example.com/billing?checkout=cancel"
+                                .to_string(),
+                        }),
+                    );
+                },
+            )
+            .await;
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn billing_create_checkout_session_maps_gateway_failure() {
+    let gateway = Arc::new(TestBillingGateway::failing("test gateway failure"));
+    let configured_gateway = gateway.clone();
+    with_billing_test_env_async(
+        BillingTestEnv {
+            stripe_price_team: Some("price_team_123"),
+            ..BillingTestEnv::default()
+        },
+        async move {
+            with_api_test_app_state(
+                "billing_create_checkout_gateway_failure",
+                |state| state.with_billing_gateway(configured_gateway),
+                |app| async move {
+                    let fixture = build_billing_router_fixture(&app.pool).await;
+                    let session = app.issue_session(&fixture.owner_user_id).await;
+
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": "team" })),
+                            authenticated_json_headers(&session.token),
+                        )
+                        .await;
+
+                    response.assert_contract_status();
+                    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+                    assert_eq!(gateway.calls().len(), 1);
+                    assert!(matches!(
+                        &gateway.calls()[0],
+                        BillingGatewayCall::CreateCustomer { team_id, .. }
+                            if team_id == &fixture.team_id
+                    ));
+                },
+            )
             .await;
         },
     )
@@ -1067,69 +1117,73 @@ async fn billing_create_checkout_session_success_persists_incomplete_state_and_s
 
 #[tokio::test]
 async fn billing_create_portal_session_requires_customer_and_returns_url() {
+    let gateway = Arc::new(TestBillingGateway::default());
+    let configured_gateway = gateway.clone();
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
             web_app_url: Some("https://app.example.com"),
-            stripe_mock: Some(StripeMockState::default()),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app("billing_create_portal_session_paths", |app| async move {
-                let fixture = build_billing_router_fixture(&app.pool).await;
-                let session = app.issue_session(&fixture.owner_user_id).await;
+        async move {
+            with_api_test_app_state(
+                "billing_create_portal_session_paths",
+                |state| state.with_billing_gateway(configured_gateway),
+                |app| async move {
+                    let fixture = build_billing_router_fixture(&app.pool).await;
+                    let session = app.issue_session(&fixture.owner_user_id).await;
 
-                let missing_customer_response = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/billing/portal-sessions",
+                    let missing_customer_response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/portal-sessions",
+                            None,
+                            authenticated_json_headers(&session.token),
+                        )
+                        .await;
+                    missing_customer_response.assert_contract_status();
+                    assert_handler_error(
+                        &missing_customer_response.body,
+                        "BAD_REQUEST",
+                        "No Stripe customer found for this team",
+                    );
+
+                    update_team_billing_state(
+                        &app.pool,
+                        &fixture.team_id,
+                        "team",
+                        "active",
+                        Some("cus_portal_123"),
+                        Some("sub_portal_123"),
+                        Some("si_portal_123"),
+                        Some("price_team_123"),
+                        Some(3),
+                        false,
                         None,
-                        authenticated_json_headers(&session.token),
                     )
                     .await;
-                missing_customer_response.assert_contract_status();
-                assert_handler_error(
-                    &missing_customer_response.body,
-                    "BAD_REQUEST",
-                    "No Stripe customer found for this team",
-                );
+                    let success_response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/portal-sessions",
+                            None,
+                            authenticated_json_headers(&session.token),
+                        )
+                        .await;
+                    success_response.assert_contract_status();
+                    assert_eq!(
+                        success_response.body["url"],
+                        json!("https://billing.stripe.test/portal/session_123")
+                    );
 
-                update_team_billing_state(
-                    &app.pool,
-                    &fixture.team_id,
-                    "team",
-                    "active",
-                    Some("cus_portal_123"),
-                    Some("sub_portal_123"),
-                    Some("si_portal_123"),
-                    Some("price_team_123"),
-                    Some(3),
-                    false,
-                    None,
-                )
-                .await;
-                let success_response = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/billing/portal-sessions",
-                        None,
-                        authenticated_json_headers(&session.token),
-                    )
-                    .await;
-                success_response.assert_contract_status();
-                assert_eq!(
-                    success_response.body["url"],
-                    json!("https://billing.stripe.test/portal/session_123")
-                );
-
-                assert_eq!(
-                    stripe_mock_calls(),
-                    vec![StripeMockCall::CreateBillingPortalSession {
-                        customer_id: "cus_portal_123".to_string(),
-                        return_url: "https://app.example.com/billing".to_string(),
-                    }],
-                );
-            })
+                    assert_eq!(
+                        gateway.calls(),
+                        vec![BillingGatewayCall::CreateBillingPortalSession {
+                            customer_id: "cus_portal_123".to_string(),
+                            return_url: "https://app.example.com/billing".to_string(),
+                        }],
+                    );
+                },
+            )
             .await;
         },
     )
@@ -1138,15 +1192,16 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
 
 #[tokio::test]
 async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_response() {
+    let gateway = Arc::new(TestBillingGateway::default());
+    let configured_gateway = gateway.clone();
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
-            stripe_mock: Some(StripeMockState::default()),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app(
+        async move {
+            with_api_test_app_state(
                 "billing_preview_additional_team_seat_paths",
+                |state| state.with_billing_gateway(configured_gateway),
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let session = app.issue_session(&fixture.owner_user_id).await;
@@ -1229,8 +1284,8 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
                     );
 
                     assert_eq!(
-                        stripe_mock_calls(),
-                        vec![StripeMockCall::PreviewUpcomingTeamSeatInvoice {
+                        gateway.calls(),
+                        vec![BillingGatewayCall::PreviewUpcomingTeamSeatInvoice {
                             stripe_customer_id: "cus_preview_123".to_string(),
                             stripe_subscription_id: "sub_preview_123".to_string(),
                             stripe_subscription_item_id: Some("si_preview_123".to_string()),
@@ -1248,36 +1303,40 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
 
 #[tokio::test]
 async fn billing_create_portal_and_preview_require_billing_admin() {
+    let gateway = Arc::new(TestBillingGateway::default());
     with_billing_test_env_async(
         BillingTestEnv {
-            stripe_secret_key: Some("sk_test_123"),
             ..BillingTestEnv::default()
         },
-        async {
-            with_api_test_app("billing_admin_only_handlers", |app| async move {
-                let fixture = build_billing_router_fixture(&app.pool).await;
-                let member_session = app.issue_session(&fixture.member_user_id).await;
+        async move {
+            with_api_test_app_state(
+                "billing_admin_only_handlers",
+                |state| state.with_billing_gateway(gateway),
+                |app| async move {
+                    let fixture = build_billing_router_fixture(&app.pool).await;
+                    let member_session = app.issue_session(&fixture.member_user_id).await;
 
-                for (method, path) in [
-                    (Method::POST, "/api/v1/billing/portal-sessions"),
-                    (Method::GET, "/api/v1/billing/team-seats/addition-preview"),
-                ] {
-                    let response = app
-                        .api_json(
-                            method,
-                            path,
-                            None,
-                            authenticated_json_headers(&member_session.token),
-                        )
-                        .await;
-                    response.assert_contract_status();
-                    assert_handler_error(
-                        &response.body,
-                        "FORBIDDEN",
-                        "Only team owner or admin can manage billing",
-                    );
-                }
-            })
+                    for (method, path) in [
+                        (Method::POST, "/api/v1/billing/portal-sessions"),
+                        (Method::GET, "/api/v1/billing/team-seats/addition-preview"),
+                    ] {
+                        let response = app
+                            .api_json(
+                                method,
+                                path,
+                                None,
+                                authenticated_json_headers(&member_session.token),
+                            )
+                            .await;
+                        response.assert_contract_status();
+                        assert_handler_error(
+                            &response.body,
+                            "FORBIDDEN",
+                            "Only team owner or admin can manage billing",
+                        );
+                    }
+                },
+            )
             .await;
         },
     )

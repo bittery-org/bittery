@@ -169,9 +169,13 @@ async fn status(
     request: AuthenticatedRequest,
 ) -> Result<Json<BillingStatusResponse>, ApiError> {
     Ok(Json(
-        billing::get_billing_status(&state.db_pool, &request.session.user_id)
-            .await?
-            .into(),
+        billing::get_billing_status(
+            &state.db_pool,
+            state.billing_gateway.as_deref(),
+            &request.session.user_id,
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -208,6 +212,7 @@ async fn create_checkout_session(
     Ok(Json(
         billing::create_checkout_session(
             &state.db_pool,
+            state.billing_gateway.as_deref(),
             &request.session.user_id,
             CheckoutPlanInput {
                 plan: body.plan.map(BillingPlan::from),
@@ -224,9 +229,13 @@ async fn create_portal_session(
     request: AuthenticatedRequest,
 ) -> Result<Json<PortalSessionResponse>, ApiError> {
     Ok(Json(
-        billing::create_portal_session(&state.db_pool, &request.session.user_id)
-            .await?
-            .into(),
+        billing::create_portal_session(
+            &state.db_pool,
+            state.billing_gateway.as_deref(),
+            &request.session.user_id,
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -236,9 +245,13 @@ async fn preview_additional_team_seat(
     request: AuthenticatedRequest,
 ) -> Result<Json<Option<TeamSeatInvoicePreviewResponse>>, ApiError> {
     Ok(Json(
-        billing::preview_additional_team_seat(&state.db_pool, &request.session.user_id)
-            .await?
-            .map(Into::into),
+        billing::preview_additional_team_seat(
+            &state.db_pool,
+            state.billing_gateway.as_deref(),
+            &request.session.user_id,
+        )
+        .await?
+        .map(Into::into),
     ))
 }
 
