@@ -1,12 +1,9 @@
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
-import {
-	type AccountSessionManager,
-	getAccountSessionManager,
-	peekAccountSessionManager,
-} from "@bittery/core/services/account-session-manager";
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { IAutolockService } from "@bittery/core/services/autolock";
-import { useQueryClient } from "@tanstack/react-query";
+import { ClientRuntime } from "@bittery/core/services/client-runtime";
+import type { QueryClient } from "@tanstack/react-query";
 import type { Router } from "@tanstack/react-router";
 import {
 	createContext,
@@ -15,7 +12,6 @@ import {
 	useContext,
 	useEffect,
 	useRef,
-	useState,
 	useSyncExternalStore,
 } from "react";
 import { lifecycleDeps } from "@/lib/lifecycle";
@@ -24,7 +20,7 @@ import {
 	broadcastActiveAccountChanged,
 	broadcastLockEvent,
 } from "@/lib/tauri-commands";
-import { getDesktopVaultRuntime } from "@/lib/vault-runtime";
+import { vaultRepository } from "@/lib/vault-runtime";
 import { createDesktopAutolockService } from "@/services/autolock-service";
 
 interface AccountContextValue {
@@ -45,14 +41,15 @@ const AccountRuntimeContext = createContext<{
 	vaultRuntime: AccountVaultRuntime;
 } | null>(null);
 
-function createDesktopAccountManager(
-	queryClientRef: React.RefObject<ReturnType<typeof useQueryClient>>,
-): AccountSessionManager {
-	return getAccountSessionManager({
+export function createDesktopClientRuntime(
+	queryClient: QueryClient,
+): ClientRuntime {
+	return new ClientRuntime({
 		storage,
 		// Sibling of `storage`: `removeAccount` has to wipe the account's cached ciphertext,
 		// and `AccountStore` cannot reach it (packages/storage/CONTEXT.md §4.2).
 		itemCache,
+		vaultRepository,
 		credentialMirror: lifecycleDeps.credentialMirror,
 		onActiveChanged: async (active) => {
 			if (!active) {
@@ -79,9 +76,7 @@ function createDesktopAccountManager(
 		},
 		invalidateQueries: async (keys) => {
 			await Promise.all(
-				keys.map((key) =>
-					queryClientRef.current.invalidateQueries({ queryKey: key }),
-				),
+				keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
 			);
 		},
 	});
@@ -90,34 +85,27 @@ function createDesktopAccountManager(
 export function AccountProvider({
 	children,
 	router,
+	runtime,
 }: {
 	children: ReactNode;
 	router: Router<any, any>;
+	runtime: ClientRuntime;
 }) {
-	const queryClient = useQueryClient();
-	const queryClientRef = useRef(queryClient);
-	queryClientRef.current = queryClient;
+	const manager = runtime.accounts;
+	const vaultRuntime = runtime.vaultRuntime;
 
-	const managerRef = useRef<AccountSessionManager | null>(null);
-	if (!managerRef.current) {
-		managerRef.current =
-			peekAccountSessionManager() ??
-			createDesktopAccountManager(queryClientRef);
-	}
-	const manager = managerRef.current;
-	const vaultRuntime = getDesktopVaultRuntime(manager);
-
-	const [isLoading, setIsLoading] = useState(true);
 	const autolockService = useRef<IAutolockService | null>(null);
 
 	useSyncExternalStore(manager.subscribe, manager.getSnapshot);
 
 	useEffect(() => {
-		void manager.initialize().finally(() => setIsLoading(false));
-	}, [manager]);
+		runtime.start();
+		return () => runtime.dispose();
+	}, [runtime]);
 
 	const allAccounts = manager.getAccounts();
 	const activeAccount = manager.getActiveAccountMetadata();
+	const isLoading = !manager.isInitialized();
 
 	const refreshAccounts = useCallback(async () => {
 		await manager.refresh();

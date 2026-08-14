@@ -38,7 +38,7 @@ export function DesktopPlatformProvider({
 	children,
 }: DesktopPlatformProviderProps) {
 	const syncContext = useSyncContext();
-	const { vaultRuntime } = useDesktopAccountRuntime();
+	const { manager, vaultRuntime } = useDesktopAccountRuntime();
 
 	// Map sync context to ISyncContext interface
 	const sync: ISyncContext = useMemo(
@@ -66,6 +66,7 @@ export function DesktopPlatformProvider({
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
+			accountManager={manager}
 			sync={sync}
 		>
 			{children}

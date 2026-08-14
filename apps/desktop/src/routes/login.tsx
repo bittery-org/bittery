@@ -1,5 +1,4 @@
 import { useLogin } from "@bittery/core/hooks";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
@@ -32,33 +31,31 @@ interface LoginSearchParams {
 }
 
 export const Route = createFileRoute("/login")({
-	beforeLoad: async ({ search }) => {
+	beforeLoad: async ({ search, context }) => {
 		const prefillEmail =
 			typeof search.prefillEmail === "string" ? search.prefillEmail : undefined;
 		if (prefillEmail) {
 			return;
 		}
 
-		const accountsList = await storage.getAccountsList();
+		const accountsList = context.runtime.accounts.getAccounts();
 		if (accountsList.length === 0) {
 			return;
 		}
 
-		let activeAccount = await storage.getActiveAccount();
+		let activeAccount = context.runtime.accounts.getActiveAccount();
 		if (!activeAccount) {
 			const firstAccount = accountsList[0];
 			if (!firstAccount) {
 				return;
 			}
 			activeAccount = firstAccount.accountId;
-			await storage.setActiveAccount(activeAccount);
+			await context.runtime.accounts.switchAccount(activeAccount);
 		}
 
 		const sessionValid = await storage.isSessionValid(activeAccount);
 		if (sessionValid) {
-			// This guard can run before AccountProvider constructs the manager; with no
-			// manager there is no verified unlock, so fall through to /unlock.
-			const restored = await peekAccountSessionManager()?.unlockAccount(
+			const restored = await context.runtime.accounts.unlockAccount(
 				activeAccount,
 				true,
 			);

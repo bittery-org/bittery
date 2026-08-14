@@ -69,6 +69,7 @@ export function MobilePlatformProvider({
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
+			accountManager={manager}
 			sync={sync}
 		>
 			{children}

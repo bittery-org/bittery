@@ -1,10 +1,23 @@
+import type { ApiClient } from "@bittery/api-contract";
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";
 import { Toaster } from "@bittery/ui";
-import { createRootRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import type { QueryClient } from "@tanstack/react-query";
+import {
+	createRootRouteWithContext,
+	Outlet,
+	useNavigate,
+} from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AuthRevealLoader } from "@/components/auth/auth-reveal-loader";
 import { subscribeAuthRevealToVault } from "@/lib/auth-reveal-transition";
 
-export const Route = createRootRoute({
+export interface DesktopRouterContext {
+	apiClient: ApiClient;
+	queryClient: QueryClient;
+	runtime: ClientRuntime;
+}
+
+export const Route = createRootRouteWithContext<DesktopRouterContext>()({
 	component: RootComponent,
 });
 

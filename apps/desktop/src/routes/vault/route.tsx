@@ -10,7 +10,6 @@ import {
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
 	CreateItemSheet,
@@ -41,9 +40,9 @@ import { VaultDndProvider } from "../../providers/dnd-provider";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
-	beforeLoad: async () => {
+	beforeLoad: async ({ context }) => {
 		// Get active account
-		const activeAccount = await storage.getActiveAccount();
+		const activeAccount = context.runtime.accounts.getActiveAccount();
 		if (!activeAccount) {
 			throw redirect({ to: "/login" });
 		}
@@ -56,9 +55,7 @@ export const Route = createFileRoute("/vault")({
 			throw redirect({ to: "/unlock" });
 		}
 
-		// This guard can run before AccountProvider constructs the manager; with no
-		// manager there is no verified unlock, so send the user to /unlock.
-		const restored = await peekAccountSessionManager()?.unlockAccount(
+		const restored = await context.runtime.accounts.unlockAccount(
 			activeAccount,
 			true,
 		);
