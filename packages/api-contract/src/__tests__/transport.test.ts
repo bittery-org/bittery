@@ -47,8 +47,8 @@ describe("request transport", () => {
 			},
 		});
 
-		await transport.request("POST", "/api/v1/items", {
-			body: { name: "item" },
+		await transport.request("POST", "/api/v1/auth/email-checks", {
+			body: { email: "test@example.com" },
 			headers: requestOriginHeaders({
 				kind: "persistedAccount",
 				accountId: "account_1",
@@ -62,7 +62,7 @@ describe("request transport", () => {
 			accountId: "account_1",
 			serverUrl: "http://self-hosted.example/bittery",
 		});
-		expect(call?.body).toBe(JSON.stringify({ name: "item" }));
+		expect(call?.body).toBe(JSON.stringify({ email: "test@example.com" }));
 		expect(
 			call?.request.headers.get("Bittery-Local-Request-Origin"),
 		).toBeNull();

@@ -1,4 +1,9 @@
-import createClient from "openapi-fetch";
+import createClient, {
+	type Client,
+	type ClientPathsWithMethod,
+	type MaybeOptionalInit,
+} from "openapi-fetch";
+import type { SuccessResponseJSON } from "openapi-typescript-helpers";
 import { normalizeApiError } from "./errors.ts";
 import type { paths } from "./generated/schema.ts";
 
@@ -159,15 +164,31 @@ function takeRequestOrigin(request: Request): {
 	throw new TypeError("Local request origin is invalid.");
 }
 
-export interface ApiTransportRequest {
-	params?: {
-		path?: Record<string, string>;
-		query?: object;
-	};
-	body?: unknown;
-	headers?: HeadersInit;
-	signal?: AbortSignal;
-}
+type GeneratedClient = Client<paths>;
+type OpenApiMethod<Method extends ApiHttpMethod> = Lowercase<Method>;
+
+export type ApiTransportPath<Method extends ApiHttpMethod> =
+	ClientPathsWithMethod<GeneratedClient, OpenApiMethod<Method>>;
+
+export type ApiTransportRequest<
+	Method extends ApiHttpMethod,
+	Path extends ApiTransportPath<Method>,
+> = MaybeOptionalInit<paths[Path], OpenApiMethod<Method>>;
+
+export type ApiTransportData<
+	Method extends ApiHttpMethod,
+	Path extends ApiTransportPath<Method>,
+> = SuccessResponseJSON<
+	paths[Path][OpenApiMethod<Method>] & Record<string | number, unknown>
+>;
+
+export type ApiTransportRequestArguments<
+	Method extends ApiHttpMethod,
+	Path extends ApiTransportPath<Method>,
+> =
+	undefined extends ApiTransportRequest<Method, Path>
+		? [request?: Exclude<ApiTransportRequest<Method, Path>, undefined>]
+		: [request: ApiTransportRequest<Method, Path>];
 
 export interface ApiTransportResponse<T> {
 	data: T;
@@ -177,12 +198,14 @@ export interface ApiTransportResponse<T> {
 }
 
 export interface ApiTransport {
-	getApiMetadata(): Promise<ApiTransportResponse<unknown>>;
-	request<T>(
-		method: ApiHttpMethod,
-		path: string,
-		request?: ApiTransportRequest,
-	): Promise<ApiTransportResponse<T>>;
+	getApiMetadata(): Promise<
+		ApiTransportResponse<ApiTransportData<"GET", "/api/meta">>
+	>;
+	request<Method extends ApiHttpMethod, Path extends ApiTransportPath<Method>>(
+		method: Method,
+		path: Path,
+		...request: ApiTransportRequestArguments<Method, Path>
+	): Promise<ApiTransportResponse<ApiTransportData<Method, Path>>>;
 	openSyncEvents(signal?: AbortSignal): Promise<Response>;
 }
 
@@ -267,6 +290,18 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		baseUrl,
 		fetch: fetchImplementation,
 	});
+	type DispatchResult = {
+		data?: unknown;
+		error?: unknown;
+		response: Response;
+	};
+	// openapi-fetch's dispatcher cannot correlate a runtime method conversion
+	// with its path generic. The public transport interface retains that relation.
+	const dispatchRequest = client.request as unknown as (
+		method: Lowercase<ApiHttpMethod>,
+		path: string,
+		request: unknown,
+	) => Promise<DispatchResult>;
 
 	async function applyRequestHeaders(headers: Headers): Promise<void> {
 		const [accessToken, metadata] = await Promise.all([
@@ -308,26 +343,28 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		},
 	});
 
-	async function request<T>(
-		method: ApiHttpMethod,
-		path: string,
-		requestOptions: ApiTransportRequest = {},
-	): Promise<ApiTransportResponse<T>> {
-		const headers = new Headers(requestOptions.headers);
+	async function request<
+		Method extends ApiHttpMethod,
+		Path extends ApiTransportPath<Method>,
+	>(
+		method: Method,
+		path: Path,
+		...requestArguments: ApiTransportRequestArguments<Method, Path>
+	): Promise<ApiTransportResponse<ApiTransportData<Method, Path>>> {
+		const requestOptions = requestArguments[0];
+		const headers = new Headers(
+			requestOptions?.headers as HeadersInit | undefined,
+		);
 		if (method === "PATCH") {
 			headers.set("Content-Type", "application/merge-patch+json");
 		}
-		const request = { ...requestOptions, headers } as never;
+		const requestOptionsWithHeaders = { ...requestOptions, headers };
 		const dispatch = () =>
-			method === "GET"
-				? client.GET(path as never, request)
-				: method === "POST"
-					? client.POST(path as never, request)
-					: method === "PUT"
-						? client.PUT(path as never, request)
-						: method === "PATCH"
-							? client.PATCH(path as never, request)
-							: client.DELETE(path as never, request);
+			dispatchRequest(
+				method.toLowerCase() as Lowercase<Method>,
+				path,
+				requestOptionsWithHeaders,
+			);
 		let result = await dispatch();
 		if (
 			result.response.status === 401 &&
@@ -344,7 +381,7 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		}
 
 		return {
-			data: result.data as T,
+			data: result.data as ApiTransportData<Method, Path>,
 			response: result.response,
 			etag: result.response.headers.get("ETag"),
 			requestId: result.response.headers.get("Bittery-Request-Id"),

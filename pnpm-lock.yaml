@@ -722,6 +722,9 @@ importers:
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0
+      openapi-typescript-helpers:
+        specifier: 0.1.0
+        version: 0.1.0
     devDependencies:
       '@bittery/config':
         specifier: workspace:*
