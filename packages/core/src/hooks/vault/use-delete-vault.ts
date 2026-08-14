@@ -4,7 +4,6 @@
  * Deletes a vault permanently.
  */
 
-import { useApiClient } from "@bittery/shared/api";
 import { useMutation } from "@tanstack/react-query";
 import { useCoreContext } from "../../context/platform-context";
 import { useRefreshAfterVaultMutation } from "./mutation-utils";
@@ -21,17 +20,12 @@ export interface DeleteVaultInput {
  * Hook for deleting a vault.
  */
 export function useDeleteVault() {
-	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: async (input: DeleteVaultInput): Promise<void> => {
-			await core.vaults.deleteVault(
-				input.vaultId,
-				defaultClient,
-				input.accountId,
-			);
+			await core.vaults.deleteVault(input.vaultId, input.accountId);
 		},
 		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
 	});

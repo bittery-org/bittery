@@ -9,12 +9,12 @@ import {
 	accountMetadata,
 	createTestAccountStore,
 } from "../testing/account-store-harness";
+import { AccountVaultReplica as VaultRepository } from "./account-vault-replica";
 import {
 	getTravelModeEnforcer,
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
-import { VaultRepository } from "./vault-repository";
 
 const ACCOUNT_ID = "acc-1";
 const USER_ID = `user-${ACCOUNT_ID}`;

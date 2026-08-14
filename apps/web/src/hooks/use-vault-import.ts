@@ -15,8 +15,6 @@ import {
 	type ImportSourceVault,
 	type ImportSourceVaultNameCode,
 } from "@bittery/shared";
-import { useApiClient } from "@bittery/shared/api";
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -97,8 +95,7 @@ export interface ImportExecutionSummary {
 interface ResolvedTargetVault {
 	vaultId: string;
 	vaultName: string;
-	accountId?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 class VaultImportError extends Error {
@@ -231,7 +228,6 @@ export function useVaultImport() {
 	const { m } = useI18n();
 	const core = useCoreContext();
 	const crypto = usePlatformCrypto();
-	const apiClient = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const { vaultKeys } = useAllVaultKeys();
 
@@ -440,9 +436,11 @@ export function useVaultImport() {
 					return cachedUserId;
 				}
 
-				const sessionData = await storage.getStoredSessionData(accountId);
-				const userId =
-					sessionData?.userId ?? (await storage.getActiveAccountUserId());
+				const [sessionData, account] = await Promise.all([
+					storage.getStoredSessionData(accountId),
+					storage.getAccountMetadata(accountId),
+				]);
+				const userId = sessionData?.userId ?? account?.userId;
 				if (!userId) {
 					throw new Error("User ID not available for encryption context");
 				}
@@ -505,27 +503,18 @@ export function useVaultImport() {
 						});
 					}
 
-					// No account scope: `useAllVaultKeys` only ever lists the active
-					// account's vaults, so `resolveAccountScopeId` resolving an omitted
-					// scope to the active account is exactly this vault's account.
 					resolvedTargets.set(sourceVault.id, {
 						vaultId: targetVault.vaultId,
 						vaultName: targetVault.vaultName,
+						accountId: targetVault.accountId,
 					});
 				}
 
 				const activeAccount = await storage.getActiveAccount();
 				const defaultAccountId = activeAccount ?? undefined;
-				const defaultAccountEmail = defaultAccountId
-					? (await storage.getAccountsList()).find(
-							(a) => a.accountId === defaultAccountId,
-						)?.email
-					: undefined;
 
-				// A default account is only required to CREATE new vaults.
-				// Existing-vault mappings resolve their own account later via
-				// resolveAccountScopeId, so imports that only reuse existing
-				// vaults must be allowed to proceed in "All Accounts" mode.
+				// A default account is only required to create new vaults. Existing
+				// mappings already carry the exact accountId from their vault key.
 				const requiresVaultCreation = sourceVaults.some(
 					(sourceVault) => mappings[sourceVault.id]?.mode === "create",
 				);
@@ -535,7 +524,7 @@ export function useVaultImport() {
 
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
-					if (!mapping || mapping.mode !== "create") {
+					if (mapping?.mode !== "create") {
 						continue;
 					}
 
@@ -550,21 +539,17 @@ export function useVaultImport() {
 						currentVaultName: targetVaultName,
 					}));
 
-					const createdVault = await core.vaults.createVault(
-						{
-							name: targetVaultName,
-							type: "personal",
-							icon: DEFAULT_CREATED_VAULT_ICON,
-							accountId: defaultAccountId,
-						},
-						apiClient,
-					);
+					const createdVault = await core.vaults.createVault({
+						name: targetVaultName,
+						type: "personal",
+						icon: DEFAULT_CREATED_VAULT_ICON,
+						accountId: defaultAccountId,
+					});
 
 					const resolvedTarget: ResolvedTargetVault = {
 						vaultId: createdVault.vaultId,
 						vaultName: targetVaultName,
 						accountId: defaultAccountId,
-						accountEmail: defaultAccountEmail,
 					};
 
 					createdVaults.push(resolvedTarget);
@@ -574,7 +559,7 @@ export function useVaultImport() {
 				const refreshAccountId =
 					createdVaults[0]?.accountId ?? defaultAccountId;
 				if (createdVaults.length > 0 && refreshAccountId) {
-					await core.vaults.refreshVaultKeys(apiClient, refreshAccountId);
+					await core.vaults.refreshVaultKeys(refreshAccountId);
 					await invalidator.invalidateVaultKeys();
 				}
 
@@ -607,13 +592,9 @@ export function useVaultImport() {
 					let importedItemsInVault = 0;
 
 					try {
-						const accountId = await resolveAccountScopeId(
-							storage,
-							resolvedTarget.accountEmail,
-						);
+						const accountId = resolvedTarget.accountId;
 						const vaultApiClient = await getClientForAccount(
 							storage,
-							apiClient,
 							accountId,
 						);
 						const userId = await resolveUserIdForContext(accountId);
@@ -632,7 +613,7 @@ export function useVaultImport() {
 						try {
 							for (const sourceItem of sourceItems) {
 								const decryptedItem = provider.toDecryptedItemData(sourceItem);
-								const itemId = await core.items.generateItemId();
+								const itemId = await crypto.generateUuid();
 								const encryptedData = await core.vaultCrypto.encryptItem(
 									JSON.stringify(decryptedItem.data),
 									vaultKey,
@@ -737,7 +718,7 @@ export function useVaultImport() {
 
 				const { accountsInfo } = await core.accounts.resolveAccounts();
 				if (accountsInfo.length > 0) {
-					await core.vaultCoordinator.refreshFromServer(accountsInfo);
+					await core.vaultRepository.refreshFromServer(accountsInfo);
 				}
 
 				if (createdVaults.length > 0) {
@@ -782,13 +763,11 @@ export function useVaultImport() {
 			providerId,
 			mappings,
 			existingVaultById,
-			core.items,
 			core.vaults,
 			core.accounts,
-			core.vaultCoordinator,
+			core.vaultRepository,
 			core.vaultCrypto,
 			crypto,
-			apiClient,
 			invalidator,
 		]);
 

@@ -8,7 +8,6 @@ import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { handleNativeBiometricUnlockAll } from "./native-messaging";
-import { resolveAccountIdFromEmail } from "./services/account-resolution";
 
 function isNonEmptyVaultKeys(value: unknown): value is VaultKeyData[] {
 	return (
@@ -47,11 +46,10 @@ async function hasLocalWriteCapability(accountId: string): Promise<boolean> {
  * - best-effort session/MUK restore from local encrypted session
  */
 export async function hydrateDesktopAccountMaterial(
-	email: string,
+	accountId: string,
 ): Promise<void> {
-	const normalizedEmail = email.toLowerCase();
-	const accountId = await resolveAccountIdFromEmail(normalizedEmail);
-	if (!accountId) {
+	const account = await storage.getAccountMetadata(accountId);
+	if (!account) {
 		return;
 	}
 
@@ -79,7 +77,7 @@ export async function hydrateDesktopAccountMaterial(
 				}
 			} catch (error) {
 				console.warn(
-					`[desktop-key-material] Failed to parse vault keys for ${normalizedEmail}:`,
+					`[desktop-key-material] Failed to parse vault keys for ${accountId}:`,
 					error,
 				);
 			}
@@ -90,7 +88,7 @@ export async function hydrateDesktopAccountMaterial(
 		await storage.tryRestoreSession(false, accountId);
 	} catch (error) {
 		console.warn(
-			`[desktop-key-material] Session restore failed for ${normalizedEmail}:`,
+			`[desktop-key-material] Session restore failed for ${accountId}:`,
 			error,
 		);
 	}
@@ -101,20 +99,18 @@ export async function hydrateDesktopAccountMaterial(
  * In desktop mode this may require a native biometric unlock to hydrate MUK.
  */
 export async function ensureDesktopWriteCapability(
-	email: string,
+	accountId: string,
 	options?: {
 		allowBiometricPrompt?: boolean;
 	},
 ): Promise<boolean> {
-	const normalizedEmail = email.toLowerCase();
-	const accountId = await resolveAccountIdFromEmail(normalizedEmail);
-	if (!accountId) {
+	if (!(await storage.getAccountMetadata(accountId))) {
 		return false;
 	}
 
 	const allowBiometricPrompt = options?.allowBiometricPrompt ?? true;
 
-	await hydrateDesktopAccountMaterial(normalizedEmail);
+	await hydrateDesktopAccountMaterial(accountId);
 	if (await hasLocalWriteCapability(accountId)) {
 		return true;
 	}
@@ -133,12 +129,12 @@ export async function ensureDesktopWriteCapability(
 	});
 	if (!unlockResult.success) {
 		console.warn(
-			`[desktop-key-material] Native hydration failed for ${normalizedEmail}:`,
+			`[desktop-key-material] Native hydration failed for ${accountId}:`,
 			unlockResult.error,
 		);
 		return false;
 	}
 
-	await hydrateDesktopAccountMaterial(normalizedEmail);
+	await hydrateDesktopAccountMaterial(accountId);
 	return hasLocalWriteCapability(accountId);
 }

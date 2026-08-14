@@ -393,7 +393,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		};
 	}
 
-	test("retries by email when the sessionId resolves nothing", async () => {
+	test("retries by account id when the sessionId resolves nothing", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
 			deps: {} as never,
@@ -404,15 +404,12 @@ describe("lifecycle adapter — session invalidation", () => {
 					? outcome([])
 					: outcome([ACCOUNT]);
 			},
-			resolveFallbackEmail: () => "user@example.com",
+			resolveFallbackAccountId: () => "acc-1",
 		});
 
 		const result = await adapter.invalidateSession({ sessionId: "s1" });
 
-		expect(targets).toEqual([
-			{ sessionId: "s1" },
-			{ email: "user@example.com" },
-		]);
+		expect(targets).toEqual([{ sessionId: "s1" }, { accountId: "acc-1" }]);
 		expect(result).toEqual({
 			accountId: "acc-1",
 			email: "user@example.com",
@@ -428,7 +425,7 @@ describe("lifecycle adapter — session invalidation", () => {
 				targets.push(target);
 				return outcome([ACCOUNT]);
 			},
-			resolveFallbackEmail: () => "user@example.com",
+			resolveFallbackAccountId: () => "acc-1",
 		});
 
 		await adapter.invalidateSession({ sessionId: "s1" });
@@ -436,7 +433,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		expect(targets).toEqual([{ sessionId: "s1" }]);
 	});
 
-	test("an explicit fallback email outranks the resolver and replaces 'active'", async () => {
+	test("an explicit fallback account id outranks the resolver and replaces 'active'", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
 			deps: {} as never,
@@ -444,12 +441,12 @@ describe("lifecycle adapter — session invalidation", () => {
 				targets.push(target);
 				return outcome([ACCOUNT]);
 			},
-			resolveFallbackEmail: () => "stale@example.com",
+			resolveFallbackAccountId: () => "stale-account",
 		});
 
-		await adapter.invalidateSession("active", "fresh@example.com");
+		await adapter.invalidateSession("active", "fresh-account");
 
-		expect(targets).toEqual([{ email: "fresh@example.com" }]);
+		expect(targets).toEqual([{ accountId: "fresh-account" }]);
 	});
 
 	test("lockAll never throws when C1 reports step failures", async () => {

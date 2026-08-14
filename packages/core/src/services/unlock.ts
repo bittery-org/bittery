@@ -116,11 +116,12 @@ interface UnlockPlan {
 
 async function planAll(
 	storage: AccountStore,
-	emails: string[] | undefined,
+	accountIds: string[] | undefined,
 ): Promise<UnlockPlan> {
 	const accounts = await storage.getAccountsList();
-	const targets = emails
-		? accounts.filter((account) => emails.includes(account.email))
+	const requested = accountIds ? new Set(accountIds) : null;
+	const targets = requested
+		? accounts.filter((account) => requested.has(account.accountId))
 		: accounts;
 	return {
 		accounts,
@@ -380,13 +381,13 @@ async function runUnlock(
 	return { activeAccountId, unlocked, failed };
 }
 
-/** Unlock every account (optionally narrowed to `emails`) with one password. */
+/** Unlock every account (optionally narrowed to stable account IDs) with one password. */
 export async function unlockAllWithPassword(
-	input: { password: string; emails?: string[] },
+	input: { password: string; accountIds?: string[] },
 	deps: PasswordUnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
-	const plan = await planAll(deps.storage, input.emails);
+	const plan = await planAll(deps.storage, input.accountIds);
 	const acquired = await acquireWithPassword(
 		plan.targets,
 		input.password,
@@ -395,13 +396,13 @@ export async function unlockAllWithPassword(
 	return runUnlock(acquired, plan, deps, opts);
 }
 
-/** Unlock every account (optionally narrowed to `emails`) with one OS prompt. */
+/** Unlock every account (optionally narrowed to stable account IDs) with one OS prompt. */
 export async function unlockAllWithBiometric(
-	input: { promptMessage: string; emails?: string[] },
+	input: { promptMessage: string; accountIds?: string[] },
 	deps: UnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
-	const plan = await planAll(deps.storage, input.emails);
+	const plan = await planAll(deps.storage, input.accountIds);
 	const acquired = await acquireWithBiometric(
 		plan.targets,
 		input.promptMessage,

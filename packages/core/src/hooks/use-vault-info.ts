@@ -7,7 +7,7 @@
 
 import type { VaultKeyData } from "@bittery/storage/types";
 import { useMemo } from "react";
-import { useVaultRepositorySync } from "./use-vault-repository-sync";
+import { useVaultRepositoryState } from "./use-vault-repository-state";
 
 /**
  * Vault info with associated account metadata
@@ -47,10 +47,9 @@ export function useVaultInfo(
 	vaultId: string,
 	options: UseVaultInfoOptions = {},
 ) {
-	const { accountsInfo, isLoading, snapshot, vaultCoordinator } =
-		useVaultRepositorySync({
+	const { accountsInfo, isLoading, error, snapshot, vaultRepository } =
+		useVaultRepositoryState({
 			enabled: options.enabled,
-			requiredId: vaultId,
 		});
 
 	const vaultInfo = useMemo<VaultInfoWithAccount | null>(() => {
@@ -61,34 +60,27 @@ export function useVaultInfo(
 		}
 
 		for (const account of accountsInfo) {
-			try {
-				const repo = vaultCoordinator.getRepositoryForAccount(
-					account.accountId,
-				);
-				const vaultKey = repo
-					.getVaultKeys()
-					.find((candidate) => candidate.vaultId === vaultId);
-				if (!vaultKey) {
-					continue;
-				}
+			const vaultKey = vaultRepository
+				.getVaultKeys(account.accountId)
+				.find((candidate) => candidate.vaultId === vaultId);
+			if (!vaultKey) continue;
 
-				return {
-					...vaultKey,
-					accountId: account.accountId,
-					accountEmail: account.email,
-					accountName: account.name,
-					accountTeamName: account.teamName,
-					accountTeamAvatarUrl: account.teamAvatarUrl,
-				};
-			} catch {}
+			return {
+				...vaultKey,
+				accountId: account.accountId,
+				accountEmail: account.email,
+				accountName: account.name,
+				accountTeamName: account.teamName,
+				accountTeamAvatarUrl: account.teamAvatarUrl,
+			};
 		}
 
 		return null;
-	}, [accountsInfo, snapshot, vaultCoordinator, vaultId]);
+	}, [accountsInfo, snapshot, vaultRepository, vaultId]);
 
 	return {
 		vaultInfo,
 		isLoading,
-		error: null,
+		error,
 	};
 }

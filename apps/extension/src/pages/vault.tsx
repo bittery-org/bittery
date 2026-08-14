@@ -1,4 +1,3 @@
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, cn, Skeleton, toast } from "@bittery/ui";
 import {
@@ -348,12 +347,6 @@ export function VaultPage() {
 		}
 
 		queryClient.clear();
-		// The popup keeps its own per-context AccountStore view (storage CONTEXT.md §4.5).
-		await peekAccountSessionManager()
-			?.refresh()
-			.catch((error: unknown) => {
-				console.error("Failed to refresh account session after lock:", error);
-			});
 		navigate({ to: "/unlock" });
 	}, [isLocking, navigate, queryClient, m]);
 

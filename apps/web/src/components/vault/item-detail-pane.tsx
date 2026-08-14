@@ -1,6 +1,10 @@
-import { useToggleFavorite, useUpdateItem } from "@bittery/core/hooks";
+import {
+	type UnifiedItem,
+	useToggleFavorite,
+	useUpdateItem,
+} from "@bittery/core/hooks";
 import { detectCardBrand } from "@bittery/shared/credit-card";
-import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import type { DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,
 	cn,
@@ -58,7 +62,7 @@ export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 }
 
 interface ItemDetailPaneProps {
-	selectedItem: DecryptedItem | null;
+	selectedItem: UnifiedItem | null;
 	selectedItemId: string | null;
 	availableTags: string[];
 	canWriteItems: boolean;
@@ -104,6 +108,7 @@ export function ItemDetailPane({
 				{
 					itemId: selectedItem.id,
 					vaultId: selectedItem.vaultId,
+					accountId: selectedItem.accountId,
 					data: updatedData,
 				},
 				{
@@ -122,6 +127,7 @@ export function ItemDetailPane({
 			await updateItem.mutateAsync({
 				itemId: selectedItem.id,
 				vaultId: selectedItem.vaultId,
+				accountId: selectedItem.accountId,
 				data: { password },
 			});
 			toast.success(
@@ -192,6 +198,7 @@ export function ItemDetailPane({
 											toggleFavorite.mutate({
 												itemId: selectedItem.id,
 												vaultId: selectedItem.vaultId,
+												accountId: selectedItem.accountId,
 												favorite: !selectedItem.favorite,
 											})
 										}
@@ -272,6 +279,7 @@ export function ItemDetailPane({
 						<ItemAttachments
 							itemId={selectedItem.id}
 							vaultId={selectedItem.vaultId}
+							accountId={selectedItem.accountId}
 							canEdit={canWriteItems}
 							handleDownloadedFile={handleDownloadedFile}
 						/>

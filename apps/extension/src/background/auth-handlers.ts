@@ -276,17 +276,21 @@ export async function handleGetAuthToken(): Promise<AuthTokenResponse> {
  */
 export async function handleGetSessionData(): Promise<SessionDataResponse> {
 	const activeAccount = await storage.getActiveAccount();
-	const userId = await storage.getActiveAccountUserId();
-	const sessionValid = await storage.isSessionValid();
-
-	const email = activeAccount
-		? await resolveEmailFromAccountId(activeAccount)
-		: null;
+	if (!activeAccount) {
+		return { success: true, sessionData: null };
+	}
+	const [sessionData, sessionValid, email] = await Promise.all([
+		storage.getStoredSessionData(activeAccount),
+		storage.isSessionValid(activeAccount),
+		resolveEmailFromAccountId(activeAccount),
+	]);
 
 	return {
 		success: true,
 		sessionData:
-			email && userId ? { email, userId, isValid: sessionValid } : null,
+			email && sessionData?.userId
+				? { email, userId: sessionData.userId, isValid: sessionValid }
+				: null,
 	};
 }
 

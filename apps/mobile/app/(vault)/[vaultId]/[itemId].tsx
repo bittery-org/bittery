@@ -59,7 +59,9 @@ export default function ItemDetailScreen() {
 
 	const handleDelete = async () => {
 		try {
-			await deleteItem.mutateAsync({ itemId, vaultId });
+			const accountId = item?.accountId ?? item?.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
+			await deleteItem.mutateAsync({ itemId, vaultId, accountId });
 			toast.show({
 				variant: "accent",
 				label: m.mob_item_detail_toast_deleted(),
@@ -83,10 +85,13 @@ export default function ItemDetailScreen() {
 
 	const handleRestorePassword = async (password: string) => {
 		try {
+			const accountId = item?.accountId ?? item?.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
 			await updateItem.mutateAsync({
 				itemId,
 				vaultId,
 				data: { password },
+				accountId,
 			});
 			toast.show({
 				variant: "accent",
@@ -156,7 +161,12 @@ export default function ItemDetailScreen() {
 
 				<CustomFields fields={item.customFields} onCopy={handleCopy} />
 
-				<ItemAttachments itemId={itemId} vaultId={vaultId} canEdit />
+				<ItemAttachments
+					itemId={itemId}
+					vaultId={vaultId}
+					accountId={item.accountId}
+					canEdit
+				/>
 
 				<ItemMetadata createdAt={item.createdAt} updatedAt={item.updatedAt} />
 			</ScrollView>

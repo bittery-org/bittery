@@ -172,19 +172,21 @@ export function useCredentialProviderSync(
 		if (!enabled || Platform.OS !== "android" || !isAvailable) return;
 
 		try {
-			const unlockedEmails = await storage.getUnlockedAccounts();
+			const unlockedAccountIds = await storage.getUnlockedAccounts();
 			debugLog(
-				"[CredentialProviderSync] ensureNativeMukSet: unlockedEmails=",
-				unlockedEmails,
+				"[CredentialProviderSync] ensureNativeMukSet: unlockedAccountIds=",
+				unlockedAccountIds,
 			);
-			if (unlockedEmails.length === 0) {
+			if (unlockedAccountIds.length === 0) {
 				console.warn(
 					"[CredentialProviderSync] ensureNativeMukSet: No unlocked accounts found in RN storage!",
 				);
 				return;
 			}
 
-			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(unlockedEmails);
+			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(
+				unlockedAccountIds,
+			);
 
 			debugLog("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {
@@ -230,14 +232,14 @@ export function useCredentialProviderSync(
 			const seenAccountIds = new Set<string>();
 
 			for (const account of accountsInfo) {
-				seenAccountIds.add(account.userId);
+				seenAccountIds.add(account.accountId);
 				const [vaultKeys, secretKey, kdfProfile] = await Promise.all([
 					storage.getVaultKeys(account.accountId),
 					storage.getStoredSecretKey(account.accountId),
 					storage.getPinnedKdfProfile(account.accountId),
 				]);
 				if (!vaultKeys || vaultKeys.length === 0) {
-					lastVaultSyncSignatureByAccountRef.current.delete(account.userId);
+					lastVaultSyncSignatureByAccountRef.current.delete(account.accountId);
 					continue;
 				}
 				if (!secretKey || !kdfProfile) {
@@ -248,8 +250,10 @@ export function useCredentialProviderSync(
 
 				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
 
-				const accountLoginItems = loginItems.filter((item) =>
-					vaultIdsWithKeys.has(item.vaultId),
+				const accountLoginItems = loginItems.filter(
+					(item) =>
+						item.accountId === account.accountId &&
+						vaultIdsWithKeys.has(item.vaultId),
 				);
 
 				const vaultKeysSignature = buildVaultKeysSignature(vaultKeys);
@@ -257,7 +261,7 @@ export function useCredentialProviderSync(
 					buildLoginItemsSignature(accountLoginItems);
 				const nextSignature = `${vaultKeysSignature}|${accountItemsSignature}|${kdfProfile.schemaVersion}:${kdfProfile.algorithm}:${kdfProfile.iterations}`;
 				const previousSignature =
-					lastVaultSyncSignatureByAccountRef.current.get(account.userId);
+					lastVaultSyncSignatureByAccountRef.current.get(account.accountId);
 
 				if (previousSignature === nextSignature) {
 					continue;
@@ -392,7 +396,7 @@ export function useCredentialProviderSync(
 					JSON.stringify(syncData),
 				);
 				lastVaultSyncSignatureByAccountRef.current.set(
-					account.userId,
+					account.accountId,
 					nextSignature,
 				);
 

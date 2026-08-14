@@ -42,6 +42,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	const { m } = useI18n();
 	const [activeItem, setActiveItem] = useState<DecryptedItem | null>(null);
 	const [sourceVaultId, setSourceVaultId] = useState<string | null>(null);
+	const [sourceAccountId, setSourceAccountId] = useState<string | null>(null);
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
 
@@ -58,6 +59,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 		if (data?.type === "vault-item") {
 			setActiveItem(data.item);
 			setSourceVaultId(data.sourceVaultId);
+			setSourceAccountId(data.accountId);
 		}
 	}
 
@@ -66,10 +68,17 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 
 		const draggedItem = activeItem;
 		const draggedSourceVaultId = sourceVaultId;
+		const draggedSourceAccountId = sourceAccountId;
 		setActiveItem(null);
 		setSourceVaultId(null);
+		setSourceAccountId(null);
 
-		if (!over || !draggedItem || !draggedSourceVaultId) {
+		if (
+			!over ||
+			!draggedItem ||
+			!draggedSourceVaultId ||
+			!draggedSourceAccountId
+		) {
 			return;
 		}
 
@@ -130,6 +139,8 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 				targetVaultId,
 				category: draggedItem.category,
 				decryptedData,
+				accountId: draggedSourceAccountId,
+				targetAccountId: dropData.accountId,
 			},
 			{
 				onSuccess: () => {
@@ -154,6 +165,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	function handleDragCancel() {
 		setActiveItem(null);
 		setSourceVaultId(null);
+		setSourceAccountId(null);
 	}
 
 	return (

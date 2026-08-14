@@ -10,7 +10,7 @@
 
 import { AccountResolver } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
-import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { VaultRepository } from "@bittery/core/services/vault-repository";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import type {
@@ -18,7 +18,7 @@ import type {
 	SyncApiClient,
 	SyncCursor,
 	SyncEvent,
-	SyncItemCache,
+	SyncReplicaStore,
 } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
@@ -49,10 +49,10 @@ export interface SyncCacheStorage {
 	getAccountsList: () => Promise<
 		Array<{ accountId: string; email: string; userId?: string }>
 	>;
-	getAuthToken: (accountId?: string) => Promise<string | null>;
-	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
-	getServerUrl: (accountId?: string) => Promise<string | null>;
-	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
+	getAuthToken: (accountId: string) => Promise<string | null>;
+	storeAuthToken: (token: string, accountId: string) => Promise<void>;
+	getServerUrl: (accountId: string) => Promise<string | null>;
+	getVaultKeys: (accountId: string) => Promise<VaultKeyLike[] | null>;
 	getAccountMetadata: (accountId: string) => Promise<{
 		email?: string;
 		insecureTransportConfirmed?: boolean;
@@ -60,7 +60,7 @@ export interface SyncCacheStorage {
 }
 
 export interface SyncCacheDesktopClient {
-	getAuthToken: (email: string) => Promise<string | null>;
+	getAuthToken: (accountId: string) => Promise<string | null>;
 	clearCache: () => void;
 }
 
@@ -69,10 +69,10 @@ export type SyncEventApiClient = SyncApiClient;
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
 	/**
-	 * `VaultRepositoryCoordinator` in production. Not the raw `ItemCache`: delta sync also
+	 * `VaultRepository` in production. Not the raw `ItemCache`: delta sync also
 	 * drives `syncVaultKeys` and `replaceItemId`, which sit above the cache and the crypto.
 	 */
-	itemCache: SyncItemCache;
+	itemCache: SyncReplicaStore;
 	desktopClient: SyncCacheDesktopClient;
 	createAccountClient: (
 		token: string,
@@ -84,7 +84,7 @@ export interface SyncCacheServiceDeps {
 	 */
 	deltaSync: (
 		client: DeltaSyncApiClient,
-		cache: SyncItemCache,
+		cache: SyncReplicaStore,
 		event: SyncEvent,
 		accountScope: string,
 		serverUrl?: string,
@@ -105,7 +105,7 @@ export interface SyncCacheServiceDeps {
 
 const defaultDeps: SyncCacheServiceDeps = {
 	storage,
-	itemCache: core.vaultCoordinator,
+	itemCache: core.vaultRepository,
 	desktopClient,
 	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
 		createAccountApiClient(token, serverUrl, undefined, undefined, {
@@ -119,7 +119,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 			accountId,
 			storage,
 			itemCache,
-			core.vaultCoordinator as VaultRepositoryCoordinator,
+			core.vaultRepository as VaultRepository,
 			accountClient
 				? {
 						apiClient: accountClient,
@@ -132,13 +132,13 @@ const defaultDeps: SyncCacheServiceDeps = {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		await core.vaultCoordinator.refreshFromServer(accounts);
+		await core.vaultRepository.refreshFromServer(accounts);
 	},
 	initializeFromServer: async (accountId, currentCursor) => {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		return core.vaultCoordinator.initializeSyncBaseline(
+		return core.vaultRepository.initializeSyncBaseline(
 			accounts,
 			accountId,
 			currentCursor,
@@ -237,11 +237,6 @@ export function createSyncCacheService(
 		}
 
 		try {
-			const email = await resolveEmailForAccountId(accountId);
-			if (!email) {
-				return null;
-			}
-
 			const desktopToken = await deps.desktopClient.getAuthToken(accountId);
 			if (!desktopToken) {
 				return null;
@@ -254,18 +249,8 @@ export function createSyncCacheService(
 		}
 	}
 
-	async function getServerUrlForAccountId(
-		accountId?: string | null,
-	): Promise<string> {
-		if (accountId) {
-			const accountScoped = await deps.storage.getServerUrl(accountId);
-			if (accountScoped) {
-				return accountScoped;
-			}
-		}
-
-		const globalServerUrl = await deps.storage.getServerUrl();
-		return globalServerUrl ?? DEFAULT_SERVER_URL;
+	async function getServerUrlForAccountId(accountId: string): Promise<string> {
+		return (await deps.storage.getServerUrl(accountId)) ?? DEFAULT_SERVER_URL;
 	}
 
 	async function getAccountClientForAccountId(
@@ -376,19 +361,6 @@ export function createSyncCacheService(
 		const onlyAccount = accounts.at(0);
 		if (accounts.length === 1 && onlyAccount) {
 			return onlyAccount.accountId;
-		}
-
-		const metadataEmail =
-			typeof event.metadata?.email === "string" ? event.metadata.email : null;
-		if (metadataEmail) {
-			const normalizedMetadataEmail = normalizeEmail(metadataEmail);
-			const emailMatches = accounts.filter(
-				(account) => normalizeEmail(account.email) === normalizedMetadataEmail,
-			);
-			const onlyEmailMatch = emailMatches.at(0);
-			if (emailMatches.length === 1 && onlyEmailMatch) {
-				return onlyEmailMatch.accountId;
-			}
 		}
 
 		return null;

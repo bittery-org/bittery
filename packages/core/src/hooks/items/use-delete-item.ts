@@ -5,11 +5,7 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
-import {
-	enqueueItemMutation,
-	requireLocalItemMutationContext,
-	useItemMutationRuntime,
-} from "./mutation-utils";
+import { useItemMutationRuntime } from "./mutation-utils";
 
 /**
  * Input for deleting an item
@@ -17,26 +13,17 @@ import {
 export interface DeleteItemInput {
 	itemId: string;
 	vaultId: string;
+	accountId: string;
 }
 
 /**
  * Hook for soft-deleting a vault item.
  */
 export function useDeleteItem() {
-	const { core, queue } = useItemMutationRuntime();
+	const { commands } = useItemMutationRuntime();
 
 	return useMutation({
-		mutationFn: async (input: DeleteItemInput) => {
-			const context = requireLocalItemMutationContext(core, input.itemId);
-			await enqueueItemMutation(queue, context, {
-				type: "delete",
-				entityId: input.itemId,
-				vaultId: input.vaultId,
-			});
-
-			return {
-				_accountEmail: context.accountEmail,
-			};
-		},
+		mutationFn: (input: DeleteItemInput) =>
+			commands.execute({ type: "delete", ...input }),
 	});
 }

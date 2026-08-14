@@ -20,7 +20,7 @@ import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
 import { getOrCreateSyncClientId } from "./sync-client-id";
 import {
-	setSessionFallbackEmail,
+	setSessionFallbackAccountId,
 	setSyncPort,
 	vaultSession,
 } from "./vault-session";
@@ -45,8 +45,8 @@ let revoked = false;
 setSyncPort({ disconnect });
 
 /** The revocation payload names a session, never an account, so the machine needs this identity. */
-function setSyncConnectionEmail(email: string | null): void {
-	setSessionFallbackEmail(email);
+function setSyncConnectionAccount(accountId: string | null): void {
+	setSessionFallbackAccountId(accountId);
 }
 
 /**
@@ -174,12 +174,12 @@ export async function connect(): Promise<void> {
 	try {
 		const context = await syncCacheService.resolveConnectionContext();
 		if (!context) {
-			setSyncConnectionEmail(null);
+			setSyncConnectionAccount(null);
 			setStatus("disconnected", "no auth context available");
 			return;
 		}
 
-		setSyncConnectionEmail(context.email);
+		setSyncConnectionAccount(context.accountId);
 		syncConnectionAccountId = context.accountId;
 		syncConnectionServerUrl = context.serverUrl;
 		syncBaselineValidated = false;
@@ -366,9 +366,9 @@ export function disconnect(
 	syncConnectionServerUrl = null;
 	syncBaselineValidated = false;
 	// A revoked teardown keeps the fallback identity: the session invalidation it
-	// triggers runs after this disconnect and resolves by email.
+	// triggers runs after this disconnect and resolves by accountId.
 	if (!suppressReconnect) {
-		setSessionFallbackEmail(null);
+		setSessionFallbackAccountId(null);
 	}
 	void chrome.alarms.clear(SYNC_ALARM_NAME);
 	setStatus("disconnected", reason);

@@ -18,7 +18,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
+import { itemCache, refreshAccountRuntime, storage } from "@/lib/storage";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
 
@@ -406,7 +406,7 @@ export function useSignupForm({
 				email,
 				{ serverUrl, insecureTransportConfirmed },
 			);
-			await refreshActiveAccountId();
+			await refreshAccountRuntime();
 
 			toast.success(m.auth_signup_toast_account_created());
 			toast.success(

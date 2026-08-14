@@ -1,5 +1,4 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	AccountSwitcher,
 	Avatar,
@@ -75,8 +74,8 @@ export function ExtensionAccountSwitcher() {
 	const handleSwitchAccount = async (accountId: string) => {
 		if (accountId === activeAccountId) return;
 
-		const account = accountsData.find((item) => item.accountId === accountId);
-		if (!account) return;
+		if (!accountsData.some((account) => account.accountId === accountId))
+			return;
 
 		try {
 			await switchAccount.mutateAsync(accountId);
@@ -102,8 +101,8 @@ export function ExtensionAccountSwitcher() {
 					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				]);
 			} else {
-				// Need to unlock - redirect to unlock screen with the account email
-				navigate({ to: "/unlock", search: { email: account.email } });
+				// The unlock screen handles every locked account; no account selector is needed.
+				navigate({ to: "/unlock" });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
@@ -133,12 +132,6 @@ export function ExtensionAccountSwitcher() {
 		}
 
 		queryClient.clear();
-		// The popup keeps its own per-context AccountStore view (storage CONTEXT.md §4.5).
-		await peekAccountSessionManager()
-			?.refresh()
-			.catch((error: unknown) => {
-				console.error("Failed to refresh account session after lock:", error);
-			});
 		navigate({ to: "/unlock" });
 		toast.success(m.ext_account_switcher_toast_all_locked());
 	};

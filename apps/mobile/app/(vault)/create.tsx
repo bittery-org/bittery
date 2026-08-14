@@ -99,7 +99,7 @@ export default function CreateItemScreen() {
 			return;
 		}
 
-		if (!selectedVaultId) {
+		if (!selectedVaultId || !selectedVault) {
 			toast.show({
 				variant: "danger",
 				label: m.mob_create_item_toast_vault_required(),
@@ -173,11 +173,11 @@ export default function CreateItemScreen() {
 			}
 
 			// Encryption happens inside the hook — nothing plaintext leaves this screen.
-			// No account hint: the vault coordinator derives the account from the vault.
 			await createItem.mutateAsync({
 				vaultId: selectedVaultId,
 				category: categoryValue,
 				data: itemData,
+				accountId: selectedVault.accountId,
 			});
 
 			toast.show({

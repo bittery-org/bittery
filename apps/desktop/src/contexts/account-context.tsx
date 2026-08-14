@@ -2,7 +2,9 @@ import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle"
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
+	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { IAutolockService } from "@bittery/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Router } from "@tanstack/react-router";
@@ -22,6 +24,7 @@ import {
 	broadcastActiveAccountChanged,
 	broadcastLockEvent,
 } from "@/lib/tauri-commands";
+import { getDesktopVaultRuntime } from "@/lib/vault-runtime";
 import { createDesktopAutolockService } from "@/services/autolock-service";
 
 interface AccountContextValue {
@@ -37,6 +40,10 @@ interface AccountContextValue {
 }
 
 const AccountContext = createContext<AccountContextValue | null>(null);
+const AccountRuntimeContext = createContext<{
+	manager: AccountSessionManager;
+	vaultRuntime: AccountVaultRuntime;
+} | null>(null);
 
 function createDesktopAccountManager(
 	queryClientRef: React.RefObject<ReturnType<typeof useQueryClient>>,
@@ -93,9 +100,12 @@ export function AccountProvider({
 
 	const managerRef = useRef<AccountSessionManager | null>(null);
 	if (!managerRef.current) {
-		managerRef.current = createDesktopAccountManager(queryClientRef);
+		managerRef.current =
+			peekAccountSessionManager() ??
+			createDesktopAccountManager(queryClientRef);
 	}
 	const manager = managerRef.current;
+	const vaultRuntime = getDesktopVaultRuntime(manager);
 
 	const [isLoading, setIsLoading] = useState(true);
 	const autolockService = useRef<IAutolockService | null>(null);
@@ -198,22 +208,30 @@ export function AccountProvider({
 	}, [router]);
 
 	return (
-		<AccountContext.Provider
-			value={{
-				activeAccount,
-				allAccounts,
-				switchAccount,
-				addAccount,
-				removeAccount,
-				lockAccount,
-				lockAllAccounts,
-				refreshAccounts,
-				isLoading,
-			}}
-		>
-			{children}
-		</AccountContext.Provider>
+		<AccountRuntimeContext.Provider value={{ manager, vaultRuntime }}>
+			<AccountContext.Provider
+				value={{
+					activeAccount,
+					allAccounts,
+					switchAccount,
+					addAccount,
+					removeAccount,
+					lockAccount,
+					lockAllAccounts,
+					refreshAccounts,
+					isLoading,
+				}}
+			>
+				{children}
+			</AccountContext.Provider>
+		</AccountRuntimeContext.Provider>
 	);
+}
+
+export function useDesktopAccountRuntime() {
+	const value = useContext(AccountRuntimeContext);
+	if (!value) throw new Error("AccountProvider must own the desktop runtime");
+	return value;
 }
 
 export function useAccount(): AccountContextValue {

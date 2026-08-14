@@ -1,30 +1,31 @@
 /**
  * useItem Hook - Unified Single Item Fetching
  *
- * Reads from the local VaultRepositoryCoordinator.
+ * Reads from the local VaultRepository.
  */
 
 import { toCachedItemFromRepositoryItem } from "@bittery/shared/item-mapping";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import type { CachedEncryptedItem } from "@bittery/types";
 import { useMemo } from "react";
-import type { CoordinatedItemAccount } from "../services/vault-repository-coordinator";
+import type { VaultRepositoryItemAccount } from "../services/vault-repository";
 import { extractDecryptedItemData } from "./items/mutation-utils";
-import { useVaultRepositorySync } from "./use-vault-repository-sync";
+import { useVaultRepositoryState } from "./use-vault-repository-state";
 
 export interface UseItemOptions {
-	accountEmail?: string;
+	accountId?: string;
 	enabled?: boolean;
 }
 
 /**
  * The item's own fields come straight from the cached record, so this hook cannot quietly
- * drop one the server started sending. `account` is the coordinator's, not the server's.
+ * drop one the server started sending. `account` is the repository's, not the server's.
  */
 export type RawItemForAccount = CachedEncryptedItem & {
+	accountId: string;
 	/** Already decoded by the repository; the wire spells it as an open string. */
 	category: ItemCategory;
-	account?: CoordinatedItemAccount;
+	account?: VaultRepositoryItemAccount;
 };
 
 export interface UseItemResult {
@@ -43,28 +44,27 @@ export function useItem(
 	options: UseItemOptions = {},
 ): UseItemResult {
 	const { enabled = true } = options;
-	const { isLoading, refetch, snapshot, vaultCoordinator } =
-		useVaultRepositorySync({
+	const { isLoading, error, refetch, snapshot, vaultRepository } =
+		useVaultRepositoryState({
 			enabled,
-			requiredId: itemId,
 		});
 
 	const item = useMemo(() => {
-		// Snapshot is an invalidation signal from the coordinator store.
+		// Snapshot is an invalidation signal from the repository.
 		void snapshot;
 
 		if (!enabled || !itemId) {
 			return undefined;
 		}
-		return vaultCoordinator.getById(itemId);
-	}, [vaultCoordinator, enabled, itemId, snapshot]);
+		return vaultRepository.getById(itemId, options.accountId);
+	}, [vaultRepository, enabled, itemId, options.accountId, snapshot]);
 
 	if (!enabled || !itemId) {
 		return {
 			rawItem: null,
 			decryptedData: null,
 			isLoading: false,
-			error: null,
+			error,
 			refetch,
 		};
 	}
@@ -74,17 +74,18 @@ export function useItem(
 			rawItem: null,
 			decryptedData: null,
 			isLoading,
-			error: null,
+			error,
 			refetch,
 		};
 	}
 
 	const rawItem: RawItemForAccount = {
 		...toCachedItemFromRepositoryItem(item, {
-			accountId: item.account?.accountId,
+			accountId: item.accountId,
 			accountEmail: item.account?.email,
 			serverUrl: item.account?.serverUrl,
 		}),
+		accountId: item.accountId,
 		category: item.category,
 		account: item.account,
 	};
@@ -93,7 +94,7 @@ export function useItem(
 		rawItem,
 		decryptedData: extractDecryptedItemData(item),
 		isLoading,
-		error: null,
+		error,
 		refetch,
 	};
 }

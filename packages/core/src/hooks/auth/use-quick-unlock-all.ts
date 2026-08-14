@@ -37,7 +37,7 @@ export interface QuickUnlockAllInput {
 	 * Optional: specific accounts to unlock.
 	 * If not provided, will attempt to unlock all accounts that have stored secret keys.
 	 */
-	emails?: string[];
+	accountIds?: string[];
 }
 
 /** Surfaced as-is: consumers read `unlocked` and `failed.length`. */
@@ -104,7 +104,7 @@ export function useQuickUnlockAll(
 	return useMutation({
 		mutationFn: async (input: QuickUnlockAllInput) => {
 			const outcome = await unlockAllWithPassword(
-				{ password: input.password, emails: input.emails },
+				{ password: input.password, accountIds: input.accountIds },
 				{ crypto, storage, itemCache, credentialMirror },
 			);
 			// The unlock reports rather than throws; React Query needs a rejection to

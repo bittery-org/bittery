@@ -238,6 +238,22 @@ export class ItemSyncEngine {
 		);
 	}
 
+	/** Keep active drain/enqueue references aligned with the atomically reconciled document. */
+	private adoptReconciledQueue(
+		accountId: string,
+		reconciled: PendingMutation[],
+	): void {
+		const current = this.queuesByAccountId.get(accountId);
+		if (current && current !== reconciled) {
+			current.splice(0, current.length, ...reconciled);
+		}
+		if (reconciled.length === 0) {
+			this.queuesByAccountId.delete(accountId);
+		} else {
+			this.queuesByAccountId.set(accountId, current ?? reconciled);
+		}
+	}
+
 	private toAuthoritativeItem(
 		mutation: PendingMutation,
 		item: Awaited<ReturnType<OutboundQueueApiClient["items"]["get"]>>["data"],
@@ -271,80 +287,68 @@ export class ItemSyncEngine {
 
 	private async writeQueue(accountId: string): Promise<void> {
 		const queue = this.queuesByAccountId.get(accountId) ?? [];
-		if (this.storage.update) {
-			const desiredById = new Map(
-				queue.map((command) => [command.operationId ?? command.id, command]),
-			);
-			const knownIds = this.persistedOperationIds.get(accountId) ?? new Set();
-			const knownSignatures =
-				this.persistedCommandSignatures.get(accountId) ?? new Map();
-			const acknowledgedElsewhere: PendingMutation[] = [];
-			const document = await this.storage.update<QueueDocument>(
-				QUEUE_DOCUMENT_KEY,
-				(current) => {
-					const nextDocument = { ...(current ?? {}) };
-					const mergedById = new Map(
-						(nextDocument[accountId] ?? []).map((command) => [
-							command.operationId ?? command.id,
-							command,
-						]),
-					);
-					for (const knownId of knownIds) {
-						if (!desiredById.has(knownId)) {
-							mergedById.delete(knownId);
-						}
-					}
-					for (const [operationId, command] of desiredById) {
-						if (knownIds.has(operationId) && !mergedById.has(operationId)) {
-							acknowledgedElsewhere.push(command);
-							continue;
-						}
-						const currentCommand = mergedById.get(operationId);
-						const knownSignature = knownSignatures.get(operationId);
-						if (
-							currentCommand &&
-							knownSignature &&
-							this.commandSignature(currentCommand) !== knownSignature
-						) {
-							continue;
-						}
-						mergedById.set(operationId, command);
-					}
-					const next = Array.from(mergedById.values()).sort(
-						(a, b) => a.timestamp - b.timestamp,
-					);
-					if (next.length > 0) {
-						nextDocument[accountId] = next;
-					} else {
-						delete nextDocument[accountId];
-					}
-					return Object.keys(nextDocument).length > 0 ? nextDocument : null;
-				},
-			);
-			for (const command of acknowledgedElsewhere) {
-				await this.reconciler?.discardAcknowledgedElsewhere?.(command);
-			}
-			const reconciled = document?.[accountId] ?? [];
-			if (
-				reconciled.some(
-					(command) => !desiredById.has(command.operationId ?? command.id),
-				)
-			) {
-				this.drainRequested = true;
-			}
-			if (reconciled.length === 0) {
-				this.queuesByAccountId.delete(accountId);
-			} else {
-				this.queuesByAccountId.set(accountId, reconciled);
-			}
-			this.rememberPersistedCommands(accountId, reconciled);
-			return;
-		}
-		if (queue.length === 0) this.queuesByAccountId.delete(accountId);
-		await this.storage.set(
-			QUEUE_DOCUMENT_KEY,
-			Object.fromEntries(this.queuesByAccountId),
+		const desiredById = new Map(
+			queue.map((command) => [command.operationId ?? command.id, command]),
 		);
+		const knownIds = this.persistedOperationIds.get(accountId) ?? new Set();
+		const knownSignatures =
+			this.persistedCommandSignatures.get(accountId) ?? new Map();
+		const acknowledgedElsewhere: PendingMutation[] = [];
+		const document = await this.storage.update<QueueDocument>(
+			QUEUE_DOCUMENT_KEY,
+			(current) => {
+				const nextDocument = { ...(current ?? {}) };
+				const mergedById = new Map(
+					(nextDocument[accountId] ?? []).map((command) => [
+						command.operationId ?? command.id,
+						command,
+					]),
+				);
+				for (const knownId of knownIds) {
+					if (!desiredById.has(knownId)) {
+						mergedById.delete(knownId);
+					}
+				}
+				for (const [operationId, command] of desiredById) {
+					if (knownIds.has(operationId) && !mergedById.has(operationId)) {
+						acknowledgedElsewhere.push(command);
+						continue;
+					}
+					const currentCommand = mergedById.get(operationId);
+					const knownSignature = knownSignatures.get(operationId);
+					if (
+						currentCommand &&
+						knownSignature &&
+						this.commandSignature(currentCommand) !== knownSignature
+					) {
+						continue;
+					}
+					mergedById.set(operationId, command);
+				}
+				const next = Array.from(mergedById.values()).sort(
+					(a, b) => a.timestamp - b.timestamp,
+				);
+				if (next.length > 0) {
+					nextDocument[accountId] = next;
+				} else {
+					delete nextDocument[accountId];
+				}
+				return Object.keys(nextDocument).length > 0 ? nextDocument : null;
+			},
+		);
+		for (const command of acknowledgedElsewhere) {
+			await this.reconciler?.discardAcknowledgedElsewhere?.(command);
+		}
+		const reconciled = document?.[accountId] ?? [];
+		if (
+			reconciled.some(
+				(command) => !desiredById.has(command.operationId ?? command.id),
+			)
+		) {
+			this.drainRequested = true;
+		}
+		this.adoptReconciledQueue(accountId, reconciled);
+		this.rememberPersistedCommands(accountId, reconciled);
 	}
 
 	private schedulePersistence(accountId: string): Promise<void> {
@@ -363,7 +367,7 @@ export class ItemSyncEngine {
 				const operationId = mutation.operationId ?? mutation.id;
 				let conflictedOperationId: string | undefined;
 				const document =
-					(await this.storage.update?.<QueueDocument>(
+					(await this.storage.update<QueueDocument>(
 						QUEUE_DOCUMENT_KEY,
 						(current) => {
 							const nextDocument = { ...(current ?? {}) };
@@ -394,11 +398,7 @@ export class ItemSyncEngine {
 						},
 					)) ?? {};
 				const reconciled = document[accountId] ?? [];
-				if (reconciled.length === 0) {
-					this.queuesByAccountId.delete(accountId);
-				} else {
-					this.queuesByAccountId.set(accountId, reconciled);
-				}
+				this.adoptReconciledQueue(accountId, reconciled);
 				this.rememberPersistedCommands(accountId, reconciled);
 				return conflictedOperationId === undefined
 					? undefined
@@ -1024,30 +1024,12 @@ export class ItemSyncEngine {
 						version: serverVersion,
 					});
 					queue.splice(mutationIndex, 1);
-					if (this.storage.update) {
-						const conflicted = await this.persistAcknowledgement(
-							accountId,
-							mutation,
-							serverVersion,
-						);
-						if (conflicted) await this.preserveConflict(conflicted);
-					} else {
-						const next =
-							serverVersion === undefined
-								? undefined
-								: queue.find(
-										(candidate) =>
-											candidate.entityId === mutation.entityId &&
-											isActiveMutation(candidate),
-									);
-						if (serverVersion !== undefined && next) {
-							this.rebaseChainedCommand(next, serverVersion);
-						}
-						await this.schedulePersistence(accountId);
-						if (next?.status === "conflicted") {
-							await this.preserveConflict(next);
-						}
-					}
+					const conflicted = await this.persistAcknowledgement(
+						accountId,
+						mutation,
+						serverVersion,
+					);
+					if (conflicted) await this.preserveConflict(conflicted);
 					this.emit();
 				} catch (error) {
 					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
@@ -1129,7 +1111,10 @@ export class ItemSyncEngine {
 		const persistence = this.persistenceTail
 			.catch(() => undefined)
 			.then(async () => {
-				await this.storage.remove(QUEUE_DOCUMENT_KEY);
+				await this.storage.update<QueueDocument>(
+					QUEUE_DOCUMENT_KEY,
+					() => null,
+				);
 			});
 		this.persistenceTail = persistence.catch(() => undefined);
 		await persistence;

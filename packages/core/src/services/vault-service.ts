@@ -6,7 +6,8 @@ import {
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { AccountResolver, DefaultApiClient } from "./account-resolver";
+import type { VaultKeyData } from "@bittery/storage/types";
+import type { AccountResolver } from "./account-resolver";
 import type { VaultCrypto } from "./vault-crypto";
 
 /**
@@ -67,19 +68,22 @@ export interface ApiVaultClient {
 export async function refreshVaultKeys(
 	apiClient: ApiVaultClient,
 	storage: AccountStore,
-	accountId?: string,
-): Promise<void> {
+	accountId: string,
+): Promise<VaultKeyData[]> {
 	const { data: vaultList } = await apiClient.vaults.list();
-	await storage.storeVaultKeys(
-		vaultList.map((vault) =>
-			toVaultKeyEntry({
-				...vault,
-				icon: vault.icon ?? null,
-				imageUrl: vault.imageUrl ?? null,
-			}),
-		),
-		accountId,
+	const vaultKeys = vaultList.map((vault) =>
+		toVaultKeyEntry({
+			...vault,
+			icon: vault.icon ?? null,
+			imageUrl: vault.imageUrl ?? null,
+		}),
 	);
+	await storage.storeVaultKeys(vaultKeys, accountId);
+	return vaultKeys;
+}
+
+interface VaultKeyProjection {
+	syncVaultKeys(vaultKeys: VaultKeyData[], accountId: string): Promise<void>;
 }
 
 interface VaultServiceDeps {
@@ -87,6 +91,7 @@ interface VaultServiceDeps {
 	crypto: CryptoPort;
 	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
+	vaultKeyProjection: VaultKeyProjection;
 }
 
 export class VaultService {
@@ -94,18 +99,17 @@ export class VaultService {
 	private readonly crypto: CryptoPort;
 	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
+	private readonly vaultKeyProjection: VaultKeyProjection;
 
 	constructor(deps: VaultServiceDeps) {
 		this.storage = deps.storage;
 		this.crypto = deps.crypto;
 		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
+		this.vaultKeyProjection = deps.vaultKeyProjection;
 	}
 
-	async createVault(
-		input: CreateVaultInput,
-		defaultClient: DefaultApiClient,
-	): Promise<CreateVaultResult> {
+	async createVault(input: CreateVaultInput): Promise<CreateVaultResult> {
 		const trimmedName = input.name.trim();
 		if (!trimmedName) {
 			throw new Error("Vault name is required");
@@ -115,10 +119,7 @@ export class VaultService {
 		}
 
 		const accountId = input.accountId;
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+		const client = await this.accounts.getClientForAccount(accountId);
 		const vaultId = await this.crypto.generateUuid();
 
 		let imageKey = input.imageKey;
@@ -186,15 +187,9 @@ export class VaultService {
 		}
 	}
 
-	async updateVault(
-		input: UpdateVaultInput,
-		defaultClient: DefaultApiClient,
-	): Promise<void> {
+	async updateVault(input: UpdateVaultInput): Promise<void> {
 		const accountId = input.accountId;
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+		const client = await this.accounts.getClientForAccount(accountId);
 
 		if (input.name !== undefined) {
 			const trimmedName = input.name.trim();
@@ -246,13 +241,9 @@ export class VaultService {
 
 	async convertVaultType(
 		input: ConvertVaultTypeInput,
-		defaultClient: DefaultApiClient,
 	): Promise<ConvertVaultTypeResult> {
 		const accountId = input.accountId;
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+		const client = await this.accounts.getClientForAccount(accountId);
 		const { data: result } = await client.vaults.convertType(input.vaultId, {
 			targetType: input.targetType,
 			personalEncryptedVaultKey: input.personalEncryptedVaultKey ?? null,
@@ -270,26 +261,14 @@ export class VaultService {
 		};
 	}
 
-	async deleteVault(
-		vaultId: string,
-		defaultClient: DefaultApiClient,
-		accountId: string,
-	): Promise<void> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+	async deleteVault(vaultId: string, accountId: string): Promise<void> {
+		const client = await this.accounts.getClientForAccount(accountId);
 		await client.vaults.remove(vaultId, {});
 	}
 
-	async refreshVaultKeys(
-		defaultClient: DefaultApiClient,
-		accountId: string,
-	): Promise<void> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
-		await refreshVaultKeys(client, this.storage, accountId);
+	async refreshVaultKeys(accountId: string): Promise<void> {
+		const client = await this.accounts.getClientForAccount(accountId);
+		const vaultKeys = await refreshVaultKeys(client, this.storage, accountId);
+		await this.vaultKeyProjection.syncVaultKeys(vaultKeys, accountId);
 	}
 }

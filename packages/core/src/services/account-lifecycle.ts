@@ -114,7 +114,6 @@ export interface AccountDeletionDeps extends LifecycleDeps {
 export type InvalidationTarget =
 	| "active"
 	| { accountId: string }
-	| { email: string }
 	| { sessionId: string };
 
 /**
@@ -292,14 +291,6 @@ async function resolveTarget(
 	if ("accountId" in target) {
 		return target.accountId;
 	}
-	if ("email" in target) {
-		const email = target.email.trim().toLowerCase();
-		return (
-			accounts.find((account) => account.email.trim().toLowerCase() === email)
-				?.accountId ?? null
-		);
-	}
-
 	// Only the stored session record names its server session, so this scans.
 	for (const account of accounts) {
 		const session = await step(

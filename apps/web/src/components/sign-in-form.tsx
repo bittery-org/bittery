@@ -24,7 +24,7 @@ import { useMemo, useState } from "react";
 import {
 	forgetActiveSession,
 	itemCache,
-	refreshActiveAccountId,
+	refreshAccountRuntime,
 	storage,
 } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -51,12 +51,15 @@ export default function SignInForm({
 		[insecureTransportConfirmed, serverUrl],
 	);
 	const isQuickUnlock = Boolean(
-		sessionState?.canQuickUnlock && sessionState?.email,
+		sessionState?.canQuickUnlock &&
+			sessionState.accountId &&
+			sessionState.email,
 	);
 	const storedSecretKeyQuery = useQuery({
-		queryKey: ["auth", "stored-secret-key", sessionState?.email],
-		enabled: isQuickUnlock && !!sessionState?.email,
-		queryFn: () => storage.getStoredSecretKey(),
+		queryKey: ["auth", "stored-secret-key", sessionState?.accountId],
+		enabled: isQuickUnlock && !!sessionState?.accountId,
+		queryFn: () =>
+			storage.getStoredSecretKey(sessionState?.accountId ?? undefined),
 	});
 	const registrationStatusQuery = useQuery({
 		queryKey: [
@@ -233,7 +236,7 @@ function SignInFormContent({
 			// `storeLoginSession` sets the master unlock key before it moves the
 			// active-account pointer, so the unlock notification alone would publish the
 			// pre-login id. Re-read it once the pointer is final.
-			await refreshActiveAccountId();
+			await refreshAccountRuntime();
 			return result;
 		},
 		onSuccess: () => {

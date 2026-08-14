@@ -15,7 +15,7 @@ import {
 	type TravelModeDisableProof,
 	type TravelModeServerResponse,
 } from "./travel-mode-service";
-import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import type { VaultRepository } from "./vault-repository";
 
 export interface TravelModeEnforcerOptions {
 	/** Account-scoped settings and vault keys. */
@@ -26,7 +26,7 @@ export interface TravelModeEnforcerOptions {
 	 * so a purge has to touch both explicitly.
 	 */
 	itemCache: ItemCache;
-	coordinator?: VaultRepositoryCoordinator;
+	repository?: VaultRepository;
 }
 
 const DEFAULT_CONFIG: TravelModeConfig = {
@@ -51,8 +51,8 @@ export class TravelModeEnforcer {
 
 	constructor(private options: TravelModeEnforcerOptions) {}
 
-	setCoordinator(coordinator: VaultRepositoryCoordinator): void {
-		this.options = { ...this.options, coordinator };
+	setRepository(repository: VaultRepository): void {
+		this.options = { ...this.options, repository };
 	}
 
 	get storage(): AccountStore {
@@ -170,8 +170,8 @@ export class TravelModeEnforcer {
 			await this.itemCache.setCachedVaults(filtered, accountId);
 		}
 
-		// In-memory repo layer via coordinator
-		this.options.coordinator?.purgeHiddenVaultsForAccount(
+		// In-memory decrypted projection.
+		this.options.repository?.purgeHiddenVaultsForAccount(
 			accountId,
 			hiddenVaultIds,
 		);
@@ -344,16 +344,16 @@ let enforcerByStorage = new WeakMap<AccountStore, TravelModeEnforcer>();
 export function getTravelModeEnforcer(
 	storage: AccountStore,
 	itemCache: ItemCache,
-	coordinator?: VaultRepositoryCoordinator,
+	repository?: VaultRepository,
 ): TravelModeEnforcer {
 	const existing = enforcerByStorage.get(storage);
 	if (existing) {
-		if (coordinator) {
-			existing.setCoordinator(coordinator);
+		if (repository) {
+			existing.setRepository(repository);
 		}
 		return existing;
 	}
-	const created = new TravelModeEnforcer({ storage, itemCache, coordinator });
+	const created = new TravelModeEnforcer({ storage, itemCache, repository });
 	enforcerByStorage.set(storage, created);
 	return created;
 }

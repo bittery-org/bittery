@@ -28,7 +28,6 @@ import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface UnlockSearchParams {
-	email?: string;
 	autoTrigger?: boolean;
 	autoTriggerId?: string;
 }
@@ -37,7 +36,6 @@ export const Route = createFileRoute("/unlock")({
 	component: UnlockPage,
 	validateSearch: (search: Record<string, unknown>): UnlockSearchParams => {
 		return {
-			email: typeof search.email === "string" ? search.email : undefined,
 			autoTrigger: search.autoTrigger === true || search.autoTrigger === "true",
 			autoTriggerId:
 				typeof search.autoTriggerId === "string"

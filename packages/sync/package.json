@@ -11,6 +11,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./sync-manager": "./src/sync-manager.ts",
+		"./source": "./src/source.ts",
 		"./use-sync": "./src/use-sync.ts",
 		"./types": "./src/types.ts"
 	},

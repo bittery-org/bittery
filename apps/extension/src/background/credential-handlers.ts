@@ -24,8 +24,8 @@ import type {
 	UpdateExistingCredentialResponse,
 } from "./router/contract";
 import {
-	resolveAccountEmailForItemId,
-	resolveAccountEmailForVault,
+	resolveAccountIdForItem,
+	resolveAccountIdForVault,
 } from "./services/account-resolution";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
@@ -142,8 +142,8 @@ export async function handleSaveNewCredential(
 	}
 
 	try {
-		const accountEmail = await resolveAccountEmailForVault(vaultId);
-		if (!accountEmail) {
+		const accountId = await resolveAccountIdForVault(vaultId);
+		if (!accountId) {
 			return {
 				success: false,
 				error:
@@ -152,7 +152,7 @@ export async function handleSaveNewCredential(
 			};
 		}
 
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountId);
 		if (!hasWriteCapability) {
 			return {
 				success: false,
@@ -171,7 +171,7 @@ export async function handleSaveNewCredential(
 				username,
 				password,
 			},
-			accountEmail,
+			accountId,
 		});
 
 		return { success: true, itemId: result.itemId };
@@ -217,9 +217,9 @@ export async function handleUpdateExistingCredential(
 	}
 
 	try {
-		const accountEmail = await resolveAccountEmailForItemId(itemId);
+		const accountId = await resolveAccountIdForItem(itemId);
 
-		if (!accountEmail) {
+		if (!accountId) {
 			return {
 				success: false,
 				error: "Could not resolve account for this item.",
@@ -227,7 +227,7 @@ export async function handleUpdateExistingCredential(
 			};
 		}
 
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountId);
 		if (!hasWriteCapability) {
 			return {
 				success: false,
@@ -244,7 +244,7 @@ export async function handleUpdateExistingCredential(
 				username,
 				password,
 			},
-			accountEmail,
+			accountId,
 		});
 
 		return { success: true };

@@ -31,6 +31,12 @@ export {
 	getQueryKeysForEvent,
 	invalidateQueriesForEvent,
 } from "./query-invalidation";
+export type { SyncEventContext, SyncSource } from "./source";
+export {
+	buildDefaultSyncSourceId,
+	selectScopedSyncSources,
+} from "./source";
+export { MemorySyncStorage, NamespacedSyncStorage } from "./storage";
 // Core sync functionality
 export { createSyncManager, SyncManager } from "./sync-manager";
 export {
@@ -46,12 +52,9 @@ export * from "./types";
 // React hooks
 export type {
 	SyncContextValue,
-	SyncEventContext,
-	SyncSource,
 	UseSyncOptions,
 } from "./use-sync";
 export {
-	buildDefaultSyncSourceId,
 	generateClientId,
 	getOrCreateClientId,
 	useSync,

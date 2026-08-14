@@ -1,4 +1,3 @@
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
@@ -37,17 +36,13 @@ export function subscribeBackgroundPushes(
 				break;
 			}
 			case "ACTIVE_ACCOUNT_CHANGED": {
-				void peekAccountSessionManager()
-					?.refresh()
-					.then(() =>
-						Promise.all([
-							queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-							queryClient.invalidateQueries({ queryKey: ["items"] }),
-							queryClient.invalidateQueries({ queryKey: ["accounts"] }),
-							queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
-							queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
-						]),
-					);
+				void Promise.all([
+					queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+					queryClient.invalidateQueries({ queryKey: ["items"] }),
+					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+					queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+					queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+				]);
 				break;
 			}
 		}

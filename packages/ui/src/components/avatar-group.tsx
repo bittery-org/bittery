@@ -13,6 +13,7 @@ import {
 } from "./avatar";
 
 export interface AvatarGroupAccount {
+	accountId: string;
 	email: string;
 	name?: string;
 	teamName?: string;
@@ -54,7 +55,7 @@ export function AccountAvatarGroup({
 	return (
 		<AvatarGroupRaw className={className}>
 			{visibleAccounts.map((account) => (
-				<Avatar key={account.email} className={cn(sizeClasses[size])}>
+				<Avatar key={account.accountId} className={cn(sizeClasses[size])}>
 					{account.teamAvatarUrl && (
 						<AvatarImage
 							src={account.teamAvatarUrl}

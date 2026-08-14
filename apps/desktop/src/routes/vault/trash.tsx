@@ -52,11 +52,9 @@ function TrashComponent() {
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
 
-	const [itemToDelete, setItemToDelete] = useState<{
-		id: string;
-		vaultId: string;
-		title: string;
-	} | null>(null);
+	const [itemToDelete, setItemToDelete] = useState<
+		(typeof deletedItems)[number] | null
+	>(null);
 
 	const sortedItems = useMemo(() => {
 		return [...deletedItems].sort((a, b) => {
@@ -66,9 +64,15 @@ function TrashComponent() {
 		});
 	}, [deletedItems]);
 
-	const handleRestore = async (itemId: string, vaultId: string) => {
+	const handleRestore = async (item: (typeof deletedItems)[number]) => {
 		try {
-			await restoreItem.mutateAsync({ itemId, vaultId });
+			const accountId = item.accountId ?? item.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
+			await restoreItem.mutateAsync({
+				itemId: item.id,
+				vaultId: item.vaultId,
+				accountId,
+			});
 			toast.success(m.vaults_trash_toast_restore_success());
 		} catch {
 			toast.error(m.vaults_trash_toast_restore_error());
@@ -78,9 +82,13 @@ function TrashComponent() {
 	const handleConfirmPermanentDelete = async () => {
 		if (!itemToDelete) return;
 		try {
+			const accountId =
+				itemToDelete.accountId ?? itemToDelete.account?.accountId;
+			if (!accountId) throw new Error("Item account is unavailable");
 			await permanentDeleteItem.mutateAsync({
 				itemId: itemToDelete.id,
 				vaultId: itemToDelete.vaultId,
+				accountId,
 			});
 			setItemToDelete(null);
 			toast.success(m.vaults_trash_toast_permanent_delete_success());
@@ -183,7 +191,7 @@ function TrashComponent() {
 												variant="ghost"
 												size="sm"
 												className="size-7 p-0"
-												onClick={() => handleRestore(item.id, item.vaultId)}
+												onClick={() => handleRestore(item)}
 												disabled={restoreItem.isPending}
 												title={m.vaults_trash_item_action_restore()}
 												aria-label={m.vaults_trash_item_action_restore()}
@@ -194,13 +202,7 @@ function TrashComponent() {
 												variant="ghost"
 												size="sm"
 												className="size-7 p-0 hover:text-destructive"
-												onClick={() =>
-													setItemToDelete({
-														id: item.id,
-														vaultId: item.vaultId,
-														title: item.title || m.vaults_trash_item_untitled(),
-													})
-												}
+												onClick={() => setItemToDelete(item)}
 												disabled={permanentDeleteItem.isPending}
 												title={m.vaults_trash_item_action_delete_forever()}
 												aria-label={m.vaults_trash_item_action_delete_forever()}

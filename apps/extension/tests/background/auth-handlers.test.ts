@@ -4,10 +4,9 @@ import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-ac
 import type { ActiveAccountId } from "@bittery/storage/types";
 
 // Regression coverage for the "Unlock All" password flow in the single-account
-// case. The bug: the handler treated the entries of `unlocked` (which are
-// accountIds) as emails and ran them back through `resolveAccountIdFromEmail`,
-// which only matches on email. For a UUID accountId that always returned
-// undefined and the handler threw "No unlocked accounts found".
+// case. The bug: the handler treated the stable IDs in `unlocked` as email
+// addresses, so a UUID accountId was discarded and the handler threw
+// "No unlocked accounts found".
 
 const bgDir = path.resolve(import.meta.dir, "../../src/background");
 const libDir = path.resolve(import.meta.dir, "../../src/lib");
@@ -28,13 +27,9 @@ const forgetSessionCalls: (string | undefined)[] = [];
 const clearItemCacheCalls: (string | undefined)[] = [];
 let forgetSessionError: Error | null = null;
 
-// resolveAccountIdFromEmail only matches on email; for an accountId (UUID) it
-// resolves to undefined. This mirrors the real behavior that exposed the bug.
 mock.module(path.join(bgDir, "services/account-resolution.ts"), () => ({
 	resolveEmailFromAccountId: async (accountId: string) =>
 		accounts.find((a) => a.accountId === accountId)?.email,
-	resolveAccountIdFromEmail: async (email: string) =>
-		accounts.find((a) => a.email === email)?.accountId,
 }));
 
 const storageMock = {

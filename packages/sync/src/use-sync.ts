@@ -1,4 +1,3 @@
-import { useApiClient } from "@bittery/shared/api";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ItemSyncEngine, type OutboundQueueApiClient } from "./outbound-queue";
@@ -8,94 +7,23 @@ import {
 	type QueryInvalidator,
 } from "./query-invalidation";
 import {
-	SyncOrchestrator,
-	type SyncOrchestratorOptions,
-} from "./sync-orchestrator";
+	type SyncEventContext,
+	type SyncSource,
+	selectScopedSyncSources,
+} from "./source";
+import { MemorySyncStorage, NamespacedSyncStorage } from "./storage";
+import { SyncOrchestrator } from "./sync-orchestrator";
 import { subscribeToNewTerminalCommands } from "./terminal-command-status";
 import type {
+	ItemCommandProjection,
+	SemanticItemCommandExecutor,
 	SessionRevokedControlPayload,
 	SyncCommandSummary,
 	SyncEvent,
-	SyncItemCache,
+	SyncOrchestratorReplica,
 	SyncStatus,
 	SyncStorage,
 } from "./types";
-
-class MemorySyncStorage implements SyncStorage {
-	private readonly data = new Map<string, unknown>();
-
-	async get<T>(key: string): Promise<T | null> {
-		return (this.data.get(key) as T | undefined) ?? null;
-	}
-
-	async set<T>(key: string, value: T): Promise<void> {
-		this.data.set(key, value);
-	}
-
-	async remove(key: string): Promise<void> {
-		this.data.delete(key);
-	}
-}
-
-class NamespacedSyncStorage implements SyncStorage {
-	constructor(
-		private readonly storage: SyncStorage,
-		private readonly namespace: string,
-	) {}
-
-	private key(key: string): string {
-		return `${this.namespace}:${key}`;
-	}
-
-	get<T>(key: string): Promise<T | null> {
-		return this.storage.get<T>(this.key(key));
-	}
-
-	set<T>(key: string, value: T): Promise<void> {
-		return this.storage.set(this.key(key), value);
-	}
-
-	remove(key: string): Promise<void> {
-		return this.storage.remove(this.key(key));
-	}
-
-	update<T>(
-		key: string,
-		updater: (current: T | null) => T | null,
-	): Promise<T | null> {
-		if (!this.storage.update) {
-			return this.storage.get<T>(this.key(key)).then(async (current) => {
-				const next = updater(current);
-				if (next === null) {
-					await this.storage.remove(this.key(key));
-				} else {
-					await this.storage.set(this.key(key), next);
-				}
-				return next;
-			});
-		}
-		return this.storage.update(this.key(key), updater);
-	}
-}
-
-export interface SyncSource {
-	id: string;
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
-	apiClient: SyncOrchestratorOptions["apiClient"];
-	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
-	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
-	itemCacheAccountId?: string | null;
-	itemCacheAccountEmail?: string | null;
-	itemCacheServerUrl?: string | null;
-}
-
-export interface SyncEventContext {
-	sourceId: string;
-	accountId?: string | null;
-	accountEmail?: string | null;
-	serverUrl?: string | null;
-}
 
 function aggregateStatuses(
 	statuses: Iterable<SyncStatus>,
@@ -144,50 +72,24 @@ function aggregateStatuses(
 }
 
 /**
- * `SyncOrchestrator.getDeltaSyncAccountScope()` throws without an accountId, so a source
- * that has not resolved one yet can only produce an orchestrator that fails on connect.
- */
-export function selectScopedSyncSources(sources: SyncSource[]): SyncSource[] {
-	return sources.filter((source) => !!source.itemCacheAccountId);
-}
-
-export function buildDefaultSyncSourceId(
-	serverUrl: string,
-	accountId: string | null | undefined,
-): string {
-	if (!accountId) {
-		return "unscoped";
-	}
-	let normalizedServerUrl = serverUrl.trim().replace(/\/+$/, "");
-	try {
-		normalizedServerUrl = new URL(serverUrl).toString().replace(/\/+$/, "");
-	} catch {
-		// A malformed URL still gets a deterministic isolated scope.
-	}
-	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(normalizedServerUrl)}`;
-}
-
-/**
  * Options for useSync hook
  */
 export interface UseSyncOptions {
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
 	clientId: string;
 	queryClient: QueryClient;
+	sources: SyncSource[];
 	storage?: SyncStorage;
 	enabled?: boolean;
 	realtimeEnabled?: boolean;
-	itemCacheAdapter?: SyncItemCache;
-	itemCacheAccountId?: string | null;
-	itemCacheAccountEmail?: string | null;
-	itemCacheServerUrl?: string | null;
-	sources?: SyncSource[];
+	/** Replica state updated by inbound sync events. */
+	replicaStore?: SyncOrchestratorReplica;
+	/** Optimistic local projection and acknowledgement reconciliation. */
+	commandProjection?: ItemCommandProjection;
+	/** Executor for commands that do not map to the ordinary item API. */
+	semanticCommandExecutor?: SemanticItemCommandExecutor;
 	getClientForAccount?: (
 		accountId: string,
 	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
-	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
-	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
@@ -227,24 +129,17 @@ export interface SyncContextValue {
  * React hook for real-time synchronization
  */
 export function useSync(options: UseSyncOptions): SyncContextValue {
-	const apiClient = useApiClient();
-
 	const {
-		serverUrl,
-		getAuthToken,
 		clientId,
 		queryClient,
+		sources,
 		storage,
 		enabled = true,
 		realtimeEnabled = true,
-		itemCacheAdapter,
-		itemCacheAccountId,
-		itemCacheAccountEmail,
-		itemCacheServerUrl,
-		sources,
+		replicaStore,
+		commandProjection,
+		semanticCommandExecutor,
 		getClientForAccount,
-		refreshFromServer,
-		initializeFromServer,
 		onSessionRevoked,
 		onEventProcessed,
 		onTerminalCommandFailure,
@@ -258,28 +153,34 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 		() =>
 			new ItemSyncEngine(syncStorage, clientId, {
 				apply: async (command) => {
-					await itemCacheAdapter?.applyItemCommand(command);
+					await commandProjection?.applyItemCommand(command);
 				},
 				executeSemanticCommand: async (command) =>
-					itemCacheAdapter?.executeSemanticItemCommand(command),
+					semanticCommandExecutor?.executeSemanticItemCommand(command),
 				discardAcknowledgedElsewhere: async (command) => {
-					await itemCacheAdapter?.discardItemCommandAcknowledgedElsewhere(
+					await commandProjection?.discardItemCommandAcknowledgedElsewhere(
 						command,
 					);
 				},
 				preserveConflict: async (command) =>
-					itemCacheAdapter?.preserveItemConflict(command),
+					commandProjection?.preserveItemConflict(command),
 				reconcileAuthoritative: async (command, item) => {
-					await itemCacheAdapter?.upsertCachedItem(item, command.accountId);
+					await replicaStore?.upsertCachedItem(item, command.accountId);
 				},
 				acknowledge: async (command, acknowledgement) => {
-					await itemCacheAdapter?.acknowledgeItemCommand(
+					await commandProjection?.acknowledgeItemCommand(
 						command,
 						acknowledgement,
 					);
 				},
 			}),
-		[syncStorage, clientId, itemCacheAdapter],
+		[
+			syncStorage,
+			clientId,
+			commandProjection,
+			semanticCommandExecutor,
+			replicaStore,
+		],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
@@ -308,37 +209,11 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 	);
 
 	const syncSources = useMemo<SyncSource[]>(() => {
-		if (sources && sources.length > 0) {
-			return selectScopedSyncSources(sources);
-		}
-
-		return selectScopedSyncSources([
-			{
-				id: buildDefaultSyncSourceId(serverUrl, itemCacheAccountId),
-				serverUrl,
-				getAuthToken,
-				apiClient,
-				refreshFromServer,
-				initializeFromServer,
-				itemCacheAccountId,
-				itemCacheAccountEmail,
-				itemCacheServerUrl,
-			},
-		]);
-	}, [
-		sources,
-		serverUrl,
-		getAuthToken,
-		apiClient,
-		refreshFromServer,
-		initializeFromServer,
-		itemCacheAccountId,
-		itemCacheAccountEmail,
-		itemCacheServerUrl,
-	]);
+		return selectScopedSyncSources(sources);
+	}, [sources]);
 
 	useEffect(() => {
-		if (!enabled || !itemCacheAdapter || syncSources.length === 0) {
+		if (!enabled || !replicaStore || syncSources.length === 0) {
 			return;
 		}
 
@@ -373,7 +248,7 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 				apiClient: source.apiClient,
 				refreshFromServer: source.refreshFromServer,
 				initializeFromServer: source.initializeFromServer,
-				itemCache: itemCacheAdapter,
+				itemCache: replicaStore,
 				outboundQueue,
 				itemCacheAccountId: source.itemCacheAccountId,
 				itemCacheAccountEmail: source.itemCacheAccountEmail,
@@ -443,7 +318,7 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 		};
 	}, [
 		enabled,
-		itemCacheAdapter,
+		replicaStore,
 		syncSources,
 		clientId,
 		syncStorage,

@@ -3,7 +3,7 @@ import { ApiError } from "@bittery/shared/api-client";
 import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import { type DeltaSyncApiClient, performDeltaSync } from "../delta-sync";
-import type { SyncEvent, SyncItemCache, SyncVaultKeyEntry } from "../types";
+import type { SyncEvent, SyncReplicaStore, SyncVaultKeyEntry } from "../types";
 
 function serverVault() {
 	return {
@@ -59,7 +59,7 @@ function recordingCache() {
 	const items: CachedEncryptedItem[] = [];
 	const removedItems: string[] = [];
 
-	const cache: SyncItemCache = {
+	const cache: SyncReplicaStore = {
 		syncVaultKeys: async (keys) => {
 			vaultKeys.push(...keys);
 		},
@@ -74,12 +74,6 @@ function recordingCache() {
 		},
 		removeCachedVault: async () => undefined,
 		clearItemCache: async () => undefined,
-		replaceItemId: () => undefined,
-		applyItemCommand: async () => undefined,
-		executeSemanticItemCommand: async () => undefined,
-		discardItemCommandAcknowledgedElsewhere: async () => undefined,
-		preserveItemConflict: async () => undefined,
-		acknowledgeItemCommand: async () => undefined,
 	};
 
 	return { cache, items, removedItems, vaultKeys, vaults };
@@ -257,6 +251,26 @@ describe("performDeltaSync Item encryption context", () => {
 		expect(items[0]?.version).toBe(4);
 		expect(items[0]?.encryptionVersion).toBe(2);
 		expect(items[0]?.encryptedByUserId).toBe("member_1");
+	});
+
+	it("stores accountId as the cache scope without copying it into accountEmail", async () => {
+		const api = client();
+		api.items.get = async () => ({ data: serverItem() }) as never;
+		const { cache, items } = recordingCache();
+
+		await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "item_updated",
+				entityId: "item_1",
+				entityType: "item",
+			}),
+			"acc_1",
+		);
+
+		expect(items[0]?.accountId).toBe("acc_1");
+		expect(items[0]?.accountEmail).toBeUndefined();
 	});
 
 	it("preserves ciphertext context during bulk-import refresh", async () => {

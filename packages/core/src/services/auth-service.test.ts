@@ -15,6 +15,7 @@ import {
 import {
 	deriveSrpLoginProof,
 	getBiometricUnlockAvailability,
+	getSessionState,
 	type IAuthClient,
 	type LoginResult,
 	performSRPLogin,
@@ -183,6 +184,23 @@ function createAuthClient(
 }
 
 describe("account-routed authentication", () => {
+	it("returns the stable account ID with active session metadata", async () => {
+		const metadata = account("account-a", "user-a", "https://a.example");
+		const { storage } = await makeStore([metadata]);
+		await storage.setActiveAccount(metadata.accountId);
+		await storage.storeSessionData(
+			await mukRef(),
+			metadata.accountId,
+			metadata.email,
+			metadata.userId,
+		);
+
+		const state = await getSessionState(storage);
+
+		expect(state.accountId).toBe(metadata.accountId);
+		expect(state.email).toBe(metadata.email);
+	});
+
 	it("reports biometric unlock when any account is eligible", async () => {
 		const accounts = [
 			account("account-a", "user-a", "https://a.example"),

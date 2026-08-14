@@ -119,7 +119,7 @@ export default function UnlockScreen() {
 		queryKey: [
 			"unlock",
 			"all-accounts-status",
-			allAccounts.map((account) => account.email).join("|"),
+			allAccounts.map((account) => account.accountId).join("|"),
 		],
 		queryFn: async () => {
 			if (allAccounts.length === 0) {

@@ -8,16 +8,15 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { lifecycleDeps } from "@/background/lifecycle";
 import { crypto } from "@/lib/crypto";
+import { vaultRuntime } from "@/lib/popup-account-vault-runtime";
 import { itemCache, storage } from "@/lib/storage";
+import { vaultCrypto } from "@/lib/vault-runtime";
 import { useSyncContext } from "./sync-provider";
-
-const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Props for ExtensionPlatformProvider
@@ -65,6 +64,7 @@ export function ExtensionPlatformProvider({
 			crypto={crypto}
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
+			vaultRuntime={vaultRuntime}
 			sync={sync}
 		>
 			{children}

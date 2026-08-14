@@ -98,6 +98,7 @@ export type PasskeyCreateExistingItemOption = {
 export type PasskeyWritableVaultOption = {
 	id: string;
 	name: string;
+	accountId: string;
 	accountEmail?: string;
 	type: "personal" | "team";
 	role: "owner" | "admin" | "member" | "read-only";

@@ -4,7 +4,6 @@
  * Creates a new vault with encryption and optional image upload.
  */
 
-import { useApiClient } from "@bittery/shared/api";
 import { useMutation } from "@tanstack/react-query";
 import { useCoreContext } from "../../context/platform-context";
 import { useRefreshAfterVaultMutation } from "./mutation-utils";
@@ -37,13 +36,12 @@ export interface CreateVaultResult {
  * Hook for creating a new vault.
  */
 export function useCreateVault() {
-	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: (input: CreateVaultInput): Promise<CreateVaultResult> =>
-			core.vaults.createVault(input, defaultClient),
+			core.vaults.createVault(input),
 		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
 	});
 }

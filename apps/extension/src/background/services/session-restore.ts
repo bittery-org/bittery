@@ -11,7 +11,7 @@
  *
  * ## Why one routine instead of a restore at each reader
  *
- * Restoring inside `resolveAccountEmailForVault`, `desktop-sync`, `handleCheckAuth`, …
+ * Restoring inside account resolution, desktop sync, `handleCheckAuth`, …
  * would spread the same responsibility over five call sites that each have to remember it.
  * This module is called once from the service-worker startup routine, before any runtime
  * message is routed (see `service-worker-lifecycle.ts`). Readers just read.

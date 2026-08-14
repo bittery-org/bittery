@@ -1,5 +1,3 @@
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import {
 	type ConnectionStatus,
 	getNewTerminalCommandCount,
@@ -19,10 +17,12 @@ import {
 	useState,
 } from "react";
 import { isBackgroundEvent } from "../background/events";
-import { crypto } from "../lib/crypto";
 import { sendMessage } from "../lib/messaging";
+import "../lib/popup-account-runtime-bridge";
+import { popupAccountVaultRuntime } from "../lib/popup-account-vault-runtime";
+import { loadPopupWorkerState } from "../lib/popup-worker-state";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
-import { itemCache, storage } from "../lib/storage";
+import { vaultRepository } from "../lib/vault-runtime";
 import {
 	isWorkerItemCommandAcknowledgedMessage,
 	reconcileWorkerItemCommandAcknowledgement,
@@ -81,63 +81,54 @@ export function ExtensionSyncProvider({
 	});
 	const commandSummaryInitializedRef = useRef(false);
 	const [invalidator] = useState(() => createExtensionInvalidator(queryClient));
-	const vaultCoordinator = useMemo(
-		() =>
-			getOrCreateVaultRepositoryCoordinator(
-				crypto,
-				createVaultCrypto({ crypto, storage }),
-				storage,
-				itemCache,
-			),
-		[],
-	);
 	const outboundQueue = useMemo(
 		() =>
 			createWorkerOwnedOutboundQueue({
 				sendMessage,
-				applyProjection: (command) =>
-					vaultCoordinator.applyItemCommand(command),
+				applyProjection: (command) => vaultRepository.applyItemCommand(command),
 				discardProjection: (command) =>
-					vaultCoordinator.discardItemCommandAcknowledgedElsewhere(command),
+					vaultRepository.discardItemCommandAcknowledgedElsewhere(command),
 			}),
-		[vaultCoordinator],
+		[],
 	);
 
-	// Initialize: request initial state from background worker
+	// Worker state is advisory for the popup. Each request settles independently,
+	// while the account Vault runtime opens local reads outside this effect.
 	useEffect(() => {
-		(async () => {
-			try {
-				// Request initial sync status
-				const statusResponse = await sendMessage({ type: "GET_SYNC_STATUS" });
-				if (statusResponse.success) {
-					setStatus(statusResponse.status);
-				}
-
-				// Request client ID
-				const clientIdResponse = await sendMessage({
-					type: "GET_SYNC_CLIENT_ID",
-				});
-				if (clientIdResponse.success && clientIdResponse.clientId) {
-					setClientId(clientIdResponse.clientId);
-				}
-				const commandResponse = await sendMessage({
+		let mounted = true;
+		void loadPopupWorkerState({
+			status: async () => {
+				const response = await sendMessage({ type: "GET_SYNC_STATUS" });
+				return response.success ? response.status : undefined;
+			},
+			clientId: async () => {
+				const response = await sendMessage({ type: "GET_SYNC_CLIENT_ID" });
+				return response.success ? response.clientId : undefined;
+			},
+			commandSummary: async () => {
+				const response = await sendMessage({
 					type: "GET_SYNC_COMMAND_SUMMARY",
 				});
-				if (commandResponse.success) {
-					commandSummaryRef.current = commandResponse.summary;
-					commandSummaryInitializedRef.current = true;
-				}
-				await outboundQueue.recoverStaged();
-
-				setIsInitialized(true);
-			} catch (error) {
-				console.error("Failed to initialize sync context:", error);
-				setIsInitialized(true); // Still mark as initialized to prevent blocking
+				return response.success ? response.summary : undefined;
+			},
+			recoverStaged: () => outboundQueue.recoverStaged(),
+		}).then((workerState) => {
+			if (!mounted) return;
+			if (workerState.status) setStatus(workerState.status);
+			if (workerState.clientId) setClientId(workerState.clientId);
+			if (workerState.commandSummary) {
+				commandSummaryRef.current = workerState.commandSummary;
+				commandSummaryInitializedRef.current = true;
 			}
-		})();
+			setIsInitialized(true);
+		});
+		return () => {
+			mounted = false;
+		};
 	}, [outboundQueue]);
 
 	const handleFullRefresh = useCallback(async () => {
+		await popupAccountVaultRuntime.reloadFromCache();
 		await queryClient.invalidateQueries();
 	}, [queryClient]);
 
@@ -155,7 +146,7 @@ export function ExtensionSyncProvider({
 			) {
 				void reconcileWorkerItemCommandAcknowledgement(
 					message,
-					vaultCoordinator,
+					vaultRepository,
 				).then(
 					() => sendResponse({ success: true }),
 					(error) => sendResponse({ success: false, error: String(error) }),
@@ -190,7 +181,7 @@ export function ExtensionSyncProvider({
 		return () => {
 			chrome.runtime.onMessage.removeListener(handleMessage);
 		};
-	}, [handleFullRefresh, m, vaultCoordinator]);
+	}, [handleFullRefresh, m]);
 
 	const contextValue: SyncContextValue = {
 		status,

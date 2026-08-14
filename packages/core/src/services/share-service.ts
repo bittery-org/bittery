@@ -1,9 +1,7 @@
 import type { CryptoPort } from "@bittery/crypto-port";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import type { DecryptedItem, SharedItemPayload } from "@bittery/shared/types";
-import type { AccountStore } from "@bittery/storage";
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
-import type { AccountResolver, DefaultApiClient } from "./account-resolver";
+import type { AccountResolver } from "./account-resolver";
 import type { VaultCrypto } from "./vault-crypto";
 
 export const SHARE_EXPIRATION_OPTIONS = [
@@ -24,7 +22,7 @@ export interface CreateShareInput {
 	expiresIn: ShareExpirationOption;
 	isOneTimeUse: boolean;
 	allowedEmails?: string[];
-	accountEmail?: string;
+	accountId: string;
 }
 
 // The share key only ever exists in the URL fragment, so a link assembled from
@@ -88,41 +86,31 @@ function buildSharedItemPayload(item: DecryptedItem): SharedItemPayload {
 }
 
 interface ShareServiceDeps {
-	storage: AccountStore;
 	crypto: CryptoPort;
 	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
 }
 
 export class ShareService {
-	private readonly storage: AccountStore;
 	private readonly crypto: CryptoPort;
 	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
 
 	constructor(deps: ShareServiceDeps) {
-		this.storage = deps.storage;
 		this.crypto = deps.crypto;
 		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
 	}
 
-	async createShare(
-		input: CreateShareInput,
-		defaultClient: DefaultApiClient,
-	): Promise<CreateShareResult> {
+	async createShare(input: CreateShareInput): Promise<CreateShareResult> {
 		const {
 			item,
 			accessMode,
 			expiresIn,
 			isOneTimeUse,
 			allowedEmails,
-			accountEmail,
+			accountId,
 		} = input;
-
-		const accountId = await resolveAccountScopeId(this.storage, accountEmail, {
-			errorMessage: "Account not found for the provided email address",
-		});
 
 		// `item` is already decrypted, so this decrypt is purely an unlock gate:
 		// sharing must be refused unless this account can still open the vault.
@@ -135,10 +123,7 @@ export class ShareService {
 		}
 
 		try {
-			const client = await this.accounts.getClientForAccount(
-				defaultClient,
-				accountId,
-			);
+			const client = await this.accounts.getClientForAccount(accountId);
 			const shareKey = await this.crypto.generateEncryptionKey();
 			try {
 				const encryptedData = await this.crypto.encrypt(

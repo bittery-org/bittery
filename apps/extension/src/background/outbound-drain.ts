@@ -1,9 +1,14 @@
 // The worker owns durability and account-scoped transport; popup projections
 // are leased so no command becomes drainable before its local view is ready.
 
+import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
+import { CrossAccountItemCommandExecutor } from "@bittery/core/services/cross-account-item-command-executor";
 import { ItemSyncEngine, type SyncCommandSummary } from "@bittery/sync";
 import type { ItemSyncCommand } from "@bittery/types";
+import { crypto } from "../lib/crypto";
+import { storage } from "../lib/storage";
 import { ChromeSyncStorage } from "../lib/sync-storage";
+import { vaultCrypto } from "../lib/vault-runtime";
 import { core } from "./core-instance";
 import { emitBackgroundEvent } from "./events";
 import { syncCacheService } from "./services/sync-cache-service";
@@ -13,6 +18,21 @@ const OUTBOUND_RETRY_ALARM_NAME = "bittery_outbound_retry";
 const POPUP_PROJECTION_LEASE_MS = 30_000;
 
 let queuePromise: Promise<ItemSyncEngine> | null = null;
+const semanticExecutor = new CrossAccountItemCommandExecutor({
+	crypto,
+	vaultCrypto,
+	getClientForAccount: async (accountId) => {
+		const client = await createStoredAccountApiClient(
+			storage,
+			accountId,
+			await getOrCreateSyncClientId(),
+		);
+		if (!client) {
+			throw new Error(`No authenticated API client for account ${accountId}`);
+		}
+		return client;
+	},
+});
 
 function getQueue(): Promise<ItemSyncEngine> {
 	queuePromise ??= (async () => {
@@ -20,15 +40,15 @@ function getQueue(): Promise<ItemSyncEngine> {
 			new ChromeSyncStorage(),
 			await getOrCreateSyncClientId(),
 			{
-				apply: (command) => core.vaultCoordinator.applyItemCommand(command),
+				apply: (command) => core.vaultRepository.applyItemCommand(command),
 				executeSemanticCommand: (command) =>
-					core.vaultCoordinator.executeSemanticItemCommand(command),
+					semanticExecutor.executeSemanticItemCommand(command),
 				preserveConflict: (command) =>
-					core.vaultCoordinator.preserveItemConflict(command),
+					core.vaultRepository.preserveItemConflict(command),
 				reconcileAuthoritative: (command, item) =>
-					core.vaultCoordinator.upsertCachedItem(item, command.accountId),
+					core.vaultRepository.reconcileAuthoritative(command, item),
 				acknowledge: async (command, acknowledgement) => {
-					await core.vaultCoordinator.acknowledgeItemCommand(
+					await core.vaultRepository.acknowledgeItemCommand(
 						command,
 						acknowledgement,
 					);
@@ -131,7 +151,7 @@ async function runDrain(): Promise<void> {
 	}
 
 	for (const mapping of queue.consumeTempIdMappings()) {
-		core.vaultCoordinator.replaceItemId(
+		core.vaultRepository.replaceItemId(
 			mapping.tempId,
 			mapping.realId,
 			mapping.accountId,

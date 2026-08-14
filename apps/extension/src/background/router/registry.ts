@@ -69,6 +69,7 @@ import {
 	handleGetVaultItems,
 	handleGetWritableVaults,
 } from "../vault-handlers";
+import { reconcileVaultRuntimeFromStorage } from "../vault-runtime";
 import type { PasswordUnlockAllResponse, UnlockResponse } from "./contract";
 import {
 	cleanupSync,
@@ -76,6 +77,7 @@ import {
 	disconnectSync,
 	getSyncClientId,
 	getSyncStatus,
+	reconcileSyncAccountScope,
 } from "./sync-effects";
 import type { RouteRegistry } from "./types";
 
@@ -151,6 +153,14 @@ export const routeRegistry: RouteRegistry = {
 			disconnectSync("SYNC_DISCONNECT");
 		},
 		handle: () => ({ success: true }),
+	},
+
+	RECONCILE_ACCOUNT_SCOPE: {
+		handle: async () => {
+			await reconcileVaultRuntimeFromStorage();
+			await reconcileSyncAccountScope();
+			return { success: true };
+		},
 	},
 
 	GET_SYNC_STATUS: {

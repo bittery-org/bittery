@@ -1,4 +1,3 @@
-import { useApiClient } from "@bittery/shared/api";
 import {
 	useCoreContext,
 	useQueryInvalidator,
@@ -12,12 +11,11 @@ import { refreshRepositoriesFromServer } from "../items/mutation-utils";
 export function useRefreshAfterVaultMutation(): (
 	accountId: string,
 ) => Promise<void> {
-	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 
 	return async (accountId: string) => {
-		await core.vaults.refreshVaultKeys(defaultClient, accountId);
+		await core.vaults.refreshVaultKeys(accountId);
 		await refreshRepositoriesFromServer(core);
 		await invalidator.invalidateVaultKeys();
 	};

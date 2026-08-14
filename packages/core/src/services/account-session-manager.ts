@@ -63,6 +63,8 @@ export class AccountSessionManager {
 	private active: ActiveAccountId = null;
 	private initialized = false;
 	private initialization: Promise<void> | null = null;
+	private localInitialization: Promise<void> | null = null;
+	private stateTransitionTail: Promise<void> = Promise.resolve();
 	private snapshot = 0;
 	private readonly listeners = new Set<() => void>();
 	private readonly lifecycle: LifecycleDeps;
@@ -97,6 +99,18 @@ export class AccountSessionManager {
 		}
 	}
 
+	/** Serializes every operation that can change durable or projected account state. */
+	private runStateTransition<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.stateTransitionTail
+			.catch(() => undefined)
+			.then(operation);
+		this.stateTransitionTail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	}
+
 	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
 		try {
 			if (this.options.verifyUnlockPolicy) {
@@ -127,13 +141,67 @@ export class AccountSessionManager {
 
 	async initialize(): Promise<void> {
 		if (this.initialized) return;
-		this.initialization ??= this.refresh().finally(() => {
+		this.initialization ??= (async () => {
+			await this.initializeLocalVaultState();
+			if (!this.initialized) await this.refresh();
+		})().finally(() => {
 			this.initialization = null;
 		});
 		await this.initialization;
 	}
 
+	/**
+	 * Restores prompt-free local sessions, then loads the account selection and lock
+	 * descriptors used to open the local Vault runtime. Travel Mode is restored
+	 * independently from its durable cache there; the full session initialize still
+	 * performs remote-first verification.
+	 */
+	async initializeLocalVaultState(): Promise<void> {
+		if (this.localInitialization) {
+			await this.localInitialization;
+			return;
+		}
+		const attempt = this.runStateTransition(() => this.loadLocalVaultState());
+		this.localInitialization = attempt;
+		try {
+			await attempt;
+		} catch (error) {
+			if (this.localInitialization === attempt) {
+				this.localInitialization = null;
+			}
+			throw error;
+		}
+	}
+
+	private async loadLocalVaultState(): Promise<void> {
+		const accounts = await this.storage.getAccountsList();
+		await Promise.all(
+			accounts.map((account) =>
+				this.storage.tryRestoreSessionWithoutPrompt(account.accountId),
+			),
+		);
+		const [active, unlocked] = await Promise.all([
+			this.storage.getActiveAccount(),
+			this.storage.getUnlockedAccounts(),
+		]);
+		this.accounts = accounts;
+		this.active =
+			active && !resolveActiveAccountId(active, accounts) ? null : active;
+		const locallyUnlocked = new Set(unlocked);
+		this.lockState.clear();
+		for (const account of accounts) {
+			this.lockState.set(
+				account.accountId,
+				locallyUnlocked.has(account.accountId) ? "unlocked" : "locked",
+			);
+		}
+	}
+
 	async refresh(): Promise<void> {
+		await this.runStateTransition(() => this.refreshState());
+	}
+
+	private async refreshState(): Promise<void> {
 		const [accounts, active, unlocked] = await Promise.all([
 			this.storage.getAccountsList(),
 			this.storage.getActiveAccount(),
@@ -195,8 +263,15 @@ export class AccountSessionManager {
 	}
 
 	async switchAccount(accountId: ActiveAccountId): Promise<void> {
+		await this.runStateTransition(() => this.switchAccountState(accountId));
+	}
+
+	private async switchAccountState(accountId: ActiveAccountId): Promise<void> {
 		await this.storage.setActiveAccount(accountId);
 		this.active = accountId;
+		// Selection changes the visible Vault scope before restore or policy checks
+		// can yield to storage, crypto, network, or platform callbacks.
+		this.emit();
 
 		if (accountId) {
 			const meta = findAccountById(this.accounts, accountId);
@@ -213,6 +288,7 @@ export class AccountSessionManager {
 			}
 		}
 
+		this.emit();
 		await this.options.onActiveChanged?.(accountId);
 		await this.options.invalidateQueries?.([
 			["accounts"],
@@ -220,15 +296,22 @@ export class AccountSessionManager {
 			["vaults"],
 			["items"],
 		]);
-		this.emit();
 	}
 
 	async addAccount(metadata: AccountMetadata): Promise<void> {
-		await this.storage.addAccount(metadata);
-		await this.refresh();
+		await this.runStateTransition(async () => {
+			await this.storage.addAccount(metadata);
+			await this.refreshState();
+		});
 	}
 
 	async registerLoginAccount(input: LoginSessionInput): Promise<string> {
+		return this.runStateTransition(() => this.registerLoginAccountState(input));
+	}
+
+	private async registerLoginAccountState(
+		input: LoginSessionInput,
+	): Promise<string> {
 		const accounts = await this.storage.getAccountsList();
 		const serverUrl = input.serverUrl.replace(/\/$/, "");
 		const accountId = resolveOrCreateAccountId(
@@ -254,42 +337,56 @@ export class AccountSessionManager {
 
 		await this.storage.addAccount(metadata);
 		await this.storage.setActiveAccount(accountId);
-		await this.refresh();
+		await this.refreshState();
 		return accountId;
 	}
 
 	async lockAccount(accountId: string): Promise<void> {
+		await this.runStateTransition(() => this.lockAccountState(accountId));
+	}
+
+	private async lockAccountState(accountId: string): Promise<void> {
 		await lifecycleLockAccount(accountId, this.lifecycle);
 		this.lockState.set(accountId, "locked");
+		this.emit();
 		await this.options.invalidateQueries?.([
 			["accounts", "unlocked"],
 			["auth", "sessionState"],
 			["items"],
 		]);
-		this.emit();
 	}
 
 	async lockAll(reason = "manual"): Promise<void> {
+		await this.runStateTransition(() => this.lockAllState(reason));
+	}
+
+	private async lockAllState(reason: string): Promise<void> {
 		// `reason` is broadcast metadata for the app, not part of the sequence, so it
 		// stops here rather than travelling into the lifecycle module.
 		await lifecycleLockAllAccounts(this.lifecycle);
 		for (const account of this.accounts) {
 			this.lockState.set(account.accountId, "locked");
 		}
+		this.emit();
 		await this.options.onLockBroadcast?.(reason);
 		await this.options.invalidateQueries?.([
 			["accounts", "unlocked"],
 			["auth", "sessionState"],
 			["items"],
 		]);
-		this.emit();
 	}
 
 	async removeAccount(accountId: string): Promise<LifecycleOutcome> {
+		return this.runStateTransition(() => this.removeAccountState(accountId));
+	}
+
+	private async removeAccountState(
+		accountId: string,
+	): Promise<LifecycleOutcome> {
 		const outcome = await lifecycleRemoveAccount(accountId, this.lifecycle);
 		// Re-reads the list, the pointer the module may have moved, and the lock
 		// states, then emits — so nothing in-memory has to be patched by hand here.
-		await this.refresh();
+		await this.refreshState();
 
 		if (outcome.wasActive) {
 			await this.options.onActiveChanged?.(this.active);
@@ -306,6 +403,15 @@ export class AccountSessionManager {
 	async unlockAccount(
 		accountId: string,
 		skipBiometric = false,
+	): Promise<boolean> {
+		return this.runStateTransition(() =>
+			this.unlockAccountState(accountId, skipBiometric),
+		);
+	}
+
+	private async unlockAccountState(
+		accountId: string,
+		skipBiometric: boolean,
 	): Promise<boolean> {
 		let restored = await this.storage.tryRestoreSession(
 			skipBiometric,

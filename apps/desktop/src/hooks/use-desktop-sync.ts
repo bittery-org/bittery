@@ -1,111 +1,36 @@
+import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
-	invalidateAccountSession,
-	type LifecycleOutcome,
-} from "@bittery/core/services/account-lifecycle";
-import {
-	AccountResolver,
-	createStoredAccountApiClient,
-} from "@bittery/core/services/account-resolver";
-import {
-	createInitialSyncBootstrap,
-	createStagedFullRefresh,
-} from "@bittery/core/services/staged-full-refresh";
-import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
-import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { AppApiClient } from "@bittery/shared/api-client";
+	type AccountSyncAssembly,
+	createAccountSync,
+} from "@bittery/core/services/account-sync";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
-import type { SyncSource, SyncStorage } from "@bittery/sync";
-import { buildDefaultSyncSourceId, useSync } from "@bittery/sync";
+import type { SyncStorage } from "@bittery/sync";
+import { useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
-import { itemCache, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
+import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
-/**
- * `accountId` is deliberately non-nullable: it becomes `SyncSource.itemCacheAccountId`, which
- * `SyncOrchestrator.getDeltaSyncAccountScope()` now requires — it throws if absent.
- */
-interface SyncConnectionContext {
-	accountId: string;
-	email: string | null;
-	serverUrl: string;
-	apiClient: SyncSource["apiClient"];
-}
-
-function areSyncContextsEquivalent(
-	left: SyncConnectionContext[],
-	right: SyncConnectionContext[],
-): boolean {
-	if (left.length !== right.length) {
-		return false;
-	}
-
-	return left.every((context, index) => {
-		const other = right[index];
-		return (
-			other &&
-			context.accountId === other.accountId &&
-			context.email === other.email &&
-			context.serverUrl === other.serverUrl
-		);
-	});
-}
-
-async function resolveDesktopSyncContexts(
-	clientId?: string,
-): Promise<SyncConnectionContext[]> {
-	const [activeAccount, accounts] = await Promise.all([
-		storage.getActiveAccount(),
-		storage.getAccountsList(),
-	]);
-
-	const accountById = new Map(
-		accounts.map((account) => [account.accountId, account]),
-	);
-	const candidateIds: string[] = [];
-	if (activeAccount) {
-		candidateIds.push(activeAccount);
-	}
-
-	const contexts: SyncConnectionContext[] = [];
-	for (const accountId of candidateIds) {
-		const [token, url] = await Promise.all([
-			storage.getAuthToken(accountId),
-			storage.getServerUrl(accountId),
-		]);
-		if (token && url) {
-			const email = accountById.get(accountId)?.email ?? null;
-			const apiClient = await createStoredAccountApiClient(
-				storage,
-				accountId,
-				clientId,
-			);
-			if (!apiClient) {
-				continue;
-			}
-			contexts.push({
-				accountId,
-				email,
-				serverUrl: url,
-				apiClient: apiClient,
-			});
-		}
-	}
-
-	// No account-less fallback: `storage.getAuthToken()` / `getServerUrl()` without an
-	// accountId resolve the *active* account, which is exactly the account the loop above
-	// already tried — and would hand the sync orchestrator a `null` itemCacheAccountId.
-	return contexts;
-}
+// Desktop currently has one renderer. This tail coordinates every SyncStorage instance in
+// that process; the Tauri store write and save stay inside the same critical section.
+let desktopSyncUpdateTail: Promise<void> = Promise.resolve();
 
 /**
  * Tauri-compatible sync storage implementation
@@ -132,6 +57,35 @@ class TauriSyncStorage implements SyncStorage {
 		await store.delete(key);
 		await store.save();
 	}
+
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		let result: T | null = null;
+		const update = desktopSyncUpdateTail.then(async () => {
+			const store = await getDesktopSyncStore();
+			const stored = await store.get<string>(key);
+			let current: T | null = null;
+			if (stored) {
+				try {
+					current = JSON.parse(stored) as T;
+				} catch {
+					current = null;
+				}
+			}
+			result = updater(current);
+			if (result === null) {
+				await store.delete(key);
+			} else {
+				await store.set(key, JSON.stringify(result));
+			}
+			await store.save();
+		});
+		desktopSyncUpdateTail = update.catch(() => undefined);
+		await update;
+		return result;
+	}
 }
 
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
@@ -139,98 +93,68 @@ const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 /**
  * Desktop-specific sync hook that integrates with Tauri storage
  */
-export function useDesktopSync(queryClient: QueryClient, enabled = true) {
+export function useDesktopSync(
+	queryClient: QueryClient,
+	manager: AccountSessionManager,
+	vaultRuntime: AccountVaultRuntime,
+	enabled = true,
+) {
 	const { m } = useI18n();
 	const [clientId, setClientId] = useState<string>("");
-	const [serverUrl, setServerUrl] = useState<string>("");
-	const [syncContexts, setSyncContexts] = useState<SyncConnectionContext[]>([]);
+	const [assembly, setAssembly] = useState<AccountSyncAssembly | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
+	const accountSync = useMemo(
+		() =>
+			createAccountSync({
+				lifecycle: lifecycleDeps,
+				vaultRepository,
+				crypto,
+				vaultCrypto,
+			}),
+		[],
+	);
 
-	// Initialize and keep sync connection context fresh.
+	useSyncExternalStore(
+		vaultRuntime.subscribe,
+		vaultRuntime.getSnapshot,
+		vaultRuntime.getSnapshot,
+	);
+	const accountRevision = useSyncExternalStore(
+		manager.subscribe,
+		manager.getSnapshot,
+		manager.getSnapshot,
+	);
+	const activeAccountId = manager.getActiveAccount();
+
+	// Client identity is process-stable; account changes drive assembly separately.
 	useEffect(() => {
 		let mounted = true;
-		let resolving = false;
-
-		const resolveContext = async () => {
-			if (resolving) {
-				return;
-			}
-			resolving = true;
-			try {
-				const id = await getOrCreateDesktopSyncClientId();
-				const contexts = await resolveDesktopSyncContexts(id);
-				if (!mounted) {
-					return;
-				}
-				setClientId(id);
-				setServerUrl(contexts[0]?.serverUrl ?? "");
-				setSyncContexts((current) =>
-					areSyncContextsEquivalent(current, contexts) ? current : contexts,
-				);
-				setIsInitialized(true);
-			} finally {
-				resolving = false;
-			}
-		};
-
-		void resolveContext();
-		const interval = setInterval(() => {
-			void resolveContext();
-		}, 5000);
+		void getOrCreateDesktopSyncClientId().then((id) => {
+			if (mounted) setClientId(id);
+		});
 
 		return () => {
 			mounted = false;
-			clearInterval(interval);
 		};
 	}, []);
 
-	const getAuthToken = useCallback(async () => {
-		return storage.getAuthToken(syncContexts[0]?.accountId ?? undefined);
-	}, [syncContexts]);
-
-	/**
-	 * Returns the whole account client, not `OutboundQueueApiClient`.
-	 *
-	 * `useSync` only needs `items`, but this hook has a second caller —
-	 * `onTravelModeEvent`, which needs `vaults.list()`. Declaring the narrow type here threw
-	 * that away and the travel-mode call site bought it back with an `as unknown as
-	 * ApiVaultClient`, so nothing checked that the value could actually serve a vault
-	 * request. Both consumers narrow this on their own.
-	 */
-	const getClientForAccount = useCallback(
-		async (accountId: string): Promise<AppApiClient> => {
-			const [accountToken, accountServerUrl, account] = await Promise.all([
-				storage.getAuthToken(accountId),
-				storage.getServerUrl(accountId),
-				storage.getAccountMetadata(accountId),
-			]);
-			if (accountToken) {
-				const client = await createStoredAccountApiClient(
-					storage,
-					accountId,
-					clientId,
-				);
-				if (client) {
-					return client;
-				}
-				return createAccountApiClient(
-					accountToken,
-					accountServerUrl || serverUrl || "http://localhost:3000",
-					undefined,
-					undefined,
-					{
-						insecureTransportConfirmed:
-							account?.insecureTransportConfirmed === true,
-					},
-				);
-			}
-
-			throw new Error(
-				`No auth token available for account queue drain (${accountId})`,
-			);
-		},
-		[clientId, serverUrl],
-	);
+	// Generation cancellation prevents a slow A→B assembly from overwriting B→A.
+	useEffect(() => {
+		void accountRevision;
+		if (!clientId) return;
+		let current = true;
+		setIsInitialized(false);
+		void accountSync
+			.assemble({ clientId, activeAccountId })
+			.then((resolved) => {
+				if (!current) return;
+				setAssembly(resolved);
+				setIsInitialized(true);
+			});
+		return () => {
+			current = false;
+		};
+	}, [accountSync, accountRevision, activeAccountId, clientId]);
 
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
@@ -244,7 +168,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			queryClient.clear();
 
 			if (outcome.wasActive) {
-				window.location.href = `/unlock?email=${encodeURIComponent(invalidated.email.toLowerCase())}`;
+				window.location.href = "/unlock";
 			}
 			return invalidated;
 		},
@@ -252,31 +176,26 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	);
 
 	const handleAccountSessionInvalidation = useCallback(
-		async (email: string) => {
+		async (sessionId: string) => {
 			await applyInvalidatedSession(
-				await invalidateAccountSession({ email }, lifecycleDeps),
+				await accountSync.invalidateSession({ sessionId }),
 			);
+			setAssembly(null);
 		},
-		[applyInvalidatedSession],
+		[accountSync, applyInvalidatedSession],
 	);
 
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
 			const revoked = await applyInvalidatedSession(
-				await invalidateAccountSession(
-					{ sessionId: payload.sessionId },
-					lifecycleDeps,
-				),
+				await accountSync.invalidateSession(payload),
 			);
 			if (!revoked) {
 				return;
 			}
-
-			setSyncContexts((current) =>
-				current.filter((context) => context.accountId !== revoked.accountId),
-			);
+			setAssembly(null);
 		},
-		[applyInvalidatedSession],
+		[accountSync, applyInvalidatedSession],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.
@@ -299,7 +218,6 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 					return;
 				}
 
-				const email = account.email.toLowerCase();
 				const [token, url, sessionData] = await Promise.all([
 					storage.getAuthToken(account.accountId),
 					storage.getServerUrl(account.accountId),
@@ -320,10 +238,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 						continue;
 					}
 
-					await handleAccountSessionInvalidation(email);
-					setSyncContexts((current) =>
-						current.filter((context) => context.email?.toLowerCase() !== email),
-					);
+					await handleAccountSessionInvalidation(sessionData.sessionId);
 				}
 			}
 		};
@@ -340,71 +255,6 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
-	const vaultCoordinator = useMemo(
-		() =>
-			getOrCreateVaultRepositoryCoordinator(
-				crypto,
-				createVaultCrypto({ crypto, storage }),
-				storage,
-				itemCache,
-			),
-		[],
-	);
-
-	const onTravelModeEvent = useCallback(
-		async (
-			event: { type: string; metadata?: Record<string, unknown> },
-			context?: {
-				accountId?: string | null;
-				accountEmail?: string | null;
-			},
-		) => {
-			const accountId = context?.accountId;
-			const accountEmail = context?.accountEmail;
-			if (!accountId || !accountEmail || event.type !== "travel_mode_updated") {
-				return;
-			}
-			const apiClient = await getClientForAccount(accountId);
-			const accounts = new AccountResolver(storage);
-			await handleTravelModeSyncEvent(
-				event,
-				accountId,
-				storage,
-				itemCache,
-				vaultCoordinator,
-				{
-					apiClient: apiClient,
-					accounts,
-				},
-			);
-		},
-		[getClientForAccount, vaultCoordinator],
-	);
-
-	const refreshFromServer = useMemo(
-		() => createStagedFullRefresh(storage, vaultCoordinator),
-		[vaultCoordinator],
-	);
-	const initializeFromServer = useMemo(
-		() => createInitialSyncBootstrap(storage, vaultCoordinator),
-		[vaultCoordinator],
-	);
-
-	const syncSources = useMemo<SyncSource[]>(
-		() =>
-			syncContexts.map((context) => ({
-				id: buildDefaultSyncSourceId(context.serverUrl, context.accountId),
-				serverUrl: context.serverUrl,
-				getAuthToken: () => storage.getAuthToken(context.accountId),
-				apiClient: context.apiClient,
-				refreshFromServer,
-				initializeFromServer,
-				itemCacheAccountId: context.accountId,
-				itemCacheAccountEmail: context.email,
-				itemCacheServerUrl: context.serverUrl,
-			})),
-		[syncContexts, refreshFromServer, initializeFromServer],
-	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.error(m.sync_command_terminal_error(), {
 			description: m.sync_command_terminal_error_description(),
@@ -412,17 +262,17 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, [m]);
 
 	const syncState = useSync({
-		serverUrl,
-		getAuthToken,
 		clientId,
 		queryClient,
+		sources: assembly?.sources ?? [],
 		storage: syncStorage,
-		enabled: enabled && isInitialized && !!clientId && syncSources.length > 0,
-		itemCacheAdapter: vaultCoordinator,
-		sources: syncSources,
-		getClientForAccount,
+		enabled: enabled && isInitialized && !!clientId && assembly !== null,
+		replicaStore: assembly?.replicaStore,
+		commandProjection: assembly?.commandProjection,
+		semanticCommandExecutor: assembly?.semanticCommandExecutor,
+		getClientForAccount: assembly?.getClientForAccount,
 		onSessionRevoked,
-		onEventProcessed: onTravelModeEvent,
+		onEventProcessed: assembly?.onEventProcessed,
 		onTerminalCommandFailure,
 	});
 

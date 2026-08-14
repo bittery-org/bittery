@@ -2,7 +2,9 @@ import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle"
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
+	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
+import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	createContext,
@@ -22,6 +24,7 @@ import {
 	itemCache,
 	storage,
 } from "@/services/storage";
+import { getMobileVaultRuntime } from "@/services/vault-runtime";
 
 interface AccountContextValue {
 	allAccounts: AccountMetadata[];
@@ -52,6 +55,10 @@ const AccountContext = createContext<AccountContextValue>({
 	switchAccount: async () => {},
 	removeAccount: async () => NOTHING_REMOVED,
 });
+const AccountRuntimeContext = createContext<{
+	manager: AccountSessionManager;
+	vaultRuntime: AccountVaultRuntime;
+} | null>(null);
 
 export function useAccount() {
 	return useContext(AccountContext);
@@ -68,25 +75,28 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
 	const managerRef = useRef<AccountSessionManager | null>(null);
 	if (!managerRef.current) {
-		managerRef.current = getAccountSessionManager({
-			storage,
-			// Sibling of `storage`, not reachable through it: `removeAccount` has to wipe the
-			// account's cached ciphertext as well as its session, and `AccountStore` sits on a
-			// `PlatformPort` that cannot see the record store.
-			itemCache,
-			// Removals routed through the manager must drop the native autofill MUK mirror
-			// too, otherwise autofill outlives the account it belonged to.
-			credentialMirror: lifecycleDeps.credentialMirror,
-			invalidateQueries: async (keys) => {
-				await Promise.all(
-					keys.map((key) =>
-						queryClientRef.current.invalidateQueries({ queryKey: key }),
-					),
-				);
-			},
-		});
+		managerRef.current =
+			peekAccountSessionManager() ??
+			getAccountSessionManager({
+				storage,
+				// Sibling of `storage`, not reachable through it: `removeAccount` has to wipe the
+				// account's cached ciphertext as well as its session, and `AccountStore` sits on a
+				// `PlatformPort` that cannot see the record store.
+				itemCache,
+				// Removals routed through the manager must drop the native autofill MUK mirror
+				// too, otherwise autofill outlives the account it belonged to.
+				credentialMirror: lifecycleDeps.credentialMirror,
+				invalidateQueries: async (keys) => {
+					await Promise.all(
+						keys.map((key) =>
+							queryClientRef.current.invalidateQueries({ queryKey: key }),
+						),
+					);
+				},
+			});
 	}
 	const manager = managerRef.current;
+	const vaultRuntime = getMobileVaultRuntime(manager);
 
 	const [isLoading, setIsLoading] = useState(true);
 
@@ -117,18 +127,26 @@ export function AccountProvider({ children }: AccountProviderProps) {
 	);
 
 	return (
-		<AccountContext.Provider
-			value={{
-				allAccounts,
-				activeAccountConfig,
-				activeAccount,
-				isLoading,
-				refreshAccounts,
-				switchAccount,
-				removeAccount,
-			}}
-		>
-			{children}
-		</AccountContext.Provider>
+		<AccountRuntimeContext.Provider value={{ manager, vaultRuntime }}>
+			<AccountContext.Provider
+				value={{
+					allAccounts,
+					activeAccountConfig,
+					activeAccount,
+					isLoading,
+					refreshAccounts,
+					switchAccount,
+					removeAccount,
+				}}
+			>
+				{children}
+			</AccountContext.Provider>
+		</AccountRuntimeContext.Provider>
 	);
+}
+
+export function useMobileAccountRuntime() {
+	const value = useContext(AccountRuntimeContext);
+	if (!value) throw new Error("AccountProvider must own the mobile runtime");
+	return value;
 }

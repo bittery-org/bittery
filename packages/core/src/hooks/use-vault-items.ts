@@ -2,11 +2,11 @@
  * useVaultItems Hook - Simplified Vault-Specific Item Fetching
  */
 
-import type { DecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
-import { useVaultRepositorySync } from "./use-vault-repository-sync";
+import { useVaultRepositoryState } from "./use-vault-repository-state";
 
 export interface UseVaultItemsOptions {
+	accountId?: string;
 	enabled?: boolean;
 }
 
@@ -17,22 +17,23 @@ export function useVaultItems(
 	vaultId: string,
 	options: UseVaultItemsOptions = {},
 ) {
-	const { isLoading, refetch, snapshot, vaultCoordinator } =
-		useVaultRepositorySync({
+	const { isLoading, error, refetch, snapshot, vaultRepository, enabled } =
+		useVaultRepositoryState({
 			enabled: options.enabled,
-			requiredId: vaultId,
 		});
 
 	const items = useMemo(() => {
-		// Snapshot is an invalidation signal from the coordinator store.
+		// Snapshot is an invalidation signal from the repository.
 		void snapshot;
-		return vaultCoordinator.getByVault(vaultId) as DecryptedItem[];
-	}, [vaultCoordinator, vaultId, snapshot]);
+		return enabled
+			? vaultRepository.getByVault(vaultId, options.accountId)
+			: [];
+	}, [vaultRepository, enabled, vaultId, options.accountId, snapshot]);
 
 	return {
 		items,
 		isLoading,
-		error: null,
+		error,
 		refetch,
 	};
 }

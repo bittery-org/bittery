@@ -10,10 +10,7 @@
  */
 
 import type { KeyRef } from "@bittery/crypto-port";
-import {
-	resolveAccountScopeId,
-	resolveUserIdForScope,
-} from "@bittery/storage/account-id";
+import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import { createStoredAccountApiClient } from "../services/api-client";
@@ -112,12 +109,12 @@ export function getAttachmentUploadErrorCode(
  *
  * @param itemId - The item to manage attachments for
  * @param vaultId - The vault the item belongs to (needed to look up vault key)
- * @param accountEmail - Optional account email for multi-account support
+ * @param accountId - Stable account identity for multi-account support
  */
 export function useItemAttachments(
 	itemId: string | undefined,
 	vaultId: string | undefined,
-	accountEmail?: string,
+	accountId: string,
 ) {
 	const { storage, crypto, core } = usePlatform();
 	const { vaultCrypto } = core;
@@ -127,16 +124,9 @@ export function useItemAttachments(
 		isLoading,
 		error,
 		refetch: refetchItem,
-	} = useItem(itemId ?? "", { enabled: !!itemId });
+	} = useItem(itemId ?? "", { enabled: !!itemId, accountId });
 	const attachments = (rawItem?.attachments ?? []) as AttachmentMeta[];
-	const accountScope =
-		accountEmail ?? rawItem?.account?.accountId ?? rawItem?.accountEmail;
-
 	async function getAccountApiClient() {
-		const accountId = await resolveAccountScopeId(storage, accountScope);
-		if (!accountId) {
-			throw new Error("Account context is required for attachment operations");
-		}
 		const accountClient = await createStoredAccountApiClient(
 			storage,
 			accountId,
@@ -148,21 +138,17 @@ export function useItemAttachments(
 	}
 
 	const entitlementsQuery = useQuery({
-		queryKey: ["billing", "entitlements", accountScope ?? "active"],
+		queryKey: ["billing", "entitlements", accountId],
 		queryFn: async () => {
 			const accountClient = await getAccountApiClient();
 			return (await accountClient.billing.entitlements()).data;
 		},
-		enabled: Boolean(itemId && accountScope),
+		enabled: Boolean(itemId),
 	});
 
 	// Helper to get the decrypted vault key
 	async function getVaultKey(): Promise<KeyRef> {
 		if (!vaultId) throw new Error("vaultId is required");
-		const accountId = await resolveAccountScopeId(storage, accountScope);
-		if (!accountId) {
-			throw new Error("Account context is required");
-		}
 		const key = await vaultCrypto.getVaultKey({
 			vaultId,
 			accountId,
@@ -183,7 +169,7 @@ export function useItemAttachments(
 	}
 
 	async function getCurrentUserId(): Promise<string> {
-		return resolveUserIdForScope(storage, accountScope, {
+		return resolveUserIdForAccount(storage, accountId, {
 			errorMessage: "User ID not available for attachment encryption context",
 		});
 	}

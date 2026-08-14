@@ -4,7 +4,6 @@
  * Converts an existing vault between personal and team types.
  */
 
-import { useApiClient } from "@bittery/shared/api";
 import { useMutation } from "@tanstack/react-query";
 import {
 	useCoreContext,
@@ -27,7 +26,6 @@ export interface ConvertVaultTypeResult {
 }
 
 export function useConvertVaultType() {
-	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const refreshAfterMutation = useRefreshAfterVaultMutation();
@@ -35,8 +33,7 @@ export function useConvertVaultType() {
 	return useMutation({
 		mutationFn: (
 			input: ConvertVaultTypeInput,
-		): Promise<ConvertVaultTypeResult> =>
-			core.vaults.convertVaultType(input, defaultClient),
+		): Promise<ConvertVaultTypeResult> => core.vaults.convertVaultType(input),
 		onSuccess: async (_data, variables) => {
 			await refreshAfterMutation(variables.accountId);
 			await invalidator.invalidateVaultList(variables.vaultId);

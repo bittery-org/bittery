@@ -66,7 +66,7 @@ interface AppStateModule {
 export interface MobileAutolockOptions {
 	/** Account store; the background-timestamp methods are total on every platform. */
 	storage: AccountStore;
-	/** Optional: Get the active account email for multi-account support */
+	/** Optional override for the active account's stable identity. */
 	getActiveAccountId?: () => Promise<string | undefined>;
 }
 

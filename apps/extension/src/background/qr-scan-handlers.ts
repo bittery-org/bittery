@@ -11,7 +11,7 @@ import type {
 	TotpUpdateErrorType,
 	UpdateItemTotpResponse,
 } from "./router/contract";
-import { resolveAccountEmailForItemId } from "./services/account-resolution";
+import { resolveAccountIdForItem } from "./services/account-resolution";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
@@ -129,8 +129,8 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		const accountEmail = await resolveAccountEmailForItemId(itemId);
-		if (!accountEmail) {
+		const accountId = await resolveAccountIdForItem(itemId);
+		if (!accountId) {
 			return {
 				success: false,
 				error:
@@ -139,7 +139,7 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountId);
 		if (!hasWriteCapability) {
 			return {
 				success: false,
@@ -150,7 +150,7 @@ export async function handleUpdateItemTotp(payload: {
 
 		await updateExtensionItem({
 			itemId,
-			accountEmail,
+			accountId,
 			data: {
 				totpSecret: totp.totpSecret,
 				totpIssuer: totp.totpIssuer || item.totpIssuer,

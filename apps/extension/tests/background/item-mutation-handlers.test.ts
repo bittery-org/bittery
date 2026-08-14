@@ -17,7 +17,7 @@ mock.module(path.join(backgroundDir, "extension-item-mutations.ts"), () => ({
 
 mock.module(path.join(backgroundDir, "core-instance.ts"), () => ({
 	core: {
-		vaultCoordinator: {
+		vaultRepository: {
 			getById: () => ({
 				id: "item-1",
 				vaultId: "vault-1",
@@ -35,8 +35,8 @@ mock.module(path.join(backgroundDir, "desktop-key-material.ts"), () => ({
 }));
 
 mock.module(path.join(backgroundDir, "services/account-resolution.ts"), () => ({
-	resolveAccountEmailForItemId: async () => "alice@example.com",
-	resolveAccountEmailForVault: async () => "alice@example.com",
+	resolveAccountIdForItem: async () => "account-alice",
+	resolveAccountIdForVault: async () => "account-alice",
 }));
 
 mock.module(path.join(backgroundDir, "session-manager.ts"), () => ({
@@ -87,7 +87,7 @@ describe("background Item mutation handlers", () => {
 		expect(createCalls).toHaveLength(1);
 		expect(updateCalls[0]).toMatchObject({
 			itemId: "item-1",
-			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			data: { password: "new-password" },
 		});
 	});
@@ -101,7 +101,7 @@ describe("background Item mutation handlers", () => {
 		expect(result).toMatchObject({ success: true });
 		expect(updateCalls.at(-1)).toMatchObject({
 			itemId: "item-1",
-			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			data: {
 				totpSecret: "secret",
 				totpIssuer: "Existing issuer",

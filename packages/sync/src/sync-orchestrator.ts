@@ -7,8 +7,8 @@ import type {
 	SessionRevokedControlPayload,
 	SyncCursor,
 	SyncEvent,
-	SyncItemCache,
 	SyncManagerOptions,
+	SyncOrchestratorReplica,
 	SyncStatus,
 } from "./types";
 
@@ -28,7 +28,7 @@ export interface SyncOrchestratorOptions {
 		"onStatusChange" | "onSessionRevoked" | "onSyncPing" | "openSyncEvents"
 	>;
 	apiClient: SyncApiClient;
-	itemCache: SyncItemCache;
+	itemCache: SyncOrchestratorReplica;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
@@ -161,7 +161,7 @@ export class SyncOrchestrator {
 
 	/**
 	 * An email is not an account identity. Falling back to one named an `ItemCache`
-	 * collection after an email and made the coordinator mint a repo keyed by one.
+	 * collection after an email and made the repository open a replica keyed by one.
 	 */
 	private getDeltaSyncAccountScope(): string {
 		if (!this.itemCacheAccountId) {

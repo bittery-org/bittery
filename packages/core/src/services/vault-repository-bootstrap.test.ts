@@ -17,12 +17,15 @@ import {
 	createTestAccountStore,
 } from "../testing/account-store-harness";
 import {
+	type BootstrapItemsClient,
+	AccountVaultReplica as VaultRepository,
+} from "./account-vault-replica";
+import {
 	getTravelModeEnforcer,
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
-import { type BootstrapItemsClient, VaultRepository } from "./vault-repository";
-import { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
+import { VaultRepository as MultiAccountVaultRepository } from "./vault-repository";
 
 const ACCOUNT_ID = "acc-1";
 /** `accountMetadata` derives this from the account id. */
@@ -192,6 +195,70 @@ async function cachedItem(
 describe("VaultRepository.hydrateFromServer", () => {
 	beforeEach(() => {
 		resetTravelModeEnforcerForTests();
+	});
+
+	it("builds locally hydrated items with their cached Vault metadata", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("local_item", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await itemCache.setCachedVaults(
+			[
+				{
+					id: "vault_1",
+					name: "Cached Team Vault",
+					type: "team",
+					icon: "lock",
+					imageUrl: null,
+				},
+			],
+			ACCOUNT_ID,
+		);
+
+		await repo.hydrate();
+
+		expect(repo.getById(item.id)?.vault).toEqual({
+			id: "vault_1",
+			name: "Cached Team Vault",
+			type: "team",
+			icon: "lock",
+			imageUrl: null,
+		});
+	});
+
+	it("builds server-hydrated items with promoted Vault metadata", async () => {
+		const { repo, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("server_item", crypto, vaultCrypto);
+		const client: BootstrapItemsClient = {
+			sync: {
+				bootstrap: mock(async () => ({
+					data: {
+						items: [
+							{
+								...item,
+								vault: {
+									id: "vault_1",
+									name: "Promoted Team Vault",
+									vaultType: "team" as const,
+									icon: "lock",
+									imageUrl: null,
+								},
+							},
+						],
+						hasMore: false,
+					},
+				})),
+			},
+		};
+
+		await repo.hydrateFromServer(client);
+
+		expect(repo.getById(item.id)?.vault).toEqual({
+			id: "vault_1",
+			name: "Promoted Team Vault",
+			type: "team",
+			icon: "lock",
+			imageUrl: null,
+		});
 	});
 
 	// Regression guard: the server serialises vault payloads as camelCase, so the
@@ -622,7 +689,7 @@ describe("VaultRepository hydration on a locked account", () => {
 	});
 });
 
-describe("VaultRepositoryCoordinator follows the store's lock state", () => {
+describe("VaultRepository follows the store's lock state", () => {
 	beforeEach(() => {
 		resetTravelModeEnforcerForTests();
 	});
@@ -643,7 +710,7 @@ describe("VaultRepositoryCoordinator follows the store's lock state", () => {
 			enabled: false,
 			hiddenVaultIds: [],
 		});
-		const coordinator = new VaultRepositoryCoordinator(
+		const coordinator = new MultiAccountVaultRepository(
 			crypto,
 			vaultCrypto,
 			storage,
@@ -653,22 +720,124 @@ describe("VaultRepositoryCoordinator follows the store's lock state", () => {
 			[await cachedItem("item_1", crypto, vaultCrypto)],
 			ACCOUNT_ID,
 		);
-		const repo = coordinator.getRepositoryForAccount(ACCOUNT_ID);
-		await repo.hydrate();
-		expect(repo.getAll()).toHaveLength(1);
+		coordinator.setLocalActiveAccounts([
+			{
+				...accountMetadata({ accountId: ACCOUNT_ID }),
+				serverUrl: "https://bittery.test",
+			},
+		]);
+		await coordinator.hydrateLocalAccounts([
+			{
+				...accountMetadata({ accountId: ACCOUNT_ID }),
+				serverUrl: "https://bittery.test",
+			},
+		]);
+		expect(coordinator.getAll(ACCOUNT_ID)).toHaveLength(1);
 
 		// No await between the lock and the assertion: plaintext must not outlive it.
 		await storage.lockAllAccounts();
-		expect(repo.getAll()).toEqual([]);
-		expect(repo.isHydrated()).toBe(false);
+		expect(coordinator.getAll(ACCOUNT_ID)).toEqual([]);
+		expect(coordinator.isAccountHydrated(ACCOUNT_ID)).toBe(false);
 
 		await storage.setMasterUnlockKey(
 			await crypto.importKey(new Uint8Array(32)),
 			ACCOUNT_ID,
 		);
 
-		await until(() => repo.isHydrated());
-		expect(repo.getAll()).toHaveLength(1);
+		await until(() => coordinator.isAccountHydrated(ACCOUNT_ID));
+		expect(coordinator.getAll(ACCOUNT_ID)).toHaveLength(1);
+	});
+
+	it("does not commit plaintext when locking during cache hydration", async () => {
+		const { storage, itemCache, crypto } = await createLayers();
+		const vaultCrypto = createVaultCrypto({ crypto, storage });
+		await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		await itemCache.setCachedItems(
+			[await cachedItem("item_race", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		const originalGetCachedItems = itemCache.getCachedItems.bind(itemCache);
+		let release!: () => void;
+		const paused = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let entered!: () => void;
+		const didEnter = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		itemCache.getCachedItems = async (accountId?: string) => {
+			entered();
+			await paused;
+			return originalGetCachedItems(accountId ?? ACCOUNT_ID);
+		};
+		const repository = new MultiAccountVaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		const localAccount = {
+			...accountMetadata({ accountId: ACCOUNT_ID }),
+			serverUrl: "https://bittery.test",
+		};
+		repository.setLocalActiveAccounts([localAccount]);
+		const hydration = repository.hydrateLocalAccounts([localAccount]);
+		await didEnter;
+		await storage.lockAllAccounts();
+		release();
+		await hydration;
+		expect(repository.getAll(ACCOUNT_ID)).toEqual([]);
+		expect(repository.isAccountHydrated(ACCOUNT_ID)).toBe(false);
+	});
+
+	it("does not commit plaintext when locking during remote bootstrap", async () => {
+		const { storage, itemCache, crypto } = await createLayers();
+		const vaultCrypto = createVaultCrypto({ crypto, storage });
+		await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const repository = new MultiAccountVaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		const client = createClient();
+		const originalBootstrap = client.sync.bootstrap.bind(client.sync);
+		let release!: () => void;
+		const paused = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let entered!: () => void;
+		const didEnter = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		client.sync.bootstrap = async (input) => {
+			entered();
+			await paused;
+			return originalBootstrap(input);
+		};
+		const bootstrap = repository.initializeSyncBaseline(
+			[
+				{
+					...accountMetadata({ accountId: ACCOUNT_ID }),
+					authToken: "token",
+					serverUrl: "https://bittery.test",
+					apiClient: client as never,
+				},
+			],
+			ACCOUNT_ID,
+		);
+		await didEnter;
+		await storage.lockAllAccounts();
+		release();
+		await bootstrap;
+		expect(repository.getAll(ACCOUNT_ID)).toEqual([]);
+		expect(repository.isAccountHydrated(ACCOUNT_ID)).toBe(false);
 	});
 });
 

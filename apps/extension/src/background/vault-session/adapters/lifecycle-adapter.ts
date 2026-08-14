@@ -29,10 +29,10 @@ export interface LifecycleAdapterOptions {
 	) => Promise<LifecycleOutcome>;
 	/**
 	 * Identity of the connection whose session was revoked. The SSE payload
-	 * carries no account, so this is the only way to name one when the
-	 * `sessionId` matches nothing on the device.
+	 * carries no account, so this names the exact account when the `sessionId`
+	 * matches nothing on the device.
 	 */
-	resolveFallbackEmail?: () => string | null;
+	resolveFallbackAccountId?: () => string | null;
 }
 
 function reportFailures(scope: string, outcome: LifecycleOutcome): void {
@@ -52,10 +52,10 @@ function project(outcome: LifecycleOutcome): InvalidatedSession {
 
 function toCoreTarget(
 	target: SessionInvalidationTarget,
-	fallbackEmail: string | null,
+	fallbackAccountId: string | null,
 ): InvalidationTarget {
 	if (target === "active") {
-		return fallbackEmail ? { email: fallbackEmail } : "active";
+		return fallbackAccountId ? { accountId: fallbackAccountId } : "active";
 	}
 	return target;
 }
@@ -74,21 +74,22 @@ export function createLifecycleAdapter(
 
 		async invalidateSession(
 			target: SessionInvalidationTarget,
-			fallbackEmail?: string | null,
+			fallbackAccountId?: string | null,
 		): Promise<InvalidatedSession> {
-			const email = fallbackEmail ?? options.resolveFallbackEmail?.() ?? null;
-			const resolved = toCoreTarget(target, email);
+			const accountId =
+				fallbackAccountId ?? options.resolveFallbackAccountId?.() ?? null;
+			const resolved = toCoreTarget(target, accountId);
 
 			let outcome = await invalidate(resolved, deps);
 			// `StoredSessionData.sessionId` is optional, so an id that matches no
 			// stored session returns `affected: []` with `failures: []` — success and
-			// "never found it" are the same value. Retrying by email closes that.
+			// "never found it" are the same value. Retrying by accountId closes that.
 			if (
 				outcome.affected.length === 0 &&
-				email &&
-				!(typeof resolved === "object" && "email" in resolved)
+				accountId &&
+				!(typeof resolved === "object" && "accountId" in resolved)
 			) {
-				outcome = await invalidate({ email }, deps);
+				outcome = await invalidate({ accountId }, deps);
 			}
 
 			reportFailures("invalidateAccountSession", outcome);

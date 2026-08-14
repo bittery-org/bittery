@@ -1,4 +1,3 @@
-import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { storage } from "../../lib/storage";
 import { core } from "../core-instance";
 import {
@@ -14,90 +13,56 @@ export async function resolveEmailFromAccountId(
 	return metadata?.email;
 }
 
-export async function resolveAccountIdFromEmail(
-	email: string,
-): Promise<string | undefined> {
-	const normalizedEmail = email.toLowerCase();
-	const accounts = await storage.getAccountsList();
-	return accounts.find(
-		(account) => account.email.toLowerCase() === normalizedEmail,
-	)?.accountId;
-}
-
-export function getItemAccountEmail(
-	item: Pick<DecryptedItemWithContext, "accountEmail" | "account">,
-): string | undefined {
-	return item.accountEmail ?? item.account?.email;
-}
-
-export async function resolveAccountEmailForVault(
+export async function resolveAccountIdForVault(
 	vaultId: string,
 ): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount) {
-		return await resolveEmailFromAccountId(activeAccount);
-	}
-
-	const cached = core.vaultCoordinator.findAccountForVault(vaultId);
+	const cached = core.vaultRepository.findAccountForVault(vaultId);
 	if (cached) {
-		return await resolveEmailFromAccountId(cached.accountId);
+		return cached.accountId;
 	}
 
-	// `getUnlockedAccounts` reports which accounts hold a master unlock key in memory.
-	// The service-worker startup routine (`restoreUnlockedSessions`) repopulates that set
-	// before any message is routed, so this reader never has to restore anything itself.
+	// The desktop protocol and local storage both publish stable account IDs.
+	// Hydrate every candidate by that ID and inspect its scoped vault keys.
+	const activeAccountId = await storage.getActiveAccount();
 	const localUnlockedAccountIds = await storage.getUnlockedAccounts();
 	const desktopStatus = desktopSync.getLastStatus();
-	const desktopUnlockedEmails =
+	const desktopUnlockedAccountIds =
 		desktopStatus?.available && !desktopStatus.locked
 			? (desktopStatus.unlockedAccounts ?? [])
 			: [];
-	const desktopUnlockedAccountIds = (
-		await Promise.all(
-			desktopUnlockedEmails.map((email) => resolveAccountIdFromEmail(email)),
-		)
-	).filter((accountId): accountId is string => Boolean(accountId));
-
 	const candidateAccountIds = Array.from(
-		new Set([...localUnlockedAccountIds, ...desktopUnlockedAccountIds]),
+		new Set(
+			[
+				activeAccountId,
+				...localUnlockedAccountIds,
+				...desktopUnlockedAccountIds,
+			].filter((accountId): accountId is string => Boolean(accountId)),
+		),
 	);
 
 	for (const accountId of candidateAccountIds) {
-		const email = await resolveEmailFromAccountId(accountId);
-		if (!email) {
-			continue;
-		}
-		await hydrateDesktopAccountMaterial(email);
+		await hydrateDesktopAccountMaterial(accountId);
 		let vaultKeys = await storage.getVaultKeys(accountId);
 		if (!vaultKeys || vaultKeys.length === 0) {
-			const hydrated = await ensureDesktopWriteCapability(email);
+			const hydrated = await ensureDesktopWriteCapability(accountId);
 			if (hydrated) {
 				vaultKeys = await storage.getVaultKeys(accountId);
 			}
 		}
 		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
-			return email;
+			return accountId;
 		}
 	}
 
 	return undefined;
 }
 
-export async function resolveAccountEmailForItemId(
+export async function resolveAccountIdForItem(
 	itemId: string,
 ): Promise<string | undefined> {
-	const coordinatedItem = core.vaultCoordinator.getById(itemId);
-	if (coordinatedItem?.accountEmail) {
-		return coordinatedItem.accountEmail;
-	}
-	if (coordinatedItem?.account?.email) {
-		return coordinatedItem.account.email;
-	}
-
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount) {
-		return await resolveEmailFromAccountId(activeAccount);
-	}
-
-	return undefined;
+	const coordinatedItem = core.vaultRepository.getById(itemId);
+	return (
+		coordinatedItem?.accountId ??
+		core.vaultRepository.findAccountForItem(itemId)?.accountId
+	);
 }

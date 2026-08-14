@@ -1,12 +1,12 @@
 /**
  * useAllVaultKeys Hook
  *
- * Fetches all vault keys with account metadata from VaultRepositoryCoordinator.
+ * Fetches all vault keys with account metadata from VaultRepository.
  */
 
 import type { VaultKeyData } from "@bittery/storage/types";
 import { useMemo } from "react";
-import { useVaultRepositorySync } from "./use-vault-repository-sync";
+import { useVaultRepositoryState } from "./use-vault-repository-state";
 
 /**
  * Vault key with associated account metadata
@@ -46,13 +46,13 @@ export interface UseAllVaultKeysOptions {
  * ```
  */
 export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
-	const { accountsInfo, isLoading, snapshot, vaultCoordinator } =
-		useVaultRepositorySync({
+	const { accountsInfo, isLoading, error, snapshot, vaultRepository } =
+		useVaultRepositoryState({
 			enabled: options.enabled,
 		});
 
 	const vaultKeys = useMemo(() => {
-		// Snapshot is an invalidation signal from the coordinator store.
+		// Snapshot is an invalidation signal from the repository.
 		void snapshot;
 
 		if (accountsInfo.length === 0) {
@@ -60,26 +60,23 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 		}
 
 		return accountsInfo.flatMap((account) =>
-			vaultCoordinator
-				.getRepositoryForAccount(account.accountId)
-				.getVaultKeys()
-				.map((vaultKey) => ({
-					...vaultKey,
-					accountId: account.accountId,
-					// Cross-account metadata is intentionally left undefined for the
-					// single-account view. Consumers that need it (the Move dialog)
-					// use `useMoveTargetVaults`.
-					accountEmail: undefined,
-					accountName: undefined,
-					accountTeamName: undefined,
-					accountTeamAvatarUrl: undefined,
-				})),
+			vaultRepository.getVaultKeys(account.accountId).map((vaultKey) => ({
+				...vaultKey,
+				accountId: account.accountId,
+				// Cross-account metadata is intentionally left undefined for the
+				// single-account view. Consumers that need it (the Move dialog)
+				// use `useMoveTargetVaults`.
+				accountEmail: undefined,
+				accountName: undefined,
+				accountTeamName: undefined,
+				accountTeamAvatarUrl: undefined,
+			})),
 		);
-	}, [accountsInfo, snapshot, vaultCoordinator]);
+	}, [accountsInfo, snapshot, vaultRepository]);
 
 	return {
 		vaultKeys,
 		isLoading,
-		error: null,
+		error,
 	};
 }

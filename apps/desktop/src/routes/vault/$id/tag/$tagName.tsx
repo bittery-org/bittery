@@ -37,15 +37,17 @@ function TagRouteComponent() {
 
 	const handleToggleFavorite = (
 		e: React.MouseEvent,
-		itemId: string,
-		currentFavorite: boolean,
+		item: (typeof filteredItems)[number],
 	) => {
 		e.preventDefault();
 		e.stopPropagation();
+		const accountId = item.accountId ?? item.account?.accountId;
+		if (!accountId) return;
 		toggleFavorite.mutate({
-			itemId,
+			itemId: item.id,
 			vaultId: vaultId || "",
-			favorite: !currentFavorite,
+			favorite: !item.favorite,
+			accountId,
 		});
 	};
 
@@ -157,9 +159,7 @@ function TagRouteComponent() {
 									</div>
 									<button
 										type="button"
-										onClick={(e) =>
-											handleToggleFavorite(e, item.id, item.favorite)
-										}
+										onClick={(e) => handleToggleFavorite(e, item)}
 										className={cn(
 											"shrink-0",
 											item.favorite

@@ -459,11 +459,11 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		]);
 	});
 
-	it("resolves the target by email", async () => {
+	it("resolves the target by account id", async () => {
 		const fixture = await createFixture();
 
 		const outcome = await invalidateAccountSession(
-			{ email: "acc-2@test.com" },
+			{ accountId: "acc-2" },
 			fixture.deps,
 		);
 
@@ -499,7 +499,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		const before = fullState(fixture);
 
 		const outcome = await invalidateAccountSession(
-			{ email: "nobody@test.com" },
+			{ accountId: "nobody" },
 			fixture.deps,
 		);
 

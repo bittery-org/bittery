@@ -29,7 +29,7 @@ import { RowAction } from "./field-row";
 interface ItemAttachmentsProps {
 	itemId: string;
 	vaultId: string;
-	accountEmail?: string;
+	accountId: string;
 	canEdit?: boolean;
 }
 
@@ -61,13 +61,13 @@ function AttachmentRow({
 	onDownload,
 	onDelete,
 	canEdit,
-	accountEmail,
+	accountId,
 }: {
 	attachment: AttachmentMeta;
 	onDownload: (attachment: AttachmentMeta) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
-	accountEmail?: string;
+	accountId: string;
 }) {
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
 	const [isEditing, setIsEditing] = useState(false);
@@ -79,7 +79,7 @@ function AttachmentRow({
 	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
-		accountEmail,
+		accountId,
 	);
 	const decryptedNameQuery = useQuery({
 		queryKey: [
@@ -87,7 +87,7 @@ function AttachmentRow({
 			attachment.vaultId,
 			attachment.itemId,
 			attachment.id,
-			accountEmail,
+			accountId,
 		],
 		queryFn: async () => {
 			const decrypted = await decryptMeta(attachment);
@@ -126,7 +126,7 @@ function AttachmentRow({
 					attachment.vaultId,
 					attachment.itemId,
 					attachment.id,
-					accountEmail,
+					accountId,
 				],
 				trimmed,
 			);
@@ -230,7 +230,7 @@ function AttachmentRow({
 export function ItemAttachments({
 	itemId,
 	vaultId,
-	accountEmail,
+	accountId,
 	canEdit = false,
 }: ItemAttachmentsProps) {
 	const { m } = useI18n();
@@ -249,7 +249,7 @@ export function ItemAttachments({
 		download,
 		remove,
 		attachmentMaxFileSizeBytes,
-	} = useItemAttachments(itemId, vaultId, accountEmail);
+	} = useItemAttachments(itemId, vaultId, accountId);
 
 	const handlePickFile = useCallback(async () => {
 		const result = await DocumentPicker.getDocumentAsync({
@@ -520,7 +520,7 @@ export function ItemAttachments({
 								onDownload={handleDownload}
 								onDelete={handleDelete}
 								canEdit={canEdit}
-								accountEmail={accountEmail}
+								accountId={accountId}
 							/>
 						))
 					: null}

@@ -6,12 +6,8 @@
 
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
-import {
-	enqueueItemMutation,
-	requireRepositoryForVault,
-	toQueueEncryptedPayload,
-	useItemMutationRuntime,
-} from "./mutation-utils";
+import type { CreateItemCommandResult } from "../../services/item-commands";
+import { useItemMutationRuntime } from "./mutation-utils";
 
 /**
  * Input for creating a new item
@@ -20,64 +16,25 @@ export interface CreateItemInput {
 	vaultId: string;
 	category: ItemCategory;
 	data: DecryptedItemData;
-	accountId?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 /**
  * Result from item creation
  */
-export interface CreateItemResult {
-	itemId: string;
-	_encryptedData?: {
-		ciphertext: string;
-		iv: string;
-		algorithm: string;
-	};
-	_accountEmail?: string;
-}
+export type CreateItemResult = CreateItemCommandResult;
 
 /**
  * Hook for creating a new vault item.
  */
 export function useCreateItem() {
-	const { core, queue } = useItemMutationRuntime();
+	const { commands } = useItemMutationRuntime();
 
 	return useMutation({
-		mutationFn: async (input: CreateItemInput): Promise<CreateItemResult> => {
-			const { accountId, accountEmail, repo } = requireRepositoryForVault(
-				core,
-				input.vaultId,
-				input.accountId,
-				input.accountEmail,
-			);
-			const localItemId = await core.items.generateItemId();
-			const encryptedData = await repo.encryptWithVaultKey(
-				input.vaultId,
-				input.data,
-				{ itemId: localItemId, version: 1 },
-			);
-			await enqueueItemMutation(
-				queue,
-				{
-					accountId,
-					accountEmail,
-					baseVersion: 0,
-				},
-				{
-					type: "create",
-					entityId: localItemId,
-					vaultId: input.vaultId,
-					category: input.category,
-					encryptedPayload: toQueueEncryptedPayload(encryptedData),
-				},
-			);
-
-			return {
-				itemId: localItemId,
-				_encryptedData: encryptedData,
-				_accountEmail: accountEmail,
-			};
-		},
+		mutationFn: (input: CreateItemInput) =>
+			commands.execute({
+				type: "create",
+				...input,
+			}),
 	});
 }
