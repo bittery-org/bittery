@@ -13,6 +13,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { subscribeBackgroundPushes } from "./lib/background-events";
 import { sendMessage } from "./lib/messaging";
+import { subscribePopupAccountRuntime } from "./lib/popup-account-runtime-bridge";
+import { createPopupAccountVaultRuntime } from "./lib/popup-account-vault-runtime";
 import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
@@ -31,6 +33,14 @@ const queryClient = new QueryClient({
 			refetchOnWindowFocus: false,
 		},
 	},
+});
+
+/** The popup owns a runtime separate from the service worker's process. */
+const popupRuntime = createPopupAccountVaultRuntime();
+popupRuntime.start();
+subscribePopupAccountRuntime(popupRuntime);
+window.addEventListener("pagehide", () => popupRuntime.dispose(), {
+	once: true,
 });
 
 const fallbackServerUrl =
@@ -103,8 +113,11 @@ function Popup() {
 			<ApiProvider apiClient={apiClient}>
 				<I18nProvider>
 					<ThemeProvider>
-						<ExtensionSyncProvider queryClient={queryClient}>
-							<ExtensionPlatformProvider>
+						<ExtensionSyncProvider
+							queryClient={queryClient}
+							runtime={popupRuntime}
+						>
+							<ExtensionPlatformProvider runtime={popupRuntime}>
 								<RouterProvider router={router} />
 								<Toaster />
 							</ExtensionPlatformProvider>

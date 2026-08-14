@@ -18,8 +18,7 @@ import {
 } from "react";
 import { isBackgroundEvent } from "../background/events";
 import { sendMessage } from "../lib/messaging";
-import "../lib/popup-account-runtime-bridge";
-import { popupAccountVaultRuntime } from "../lib/popup-account-vault-runtime";
+import type { PopupAccountVaultRuntime } from "../lib/popup-account-vault-runtime";
 import { loadPopupWorkerState } from "../lib/popup-worker-state";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
 import { vaultRepository } from "../lib/vault-runtime";
@@ -65,9 +64,11 @@ const SyncContext = createContext<SyncContextValue | null>(null);
 export function ExtensionSyncProvider({
 	children,
 	queryClient,
+	runtime,
 }: {
 	children: ReactNode;
 	queryClient: QueryClient;
+	runtime: PopupAccountVaultRuntime;
 }) {
 	const [status, setStatus] = useState<ConnectionStatus>("disconnected");
 	const [clientId, setClientId] = useState<string>("");
@@ -128,9 +129,9 @@ export function ExtensionSyncProvider({
 	}, [outboundQueue]);
 
 	const handleFullRefresh = useCallback(async () => {
-		await popupAccountVaultRuntime.reloadFromCache();
+		await runtime.reloadFromCache();
 		await queryClient.invalidateQueries();
-	}, [queryClient]);
+	}, [queryClient, runtime]);
 
 	// Listen for messages from background worker
 	useEffect(() => {

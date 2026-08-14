@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { lifecycleDeps } from "@/background/lifecycle";
 import { crypto } from "@/lib/crypto";
-import { vaultRuntime } from "@/lib/popup-account-vault-runtime";
+import type { PopupAccountVaultRuntime } from "@/lib/popup-account-vault-runtime";
 import { itemCache, storage } from "@/lib/storage";
 import { vaultCrypto } from "@/lib/vault-runtime";
 import { useSyncContext } from "./sync-provider";
@@ -23,6 +23,7 @@ import { useSyncContext } from "./sync-provider";
  */
 interface ExtensionPlatformProviderProps {
 	children: ReactNode;
+	runtime: PopupAccountVaultRuntime;
 }
 
 /**
@@ -36,6 +37,7 @@ interface ExtensionPlatformProviderProps {
  */
 export function ExtensionPlatformProvider({
 	children,
+	runtime,
 }: ExtensionPlatformProviderProps) {
 	const syncContext = useSyncContext();
 
@@ -64,7 +66,8 @@ export function ExtensionPlatformProvider({
 			crypto={crypto}
 			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
-			vaultRuntime={vaultRuntime}
+			vaultRuntime={runtime.vaultRuntime}
+			accountManager={runtime.manager}
 			sync={sync}
 		>
 			{children}

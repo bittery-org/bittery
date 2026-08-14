@@ -12,6 +12,7 @@ import {
 	storeLoginSessionOwned,
 	storeUnlockSessionOwned,
 } from "@bittery/core/services/auth-service";
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { createApiClientForServer } from "@bittery/shared/api-client-factory";
 import { crypto } from "../lib/crypto";
@@ -42,6 +43,7 @@ import {
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
+import { reconcileClientRuntime } from "./vault-runtime";
 import { vaultSession } from "./vault-session";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
@@ -51,6 +53,7 @@ const DEFAULT_SERVER_URL = "http://localhost:3000";
  */
 export async function handleLogin(
 	payload: LoginPayload,
+	runtime: ClientRuntime,
 ): Promise<Acknowledgement> {
 	const { email, password, secretKey } = payload;
 	const serverUrl = payload.serverUrl ?? DEFAULT_SERVER_URL;
@@ -85,6 +88,7 @@ export async function handleLogin(
 			onMasterUnlockKeyTransferred: () => {
 				setMasterUnlockKey(result.masterUnlockKey);
 			},
+			onSessionStored: () => reconcileClientRuntime(runtime),
 		},
 	);
 
@@ -99,6 +103,7 @@ export async function handleLogin(
  */
 export async function handleQuickUnlock(
 	payload: PasswordPayload,
+	runtime: ClientRuntime,
 ): Promise<UnlockResponse> {
 	const { password } = payload;
 
@@ -138,6 +143,7 @@ export async function handleQuickUnlock(
 			setActive: true,
 		},
 	);
+	await reconcileClientRuntime(runtime);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -153,13 +159,15 @@ export async function handleQuickUnlock(
 /**
  * Handle CHECK_AUTH message - Check if extension is authenticated and unlocked
  */
-export async function handleCheckAuth(): Promise<CheckAuthResponse> {
+export async function handleCheckAuth(
+	runtime: ClientRuntime,
+): Promise<CheckAuthResponse> {
 	// Check if we have a valid session
 	const localAuthenticated = await storage.isAuthenticated();
 
 	// Ensure an active account is set if accounts exist but none is active
 	// This handles the case where the first account is added but not set as active
-	await ensureActiveAccountSet();
+	await ensureActiveAccountSet(runtime);
 
 	// Try to restore sessions from storage if not already unlocked.
 	//
@@ -167,7 +175,7 @@ export async function handleCheckAuth(): Promise<CheckAuthResponse> {
 	// (`restoreUnlockedSessions`); this covers the case where the worker stayed alive
 	// through a lock and the popup is asking again.
 	if (localAuthenticated && !isUnlocked()) {
-		const restored = await restoreUnlockedSessions();
+		const restored = await restoreUnlockedSessions(runtime.accounts);
 		if (restored.muk) {
 			setMasterUnlockKey(restored.muk);
 		}
@@ -197,7 +205,7 @@ export async function handleCheckAuth(): Promise<CheckAuthResponse> {
  * Ensure an active account is set if accounts exist but none is active
  * This handles the case where the first account is added but no active account is set
  */
-async function ensureActiveAccountSet(): Promise<void> {
+async function ensureActiveAccountSet(runtime: ClientRuntime): Promise<void> {
 	try {
 		const accounts = await storage.getAccountsList();
 		if (accounts.length === 0) return;
@@ -211,6 +219,7 @@ async function ensureActiveAccountSet(): Promise<void> {
 			const firstAccount = accounts[0];
 			if (!firstAccount) return; // Should never happen but satisfies TS
 			await storage.setActiveAccount(firstAccount.accountId);
+			await reconcileClientRuntime(runtime);
 		} else {
 			// Multiple accounts - check if any are unlocked
 			const unlockedAccountIds = await storage.getUnlockedAccounts();
@@ -220,11 +229,13 @@ async function ensureActiveAccountSet(): Promise<void> {
 				const unlockedAccountId = unlockedAccountIds[0];
 				if (!unlockedAccountId) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount(unlockedAccountId);
+				await reconcileClientRuntime(runtime);
 			} else {
 				// None unlocked - default to first account
 				const firstAccount = accounts[0];
 				if (!firstAccount) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount(firstAccount.accountId);
+				await reconcileClientRuntime(runtime);
 			}
 		}
 	} catch (error) {
@@ -297,7 +308,9 @@ export async function handleGetSessionData(): Promise<SessionDataResponse> {
 /**
  * Handle LOGOUT message - Sign out of the active account and lock
  */
-export async function handleLogout(): Promise<Acknowledgement> {
+export async function handleLogout(
+	runtime: ClientRuntime,
+): Promise<Acknowledgement> {
 	const accountId = await storage.getActiveAccount();
 	const outcome = accountId
 		? await invalidateAccountSession({ accountId }, lifecycleDeps)
@@ -315,6 +328,7 @@ export async function handleLogout(): Promise<Acknowledgement> {
 		console.error("[Auth] Sign-out steps failed:", outcome.failures);
 		return { success: false };
 	}
+	if (outcome) await reconcileClientRuntime(runtime);
 	return { success: true };
 }
 
@@ -353,6 +367,7 @@ export async function handleLock(): Promise<LockResponse> {
  */
 export async function handleQuickUnlockAll(
 	payload: PasswordPayload,
+	runtime: ClientRuntime,
 ): Promise<PasswordUnlockAllResponse> {
 	const { password } = payload;
 
@@ -395,6 +410,7 @@ export async function handleQuickUnlockAll(
 	}
 
 	updateActivity();
+	await reconcileClientRuntime(runtime);
 
 	return {
 		success: true,

@@ -32,7 +32,6 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountApiClient } from "./api-client";
 import {
 	getTravelModeEnforcer,
@@ -577,9 +576,7 @@ export async function storeLoginSession(
 	options?.onMasterUnlockKeyTransferred?.();
 
 	try {
-		await (
-			options?.onSessionStored ?? (() => peekAccountSessionManager()?.refresh())
-		)();
+		await options?.onSessionStored?.();
 	} catch (error) {
 		console.error("[auth-service] session manager refresh failed:", error);
 	}

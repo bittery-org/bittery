@@ -78,13 +78,16 @@ export async function handleUpdateAutofillTimestamp(): Promise<Acknowledgement> 
 /**
  * Handle GET_AUTOFILL_ITEMS message - Get autofill items for a hostname
  */
-export async function handleGetAutofillItems(payload: {
-	hostname: string;
-}): Promise<VaultItemsResponse> {
+export async function handleGetAutofillItems(
+	payload: {
+		hostname: string;
+	},
+	runtime: ClientRuntime,
+): Promise<VaultItemsResponse> {
 	updateActivity();
 
 	const { hostname } = payload;
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 
 	// Ranked, not just filtered: the exact host for the page the user is on comes
 	// first, then parent/child domains, then anything that merely shares a
@@ -100,10 +103,12 @@ export async function handleGetAutofillItems(payload: {
 /**
  * Handle GET_AUTOFILL_CREDIT_CARDS message - Get all credit card items
  */
-export async function handleGetAutofillCreditCards(): Promise<VaultItemsResponse> {
+export async function handleGetAutofillCreditCards(
+	runtime: ClientRuntime,
+): Promise<VaultItemsResponse> {
 	updateActivity();
 
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	const creditCards = items.filter(
 		(item): item is NonNullable<typeof item> =>
 			item?.category === "credit-card" && Boolean(item?.cardNumber),
@@ -115,13 +120,17 @@ export async function handleGetAutofillCreditCards(): Promise<VaultItemsResponse
 /**
  * Handle GET_AUTOFILL_IDENTITIES message - Get all identity items
  */
-export async function handleGetAutofillIdentities(): Promise<VaultItemsResponse> {
+export async function handleGetAutofillIdentities(
+	runtime: ClientRuntime,
+): Promise<VaultItemsResponse> {
 	updateActivity();
 
-	const items = await getDecryptedItemsForCurrentMode();
+	const items = await getDecryptedItemsForCurrentMode(runtime);
 	const identities = items.filter(
 		(item): item is NonNullable<typeof item> => item?.category === "identity",
 	);
 
 	return { success: true, items: rankItemsByUsefulness(identities) };
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";

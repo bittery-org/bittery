@@ -22,7 +22,7 @@ import type {
 } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
-import { core } from "../core-instance";
+import { vaultRepository } from "../../lib/vault-runtime";
 import { desktopClient } from "../desktop-client";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
@@ -105,7 +105,7 @@ export interface SyncCacheServiceDeps {
 
 const defaultDeps: SyncCacheServiceDeps = {
 	storage,
-	itemCache: core.vaultRepository,
+	itemCache: vaultRepository,
 	desktopClient,
 	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
 		createAccountApiClient(token, serverUrl, undefined, undefined, {
@@ -119,7 +119,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 			accountId,
 			storage,
 			itemCache,
-			core.vaultRepository as VaultRepository,
+			vaultRepository as VaultRepository,
 			accountClient
 				? {
 						apiClient: accountClient,
@@ -132,13 +132,13 @@ const defaultDeps: SyncCacheServiceDeps = {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		await core.vaultRepository.refreshFromServer(accounts);
+		await vaultRepository.refreshFromServer(accounts);
 	},
 	initializeFromServer: async (accountId, currentCursor) => {
 		const accounts = await new AccountResolver(
 			storage,
 		).resolveUnlockedAccounts();
-		return core.vaultRepository.initializeSyncBaseline(
+		return vaultRepository.initializeSyncBaseline(
 			accounts,
 			accountId,
 			currentCursor,

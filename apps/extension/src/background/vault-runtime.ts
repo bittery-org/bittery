@@ -1,18 +1,17 @@
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
+import { ClientRuntime } from "@bittery/core/services/client-runtime";
 import { itemCache, storage } from "../lib/storage";
 import { vaultRepository } from "../lib/vault-runtime";
 
-/** Process-local Vault lifetime for the service worker's command and Sync modules. */
-export const accountManager = getAccountSessionManager({ storage, itemCache });
-export const vaultRuntime = new AccountVaultRuntime(
-	accountManager,
+export const backgroundClientRuntime = new ClientRuntime({
+	storage,
+	itemCache,
 	vaultRepository,
-);
-vaultRuntime.start();
+});
 
-/** Re-read cross-context account state, then wait for the latest local opening. */
-export async function reconcileVaultRuntimeFromStorage(): Promise<void> {
-	await accountManager.refresh();
-	await vaultRuntime.retry();
+/** Re-read cross-context account state, then wait for this runtime's local opening. */
+export async function reconcileClientRuntime(
+	runtime: Pick<ClientRuntime, "accounts" | "vaultRuntime">,
+): Promise<void> {
+	await runtime.accounts.refresh();
+	await runtime.vaultRuntime.retry();
 }

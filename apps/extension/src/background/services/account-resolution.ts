@@ -1,10 +1,10 @@
 import { storage } from "../../lib/storage";
-import { core } from "../core-instance";
+import { vaultRepository } from "../../lib/vault-runtime";
 import {
 	ensureDesktopWriteCapability,
 	hydrateDesktopAccountMaterial,
 } from "../desktop-key-material";
-import { desktopSync } from "../desktop-sync";
+import type { DesktopSyncService } from "../desktop-sync";
 
 export async function resolveEmailFromAccountId(
 	accountId: string,
@@ -15,8 +15,9 @@ export async function resolveEmailFromAccountId(
 
 export async function resolveAccountIdForVault(
 	vaultId: string,
+	desktopSync: Pick<DesktopSyncService, "getLastStatus">,
 ): Promise<string | undefined> {
-	const cached = core.vaultRepository.findAccountForVault(vaultId);
+	const cached = vaultRepository.findAccountForVault(vaultId);
 	if (cached) {
 		return cached.accountId;
 	}
@@ -60,9 +61,9 @@ export async function resolveAccountIdForVault(
 export async function resolveAccountIdForItem(
 	itemId: string,
 ): Promise<string | undefined> {
-	const coordinatedItem = core.vaultRepository.getById(itemId);
+	const coordinatedItem = vaultRepository.getById(itemId);
 	return (
 		coordinatedItem?.accountId ??
-		core.vaultRepository.findAccountForItem(itemId)?.accountId
+		vaultRepository.findAccountForItem(itemId)?.accountId
 	);
 }

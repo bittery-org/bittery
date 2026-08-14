@@ -45,7 +45,7 @@ export interface PlatformContextValue {
 	core: CoreContext;
 
 	/** Explicit account runtime when the app owns one. */
-	accountManager?: AccountSessionManager;
+	accountManager: AccountSessionManager;
 
 	/** Autolock service (optional - may not be available on all platforms) */
 	autolock?: IAutolockService;
@@ -82,7 +82,7 @@ export interface PlatformProviderProps {
 	vaultRuntime: AccountVaultRuntime;
 
 	/** Explicit account runtime when the app owns one. */
-	accountManager?: AccountSessionManager;
+	accountManager: AccountSessionManager;
 
 	/** Autolock service (optional) */
 	autolock?: IAutolockService;
@@ -222,7 +222,7 @@ export function useCoreContext(): CoreContext {
 }
 
 /** Returns the account manager explicitly supplied by the app runtime, if present. */
-export function usePlatformAccountManager(): AccountSessionManager | undefined {
+export function usePlatformAccountManager(): AccountSessionManager {
 	return usePlatform().accountManager;
 }
 

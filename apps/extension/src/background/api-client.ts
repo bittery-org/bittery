@@ -2,7 +2,7 @@ import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-re
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
-import { desktopSync } from "./desktop-sync";
+import { getDesktopSync } from "./desktop-sync";
 
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
@@ -37,7 +37,7 @@ async function getOrCreateSyncClientId(): Promise<string> {
 }
 
 async function getAuthToken(accountId: string): Promise<string | null> {
-	if (desktopSync.isDesktopAvailable()) {
+	if (getDesktopSync().isDesktopAvailable()) {
 		try {
 			const desktopToken = await desktopClient.getAuthToken(accountId);
 			if (desktopToken) {

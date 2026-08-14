@@ -5,23 +5,11 @@
  */
 
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
-import {
-	type UseMutationResult,
-	useMutation,
-	useQueryClient,
-} from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import {
-	usePlatformAccountManager,
-	usePlatformItemCache,
-	usePlatformStorage,
-} from "../../context/platform-context";
+import { type UseMutationResult, useMutation } from "@tanstack/react-query";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { usePlatformAccountManager } from "../../context/platform-context";
 import type { LifecycleOutcome } from "../../services/account-lifecycle";
-import {
-	type AccountSessionManager,
-	getAccountSessionManager,
-	peekAccountSessionManager,
-} from "../../services/account-session-manager";
+import type { AccountSessionManager } from "../../services/account-session-manager";
 
 export interface UseAccountSwitcherOptions {
 	enabled?: boolean;
@@ -41,28 +29,7 @@ export interface UseAccountSwitcherResult {
 }
 
 function useAccountSessionManager(): AccountSessionManager {
-	const storage = usePlatformStorage();
-	const itemCache = usePlatformItemCache();
-	const ownedManager = usePlatformAccountManager();
-	const queryClient = useQueryClient();
-
-	return useMemo(
-		() =>
-			ownedManager ??
-			// Several components use this hook, and on desktop/mobile the account
-			// provider owns construction — so only construct when nobody else has.
-			peekAccountSessionManager() ??
-			getAccountSessionManager({
-				storage,
-				itemCache,
-				invalidateQueries: async (keys) => {
-					await Promise.all(
-						keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
-					);
-				},
-			}),
-		[ownedManager, storage, itemCache, queryClient],
-	);
+	return usePlatformAccountManager();
 }
 
 export function useAccountSwitcher(

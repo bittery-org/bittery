@@ -25,6 +25,7 @@ import type {
 import { routeRegistry } from "./registry";
 import { ensureSyncInitialized } from "./sync-effects";
 import type {
+	BackgroundRouteServices,
 	PasskeyRouteOverrides,
 	RouteContext,
 	RouteDefinition,
@@ -91,6 +92,7 @@ async function dispatchRoute<K extends RouteKey>(
 
 export async function routeRuntimeMessage(
 	message: unknown,
+	services: BackgroundRouteServices,
 	overrides?: PasskeyRouteOverrides,
 ): Promise<AnyRouteResponse | RouteFailure> {
 	if (!isRuntimeMessage(message)) {
@@ -102,6 +104,7 @@ export async function routeRuntimeMessage(
 	}
 
 	const ctx: RouteContext = {
+		...services,
 		passkeyHandlers: {
 			handlePasskeyCreate,
 			handlePasskeyGet,
@@ -113,15 +116,20 @@ export async function routeRuntimeMessage(
 	return dispatchRoute(message.type, message.payload, ctx);
 }
 
-export function registerBackgroundMessageRouter(): void {
+export function registerBackgroundMessageRouter(
+	services: BackgroundRouteServices,
+): void {
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		void (async () => {
 			try {
 				// A message can arrive on a freshly woken service worker whose in-memory
 				// master-unlock-key cache is still empty. Waiting for the startup routine
 				// means no handler ever reads a half-restored unlock state.
-				await ensureBackgroundServicesReady();
-				const response = await routeRuntimeMessage(message);
+				await ensureBackgroundServicesReady(
+					services.runtime,
+					services.desktopSync,
+				);
+				const response = await routeRuntimeMessage(message, services);
 				sendResponse(response);
 			} catch (error) {
 				console.error("[Background router] Handler error:", error);

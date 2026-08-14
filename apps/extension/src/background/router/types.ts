@@ -1,3 +1,7 @@
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";
+import type { DesktopSyncService } from "../desktop-sync";
+import type { ExtensionItemCommands } from "../extension-item-mutations";
+
 /**
  * Background Message Router Types
  *
@@ -28,7 +32,12 @@ export type PasskeyRouteOverrides = Partial<PasskeyHandlers>;
 
 export interface RouteContext {
 	passkeyHandlers: PasskeyHandlers;
+	runtime: ClientRuntime;
+	desktopSync: DesktopSyncService;
+	itemCommands: ExtensionItemCommands;
 }
+
+export type BackgroundRouteServices = Omit<RouteContext, "passkeyHandlers">;
 
 export interface RouteDefinition<K extends RouteKey> {
 	handle(

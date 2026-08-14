@@ -1,5 +1,4 @@
 import { type BackgroundEvent, isBackgroundEvent } from "../background/events";
-import { popupAccountVaultRuntime } from "./popup-account-vault-runtime";
 
 export interface PopupAccountRuntimeReconciler {
 	reconcileFromStorage(): Promise<void>;
@@ -45,26 +44,17 @@ export function createPopupAccountRuntimeBridge(
 	};
 }
 
-export const popupAccountRuntimeBridge = createPopupAccountRuntimeBridge(
-	popupAccountVaultRuntime,
-);
-
-/**
- * Registered at module scope so an account event arriving while React mounts is
- * still reconciled before any popup read hook can depend on its scope.
- */
-if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+export function subscribePopupAccountRuntime(
+	runtime: PopupAccountRuntimeReconciler,
+): void {
+	const bridge = createPopupAccountRuntimeBridge(runtime);
 	chrome.runtime.onMessage.addListener((message: unknown) => {
 		if (!isBackgroundEvent(message)) return;
-		const reconciliation =
-			popupAccountRuntimeBridge.handleBackgroundEvent(message);
-		if (reconciliation) {
-			void reconciliation.catch((error) => {
-				console.error(
-					"[Popup Vault runtime] Failed to reconcile worker account state:",
-					error,
-				);
-			});
-		}
+		void bridge.handleBackgroundEvent(message)?.catch((error) => {
+			console.error(
+				"[Popup Vault runtime] Failed to reconcile worker account state:",
+				error,
+			);
+		});
 	});
 }

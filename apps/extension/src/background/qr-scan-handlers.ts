@@ -4,7 +4,10 @@
  */
 
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { updateExtensionItem } from "./extension-item-mutations";
+import {
+	type ExtensionItemCommands,
+	updateExtensionItem,
+} from "./extension-item-mutations";
 import type {
 	CaptureTabScreenshotResponse,
 	TotpUpdate,
@@ -81,10 +84,14 @@ export async function handleCaptureTabScreenshot(): Promise<CaptureTabScreenshot
 /**
  * Handle UPDATE_ITEM_TOTP message - Add/update TOTP field on an existing item
  */
-export async function handleUpdateItemTotp(payload: {
-	itemId: string;
-	totp: TotpUpdate;
-}): Promise<UpdateItemTotpResponse> {
+export async function handleUpdateItemTotp(
+	payload: {
+		itemId: string;
+		totp: TotpUpdate;
+	},
+	runtime: ClientRuntime,
+	itemCommands: ExtensionItemCommands,
+): Promise<UpdateItemTotpResponse> {
 	updateActivity();
 
 	const { itemId, totp } = payload;
@@ -108,7 +115,7 @@ export async function handleUpdateItemTotp(payload: {
 	}
 
 	try {
-		const item = (await getDecryptedItemsForCurrentMode()).find(
+		const item = (await getDecryptedItemsForCurrentMode(runtime)).find(
 			(candidate) => candidate?.id === itemId,
 		);
 
@@ -148,18 +155,21 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		await updateExtensionItem({
-			itemId,
-			accountId,
-			data: {
-				totpSecret: totp.totpSecret,
-				totpIssuer: totp.totpIssuer || item.totpIssuer,
-				totpAccountName: totp.totpAccountName || item.totpAccountName,
-				totpAlgorithm: totp.totpAlgorithm || item.totpAlgorithm || "SHA1",
-				totpDigits: totp.totpDigits || item.totpDigits || 6,
-				totpPeriod: totp.totpPeriod || item.totpPeriod || 30,
+		await updateExtensionItem(
+			{
+				itemId,
+				accountId,
+				data: {
+					totpSecret: totp.totpSecret,
+					totpIssuer: totp.totpIssuer || item.totpIssuer,
+					totpAccountName: totp.totpAccountName || item.totpAccountName,
+					totpAlgorithm: totp.totpAlgorithm || item.totpAlgorithm || "SHA1",
+					totpDigits: totp.totpDigits || item.totpDigits || 6,
+					totpPeriod: totp.totpPeriod || item.totpPeriod || 30,
+				},
 			},
-		});
+			itemCommands,
+		);
 
 		return {
 			success: true,
@@ -211,3 +221,5 @@ export async function handleUpdateItemTotp(payload: {
 		};
 	}
 }
+
+import type { ClientRuntime } from "@bittery/core/services/client-runtime";
