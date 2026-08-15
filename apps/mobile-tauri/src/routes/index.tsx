@@ -1,24 +1,40 @@
-import { Button } from "@bittery/ui";
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-	// MIGRATION SCAFFOLD — M1-C4a: land straight on the storage self-test so it is reachable
-	// without a deep link. Remove this redirect together with `routes/debug.tsx` before release.
-	beforeLoad: () => {
-		throw redirect({ to: "/debug" });
-	},
-	component: IndexComponent,
-});
+	beforeLoad: async ({ context }) => {
+		// Check for accounts
+		const accountsList = context.runtime.accounts.getAccounts();
 
-function IndexComponent() {
-	return (
-		<div className="flex min-h-dvh flex-col items-center justify-center gap-4">
-			<h1 className="font-semibold text-2xl">Bittery</h1>
-			<p className="text-muted-foreground">mobile shell — M1-C1</p>
-			<Button>Continue</Button>
-			<Link to="/debug" className="text-primary text-sm underline">
-				Storage self-test (M1-C4a scaffold)
-			</Link>
-		</div>
-	);
-}
+		const [firstAccount] = accountsList;
+		if (!firstAccount) {
+			// No accounts, go to login
+			throw redirect({ to: "/login" });
+		}
+
+		// Get active account
+		let activeAccount = context.runtime.accounts.getActiveAccount();
+
+		if (!activeAccount) {
+			// Has accounts but none active, set first as active
+			await context.runtime.accounts.switchAccount(firstAccount.accountId);
+			activeAccount = firstAccount.accountId;
+		}
+
+		// Single account mode: check if the active account has a valid session.
+		const sessionValid =
+			await context.runtime.accounts.storage.isSessionValid(activeAccount);
+
+		if (sessionValid) {
+			const restored = await context.runtime.accounts.unlockAccount(
+				activeAccount,
+				true,
+			);
+			if (restored) {
+				throw redirect({ to: "/vault" });
+			}
+		}
+
+		// Session not valid or restore failed, go to unlock
+		throw redirect({ to: "/unlock" });
+	},
+});

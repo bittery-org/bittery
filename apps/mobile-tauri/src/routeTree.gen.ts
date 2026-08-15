@@ -11,6 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DebugRouteImport } from './routes/debug'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as UnlockRouteImport } from './routes/unlock'
+import { Route as VaultIndexRouteImport } from './routes/vault/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +25,58 @@ const DebugRoute = DebugRouteImport.update({
   path: '/debug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UnlockRoute = UnlockRouteImport.update({
+  id: '/unlock',
+  path: '/unlock',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VaultIndexRoute = VaultIndexRouteImport.update({
+  id: '/vault/',
+  path: '/vault/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/debug': typeof DebugRoute
+  '/login': typeof LoginRoute
+  '/unlock': typeof UnlockRoute
+  '/vault/': typeof VaultIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/debug': typeof DebugRoute
+  '/login': typeof LoginRoute
+  '/unlock': typeof UnlockRoute
+  '/vault': typeof VaultIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/debug': typeof DebugRoute
+  '/login': typeof LoginRoute
+  '/unlock': typeof UnlockRoute
+  '/vault/': typeof VaultIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/debug'
+  fullPaths: '/' | '/debug' | '/login' | '/unlock' | '/vault/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/debug'
-  id: '__root__' | '/' | '/debug'
+  to: '/' | '/debug' | '/login' | '/unlock' | '/vault'
+  id: '__root__' | '/' | '/debug' | '/login' | '/unlock' | '/vault/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DebugRoute: typeof DebugRoute
+  LoginRoute: typeof LoginRoute
+  UnlockRoute: typeof UnlockRoute
+  VaultIndexRoute: typeof VaultIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +95,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DebugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/unlock': {
+      id: '/unlock'
+      path: '/unlock'
+      fullPath: '/unlock'
+      preLoaderRoute: typeof UnlockRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vault/': {
+      id: '/vault/'
+      path: '/vault'
+      fullPath: '/vault/'
+      preLoaderRoute: typeof VaultIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DebugRoute: DebugRoute,
+  LoginRoute: LoginRoute,
+  UnlockRoute: UnlockRoute,
+  VaultIndexRoute: VaultIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
