@@ -401,7 +401,7 @@ mod tests {
         for operation_id in [
             "getApiMetadata",
             "getRegistrationStatus",
-            "start_login",
+            "startLogin",
             "getPublicShareInfo",
             "accessPublicShare",
             "getTeamInvitation",
