@@ -626,17 +626,22 @@ jobs:
         with:
           workspaces: apps/server
 
-      - name: Migrate test database
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          cargo run --manifest-path apps/server/Cargo.toml --bin migrate
-          elapsed="$(( $(date +%s) - start ))"
-          echo "server migration: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Server fmt
         run: cargo fmt --check --manifest-path apps/server/Cargo.toml
+
+      # Compile-time SQLx metadata is checked against the current schema. The server tests still
+      # create and migrate isolated databases; this is the one reason the service database itself
+      # must be migrated in CI.
+      - name: Install SQLx CLI
+        run: >-
+          cargo install sqlx-cli --version 0.8.6 --locked --no-default-features
+          --features rustls,postgres
+
+      - name: SQLx metadata matches migrations
+        working-directory: apps/server
+        run: |
+          cargo sqlx migrate run
+          cargo sqlx prepare --check -- --lib
 
       # The other half of `contracts:check`. js-static proves openapi.v1.json and
       # the generated TypeScript agree; only this proves the committed spec still

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO sync_event\n               (id, event_type, vault_id, entity_id, entity_type, version, user_id, metadata)\n           SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || vk.user_id || 'member_removed'),\n                  'vault_member_removed',\n                  p.vault_id,\n                  p.excluded_user_id,\n                  'vault_member',\n                  $2,\n                  vk.user_id,\n                  json_build_object('rotationId', $1::text, 'removedUserId', p.excluded_user_id)::text\n           FROM vault_key_rotation_plan p\n           JOIN vault_key vk ON vk.vault_id = p.vault_id\n           WHERE p.id = $3\n             AND p.reason = 'member_removed'\n             AND p.excluded_user_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96570594761e498523c15ecb64523cc974910f5d2f327bdd8442463a37b5e971"
+}

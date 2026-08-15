@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n               (\n                   SELECT entity_id, payload::jsonb->>'publicKey', payload::jsonb->>'role'\n                   FROM vault_key_rotation_plan_manifest\n                   WHERE plan_id = $1 AND kind = 'member'\n                   EXCEPT\n                   SELECT vk.user_id, u.public_key, vk.role::text\n                   FROM vault_key vk\n                   JOIN \"user\" u ON u.id = vk.user_id\n                   JOIN vault_key_rotation_plan p ON p.id = $1\n                   WHERE vk.vault_id = $2\n                     AND (p.excluded_user_id IS NULL OR vk.user_id <> p.excluded_user_id)\n               )\n               UNION ALL\n               (\n                   SELECT vk.user_id, u.public_key, vk.role::text\n                   FROM vault_key vk\n                   JOIN \"user\" u ON u.id = vk.user_id\n                   JOIN vault_key_rotation_plan p ON p.id = $1\n                   WHERE vk.vault_id = $2\n                     AND (p.excluded_user_id IS NULL OR vk.user_id <> p.excluded_user_id)\n                   EXCEPT\n                   SELECT entity_id, payload::jsonb->>'publicKey', payload::jsonb->>'role'\n                   FROM vault_key_rotation_plan_manifest\n                   WHERE plan_id = $1 AND kind = 'member'\n               )\n           ) AS \"member_stale!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "member_stale!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9a1d4b951050cb79ad4da9c5b61f580812cd3d02dcd3ae2cd604ad9b304d1630"
+}

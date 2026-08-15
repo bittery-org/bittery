@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT vault_id,\n                  initiator_user_id,\n                  reason::text AS \"reason!\",\n                  authorization_context,\n                  excluded_user_id\n           FROM vault_key_rotation_plan\n           WHERE id = $1\n             AND state IN ('preparing', 'ready')\n             AND idle_expires_at > now()\n             AND absolute_expires_at > now()\n           FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "vault_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "initiator_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "authorization_context",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "excluded_user_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "2853591e6a3cd9cfd23b5aaec056640b4405a6a151c2b6647cb179dc9d55d131"
+}

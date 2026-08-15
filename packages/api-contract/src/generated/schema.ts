@@ -77,7 +77,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["check_email"];
+        readonly post: operations["checkEmail"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -93,7 +93,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["start_login"];
+        readonly post: operations["startLogin"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -109,7 +109,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["finish_login"];
+        readonly post: operations["finishLogin"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -125,7 +125,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["recovery_data"];
+        readonly post: operations["recoveryData"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -141,7 +141,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["reset_password"];
+        readonly post: operations["resetPassword"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -157,7 +157,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["request_recovery_verification"];
+        readonly post: operations["requestRecoveryVerification"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -173,7 +173,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["verify_recovery"];
+        readonly post: operations["verifyRecovery"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -205,7 +205,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["request_signup_verification"];
+        readonly post: operations["requestSignupVerification"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -221,7 +221,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["verify_signup_verification"];
+        readonly post: operations["verifySignupVerification"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -619,7 +619,7 @@ export interface paths {
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get: operations["list_sessions"];
+        readonly get: operations["listSessions"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -637,7 +637,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["refresh_session"];
+        readonly post: operations["refreshSession"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -654,10 +654,10 @@ export interface paths {
         readonly get?: never;
         readonly put?: never;
         readonly post?: never;
-        readonly delete: operations["revoke_session"];
+        readonly delete: operations["revokeSession"];
         readonly options?: never;
         readonly head?: never;
-        readonly patch: operations["rename_session"];
+        readonly patch: operations["renameSession"];
         readonly trace?: never;
     };
     readonly "/api/v1/share-links/{linkId}": {
@@ -1038,7 +1038,7 @@ export interface paths {
         readonly get: operations["me"];
         readonly put?: never;
         readonly post?: never;
-        readonly delete: operations["delete_account"];
+        readonly delete: operations["deleteAccount"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -1053,7 +1053,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["update_email"];
+        readonly post: operations["updateEmail"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1069,7 +1069,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["change_password"];
+        readonly post: operations["changePassword"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1084,7 +1084,7 @@ export interface paths {
             readonly cookie?: never;
         };
         readonly get?: never;
-        readonly put: operations["store_recovery_key"];
+        readonly put: operations["storeRecoveryKey"];
         readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
@@ -1101,7 +1101,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["regenerate_secret_key"];
+        readonly post: operations["regenerateSecretKey"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -3306,7 +3306,7 @@ export interface operations {
             };
         };
     };
-    readonly check_email: {
+    readonly checkEmail: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3337,7 +3337,7 @@ export interface operations {
             };
         };
     };
-    readonly start_login: {
+    readonly startLogin: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3386,7 +3386,7 @@ export interface operations {
             };
         };
     };
-    readonly finish_login: {
+    readonly finishLogin: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3437,7 +3437,7 @@ export interface operations {
             };
         };
     };
-    readonly recovery_data: {
+    readonly recoveryData: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3484,7 +3484,7 @@ export interface operations {
             };
         };
     };
-    readonly reset_password: {
+    readonly resetPassword: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3531,7 +3531,7 @@ export interface operations {
             };
         };
     };
-    readonly request_recovery_verification: {
+    readonly requestRecoveryVerification: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3580,7 +3580,7 @@ export interface operations {
             };
         };
     };
-    readonly verify_recovery: {
+    readonly verifyRecovery: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3658,7 +3658,7 @@ export interface operations {
             };
         };
     };
-    readonly request_signup_verification: {
+    readonly requestSignupVerification: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -3707,7 +3707,7 @@ export interface operations {
             };
         };
     };
-    readonly verify_signup_verification: {
+    readonly verifySignupVerification: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -6717,7 +6717,7 @@ export interface operations {
             };
         };
     };
-    readonly list_sessions: {
+    readonly listSessions: {
         readonly parameters: {
             readonly query?: {
                 readonly cursor?: components["schemas"]["PageCursor"];
@@ -6763,7 +6763,7 @@ export interface operations {
             };
         };
     };
-    readonly refresh_session: {
+    readonly refreshSession: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -6798,7 +6798,7 @@ export interface operations {
             };
         };
     };
-    readonly revoke_session: {
+    readonly revokeSession: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -6850,9 +6850,19 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
-    readonly rename_session: {
+    readonly renameSession: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -6909,6 +6919,16 @@ export interface operations {
             };
             readonly 415: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9300,7 +9320,7 @@ export interface operations {
             };
         };
     };
-    readonly delete_account: {
+    readonly deleteAccount: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -9353,9 +9373,19 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
-    readonly update_email: {
+    readonly updateEmail: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -9400,9 +9430,19 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
-    readonly change_password: {
+    readonly changePassword: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -9439,6 +9479,16 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             readonly 500: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9449,7 +9499,7 @@ export interface operations {
             };
         };
     };
-    readonly store_recovery_key: {
+    readonly storeRecoveryKey: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -9488,7 +9538,7 @@ export interface operations {
             };
         };
     };
-    readonly regenerate_secret_key: {
+    readonly regenerateSecretKey: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -9519,6 +9569,16 @@ export interface operations {
             };
             readonly 401: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 429: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

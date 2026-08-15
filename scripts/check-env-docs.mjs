@@ -65,10 +65,6 @@ const UNDOCUMENTED_SERVER_VARS = new Map([
 		"local-development stub for auth email delivery; must not be advertised as a deployment option",
 	],
 	[
-		"DATABASE_MAX_CONNECTIONS",
-		"connection-pool tuning; defaults to 5 and is not part of the supported surface",
-	],
-	[
 		"HOST",
 		"bind address; the shipped images always run on the 0.0.0.0 default",
 	],
@@ -119,6 +115,7 @@ const ENV_ACCESSOR =
 // .env.example also lists counts as a read: that pair is not a coincidence, and
 // .env.example is one of the two places the undocumented variables were hiding.
 const ENV_SHAPED_LITERAL = /"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)"/g;
+const CONFIG_ENV_LITERAL = /"([A-Z][A-Z0-9_]*)"/g;
 
 // `| \`NAME\` | default | description |` table rows, and `NAME=value` lines in
 // shell snippets (including Compose-style `- NAME=value`).
@@ -153,8 +150,17 @@ for (const filePath of listFiles(
 	(name) => name.endsWith(".rs") && !isTestFile(name),
 )) {
 	const content = readFileSync(filePath, "utf8");
+	const productionContent = content.split("\n#[cfg(test)]")[0];
 	for (const name of matchAll(content, ENV_ACCESSOR)) {
 		serverVars.add(name);
+	}
+	// Startup configuration intentionally receives an injected lookup function instead of reading
+	// process-global state itself. Every env-shaped literal in its production section is therefore
+	// a real configuration key, even when it is not listed in .env.example.
+	if (filePath === `${SERVER_SRC}/config/mod.rs`) {
+		for (const name of matchAll(productionContent, CONFIG_ENV_LITERAL)) {
+			serverVars.add(name);
+		}
 	}
 	for (const name of matchAll(content, ENV_SHAPED_LITERAL)) {
 		if (exampleVars.has(name)) {

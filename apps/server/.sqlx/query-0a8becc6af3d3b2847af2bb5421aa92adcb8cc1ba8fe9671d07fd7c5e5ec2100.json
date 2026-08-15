@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"missing!\"\n               FROM vault_key_rotation_plan_manifest m\n               LEFT JOIN vault_key_rotation_plan_staged_output s\n                 ON s.plan_id = m.plan_id\n                AND s.kind = m.kind\n                AND s.entity_id = m.entity_id\n               WHERE m.plan_id = $1\n                 AND m.kind = $2::vault_key_rotation_manifest_kind\n                 AND s.entity_id IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "missing!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "vault_key_rotation_manifest_kind",
+            "kind": {
+              "Enum": [
+                "member",
+                "item",
+                "attachment"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0a8becc6af3d3b2847af2bb5421aa92adcb8cc1ba8fe9671d07fd7c5e5ec2100"
+}

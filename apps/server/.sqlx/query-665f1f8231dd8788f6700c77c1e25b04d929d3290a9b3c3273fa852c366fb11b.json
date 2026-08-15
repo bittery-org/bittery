@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vault_key_rotation_plan_manifest\n               (plan_id, kind, entity_id, expected_version, payload)\n           SELECT $1,\n                  'member',\n                  vk.user_id,\n                  $2,\n                  json_build_object(\n                      'userId', vk.user_id,\n                      'publicKey', u.public_key,\n                      'role', vk.role\n                  )::text\n           FROM vault_key vk\n           JOIN \"user\" u ON u.id = vk.user_id\n           WHERE vk.vault_id = $3\n             AND ($4::text IS NULL OR vk.user_id <> $4)\n           ORDER BY vk.user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "665f1f8231dd8788f6700c77c1e25b04d929d3290a9b3c3273fa852c366fb11b"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM vault_key vk\n           USING vault_key_rotation_plan p\n           WHERE p.id = $1\n             AND vk.vault_id = $2\n             AND vk.user_id = p.excluded_user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ae6a688946c2ad6e709a2f0a43679bd088ea7a578d184ff060b7c5f479bfaf6"
+}

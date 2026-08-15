@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vault_key_rotation_plan_manifest\n               (plan_id, kind, entity_id, expected_version, payload)\n           SELECT $1,\n                  'attachment',\n                  a.id,\n                  a.envelope_version,\n                  json_build_object(\n                      'encryptedAttachmentKey', a.encrypted_attachment_key,\n                      'attachmentKeyIv', a.attachment_key_iv,\n                      'attachmentKeyAlgorithm', a.attachment_key_algorithm,\n                      'vaultId', a.vault_id,\n                      'attachmentId', a.id,\n                      'uploadedBy', a.uploaded_by,\n                      'envelopeVersion', a.envelope_version\n                  )::text\n           FROM item_attachment a\n           WHERE a.vault_id = $2\n           ORDER BY a.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a96efd5cd9163a21a6230930d910d37484198fbd469a92b6242ee40700cc79e"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vault_key_rotation\n               (id, vault_id, key_version, reason, initiated_by_id, removed_user_id,\n                items_re_encrypted, members_updated, status, created_at, completed_at)\n           SELECT $1,\n                  vault_id,\n                  $2,\n                  reason,\n                  initiator_user_id,\n                  excluded_user_id,\n                  (SELECT COUNT(*) FROM vault_key_rotation_plan_manifest WHERE plan_id = $3 AND kind = 'item'),\n                  (SELECT COUNT(*) FROM vault_key_rotation_plan_manifest WHERE plan_id = $3 AND kind = 'member'),\n                  'completed',\n                  now(),\n                  now()\n           FROM vault_key_rotation_plan\n           WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26e66ba1d9501c4870c228e82ee4e1f1c684eb9f98bc3444b11fb972bafa9826"
+}

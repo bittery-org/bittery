@@ -6,6 +6,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
+use crate::config::StripeConfig;
+
 const STRIPE_API_BASE: &str = "https://api.stripe.com/v1";
 
 #[derive(Debug)]
@@ -79,12 +81,8 @@ pub struct StripeBillingGateway {
 }
 
 impl StripeBillingGateway {
-    pub fn from_env() -> Result<Option<Self>, StripeClientError> {
-        let Some(secret_key) = std::env::var("STRIPE_SECRET_KEY")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-        else {
+    pub fn from_config(config: &StripeConfig) -> Result<Option<Self>, StripeClientError> {
+        let Some(secret_key) = config.secret_key.clone() else {
             return Ok(None);
         };
         let client = Client::builder()

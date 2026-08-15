@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vault_key_rotation_plan p\n           SET state = 'ready'\n           WHERE p.id = $1\n             AND NOT EXISTS (\n                 SELECT 1\n                 FROM vault_key_rotation_plan_manifest m\n                 LEFT JOIN vault_key_rotation_plan_staged_output s\n                   ON s.plan_id = m.plan_id\n                  AND s.kind = m.kind\n                  AND s.entity_id = m.entity_id\n                 WHERE m.plan_id = p.id AND s.entity_id IS NULL\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c395347dc8aafd9b5fc68f278946b47444d9e37e5759562114bdf92951397b22"
+}

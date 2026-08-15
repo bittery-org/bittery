@@ -10,22 +10,26 @@ const RESETTABLE_DATABASE_PREFIXES: [&str; 2] = ["bittery_e2e", "bittery_test"];
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _ = dotenvy::dotenv();
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| "DATABASE_URL environment variable is not set")?;
 
     if std::env::args()
         .skip(1)
         .any(|argument| argument == "--fresh")
     {
-        let database_url = std::env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL environment variable is not set")?;
         let name = recreate_database(&database_url).await?;
         println!("Recreated database {name}");
     }
 
-    let Some(pool) = db::connect_from_env().await? else {
-        return Err("DATABASE_URL environment variable is not set".into());
-    };
+    let pool = db::connect(&database_url).await?;
 
-    db::run_migrations(&pool).await?;
+    match std::env::var("MIGRATIONS_FOLDER")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+    {
+        Some(path) => db::run_migrations_from(&pool, path.trim()).await?,
+        None => db::run_migrations(&pool).await?,
+    }
     println!("Migrations applied successfully");
 
     Ok(())

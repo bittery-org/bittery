@@ -1,9 +1,7 @@
-use std::{env, sync::LazyLock, time::Duration};
+use std::time::Duration;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use rand::random;
-use regex::Regex;
 use reqwest::{
     header::{CONTENT_LENGTH, CONTENT_TYPE, HOST},
     Method,
@@ -14,18 +12,12 @@ use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
 
-const ATTACHMENT_UPLOAD_KEY_TTL_MS: i64 = 15 * 60 * 1000;
 const AWS_ALGORITHM: &str = "AWS4-HMAC-SHA256";
 const S3_SERVICE: &str = "s3";
 const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 
-static ATTACHMENT_UPLOAD_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^attachments/([^/]+)/([^/]+)/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$")
-		.expect("attachment upload key regex should compile")
-});
-
 #[derive(Clone)]
-pub struct StorageConfig {
+pub struct S3StorageConfig {
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
@@ -53,13 +45,13 @@ pub trait ObjectStorage: Send + Sync {
 }
 
 pub struct S3CompatibleStorage {
-    config: StorageConfig,
+    config: S3StorageConfig,
     cdn_url: Option<String>,
     client: reqwest::Client,
 }
 
 impl S3CompatibleStorage {
-    pub fn new(config: StorageConfig, cdn_url: Option<String>) -> Result<Self, StorageError> {
+    pub fn new(config: S3StorageConfig, cdn_url: Option<String>) -> Result<Self, StorageError> {
         object_url(&config, "configuration-check")?;
         Ok(Self {
             config,
@@ -81,13 +73,23 @@ impl UnavailableObjectStorage {
     }
 }
 
-pub fn object_storage_from_env() -> Result<std::sync::Arc<dyn ObjectStorage>, StorageError> {
-    let cdn_url = env::var("BITTERY_STORAGE_CDN_URL").ok();
-    match load_config()? {
+pub fn object_storage_from_config(
+    settings: &crate::config::StorageConfig,
+) -> Result<std::sync::Arc<dyn ObjectStorage>, StorageError> {
+    match &settings.s3 {
         Some(config) => Ok(std::sync::Arc::new(S3CompatibleStorage::new(
-            config, cdn_url,
+            S3StorageConfig {
+                endpoint: config.endpoint.clone(),
+                region: config.region.clone(),
+                bucket: config.bucket.clone(),
+                access_key_id: config.access_key_id.clone(),
+                secret_access_key: config.secret_access_key.clone(),
+            },
+            settings.cdn_url.clone(),
         )?)),
-        None => Ok(std::sync::Arc::new(UnavailableObjectStorage::new(cdn_url))),
+        None => Ok(std::sync::Arc::new(UnavailableObjectStorage::new(
+            settings.cdn_url.clone(),
+        ))),
     }
 }
 
@@ -131,65 +133,6 @@ pub fn create_vault_image_key(user_id: &str, vault_id: Option<&str>, file_name: 
     format!(
         "vaults/{user_id}/{vault_segment}/{:016x}-{safe_name}",
         random::<u64>()
-    )
-}
-
-pub fn create_attachment_key(
-    user_id: &str,
-    item_id: &str,
-    file_name: &str,
-) -> Result<String, StorageError> {
-    let safe_name = sanitize_file_name(file_name);
-    let upload_id = random_uuid_like();
-    let expires_at_ms = chrono::Utc::now().timestamp_millis() + ATTACHMENT_UPLOAD_KEY_TTL_MS;
-    let signature =
-        sign_attachment_upload_intent(&format!("{user_id}:{item_id}:{upload_id}:{expires_at_ms}"))?;
-    Ok(format!(
-        "attachments/{user_id}/{item_id}/{expires_at_ms}-{upload_id}-{signature}-{safe_name}"
-    ))
-}
-
-pub fn is_valid_attachment_upload_key(
-    key: &str,
-    user_id: &str,
-    item_id: &str,
-    now_ms: Option<i64>,
-) -> Result<bool, StorageError> {
-    let pattern = &*ATTACHMENT_UPLOAD_KEY_PATTERN;
-    let Some(captures) = pattern.captures(key) else {
-        return Ok(false);
-    };
-    let key_user_id = captures
-        .get(1)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    let key_item_id = captures
-        .get(2)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    if key_user_id != user_id || key_item_id != item_id {
-        return Ok(false);
-    }
-    let Some(expires_at_ms) = captures
-        .get(3)
-        .and_then(|value| value.as_str().parse::<i64>().ok())
-    else {
-        return Ok(false);
-    };
-    if expires_at_ms < now_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()) {
-        return Ok(false);
-    }
-    let upload_id = captures
-        .get(4)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    let signature = captures
-        .get(5)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    verify_attachment_upload_intent(
-        &format!("{key_user_id}:{key_item_id}:{upload_id}:{expires_at_ms}"),
-        signature,
     )
 }
 
@@ -283,7 +226,7 @@ async fn head_object(
     Ok(Some(StorageObjectHead { size, content_type }))
 }
 
-fn object_url(config: &StorageConfig, key: &str) -> Result<Url, StorageError> {
+fn object_url(config: &S3StorageConfig, key: &str) -> Result<Url, StorageError> {
     let mut url = Url::parse(config.endpoint.trim())
         .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
     {
@@ -299,41 +242,8 @@ fn object_url(config: &StorageConfig, key: &str) -> Result<Url, StorageError> {
     Ok(url)
 }
 
-fn load_config() -> Result<Option<StorageConfig>, StorageError> {
-    let endpoint = env::var("BITTERY_STORAGE_ENDPOINT").ok();
-    let bucket = env::var("BITTERY_STORAGE_BUCKET").ok();
-    let access_key_id = env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
-    let secret_access_key = env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok();
-    let region = env::var("BITTERY_STORAGE_REGION").unwrap_or_else(|_| "auto".to_string());
-
-    if endpoint.is_none()
-        && bucket.is_none()
-        && access_key_id.is_none()
-        && secret_access_key.is_none()
-    {
-        return Ok(None);
-    }
-    match (endpoint, bucket, access_key_id, secret_access_key) {
-        (Some(endpoint), Some(bucket), Some(access_key_id), Some(secret_access_key))
-            if !endpoint.trim().is_empty()
-                && !bucket.trim().is_empty()
-                && !access_key_id.trim().is_empty()
-                && !secret_access_key.trim().is_empty() =>
-        {
-            Ok(Some(StorageConfig {
-                endpoint: endpoint.trim().to_string(),
-                region,
-                bucket: bucket.trim().to_string(),
-                access_key_id: access_key_id.trim().to_string(),
-                secret_access_key: secret_access_key.trim().to_string(),
-            }))
-        }
-        _ => Err(StorageError::MissingConfig),
-    }
-}
-
 fn presigned_url(
-    config: &StorageConfig,
+    config: &S3StorageConfig,
     method: &str,
     key: &str,
     content_type: Option<&str>,
@@ -396,7 +306,7 @@ fn presigned_url(
 
 fn signed_request(
     client: &reqwest::Client,
-    config: &StorageConfig,
+    config: &S3StorageConfig,
     method: Method,
     key: &str,
 ) -> Result<reqwest::RequestBuilder, StorageError> {
@@ -586,7 +496,7 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
-fn sanitize_file_name(file_name: &str) -> String {
+pub(crate) fn sanitize_file_name(file_name: &str) -> String {
     let trimmed = file_name.trim();
     let base = if trimmed.is_empty() { "image" } else { trimmed };
     let safe: String = base
@@ -602,49 +512,6 @@ fn sanitize_file_name(file_name: &str) -> String {
     } else {
         safe
     }
-}
-
-fn get_attachment_upload_signing_secret() -> Result<String, StorageError> {
-    match env::var("BITTERY_ATTACHMENT_UPLOAD_SECRET").or_else(|_| env::var("JWT_SECRET")) {
-        Ok(secret) if !secret.trim().is_empty() => Ok(secret),
-        _ => Err(StorageError::MissingAttachmentUploadSecret),
-    }
-}
-
-fn attachment_upload_mac(payload: &str) -> Result<HmacSha256, StorageError> {
-    let secret = get_attachment_upload_signing_secret()?;
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
-    mac.update(payload.as_bytes());
-    Ok(mac)
-}
-
-fn sign_attachment_upload_intent(payload: &str) -> Result<String, StorageError> {
-    let mac = attachment_upload_mac(payload)?;
-    Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
-}
-
-fn verify_attachment_upload_intent(payload: &str, signature: &str) -> Result<bool, StorageError> {
-    let mac = attachment_upload_mac(payload)?;
-    // An undecodable signature is treated exactly like a wrong one.
-    let Ok(tag) = URL_SAFE_NO_PAD.decode(signature) else {
-        return Ok(false);
-    };
-    // `verify_slice` compares the tag in constant time, so validation timing does not depend on how
-    // many leading bytes of a supplied signature happen to be correct.
-    Ok(mac.verify_slice(&tag).is_ok())
-}
-
-fn random_uuid_like() -> String {
-    let bytes = random::<[u8; 16]>();
-    format!(
-		"{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-		bytes[0], bytes[1], bytes[2], bytes[3],
-		bytes[4], bytes[5],
-		bytes[6], bytes[7],
-		bytes[8], bytes[9],
-		bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-	)
 }
 
 #[derive(Debug, Clone)]
@@ -679,18 +546,42 @@ impl std::error::Error for StorageError {}
 #[cfg(test)]
 mod tests {
     use std::{
-        future::Future,
         io::{Read, Write},
         net::TcpListener,
         thread,
     };
 
     use super::{
-        create_attachment_key, create_team_image_key, create_vault_image_key,
-        is_valid_attachment_upload_key, object_storage_from_env, sign_attachment_upload_intent,
-        ObjectStorage, StorageError, UnavailableObjectStorage,
+        create_team_image_key, create_vault_image_key, object_storage_from_config, ObjectStorage,
+        StorageError, UnavailableObjectStorage,
     };
-    use crate::test_support::acquire_env_lock_async;
+    use crate::config::{S3Config, StorageConfig};
+
+    const ATTACHMENT_TEST_SECRET: &str = "attachment-test-secret";
+
+    fn storage(endpoint: &str) -> std::sync::Arc<dyn ObjectStorage> {
+        object_storage_from_config(&StorageConfig {
+            s3: Some(S3Config {
+                endpoint: endpoint.to_string(),
+                region: "auto".to_string(),
+                bucket: "bittery-test".to_string(),
+                access_key_id: "test-access-key".to_string(),
+                secret_access_key: "test-secret-key".to_string(),
+            }),
+            cdn_url: None,
+            attachment_upload_secret: ATTACHMENT_TEST_SECRET.to_string(),
+        })
+        .expect("storage configuration should be valid")
+    }
+
+    fn unavailable_storage(cdn_url: Option<&str>) -> std::sync::Arc<dyn ObjectStorage> {
+        object_storage_from_config(&StorageConfig {
+            s3: None,
+            cdn_url: cdn_url.map(str::to_string),
+            attachment_upload_secret: ATTACHMENT_TEST_SECRET.to_string(),
+        })
+        .expect("absent object storage is intentional")
+    }
 
     #[test]
     fn public_urls_are_resolved_by_the_adapter() {
@@ -720,195 +611,90 @@ mod tests {
 
     #[tokio::test]
     async fn presigned_upload_uses_path_style_bucket_and_signed_content_type() {
-        with_storage_env_async("https://storage.example.invalid", async {
-            let storage = object_storage_from_env().expect("storage environment should be valid");
-            let result = storage
-                .presign_upload("vaults/user_123/avatar file.png", "image/png", None, None)
-                .await
-                .expect("presigned upload should be created");
-            let url = Url::parse(&result.upload_url).expect("upload URL should parse");
-            let params = url.query_pairs().collect::<Vec<_>>();
+        let result = storage("https://storage.example.invalid")
+            .presign_upload("vaults/user_123/avatar file.png", "image/png", None, None)
+            .await
+            .expect("presigned upload should be created");
+        let url = Url::parse(&result.upload_url).expect("upload URL should parse");
+        let params = url.query_pairs().collect::<Vec<_>>();
 
-            assert_eq!(
-                url.path(),
-                "/bittery-test/vaults/user_123/avatar%20file.png"
-            );
-            assert_eq!(
-                params
-                    .iter()
-                    .find(|(key, _)| key == "X-Amz-Expires")
-                    .map(|(_, value)| value.as_ref()),
-                Some("300"),
-            );
-            assert_eq!(
-                params
-                    .iter()
-                    .find(|(key, _)| key == "X-Amz-SignedHeaders")
-                    .map(|(_, value)| value.as_ref()),
-                Some("content-type;host"),
-            );
-            assert!(params.iter().any(|(key, _)| key == "X-Amz-Signature"));
-        })
-        .await;
+        assert_eq!(
+            url.path(),
+            "/bittery-test/vaults/user_123/avatar%20file.png"
+        );
+        assert_eq!(
+            params
+                .iter()
+                .find(|(key, _)| key == "X-Amz-Expires")
+                .map(|(_, value)| value.as_ref()),
+            Some("300"),
+        );
+        assert_eq!(
+            params
+                .iter()
+                .find(|(key, _)| key == "X-Amz-SignedHeaders")
+                .map(|(_, value)| value.as_ref()),
+            Some("content-type;host"),
+        );
+        assert!(params.iter().any(|(key, _)| key == "X-Amz-Signature"));
     }
 
     #[tokio::test]
     async fn presigned_download_uses_custom_expiration() {
-        with_storage_env_async("https://storage.example.invalid", async {
-            let storage = object_storage_from_env().expect("storage environment should be valid");
-            let url = storage
-                .presign_download("attachments/user/item/file.enc", Some(900))
-                .await
-                .expect("presigned download should be created");
-            let url = Url::parse(&url).expect("download URL should parse");
+        let url = storage("https://storage.example.invalid")
+            .presign_download("attachments/user/item/file.enc", Some(900))
+            .await
+            .expect("presigned download should be created");
+        let url = Url::parse(&url).expect("download URL should parse");
 
-            assert_eq!(url.path(), "/bittery-test/attachments/user/item/file.enc");
-            assert_eq!(
-                url.query_pairs()
-                    .find(|(key, _)| key == "X-Amz-Expires")
-                    .map(|(_, value)| value.into_owned()),
-                Some("900".to_string()),
-            );
-        })
-        .await;
+        assert_eq!(url.path(), "/bittery-test/attachments/user/item/file.enc");
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "X-Amz-Expires")
+                .map(|(_, value)| value.into_owned()),
+            Some("900".to_string()),
+        );
     }
 
     #[tokio::test]
     async fn storage_requires_config() {
-        with_missing_storage_env_async(async {
-            let storage =
-                object_storage_from_env().expect("absent storage environment should be valid");
-            let error = storage
-                .presign_download("file.txt", None)
-                .await
-                .expect_err("missing config should fail");
-            assert!(matches!(error, StorageError::MissingConfig));
-        })
-        .await;
+        let error = unavailable_storage(None)
+            .presign_download("file.txt", None)
+            .await
+            .expect_err("missing config should fail");
+        assert!(matches!(error, StorageError::MissingConfig));
     }
 
     #[tokio::test]
     async fn absent_storage_selects_unavailable_adapter_with_cdn_resolution() {
-        with_missing_storage_env_async(async {
-            set_env_var(
-                "BITTERY_STORAGE_CDN_URL",
-                Some("https://cdn.example.invalid"),
-            );
-            let storage = object_storage_from_env().expect("absent object storage is intentional");
-            assert_eq!(
-                storage.public_url("teams/team/image.png").as_deref(),
-                Some("https://cdn.example.invalid/teams/team/image.png")
-            );
-            assert!(matches!(
-                storage.head("anything").await,
-                Err(StorageError::MissingConfig)
-            ));
-        })
-        .await;
+        let storage = unavailable_storage(Some("https://cdn.example.invalid"));
+        assert_eq!(
+            storage.public_url("teams/team/image.png").as_deref(),
+            Some("https://cdn.example.invalid/teams/team/image.png")
+        );
+        assert!(matches!(
+            storage.head("anything").await,
+            Err(StorageError::MissingConfig)
+        ));
     }
 
-    #[tokio::test]
-    async fn partial_storage_configuration_is_rejected() {
-        with_missing_storage_env_async(async {
-            set_env_var(
-                "BITTERY_STORAGE_ENDPOINT",
-                Some("https://storage.example.invalid"),
-            );
-            assert!(matches!(
-                object_storage_from_env(),
-                Err(StorageError::MissingConfig)
-            ));
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn malformed_storage_endpoint_is_rejected() {
-        with_storage_env_async("not a url", async {
-            assert!(matches!(
-                object_storage_from_env(),
-                Err(StorageError::InvalidConfig(_))
-            ));
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn attachment_upload_key_validation_round_trips() {
-        with_storage_env_async("https://storage.example.invalid", async {
-            let key = create_attachment_key("user_123", "item_456", "secret file.enc")
-                .expect("attachment key should be created");
-
-            assert!(
-                is_valid_attachment_upload_key(&key, "user_123", "item_456", None)
-                    .expect("validation should succeed")
-            );
-            assert!(
-                !is_valid_attachment_upload_key(&key, "user_123", "other_item", None)
-                    .expect("validation should succeed")
-            );
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn attachment_upload_key_signature_checks_accept_only_the_expected_tag() {
-        const UPLOAD_ID: &str = "00000000-0000-0000-0000-000000000000";
-
-        with_storage_env_async("https://storage.example.invalid", async {
-            let now_ms = chrono::Utc::now().timestamp_millis();
-            let expires_at_ms = now_ms + 60_000;
-            let build_key = |signature: &str| {
-                format!("attachments/user_123/item_456/{expires_at_ms}-{UPLOAD_ID}-{signature}-file.enc")
-            };
-
-            let valid_signature = sign_attachment_upload_intent(&format!(
-                "user_123:item_456:{UPLOAD_ID}:{expires_at_ms}"
-            ))
-            .expect("signature should be created");
-            assert!(is_valid_attachment_upload_key(
-                &build_key(&valid_signature),
-                "user_123",
-                "item_456",
-                Some(now_ms),
-            )
-            .expect("validation should succeed"));
-
-            let foreign_signature = sign_attachment_upload_intent(&format!(
-                "user_123:other_item:{UPLOAD_ID}:{expires_at_ms}"
-            ))
-            .expect("signature should be created");
-            assert!(!is_valid_attachment_upload_key(
-                &build_key(&foreign_signature),
-                "user_123",
-                "item_456",
-                Some(now_ms),
-            )
-            .expect("validation should succeed"));
-
-            // Set the discarded trailing bits of the final base64url symbol: the tag bytes would be
-            // unchanged, so this only fails validation because decoding rejects it.
-            const URL_SAFE_ALPHABET: &[u8] =
-                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-            let last_symbol = valid_signature.as_bytes()[valid_signature.len() - 1];
-            let last_index = URL_SAFE_ALPHABET
-                .iter()
-                .position(|symbol| *symbol == last_symbol)
-                .expect("signature should be base64url");
-            let malformed_signature = format!(
-                "{}{}",
-                &valid_signature[..valid_signature.len() - 1],
-                URL_SAFE_ALPHABET[last_index + 1] as char,
-            );
-            assert!(!is_valid_attachment_upload_key(
-                &build_key(&malformed_signature),
-                "user_123",
-                "item_456",
-                Some(now_ms),
-            )
-            .expect("malformed signatures should not error"));
-        })
-        .await;
+    #[test]
+    fn malformed_storage_endpoint_is_rejected() {
+        let settings = StorageConfig {
+            s3: Some(S3Config {
+                endpoint: "not a url".to_string(),
+                region: "auto".to_string(),
+                bucket: "bittery-test".to_string(),
+                access_key_id: "test-access-key".to_string(),
+                secret_access_key: "test-secret-key".to_string(),
+            }),
+            cdn_url: None,
+            attachment_upload_secret: ATTACHMENT_TEST_SECRET.to_string(),
+        };
+        assert!(matches!(
+            object_storage_from_config(&settings),
+            Err(StorageError::InvalidConfig(_))
+        ));
     }
 
     #[tokio::test]
@@ -917,18 +703,14 @@ mod tests {
             "HTTP/1.1 200 OK\r\nContent-Length: 42\r\nContent-Type: image/png\r\n\r\n",
         );
 
-        with_storage_env_async(&endpoint, async {
-            let storage = object_storage_from_env().expect("storage environment should be valid");
-            let head = storage
-                .head("vaults/user/avatar.png")
-                .await
-                .expect("head request should succeed")
-                .expect("object should exist");
+        let head = storage(&endpoint)
+            .head("vaults/user/avatar.png")
+            .await
+            .expect("head request should succeed")
+            .expect("object should exist");
 
-            assert_eq!(head.size, 42);
-            assert_eq!(head.content_type.as_deref(), Some("image/png"));
-        })
-        .await;
+        assert_eq!(head.size, 42);
+        assert_eq!(head.content_type.as_deref(), Some("image/png"));
 
         let request = request.join().expect("mock server should finish");
         assert!(request.starts_with("HEAD /bittery-test/vaults/user/avatar.png "));
@@ -941,78 +723,28 @@ mod tests {
     async fn head_object_returns_none_for_not_found() {
         let (endpoint, _request) = spawn_storage_response("HTTP/1.1 404 Not Found\r\n\r\n");
 
-        with_storage_env_async(&endpoint, async {
-            let storage = object_storage_from_env().expect("storage environment should be valid");
-            let head = storage
-                .head("missing.txt")
-                .await
-                .expect("not found should not be an error");
+        let head = storage(&endpoint)
+            .head("missing.txt")
+            .await
+            .expect("not found should not be an error");
 
-            assert!(head.is_none());
-        })
-        .await;
+        assert!(head.is_none());
     }
 
     #[tokio::test]
     async fn delete_object_sends_signed_delete_request() {
         let (endpoint, request) = spawn_storage_response("HTTP/1.1 204 No Content\r\n\r\n");
 
-        with_storage_env_async(&endpoint, async {
-            let storage = object_storage_from_env().expect("storage environment should be valid");
-            storage
-                .delete("attachments/user/item/file.enc")
-                .await
-                .expect("delete request should succeed");
-        })
-        .await;
+        storage(&endpoint)
+            .delete("attachments/user/item/file.enc")
+            .await
+            .expect("delete request should succeed");
 
         let request = request.join().expect("mock server should finish");
         assert!(request.starts_with("DELETE /bittery-test/attachments/user/item/file.enc "));
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: aws4-hmac-sha256"));
-    }
-
-    async fn with_storage_env_async<T, F>(endpoint: &str, future: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        let _guard = acquire_env_lock_async().await;
-        let previous = storage_env();
-
-        set_env_var("BITTERY_STORAGE_ENDPOINT", Some(endpoint));
-        set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
-        set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
-        set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
-        set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-        set_env_var(
-            "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-            Some("test-attachment-secret"),
-        );
-
-        let result = future.await;
-
-        restore_storage_env(previous);
-
-        result
-    }
-
-    async fn with_missing_storage_env_async<T, F>(future: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        let _guard = acquire_env_lock_async().await;
-        let previous = storage_env();
-
-        for key in STORAGE_ENV_KEYS {
-            set_env_var(key, None);
-        }
-
-        let result = future.await;
-
-        restore_storage_env(previous);
-
-        result
     }
 
     fn spawn_storage_response(response: &'static str) -> (String, thread::JoinHandle<String>) {
@@ -1031,40 +763,6 @@ mod tests {
         });
 
         (format!("http://{address}"), handle)
-    }
-
-    const STORAGE_ENV_KEYS: &[&str] = &[
-        "BITTERY_STORAGE_ENDPOINT",
-        "BITTERY_STORAGE_BUCKET",
-        "BITTERY_STORAGE_ACCESS_KEY_ID",
-        "BITTERY_STORAGE_SECRET_ACCESS_KEY",
-        "BITTERY_STORAGE_REGION",
-        "BITTERY_STORAGE_CDN_URL",
-        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-        "JWT_SECRET",
-    ];
-
-    fn storage_env() -> Vec<(&'static str, Option<String>)> {
-        STORAGE_ENV_KEYS
-            .iter()
-            .map(|key| (*key, std::env::var(key).ok()))
-            .collect()
-    }
-
-    fn restore_storage_env(previous: Vec<(&'static str, Option<String>)>) {
-        for (key, value) in previous {
-            match value {
-                Some(value) => set_env_var(key, Some(&value)),
-                None => set_env_var(key, None),
-            }
-        }
-    }
-
-    fn set_env_var(key: &str, value: Option<&str>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
     }
 
     use url::Url;

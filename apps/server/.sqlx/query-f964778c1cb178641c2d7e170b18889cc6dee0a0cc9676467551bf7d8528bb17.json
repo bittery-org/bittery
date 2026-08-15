@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n               SELECT 1\n               FROM (\n                   SELECT entity_id, expected_version\n                   FROM vault_key_rotation_plan_manifest\n                   WHERE plan_id = $1 AND kind = 'attachment'\n               ) m\n               FULL JOIN (\n                   SELECT id, envelope_version FROM item_attachment WHERE vault_id = $2\n               ) a ON a.id = m.entity_id\n               WHERE a.id IS NULL\n                  OR m.entity_id IS NULL\n                  OR a.envelope_version <> m.expected_version\n           ) AS \"attachment_stale!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_stale!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f964778c1cb178641c2d7e170b18889cc6dee0a0cc9676467551bf7d8528bb17"
+}

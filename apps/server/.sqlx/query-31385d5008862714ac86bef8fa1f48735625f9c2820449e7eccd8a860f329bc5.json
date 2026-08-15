@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE item_attachment a\n           SET encrypted_attachment_key = s.payload::jsonb->>'encryptedAttachmentKey',\n               attachment_key_iv = s.payload::jsonb->>'attachmentKeyIv',\n               attachment_key_algorithm = s.payload::jsonb->>'attachmentKeyAlgorithm',\n               envelope_version = a.envelope_version + 1\n           FROM vault_key_rotation_plan_staged_output s\n           WHERE s.plan_id = $1\n             AND s.kind = 'attachment'\n             AND a.vault_id = $2\n             AND a.id = s.entity_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31385d5008862714ac86bef8fa1f48735625f9c2820449e7eccd8a860f329bc5"
+}

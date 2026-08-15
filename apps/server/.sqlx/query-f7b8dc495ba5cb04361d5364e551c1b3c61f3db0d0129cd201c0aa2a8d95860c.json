@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vault_key vk\n           SET encrypted_vault_key = s.payload::jsonb->>'encryptedVaultKey'\n           FROM vault_key_rotation_plan_staged_output s\n           WHERE s.plan_id = $1\n             AND s.kind = 'member'\n             AND vk.vault_id = $2\n             AND vk.user_id = s.entity_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7b8dc495ba5cb04361d5364e551c1b3c61f3db0d0129cd201c0aa2a8d95860c"
+}

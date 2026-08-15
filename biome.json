@@ -36,6 +36,7 @@
 			"!packages/api-contract/openapi.v1.json",
 			"!packages/api-contract/src/generated",
 			"!apps/desktop/src/generated",
+			"!apps/server/.sqlx",
 			"!**/src-tauri",
 			"!**/.nuxt",
 			"!bts.jsonc",

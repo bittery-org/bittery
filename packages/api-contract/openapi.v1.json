@@ -701,7 +701,7 @@
     },
     "/api/v1/auth/email-checks": {
       "post": {
-        "operationId": "check_email",
+        "operationId": "checkEmail",
         "requestBody": {
           "content": {
             "application/json": {
@@ -741,7 +741,7 @@
     },
     "/api/v1/auth/login-attempts": {
       "post": {
-        "operationId": "start_login",
+        "operationId": "startLogin",
         "requestBody": {
           "content": {
             "application/json": {
@@ -809,7 +809,7 @@
     },
     "/api/v1/auth/login-attempts/{attemptId}/finish": {
       "post": {
-        "operationId": "finish_login",
+        "operationId": "finishLogin",
         "parameters": [
           {
             "name": "attemptId",
@@ -887,7 +887,7 @@
     },
     "/api/v1/auth/recovery-sessions/data": {
       "post": {
-        "operationId": "recovery_data",
+        "operationId": "recoveryData",
         "requestBody": {
           "content": {
             "application/json": {
@@ -947,7 +947,7 @@
     },
     "/api/v1/auth/recovery-sessions/reset-password": {
       "post": {
-        "operationId": "reset_password",
+        "operationId": "resetPassword",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1007,7 +1007,7 @@
     },
     "/api/v1/auth/recovery-verifications": {
       "post": {
-        "operationId": "request_recovery_verification",
+        "operationId": "requestRecoveryVerification",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1075,7 +1075,7 @@
     },
     "/api/v1/auth/recovery-verifications/verify": {
       "post": {
-        "operationId": "verify_recovery",
+        "operationId": "verifyRecovery",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1184,7 +1184,7 @@
     },
     "/api/v1/auth/signup-verifications": {
       "post": {
-        "operationId": "request_signup_verification",
+        "operationId": "requestSignupVerification",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1252,7 +1252,7 @@
     },
     "/api/v1/auth/signup-verifications/verify": {
       "post": {
-        "operationId": "verify_signup_verification",
+        "operationId": "verifySignupVerification",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5268,7 +5268,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "operationId": "list_sessions",
+        "operationId": "listSessions",
         "parameters": [
           {
             "name": "cursor",
@@ -5340,7 +5340,7 @@
     },
     "/api/v1/sessions/current/refresh": {
       "post": {
-        "operationId": "refresh_session",
+        "operationId": "refreshSession",
         "responses": {
           "200": {
             "description": "",
@@ -5382,7 +5382,7 @@
     },
     "/api/v1/sessions/{sessionId}": {
       "delete": {
-        "operationId": "revoke_session",
+        "operationId": "revokeSession",
         "parameters": [
           {
             "name": "sessionId",
@@ -5443,6 +5443,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5452,7 +5470,7 @@
         ]
       },
       "patch": {
-        "operationId": "rename_session",
+        "operationId": "renameSession",
         "parameters": [
           {
             "name": "sessionId",
@@ -5526,6 +5544,24 @@
           },
           "415": {
             "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8806,7 +8842,7 @@
         ]
       },
       "delete": {
-        "operationId": "delete_account",
+        "operationId": "deleteAccount",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8867,6 +8903,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8878,7 +8932,7 @@
     },
     "/api/v1/users/me/email-changes": {
       "post": {
-        "operationId": "update_email",
+        "operationId": "updateEmail",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8929,6 +8983,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8940,7 +9012,7 @@
     },
     "/api/v1/users/me/password-changes": {
       "post": {
-        "operationId": "change_password",
+        "operationId": "changePassword",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8982,6 +9054,24 @@
               }
             }
           },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "500": {
             "description": "",
             "content": {
@@ -9002,7 +9092,7 @@
     },
     "/api/v1/users/me/recovery-key": {
       "put": {
-        "operationId": "store_recovery_key",
+        "operationId": "storeRecoveryKey",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9054,7 +9144,7 @@
     },
     "/api/v1/users/me/secret-key-rotations": {
       "post": {
-        "operationId": "regenerate_secret_key",
+        "operationId": "regenerateSecretKey",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9088,6 +9178,24 @@
           },
           "401": {
             "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -1,4 +1,7 @@
-use std::{any::Any, env, time::Duration};
+use std::{any::Any, time::Duration};
+
+#[cfg(test)]
+use std::env;
 
 use axum::{
     body::Body,
@@ -18,7 +21,7 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use tracing::Span;
 use url::Url;
 
-use super::api::error::ApiError;
+use super::error::ApiError;
 
 type HttpTraceClassifier =
     tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
@@ -235,15 +238,72 @@ const SECURITY_HEADERS: [(HeaderName, HeaderValue); 6] = [
     ),
 ];
 
-#[derive(Clone, Debug, Default)]
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug)]
 pub struct EdgeHttpConfig {
     allowed_origins: Vec<String>,
+    request_timeout: Duration,
 }
 
+impl Default for EdgeHttpConfig {
+    fn default() -> Self {
+        Self {
+            allowed_origins: Vec::new(),
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+        }
+    }
+}
+
+impl EdgeHttpConfig {
+    pub(crate) fn from_server_config(config: &crate::config::ServerConfig) -> Result<Self, String> {
+        Ok(Self {
+            allowed_origins: parse_cors_origins(config.cors_origin.as_deref())?,
+            request_timeout: config.request_timeout,
+        })
+    }
+
+    pub(crate) fn request_timeout(&self) -> Duration {
+        self.request_timeout
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.request_timeout = request_timeout;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_allowed_origin(mut self, allowed_origin: &str) -> Self {
+        self.allowed_origins.push(allowed_origin.to_string());
+        self
+    }
+}
+
+#[cfg(test)]
 pub fn load_edge_http_config() -> Result<EdgeHttpConfig, String> {
     Ok(EdgeHttpConfig {
         allowed_origins: parse_cors_origins(env::var("CORS_ORIGIN").ok().as_deref())?,
+        request_timeout: request_timeout_from_value(
+            env::var("REQUEST_TIMEOUT_SECONDS").ok().as_deref(),
+        )?,
     })
+}
+
+#[cfg(test)]
+fn request_timeout_from_value(raw_value: Option<&str>) -> Result<Duration, String> {
+    let Some(raw_value) = raw_value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(DEFAULT_REQUEST_TIMEOUT);
+    };
+    let seconds = raw_value.parse::<u64>().map_err(|_| {
+        "REQUEST_TIMEOUT_SECONDS must be a positive integer number of seconds".to_string()
+    })?;
+    if seconds == 0 {
+        return Err(
+            "REQUEST_TIMEOUT_SECONDS must be a positive integer number of seconds".to_string(),
+        );
+    }
+    Ok(Duration::from_secs(seconds))
 }
 
 pub async fn edge_http_middleware(
@@ -431,6 +491,8 @@ fn assert_valid_origin(value: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use axum::{
         body::{to_bytes, Body},
         http::{
@@ -450,12 +512,35 @@ mod tests {
 
     use super::{
         apply_cors_headers, apply_public_asset_cors, apply_security_headers, catch_panic_layer,
-        parse_cors_origins, trace_context, trace_path_label, EdgeHttpConfig,
+        parse_cors_origins, request_timeout_from_value, trace_context, trace_path_label,
+        EdgeHttpConfig,
     };
 
     async fn assert_matched_trace_path(request: Request<Body>, next: Next) -> Response {
         assert_eq!(trace_path_label(&request), "/api/v1/share-links/{token}");
         next.run(request).await
+    }
+
+    #[test]
+    fn request_timeout_defaults_to_thirty_seconds_and_accepts_an_override() {
+        assert_eq!(
+            request_timeout_from_value(None).unwrap(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            request_timeout_from_value(Some("12")).unwrap(),
+            Duration::from_secs(12)
+        );
+    }
+
+    #[test]
+    fn request_timeout_rejects_zero_and_non_numeric_values() {
+        for value in ["0", "later"] {
+            assert_eq!(
+                request_timeout_from_value(Some(value)).unwrap_err(),
+                "REQUEST_TIMEOUT_SECONDS must be a positive integer number of seconds"
+            );
+        }
     }
 
     #[test]
@@ -543,6 +628,7 @@ mod tests {
     fn api_cors_preflight_allows_every_supported_method_and_header() {
         let config = EdgeHttpConfig {
             allowed_origins: vec!["https://app.example.com".to_string()],
+            ..EdgeHttpConfig::default()
         };
         let mut response = Response::new(Body::empty());
 
@@ -583,6 +669,7 @@ mod tests {
     fn api_cors_exposes_idempotency_replay_status() {
         let config = EdgeHttpConfig {
             allowed_origins: vec!["https://app.example.com".to_string()],
+            ..EdgeHttpConfig::default()
         };
         let mut response = Response::new(Body::empty());
 
@@ -606,6 +693,7 @@ mod tests {
     fn api_cors_does_not_echo_an_origin_outside_the_exact_allowlist() {
         let config = EdgeHttpConfig {
             allowed_origins: vec!["https://app.example.com".to_string()],
+            ..EdgeHttpConfig::default()
         };
         let mut response = Response::new(Body::empty());
 

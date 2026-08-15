@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vault_key_rotation_plan SET idle_expires_at = LEAST($1, absolute_expires_at) WHERE id = $2 AND idle_expires_at = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0397fa91af27db35fb5f25306c8f0b90f35d7259b08a71b7f99fbc0d6bf77aec"
+}

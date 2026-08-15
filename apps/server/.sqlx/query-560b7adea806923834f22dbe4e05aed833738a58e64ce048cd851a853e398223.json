@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vault_key_rotation_plan SET state = 'stale', stale_reason = $2::vault_key_rotation_stale_reason WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "vault_key_rotation_stale_reason",
+            "kind": {
+              "Enum": [
+                "vault_version",
+                "member_set",
+                "item_state",
+                "attachment_state"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "560b7adea806923834f22dbe4e05aed833738a58e64ce048cd851a853e398223"
+}

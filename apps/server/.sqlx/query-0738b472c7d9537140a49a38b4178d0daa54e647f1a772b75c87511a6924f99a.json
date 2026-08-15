@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n               SELECT 1\n               FROM (\n                   SELECT entity_id, expected_version\n                   FROM vault_key_rotation_plan_manifest\n                   WHERE plan_id = $1 AND kind = 'item'\n               ) m\n               FULL JOIN (\n                   SELECT id, version FROM item WHERE vault_id = $2\n               ) i ON i.id = m.entity_id\n               WHERE i.id IS NULL\n                  OR m.entity_id IS NULL\n                  OR i.version <> m.expected_version\n           ) AS \"item_stale!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_stale!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0738b472c7d9537140a49a38b4178d0daa54e647f1a772b75c87511a6924f99a"
+}

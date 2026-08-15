@@ -5,6 +5,8 @@ server and generated contract ship together, so the superseded rotation protocol
 Each line below is intentionally scoped to one oasdiff error; unrelated breaking changes remain
 blocked by CI.
 
+- Auth operation IDs changed from their implicit snake_case Rust handler names to explicit camelCase names; HTTP paths, methods, payloads, and security requirements are unchanged
+
 - POST /api/v1/items/{itemId}/attachment-uploads removed the required property `publicUrl` from the response with the `200` status
 - POST /api/v1/items/{itemId}/attachments added the new required request property `attachmentId`
 - POST /api/v1/items/{itemId}/attachments added the new required request property `attachmentKeyAlgorithm`
