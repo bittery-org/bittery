@@ -35,6 +35,7 @@ use crate::{
             signup_verification_request_limit,
         },
         session::{format_rfc3339, now_utc, RequestMetadata},
+        team_billing::team_management_enabled,
         vault_key::validate_encrypted_vault_key,
         verification_code::{
             LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
@@ -596,9 +597,9 @@ async fn get_pending_invitation_for_signup(
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
-        bittery_mode() == "self-hosted",
-        invitation.billing_plan,
-        invitation.billing_status,
+        bittery_mode(),
+        Some(invitation.billing_plan),
+        Some(invitation.billing_status),
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -665,9 +666,9 @@ async fn get_pending_signup_invitation(
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
-        bittery_mode() == "self-hosted",
-        invitation.billing_plan,
-        invitation.billing_status,
+        bittery_mode(),
+        Some(invitation.billing_plan),
+        Some(invitation.billing_status),
     ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
@@ -971,16 +972,6 @@ async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {
             AppError::internal("Failed to load registration status")
         })?;
     Ok(user_id.is_some())
-}
-
-fn team_management_enabled(
-    is_self_hosted: bool,
-    billing_plan: BillingPlan,
-    billing_status: BillingStatus,
-) -> bool {
-    is_self_hosted
-        || (matches!(billing_plan, BillingPlan::Family | BillingPlan::Team)
-            && billing_status.is_active())
 }
 
 fn emails_match(invitation_email: &str, normalized_email: &str) -> bool {

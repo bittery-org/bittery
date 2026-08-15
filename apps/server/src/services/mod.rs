@@ -27,9 +27,21 @@ pub(crate) mod waitlist;
 
 use std::sync::LazyLock;
 
+use rand::RngExt;
 use regex::Regex;
 
 use crate::error::AppError;
+
+pub(crate) fn generate_secure_token() -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let mut rng = rand::rng();
+    (0..32)
+        .map(|_| {
+            let index = rng.random_range(0..ALPHABET.len());
+            ALPHABET[index] as char
+        })
+        .collect()
+}
 
 pub(crate) fn validate_resource_id(value: &str) -> Result<(), AppError> {
     static RESOURCE_ID: LazyLock<Regex> = LazyLock::new(|| {

@@ -1,4 +1,3 @@
-use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
@@ -19,11 +18,11 @@ use crate::{
             log_share_access,
         },
     },
-    services::rate_limit,
     services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
+    services::{generate_secure_token, rate_limit},
     shapes::{
         allowed_email_shape, create_share_link_shape, email_verification_shape,
         public_share_access_shape, public_share_info_shape, share_access_log_shape,
@@ -1057,17 +1056,6 @@ fn effective_share_link_status(
     } else {
         link.status
     }
-}
-
-fn generate_secure_token() -> String {
-    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    let mut rng = rand::rng();
-    (0..32)
-        .map(|_| {
-            let index = rng.random_range(0..ALPHABET.len());
-            ALPHABET[index] as char
-        })
-        .collect()
 }
 
 fn share_link_daily_limit() -> i64 {
