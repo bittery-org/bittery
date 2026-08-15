@@ -26,7 +26,7 @@ use crate::{
     },
     error::AppError,
     integrations::storage,
-    shared::transaction::database_error,
+    shared::transaction::{acquire_advisory_lock, database_error},
 };
 
 const ATTACHMENT_ENVELOPE_VERSION: i32 = 1;
@@ -111,11 +111,12 @@ pub(crate) async fn create_vault_attachment_upload(
         .begin()
         .await
         .map_err(|error| database_error(error, "Failed to start attachment upload transaction"))?;
-    query("SELECT pg_advisory_xact_lock(hashtext($1))")
-        .bind(attachment_quota_lock_key(&actor.team_id))
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to lock attachment quota"))?;
+    acquire_advisory_lock(
+        &mut *transaction,
+        &attachment_quota_lock_key(&actor.team_id),
+        "Failed to lock attachment quota",
+    )
+    .await?;
     let committed_usage = query_scalar::<_, i64>(
 		"SELECT COALESCE(SUM(ia.storage_size), 0)::bigint FROM item_attachment ia INNER JOIN \"user\" u ON ia.uploaded_by = u.id WHERE u.team_id = $1",
 	)
