@@ -626,15 +626,6 @@ jobs:
         with:
           workspaces: apps/server
 
-      - name: Migrate test database
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          cargo run --manifest-path apps/server/Cargo.toml --bin migrate
-          elapsed="$(( $(date +%s) - start ))"
-          echo "server migration: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Server fmt
         run: cargo fmt --check --manifest-path apps/server/Cargo.toml
 
