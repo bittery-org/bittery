@@ -15,7 +15,8 @@ use tower_http::timeout::Timeout;
 
 use crate::{
     api_response_headers, catch_panic_layer, create_api_router, create_public_http_router,
-    edge_http_middleware, http_trace_layer, request_context_middleware, AppState, EdgeHttpConfig,
+    domains::sync::SSE_EVENTS_PATH, edge_http_middleware, http_trace_layer,
+    request_context_middleware, AppState, EdgeHttpConfig,
 };
 
 pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
@@ -63,7 +64,7 @@ async fn request_timeout_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    if request.uri().path() == "/api/v1/sync/events" {
+    if request.uri().path() == SSE_EVENTS_PATH {
         return next.run(request).await;
     }
 
@@ -90,6 +91,7 @@ mod tests {
 
     use super::{apply_http_layers, create_app};
     use crate::{
+        domains::sync::SSE_EVENTS_PATH,
         error::AppError,
         shared::rate_limit::{RateLimitOutcome, RateLimiter},
         test_support::{acquire_env_lock_async, create_test_router, EnvVarGuard},
@@ -291,7 +293,7 @@ mod tests {
     async fn sync_event_stream_is_exempt_from_request_timeout() {
         let router = apply_http_layers(
             Router::new().route(
-                "/api/v1/sync/events",
+                SSE_EVENTS_PATH,
                 get(|| async {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     StatusCode::NO_CONTENT
@@ -303,7 +305,7 @@ mod tests {
         let response = router
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/sync/events")
+                    .uri(SSE_EVENTS_PATH)
                     .body(Body::empty())
                     .expect("SSE request should build"),
             )

@@ -1367,7 +1367,7 @@ async fn sync_sse_route_covers_auth_and_revocation_paths() {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let http_app = SyncHttpTestApp::new(app.state.clone());
 
-        let unauthorized = http_app.get("/api/v1/sync/events", HeaderMap::new()).await;
+        let unauthorized = http_app.get(SSE_EVENTS_PATH, HeaderMap::new()).await;
         assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
         assert!(unauthorized.body.contains(r#""code":"UNAUTHORIZED""#));
 
@@ -1382,10 +1382,7 @@ async fn sync_sse_route_covers_auth_and_revocation_paths() {
         .expect("session revocation should seed");
 
         let stream = http_app
-            .get(
-                "/api/v1/sync/events",
-                authenticated_json_headers(&session.token),
-            )
+            .get(SSE_EVENTS_PATH, authenticated_json_headers(&session.token))
             .await;
         assert_eq!(stream.status, StatusCode::OK);
         assert_eq!(

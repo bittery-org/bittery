@@ -319,6 +319,7 @@ async fn changes(
 
 #[utoipa::path(
     get,
+    // Utoipa requires a literal path; the full application path is `SSE_EVENTS_PATH`.
     path = "/sync/events",
     operation_id = "streamSyncEvents",
     tag = "sync",

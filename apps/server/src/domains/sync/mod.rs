@@ -22,6 +22,8 @@ use crate::{
     shared::{transaction::database_error, validate_resource_id},
 };
 
+pub(crate) const SSE_EVENTS_PATH: &str = "/api/v1/sync/events";
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
