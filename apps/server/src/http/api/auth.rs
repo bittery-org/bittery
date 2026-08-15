@@ -11,6 +11,7 @@ use crate::{
         auth::{self, KdfParamsInput},
         session::{RenameDeviceInput, SessionIdInput},
     },
+    shapes::{me_shape, refresh_session_shape, reset_password_shape, session_shape},
     AppState,
 };
 
@@ -200,11 +201,13 @@ response_dto!(RecoveryDataResponse {
     #[schema(max_items = 500)]
     vault_keys: Vec<RecoveryVaultKeyResponse>,
 });
-response_dto!(ResetPasswordResponse {
-    token: String,
-    session_id: String,
-    expires_at: String,
-    user_id: String,
+reset_password_shape!(wire_struct {
+    #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct ResetPasswordResponse
+});
+reset_password_shape!(shape_from {
+    auth::ResetPasswordResponse => ResetPasswordResponse
 });
 response_dto!(AuthUserResponse {
     id: String,
@@ -247,49 +250,31 @@ response_dto!(SignupResponse {
     user: AuthUserResponse,
     vault_keys: CursorPage<AuthVaultKeyResponse>,
 });
-response_dto!(MeResponse {
-    id: String,
-    email: String,
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_type: Option<TeamType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team_avatar_url: Option<String>,
-    role: TeamRole,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    secret_key_hint: Option<String>,
-    public_key: String,
-    encrypted_private_key: String,
-    has_recovery_key: bool,
-    created_at: String,
+me_shape!(wire_struct {
+    #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct MeResponse
 });
-response_dto!(SessionResponse {
-    id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_name: Option<String>,
-    platform: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    browser_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    browser_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    os_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    os_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ip_address: Option<String>,
-    last_active_at: String,
-    created_at: String,
-    is_current_session: bool,
+me_shape!(shape_from {
+    auth::MeResponse => MeResponse
 });
-response_dto!(RefreshSessionResponse {
-    token: String,
-    session_id: String,
-    expires_at: String,
+
+session_shape!(wire_struct {
+    #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct SessionResponse
+});
+session_shape!(shape_from {
+    crate::services::session::DeviceSessionResponse => SessionResponse
+});
+
+refresh_session_shape!(wire_struct {
+    #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct RefreshSessionResponse
+});
+refresh_session_shape!(shape_from {
+    crate::services::session::RefreshSessionResponse => RefreshSessionResponse
 });
 
 impl From<KdfParamsRequest> for KdfParamsInput {
@@ -934,17 +919,6 @@ impl From<auth::GetRecoveryDataResponse> for RecoveryDataResponse {
     }
 }
 
-impl From<auth::ResetPasswordResponse> for ResetPasswordResponse {
-    fn from(value: auth::ResetPasswordResponse) -> Self {
-        Self {
-            token: value.token,
-            session_id: value.session_id,
-            expires_at: value.expires_at,
-            user_id: value.user_id,
-        }
-    }
-}
-
 fn map_signup_response(
     value: auth::SignupResponse,
     jwt_secret: &str,
@@ -971,54 +945,6 @@ fn map_signup_response(
         },
         vault_keys: initial_vault_key_page(value.vault_keys, &user_id, jwt_secret)?,
     })
-}
-
-impl From<auth::MeResponse> for MeResponse {
-    fn from(value: auth::MeResponse) -> Self {
-        Self {
-            id: value.id,
-            email: value.email,
-            name: value.name,
-            team_id: value.team_id,
-            team_name: value.team_name,
-            team_type: value.team_type,
-            team_avatar_url: value.team_avatar_url,
-            role: value.role,
-            secret_key_hint: value.secret_key_hint,
-            public_key: value.public_key,
-            encrypted_private_key: value.encrypted_private_key,
-            has_recovery_key: value.has_recovery_key,
-            created_at: value.created_at,
-        }
-    }
-}
-
-impl From<crate::services::session::DeviceSessionResponse> for SessionResponse {
-    fn from(value: crate::services::session::DeviceSessionResponse) -> Self {
-        Self {
-            id: value.id,
-            device_name: value.device_name,
-            platform: value.platform,
-            browser_name: value.browser_name,
-            browser_version: value.browser_version,
-            os_name: value.os_name,
-            os_version: value.os_version,
-            ip_address: value.ip_address,
-            last_active_at: value.last_active_at,
-            created_at: value.created_at,
-            is_current_session: value.is_current_session,
-        }
-    }
-}
-
-impl From<crate::services::session::RefreshSessionResponse> for RefreshSessionResponse {
-    fn from(value: crate::services::session::RefreshSessionResponse) -> Self {
-        Self {
-            token: value.token,
-            session_id: value.session_id,
-            expires_at: value.expires_at,
-        }
-    }
 }
 
 #[cfg(test)]

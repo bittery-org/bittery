@@ -15,7 +15,13 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::{db, error::AppError, repo::common::hash_token, services::transaction::database_error};
+use crate::{
+    db,
+    error::AppError,
+    repo::common::hash_token,
+    services::transaction::database_error,
+    shapes::{refresh_session_shape, session_shape},
+};
 
 mod user_agent;
 
@@ -109,29 +115,17 @@ pub struct SeededSession {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshSessionResponse {
-    pub token: String,
-    pub session_id: String,
-    pub expires_at: String,
-}
+refresh_session_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RefreshSessionResponse
+});
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceSessionResponse {
-    pub id: String,
-    pub device_name: Option<String>,
-    pub platform: String,
-    pub browser_name: Option<String>,
-    pub browser_version: Option<String>,
-    pub os_name: Option<String>,
-    pub os_version: Option<String>,
-    pub ip_address: Option<String>,
-    pub last_active_at: String,
-    pub created_at: String,
-    pub is_current_session: bool,
-}
+session_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DeviceSessionResponse
+});
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

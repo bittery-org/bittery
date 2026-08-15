@@ -13,6 +13,7 @@ use crate::{
         session::{format_rfc3339, RequestMetadata},
         validate_resource_id,
     },
+    shapes::{me_shape, reset_password_shape},
 };
 
 const JWT_ISSUER: &str = "bittery";
@@ -60,23 +61,11 @@ pub struct CheckEmailResponse {
     pub secret_key_hint: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MeResponse {
-    pub id: String,
-    pub email: String,
-    pub name: String,
-    pub team_id: Option<String>,
-    pub team_name: Option<String>,
-    pub team_type: Option<TeamType>,
-    pub team_avatar_url: Option<String>,
-    pub role: TeamRole,
-    pub secret_key_hint: Option<String>,
-    pub public_key: String,
-    pub encrypted_private_key: String,
-    pub has_recovery_key: bool,
-    pub created_at: String,
-}
+me_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct MeResponse
+});
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LogoutResponse {
@@ -359,14 +348,11 @@ pub struct ResetPasswordInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResetPasswordResponse {
-    pub token: String,
-    pub session_id: String,
-    pub expires_at: String,
-    pub user_id: String,
-}
+reset_password_shape!(service_struct {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ResetPasswordResponse
+});
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

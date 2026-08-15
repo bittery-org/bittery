@@ -43,6 +43,7 @@
 //! every item schema in the committed `openapi.v1.json`. The macros keep the emitted schema
 //! byte-identical to a hand-written struct.
 
+mod auth;
 mod billing;
 mod item;
 mod share;
@@ -137,6 +138,7 @@ pub(crate) use wire_struct;
 
 pub(crate) use self::item::{attachment_shape, item_shape, AttachmentPayload, ItemPayload};
 
+pub(crate) use self::auth::*;
 pub(crate) use self::billing::*;
 pub(crate) use self::share::*;
 pub(crate) use self::sync::*;
