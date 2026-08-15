@@ -5,7 +5,7 @@ use fred::clients::SubscriberClient;
 use fred::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{broadcast, RwLock},
+    sync::{broadcast, watch, RwLock},
     task::JoinHandle,
 };
 use tracing::{info, warn};
@@ -204,7 +204,10 @@ impl SyncPubSub {
     /// Start the Redis dispatch loop. Must be called once on startup.
     /// Listens for incoming Redis pub/sub messages and fans them out locally.
     /// Only needed when Redis is configured.
-    pub fn start_dispatch(self: &Arc<Self>) -> Option<JoinHandle<()>> {
+    pub fn start_dispatch(
+        self: &Arc<Self>,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Option<JoinHandle<()>> {
         let redis = self.redis.as_ref()?;
 
         let pubsub = Arc::clone(self);
@@ -213,10 +216,36 @@ impl SyncPubSub {
         let subscriber = redis.subscriber.clone();
         let mut message_rx = redis.subscriber.message_rx();
         Some(tokio::spawn(async move {
-            if let Err(error) = subscriber.subscribe("sync:wake").await {
-                warn!(error = %error, "failed to subscribe to sync:wake");
+            if *shutdown.borrow() {
+                info!("Redis pub/sub dispatch loop ended");
+                return;
             }
-            while let Ok(message) = message_rx.recv().await {
+            tokio::select! {
+                result = subscriber.subscribe("sync:wake") => {
+                    if let Err(error) = result {
+                        warn!(error = %error, "failed to subscribe to sync:wake");
+                    }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        info!("Redis pub/sub dispatch loop ended");
+                        return;
+                    }
+                }
+            }
+            loop {
+                let message = tokio::select! {
+                    message = message_rx.recv() => match message {
+                        Ok(message) => message,
+                        Err(_) => break,
+                    },
+                    changed = shutdown.changed() => {
+                        if changed.is_err() || *shutdown.borrow() {
+                            break;
+                        }
+                        continue;
+                    }
+                };
                 let channel = message.channel.to_string();
 
                 if channel == "sync:wake" {
