@@ -201,10 +201,11 @@ const defaultDeps: TauriMobileDeps = {
 		const { default: Database } = await import("@tauri-apps/plugin-sql");
 		return Database.load(url);
 	},
+	// No cast, for the same reason as `loadDatabase`: the plugin's module shape satisfies
+	// `TauriMobileBiometry` structurally, and letting the compiler check that is what makes
+	// the slice a drift guard rather than a comment.
 	loadBiometry: async () =>
-		(await import(
-			"@choochmeque/tauri-plugin-biometry-api"
-		)) as unknown as TauriMobileBiometry,
+		await import("@choochmeque/tauri-plugin-biometry-api"),
 };
 
 /** One load per port instance, shared by every call. A rejection is cached too. */
@@ -404,7 +405,16 @@ export function createTauriMobilePlatformPort(
 		 * holds the long form, including what the gap costs.
 		 */
 
-		secretGet: async (key) => readString(await secrets(), secretKey(key)),
+		secretGet: async (key) => {
+			try {
+				return await readString(await secrets(), secretKey(key));
+			} catch {
+				// "Absent" must never reach the caller as a throw. The store file can fail to
+				// open at all — an uninstalled plugin, a corrupt `secrets.json` — and that is
+				// indistinguishable from an empty one to everything above this port.
+				return null;
+			}
+		},
 
 		secretSet: async (key, value) => {
 			// Not wrapped: a store that cannot accept key material is fatal, and there is no
@@ -413,11 +423,18 @@ export function createTauriMobilePlatformPort(
 			await commit(handle, () => handle.set(secretKey(key), value));
 		},
 
-		// `delete` of an absent key answers `false` rather than throwing, which is the no-op
-		// the contract asks for.
 		secretDelete: async (key) => {
-			const handle = await secrets();
-			await commit(handle, () => handle.delete(secretKey(key)));
+			try {
+				const handle = await secrets();
+				// `delete` of an absent key answers `false` rather than throwing, but the
+				// `save()` behind it is an fsync and a full disk raises there. A throw here
+				// would abort `AccountStore.clearSession` mid-way and leave the vault
+				// unlocked with `vault_keys` still on disk, so deleting is a no-op, never a
+				// throw — even when the store itself is unusable.
+				await commit(handle, () => handle.delete(secretKey(key)));
+			} catch {
+				// Deleting an absent key is a no-op, never a throw.
+			}
 		},
 
 		kvGet: async (key, scope) =>
@@ -475,6 +492,22 @@ const CREATE_RECORDS_TABLE = `
  *
  * `collection` and `id` are opaque strings the port must never parse, so the id is recovered
  * by slicing off a prefix of known length rather than by splitting on `:`.
+ *
+ * One flat `key TEXT PRIMARY KEY` instead of a `(collection, id)` composite buys the O(1)
+ * upsert and costs two assumptions about collection names, both held by `keys.ts`, which
+ * mints every one of them:
+ *
+ *   1. **No collection name may be a prefix of another.** `recordList("a")` would otherwise
+ *      return collection `a:b`'s rows as ids like `b:y`, and `recordClear("a")` would delete
+ *      them. Today every name is `${accountId}:items`-shaped, and no such name is a prefix of
+ *      another.
+ *   2. **No collection name may contain a NUL.** SQLite's `length()` stops at the first one,
+ *      so `PREFIX_PREDICATE` would compare a truncated prefix: `recordPut` and `recordGet`
+ *      would still work while `recordList` returned nothing and `recordClear` deleted
+ *      nothing — data invisible and un-clearable rather than loudly broken.
+ *
+ * Neither is reachable today. Breaking either means moving to a composite primary key, not
+ * sanitising the input here: a port must not parse the strings it is given.
  */
 function collectionPrefix(collection: string): string {
 	return `${collection}:`;

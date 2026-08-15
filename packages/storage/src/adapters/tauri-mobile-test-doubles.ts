@@ -14,20 +14,26 @@
  * Each double models the behaviour the adapter actually depends on, taken from the plugins'
  * own sources rather than from what would be convenient:
  *
- *   - `SqlDatabaseDouble` **executes** the SQL the adapter issues rather than pattern-matching
- *     it to a canned answer. It applies `ON CONFLICT ... DO UPDATE` row by row in statement
- *     order, binds `?n` positionally, and evaluates `substr(key, 1, length(?1)) = ?2` over
- *     Unicode code points exactly as SQLite does. If the adapter's SQL were wrong, the suite
- *     would fail here rather than passing against a double that agreed with the bug.
+ *   - There are **two** databases here, and the distinction matters. `RealSqliteDatabase` is
+ *     `bun:sqlite` — the same engine `tauri-plugin-sql` runs — and it is what says whether the
+ *     adapter's SQL is *correct*. `SqlDatabaseDouble` is a hand-written interpreter of the six
+ *     statements this adapter issues; it cannot tell right SQL from wrong, because it
+ *     whitelists the exact statement strings and was written by the same hand as the adapter.
+ *     Its one job is the call log — `executes` and `selects` — which is what proves `recordPut`
+ *     and `recordDelete` are O(1). Every *behavioural* record test, including the shared
+ *     conformance suite, runs on real SQLite.
  *   - `BiometryDouble` covers only `checkStatus` and `authenticate`, because those are the
  *     only two functions the adapter still uses from that plugin.
  *   - `@tauri-apps/plugin-store`'s `Store.load(path)` returns the *same* store for the same
  *     path, so `loadStore` hands back one instance per path — which is what makes the
  *     `store.json` / `secrets.json` separation observable to a test.
+ *   - Each of the three loaders can be made to reject, because "the optional peer dependency
+ *     is not installed" is a real deployment and the port must stay total under it.
  *
  * Nothing here is exported to production code.
  */
 
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import type {
 	TauriBiometryStatus,
 	TauriMobileBiometry,
@@ -61,6 +67,13 @@ export class TauriMobileStoreDouble implements TauriStore {
 	saves = 0;
 	/** When set, every `set` rejects with it: a store file that cannot accept a write. */
 	setFailure: unknown = null;
+	/**
+	 * When set, every `save` rejects with it.
+	 *
+	 * `save()` is the fsync, so this is the full-disk case: the in-memory mutation lands and
+	 * the flush behind it fails.
+	 */
+	saveFailure: unknown = null;
 
 	async get<T>(key: string): Promise<T | undefined> {
 		this.ipcCalls += 1;
@@ -91,6 +104,9 @@ export class TauriMobileStoreDouble implements TauriStore {
 	async save(): Promise<void> {
 		this.ipcCalls += 1;
 		this.saves += 1;
+		if (this.saveFailure !== null) {
+			throw this.saveFailure;
+		}
 	}
 
 	/** Forget the recorded calls without touching the stored data. */
@@ -151,9 +167,15 @@ function prefixMatches(key: string, prefix: string, compare: string): boolean {
 /**
  * The one table this adapter uses, as an interpreter for the statements it issues.
  *
- * It is not a general SQL engine: it recognises exactly the six statement shapes in
- * `tauri-mobile.ts` and throws on anything else, so a change to the adapter's SQL that this
- * double has not been taught cannot pass silently.
+ * **This cannot tell you whether the SQL is correct.** It recognises exactly the six statement
+ * shapes in `tauri-mobile.ts` by their literal text and throws on anything else, so any change
+ * to the adapter's SQL turns the suite red whether the change was right or wrong; and where it
+ * does interpret — `prefixMatches`, `applyUpsert` — it was written from the same understanding
+ * as the adapter, so it would happily agree with a shared misunderstanding.
+ *
+ * What it is for is the **call log**: `executes` and `selects` record every round trip in
+ * order, which is how a test proves `recordPut` issues one statement and never reads first.
+ * `RealSqliteDatabase` below answers the correctness half.
  */
 export class SqlDatabaseDouble implements TauriSqlDatabase {
 	/** The `records` table: key -> value. Insertion order is the natural row order. */
@@ -284,6 +306,80 @@ export class SqlDatabaseDouble implements TauriSqlDatabase {
 	}
 }
 
+/**
+ * `tauri-plugin-sql`'s surface over a **real** in-memory SQLite database.
+ *
+ * `tauri-plugin-sql` is sqlx over SQLite and `bun:sqlite` is SQLite, so the answers here are
+ * SQLite's own: `substr`/`length` count characters, `=` on TEXT is exact and case-sensitive,
+ * `ON CONFLICT DO UPDATE` applies row by row in statement order. That is what makes a
+ * behavioural test worth running — nothing in this class was written from the adapter's
+ * assumptions, so it can disagree with them.
+ *
+ * The plugin binds `?n` positionally through sqlx; `bun:sqlite` binds positional arguments to
+ * parameter indices 1..n, which is the same thing for the statements this adapter issues.
+ *
+ * Only the two methods `TauriSqlDatabase` declares, plus two read helpers for assertions the
+ * port itself cannot express.
+ */
+export class RealSqliteDatabase implements TauriSqlDatabase {
+	private readonly db = new Database(":memory:");
+
+	async execute(
+		query: string,
+		bindValues: unknown[] = [],
+	): Promise<TauriSqlQueryResult> {
+		const result = this.db
+			.query(query)
+			.run(...(bindValues as SQLQueryBindings[]));
+		return {
+			rowsAffected: result.changes,
+			lastInsertId: Number(result.lastInsertRowid),
+		};
+	}
+
+	async select<TRow>(
+		query: string,
+		bindValues: unknown[] = [],
+	): Promise<TRow[]> {
+		return this.db
+			.query(query)
+			.all(...(bindValues as SQLQueryBindings[])) as TRow[];
+	}
+
+	/** Every key in `records`, or `[]` before the table exists. */
+	keys(): string[] {
+		if (!this.hasTable()) {
+			return [];
+		}
+		return this.db
+			.query("SELECT key FROM records")
+			.all()
+			.map((row) => (row as { key: string }).key);
+	}
+
+	/** One row's value, or `null` — read straight from SQLite, not through the port. */
+	value(key: string): string | null {
+		if (!this.hasTable()) {
+			return null;
+		}
+		const row = this.db
+			.query("SELECT value FROM records WHERE key = ?1")
+			.get(key) as { value: string } | null;
+		// `?? null` and not `|| null`, for the same reason the adapter uses it.
+		return row?.value ?? null;
+	}
+
+	private hasTable(): boolean {
+		return (
+			this.db
+				.query(
+					"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+				)
+				.all("records").length > 0
+		);
+	}
+}
+
 // ============================================================================
 // The biometry plugin
 // ============================================================================
@@ -331,22 +427,35 @@ export class BiometryDouble implements TauriMobileBiometry {
 // Wiring them into TauriMobileDeps
 // ============================================================================
 
-export interface TauriMobileDoubles {
+/** The shape both factories share; only the database differs. */
+interface TauriMobileDoublesOf<TDatabase extends TauriSqlDatabase> {
 	/** Pass this to `createTauriMobilePlatformPort` / `createTauriMobileRecordPort`. */
 	deps: TauriMobileDeps;
 	/** `store.json` — the plain tier. */
 	store: TauriMobileStoreDouble;
 	/** `secrets.json` — the secret tier, a separate file and therefore a separate double. */
 	secrets: TauriMobileStoreDouble;
-	database: SqlDatabaseDouble;
+	database: TDatabase;
 	biometry: BiometryDouble;
 }
+
+/** Records on real SQLite. The default, and what every behavioural test uses. */
+export type TauriMobileDoubles = TauriMobileDoublesOf<RealSqliteDatabase>;
+
+/** Records on the recording interpreter, for the O(1) round-trip assertions only. */
+export type TauriMobileCountingDoubles =
+	TauriMobileDoublesOf<SqlDatabaseDouble>;
 
 export interface TauriMobileDoublesOptions {
 	/** Simulate `@choochmeque/tauri-plugin-biometry-api` not being installed. */
 	biometryModuleMissing?: boolean;
 	/** Simulate `@tauri-apps/plugin-sql` not being installed. */
 	sqlModuleMissing?: boolean;
+	/**
+	 * Simulate `@tauri-apps/plugin-store` not being installed — or, identically as far as this
+	 * port can tell, a `store.json` that will not open at all.
+	 */
+	storeModuleMissing?: boolean;
 }
 
 /**
@@ -357,23 +466,27 @@ export interface TauriMobileDoublesOptions {
  * `store.json`, one `secrets.json` and one database — and a value written to one file cannot
  * turn up in the other by accident.
  */
-export function createTauriMobileDoubles(
-	options: TauriMobileDoublesOptions = {},
-): TauriMobileDoubles {
+function buildDoubles<TDatabase extends TauriSqlDatabase>(
+	makeDatabase: () => TDatabase,
+	options: TauriMobileDoublesOptions,
+): TauriMobileDoublesOf<TDatabase> {
 	const stores = new Map<string, TauriMobileStoreDouble>();
 	const store = new TauriMobileStoreDouble();
 	stores.set("store.json", store);
 	const secrets = new TauriMobileStoreDouble();
 	stores.set("secrets.json", secrets);
 
-	const databases = new Map<string, SqlDatabaseDouble>();
-	const database = new SqlDatabaseDouble();
+	const databases = new Map<string, TDatabase>();
+	const database = makeDatabase();
 	databases.set("sqlite:bittery-records.db", database);
 
 	const biometry = new BiometryDouble();
 
 	const deps: TauriMobileDeps = {
 		loadStore: async (path) => {
+			if (options.storeModuleMissing === true) {
+				throw new Error("Cannot find module '@tauri-apps/plugin-store'");
+			}
 			let handle = stores.get(path);
 			if (handle === undefined) {
 				handle = new TauriMobileStoreDouble();
@@ -387,7 +500,7 @@ export function createTauriMobileDoubles(
 			}
 			let handle = databases.get(url);
 			if (handle === undefined) {
-				handle = new SqlDatabaseDouble();
+				handle = makeDatabase();
 				databases.set(url, handle);
 			}
 			return handle;
@@ -403,4 +516,28 @@ export function createTauriMobileDoubles(
 	};
 
 	return { deps, store, secrets, database, biometry };
+}
+
+/**
+ * The default doubles: records on a real in-memory SQLite database.
+ *
+ * Use this unless the test is counting SQL round trips, in which case use
+ * `createTauriMobileCountingDoubles` below and say so in the test name.
+ */
+export function createTauriMobileDoubles(
+	options: TauriMobileDoublesOptions = {},
+): TauriMobileDoubles {
+	return buildDoubles(() => new RealSqliteDatabase(), options);
+}
+
+/**
+ * Doubles whose database records every statement instead of executing real SQL.
+ *
+ * The only reason to reach for this is `executes` / `selects` — the O(1) proof. It cannot
+ * tell right SQL from wrong; see `SqlDatabaseDouble`.
+ */
+export function createTauriMobileCountingDoubles(
+	options: TauriMobileDoublesOptions = {},
+): TauriMobileCountingDoubles {
+	return buildDoubles(() => new SqlDatabaseDouble(), options);
 }

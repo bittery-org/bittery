@@ -585,6 +585,18 @@ export function runPortConformance(
 			expect(await record.recordGet("c1", "unicode")).toBe(UNICODE_VALUE);
 		});
 
+		test("a record round-trips the empty string as a value, not as absent", async () => {
+			const { record } = await make();
+
+			await record.recordPut("c1", "empty", "");
+
+			// The same distinction the secret tier makes above: `?? null`, never `|| null`.
+			expect(await record.recordGet("c1", "empty")).toBe("");
+			expect(await record.recordList("c1")).toEqual([
+				{ id: "empty", value: "" },
+			]);
+		});
+
 		test("collection and id strings are opaque to the port", async () => {
 			const { record } = await make();
 

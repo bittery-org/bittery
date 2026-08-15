@@ -9,20 +9,30 @@
  * O(1) upsert, the prefix predicate's immunity to `LIKE` wildcards, and the biometric error
  * mapping.
  *
- * One test here is a *compile-time* check rather than a runtime one: `TauriSqlDatabase` is a
- * structural restatement of `@tauri-apps/plugin-sql`'s `Database`, and nothing at runtime can
- * tell us whether the restatement still matches. The assignment below can.
+ * **Which database a test runs on matters, so each one says.** `makeMobilePorts` — and with it
+ * the shared conformance suite and every behavioural test below — backs records with a *real*
+ * in-memory SQLite database, because only SQLite can say whether this adapter's SQL is right.
+ * `makeCountingPorts` backs them with `SqlDatabaseDouble`, which records statements instead of
+ * executing them; the four tests that use it are the O(1) round-trip proofs, and they are the
+ * only claims that double can support.
+ *
+ * Two tests here are *compile-time* checks rather than runtime ones: `TauriSqlDatabase` and
+ * `TauriMobileBiometry` are structural restatements of two optional plugins' types, and nothing
+ * at runtime can tell us whether the restatements still match. The assignments below can.
  */
 
 import { describe, expect, test } from "bun:test";
+import type * as BiometryPlugin from "@choochmeque/tauri-plugin-biometry-api";
 import type Database from "@tauri-apps/plugin-sql";
 import { runPortConformance } from "./port-conformance";
 import {
 	createTauriMobilePlatformPort,
 	createTauriMobileRecordPort,
+	type TauriMobileBiometry,
 	type TauriSqlDatabase,
 } from "./tauri-mobile";
 import {
+	createTauriMobileCountingDoubles,
 	createTauriMobileDoubles,
 	type TauriMobileDoubles,
 } from "./tauri-mobile-test-doubles";
@@ -36,9 +46,35 @@ import {
  */
 type SqlDatabaseStillMatches = Database extends TauriSqlDatabase ? true : never;
 
-/** Fresh, empty mobile Tauri doubles plus a fresh pair of ports, as the suite requires. */
+/** The same guard for the biometry plugin, whose module *is* the object the adapter calls. */
+type BiometryStillMatches = typeof BiometryPlugin extends TauriMobileBiometry
+	? true
+	: never;
+
+/**
+ * Fresh, empty mobile Tauri doubles plus a fresh pair of ports, as the suite requires.
+ *
+ * Records run on real SQLite here. Everything that asks "what does this adapter *do*" uses
+ * this.
+ */
 async function makeMobilePorts() {
 	const doubles = createTauriMobileDoubles();
+	const platform = createTauriMobilePlatformPort(doubles.deps);
+	const record = createTauriMobileRecordPort(doubles.deps);
+	await platform.initialize();
+	await record.initialize();
+
+	return { platform, record, doubles };
+}
+
+/**
+ * The same, with records on the statement-recording double.
+ *
+ * Only for counting round trips. It cannot tell right SQL from wrong, so no behavioural claim
+ * may rest on it.
+ */
+async function makeCountingPorts() {
+	const doubles = createTauriMobileCountingDoubles();
 	const platform = createTauriMobilePlatformPort(doubles.deps);
 	const record = createTauriMobileRecordPort(doubles.deps);
 	await platform.initialize();
@@ -84,13 +120,22 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 		expect(platform.secretBacking).toContain(
 			"NO at-rest separation from the plain tier",
 		);
-		expect(platform.secretBacking).not.toContain("Keystore");
-		expect(platform.secretBacking).not.toContain("Keychain");
+		// Case-insensitive: "keystore" would mislead a reader exactly as much as "Keystore".
+		expect(platform.secretBacking).not.toMatch(/keystore/iu);
+		expect(platform.secretBacking).not.toMatch(/keychain/iu);
 	});
 
 	test("the declared TauriSqlDatabase slice still matches the real plugin type", () => {
 		// Compiles only while `Database extends TauriSqlDatabase`; see the type above.
 		const stillMatches: SqlDatabaseStillMatches = true;
+
+		expect(stillMatches).toBe(true);
+	});
+
+	test("the declared TauriMobileBiometry slice still matches the real plugin type", () => {
+		// Compiles only while the plugin module still satisfies the slice. `loadBiometry`
+		// returns that module uncast, so this is the whole drift guard for it.
+		const stillMatches: BiometryStillMatches = true;
 
 		expect(stillMatches).toBe(true);
 	});
@@ -145,7 +190,7 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 
 		await platform.secretSet("bittery_vault_keys", "vk");
 
-		expect([...doubles.database.rows.keys()]).toEqual([]);
+		expect(doubles.database.keys()).toEqual([]);
 	});
 
 	/**
@@ -208,9 +253,45 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 		const { platform, doubles } = await makeMobilePorts();
 		doubles.secrets.setFailure = new Error("Failed to write secrets.json");
 
-		expect(platform.secretSet("bittery_device_key", "dk")).rejects.toThrow(
-			"Failed to write secrets.json",
-		);
+		await expect(
+			platform.secretSet("bittery_device_key", "dk"),
+		).rejects.toThrow("Failed to write secrets.json");
+	});
+
+	/**
+	 * The read half of "never throws": a secrets store that cannot be opened at all — an
+	 * uninstalled `@tauri-apps/plugin-store`, a corrupt file, a device with no space to open
+	 * one — is indistinguishable from an empty one above this port.
+	 */
+	test("secretGet answers null when the secrets store cannot be opened", async () => {
+		const doubles = createTauriMobileDoubles({ storeModuleMissing: true });
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+
+		expect(await platform.secretGet("bittery_jwt_token")).toBeNull();
+	});
+
+	/**
+	 * The delete half, and the one that matters most. `AccountStore.clearSession` deletes
+	 * `jwt_token`, then `vault_keys`, then `encrypted_private_key`, then drops the cached
+	 * master unlock key — with no try/catch anywhere in that chain. A throw from the first
+	 * delete leaves key material on disk and the account still unlocked, so this primitive
+	 * must swallow, exactly as `tauri.ts` and `react-native.ts` do.
+	 */
+	test("secretDelete is a no-op when the secrets store cannot be opened", async () => {
+		const doubles = createTauriMobileDoubles({ storeModuleMissing: true });
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+
+		await platform.secretDelete("bittery_jwt_token");
+		await platform.secretDelete("bittery_vault_keys");
+	});
+
+	/** The same, one layer in: the file opens, but the fsync behind `delete` fails. */
+	test("secretDelete is a no-op when the flush behind it fails", async () => {
+		const { platform, doubles } = await makeMobilePorts();
+		// ENOSPC, or any other reason `store.save()` can reject.
+		doubles.secrets.saveFailure = new Error("No space left on device");
+
+		await platform.secretDelete("bittery_jwt_token");
 	});
 
 	test("an 8 KB secret is stored whole — this backing store needs no chunking", async () => {
@@ -296,11 +377,67 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 	});
 
 	// ------------------------------------------------------------------
-	// RecordPort — SQLite
+	// RecordPort — real SQLite
 	// ------------------------------------------------------------------
 
 	test("initialize creates the table without depending on a Rust-side migration", async () => {
 		const doubles = createTauriMobileDoubles();
+		const record = createTauriMobileRecordPort(doubles.deps);
+
+		// Nothing to write into before `initialize`, so a put would raise "no such table".
+		expect(doubles.database.keys()).toEqual([]);
+		await record.initialize();
+
+		await record.recordPut("acct-1:items", "item-1", "blob");
+		expect(doubles.database.keys()).toEqual(["acct-1:items:item-1"]);
+	});
+
+	test("records are stored one row per record under {collection}:{id}", async () => {
+		const { record, doubles } = await makeMobilePorts();
+
+		await record.recordPut("acct-1:items", "item-1", "blob");
+
+		expect(doubles.database.value("acct-1:items:item-1")).toBe("blob");
+	});
+
+	test("recordPutMany lets a later record win over an earlier one with the same id", async () => {
+		const { record } = await makeMobilePorts();
+
+		await record.recordPutMany("acct-1:items", [
+			{ id: "item-1", value: "first" },
+			{ id: "item-2", value: "other" },
+			{ id: "item-1", value: "second" },
+		]);
+
+		expect(await record.recordGet("acct-1:items", "item-1")).toBe("second");
+		expect(await record.recordGet("acct-1:items", "item-2")).toBe("other");
+	});
+
+	/** A 2 000-item vault bootstrap, chunked, against the engine that enforces the cap. */
+	test("recordPutMany writes every record of a chunked bootstrap", async () => {
+		const { record } = await makeMobilePorts();
+		const records = Array.from({ length: 2000 }, (_unused, index) => ({
+			id: `item-${index}`,
+			value: `blob-${index}`,
+		}));
+
+		await record.recordPutMany("acct-1:items", records);
+
+		expect(await record.recordList("acct-1:items")).toHaveLength(2000);
+		expect(await record.recordGet("acct-1:items", "item-1999")).toBe(
+			"blob-1999",
+		);
+	});
+
+	// ------------------------------------------------------------------
+	// RecordPort — round-trip counting, on the recording double
+	//
+	// These four are the only tests that use `makeCountingPorts`. They assert *how many*
+	// statements the adapter issues, never what SQLite makes of them.
+	// ------------------------------------------------------------------
+
+	test("initialize issues the CREATE TABLE itself, before any other statement", async () => {
+		const doubles = createTauriMobileCountingDoubles();
 		const record = createTauriMobileRecordPort(doubles.deps);
 
 		expect(doubles.database.created).toBe(false);
@@ -312,20 +449,12 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 		);
 	});
 
-	test("records are stored one row per record under {collection}:{id}", async () => {
-		const { record, doubles } = await makeMobilePorts();
-
-		await record.recordPut("acct-1:items", "item-1", "blob");
-
-		expect(doubles.database.rows.get("acct-1:items:item-1")).toBe("blob");
-	});
-
 	/**
 	 * The O(1) proof. `vault-repository.ts` upserts one item at a time on delta sync, so a
 	 * read-modify-write here would make a delta sync O(n^2).
 	 */
 	test("recordPut issues one upsert and never reads first", async () => {
-		const { record, doubles } = await makeMobilePorts();
+		const { record, doubles } = await makeCountingPorts();
 		for (let index = 0; index < 100; index += 1) {
 			await record.recordPut("acct-1:items", `item-${index}`, "blob");
 		}
@@ -346,7 +475,7 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 	});
 
 	test("recordDelete issues one statement and never reads first", async () => {
-		const { record, doubles } = await makeMobilePorts();
+		const { record, doubles } = await makeCountingPorts();
 		await record.recordPut("acct-1:items", "item-1", "blob");
 		await record.recordPut("acct-1:items", "item-2", "blob");
 		doubles.database.resetCallLog();
@@ -368,7 +497,7 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 	 * pool, so the statements could land on different connections.
 	 */
 	test("recordPutMany writes 250 records in a single statement", async () => {
-		const { record, doubles } = await makeMobilePorts();
+		const { record, doubles } = await makeCountingPorts();
 		const records = Array.from({ length: 250 }, (_unused, index) => ({
 			id: `item-${index}`,
 			value: `blob-${index}`,
@@ -383,7 +512,7 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 	});
 
 	test("recordPutMany chunks under SQLite's bound-variable cap", async () => {
-		const { record, doubles } = await makeMobilePorts();
+		const { record, doubles } = await makeCountingPorts();
 		// A 2 000-item vault bootstrap comes through here. Two variables per row, so no
 		// statement may carry more than 999 of them on an older SQLite build.
 		const records = Array.from({ length: 2000 }, (_unused, index) => ({
@@ -401,21 +530,10 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 		expect(await record.recordList("acct-1:items")).toHaveLength(2000);
 	});
 
-	test("recordPutMany lets a later record win over an earlier one with the same id", async () => {
-		const { record } = await makeMobilePorts();
-
-		await record.recordPutMany("acct-1:items", [
-			{ id: "item-1", value: "first" },
-			{ id: "item-2", value: "other" },
-			{ id: "item-1", value: "second" },
-		]);
-
-		expect(await record.recordGet("acct-1:items", "item-1")).toBe("second");
-		expect(await record.recordGet("acct-1:items", "item-2")).toBe("other");
-	});
-
 	// ------------------------------------------------------------------
 	// The prefix predicate — why it is not LIKE
+	//
+	// Back on real SQLite: the whole point of these is what SQLite makes of the statement.
 	// ------------------------------------------------------------------
 
 	test("a collection name containing % does not match another collection's rows", async () => {
@@ -472,6 +590,63 @@ describe("tauri-mobile adapter — platform-specific mapping", () => {
 		expect(await record.recordList("acct\\%:items")).toEqual([
 			{ id: "r1", value: "escaped" },
 		]);
+	});
+
+	/**
+	 * `length(?1)` rather than a JavaScript-computed length, and `row.key.slice(prefix.length)`
+	 * in JavaScript rather than a SQL `substr` — the two count differently above the BMP, so
+	 * the id this port recovers is only right while each measurement is taken on its own side.
+	 * Every character here is two UTF-16 code units and one SQLite character.
+	 */
+	test("an astral-plane collection name lists and clears its own rows only", async () => {
+		const { record } = await makeMobilePorts();
+
+		await record.recordPut("🔐𝕍ault:items", "𝓲d-1", "astral");
+		await record.recordPut("🔓other:items", "r1", "neighbour");
+
+		expect(await record.recordGet("🔐𝕍ault:items", "𝓲d-1")).toBe("astral");
+		expect(await record.recordList("🔐𝕍ault:items")).toEqual([
+			{ id: "𝓲d-1", value: "astral" },
+		]);
+
+		await record.recordClear("🔐𝕍ault:items");
+
+		expect(await record.recordList("🔐𝕍ault:items")).toEqual([]);
+		expect(await record.recordGet("🔓other:items", "r1")).toBe("neighbour");
+	});
+
+	/**
+	 * `@tauri-apps/plugin-sql` is an optional peer dependency, so "not installed" is a real
+	 * build. Unlike the biometric port, `RecordPort` has no honest "no" to answer: a
+	 * `recordPut` that resolved without storing anything would lose data, and a `recordGet`
+	 * that answered `null` would tell `ItemCache` the cache is simply empty. So every record
+	 * primitive carries the loader's failure out.
+	 */
+	test("an uninstalled sql plugin fails loudly rather than pretending to store records", async () => {
+		const doubles = createTauriMobileDoubles({ sqlModuleMissing: true });
+		const record = createTauriMobileRecordPort(doubles.deps);
+		const absent = "@tauri-apps/plugin-sql";
+
+		await expect(record.initialize()).rejects.toThrow(absent);
+		await expect(record.recordPut("c1", "r1", "v")).rejects.toThrow(absent);
+		await expect(
+			record.recordPutMany("c1", [{ id: "r1", value: "v" }]),
+		).rejects.toThrow(absent);
+		await expect(record.recordGet("c1", "r1")).rejects.toThrow(absent);
+		await expect(record.recordDelete("c1", "r1")).rejects.toThrow(absent);
+		await expect(record.recordList("c1")).rejects.toThrow(absent);
+		await expect(record.recordClear("c1")).rejects.toThrow(absent);
+	});
+
+	/** The two ports are independent: no record database still means a working secret tier. */
+	test("an uninstalled sql plugin leaves the platform port working", async () => {
+		const doubles = createTauriMobileDoubles({ sqlModuleMissing: true });
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
+
+		await platform.secretSet("bittery_device_key", "dk");
+
+		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
 	});
 
 	test("the store and the database survive a fresh pair of ports", async () => {
