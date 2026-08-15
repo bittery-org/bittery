@@ -17,6 +17,7 @@ mod access;
 mod attachments;
 mod catalog;
 mod items;
+mod members;
 mod pagination;
 
 pub(crate) use attachments::{
@@ -24,15 +25,17 @@ pub(crate) use attachments::{
     get_attachment_download_url, list_vault_attachments_page, update_vault_attachment,
 };
 pub(crate) use catalog::{
-    add_vault_member, available_team_members, convert_vault_type, create_vault,
-    create_vault_image_upload, delete_vault, get_vault, get_vault_stats, list_vault_members,
-    list_vaults_page, update_vault, update_vault_member_role,
+    convert_vault_type, create_vault, create_vault_image_upload, delete_vault, get_vault,
+    get_vault_stats, list_vaults_page, update_vault,
 };
 pub(crate) use items::{
     bulk_import_vault_items, create_vault_item, delete_vault_item, get_vault_item,
     list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,
     list_vault_items_page, move_vault_item, permanently_delete_vault_item, restore_vault_item,
     toggle_vault_favorite, update_vault_item,
+};
+pub(crate) use members::{
+    add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
 };
 pub(crate) use pagination::ByteBoundedPage;
 
