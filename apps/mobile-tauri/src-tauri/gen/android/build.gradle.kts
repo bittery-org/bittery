@@ -12,6 +12,10 @@ buildscript {
         // the whole classpath, down to kotlin.Unit. Nothing about the plugin can be
         // built until this moves.
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20")
+        // Room's annotation processor for the credential-provider plugin module.
+        // KSP versions are pinned to an exact Kotlin release — the suffix after the
+        // dash is KSP's own version, the part before it must equal the line above.
+        classpath("com.google.devtools.ksp:symbol-processing-gradle-plugin:2.1.20-1.0.32")
     }
 }
 

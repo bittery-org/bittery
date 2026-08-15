@@ -1,0 +1,9 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Allows the credential provider support probe. Nothing sensitive sits behind it:
+it reports the device API level, whether the user has enabled Bittery as a
+provider, and whether the service reached the merged manifest.
+"""
+permissions = ["allow-is-supported"]

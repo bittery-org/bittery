@@ -10,6 +10,7 @@
 		"sql:default",
 		"sql:allow-execute",
 		"clipboard-manager:allow-write-text",
-		"bittery-keystore:default"
+		"bittery-keystore:default",
+		"bittery-credential-provider:default"
 	]
 }

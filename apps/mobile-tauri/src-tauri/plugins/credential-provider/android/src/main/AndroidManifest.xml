@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The services and activities live here, in the Tauri plugin module, and reach the
+    APK through Gradle manifest merging. Under Expo the same declarations were injected
+    into the app manifest by app.plugin.js at prebuild time; the spike proved the merge
+    works, so the wiring no longer needs a prebuild step and nothing hand-patches
+    gen/android/app/src/main/AndroidManifest.xml.
+
+    The names stay relative (".service.X"). The merger expands them against this
+    module's namespace, com.bittery.mobile.credentialprovider — not against the app's
+    com.bittery.mobile — and the merged manifest is the proof that it did.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+    <application>
+        <!--
+            Credential Provider Service (API 34+)
+
+            CRITICAL: Do NOT add android:process to this service.
+
+            BitteryCredentialProviderService shares VaultStateManager with the main app
+            to reach the Master Unlock Key that decrypts credentials. A separate process
+            would give the service its own isolated singleton, with no MUK in it, and
+            the shared MukEscrowManager and Room database would split the same way.
+        -->
+        <service
+            android:name=".service.BitteryCredentialProviderService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Bittery"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE"
+            tools:targetApi="upside_down_cake">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.credentials.provider"
+                android:resource="@xml/credential_provider" />
+        </service>
+
+        <service
+            android:name=".service.BitteryAutofillService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Bittery"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            tools:targetApi="o">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
+        <!-- Launched by PendingIntents the services build. Credential selection with
+             biometric authentication. -->
+        <activity
+            android:name=".activity.GetCredentialsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Bittery.CredentialProvider"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
+        <activity
+            android:name=".activity.AutofillAuthActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Bittery.CredentialProvider"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+    </application>
+
+</manifest>
