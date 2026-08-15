@@ -13,6 +13,7 @@ use crate::{
     integrations::stripe::BillingGateway,
     repo::common::{generate_resource_id, hash_token},
     services::billing::sync_team_seats_best_effort,
+    services::generate_secure_token,
     services::team_billing::team_management_enabled as shared_team_management_enabled,
     services::vault_key::validate_encrypted_vault_key,
     shapes::{team_details_shape, team_summary_shape},
@@ -25,6 +26,7 @@ const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
 #[derive(Clone, Debug, sqlx::FromRow)]
 struct DbTeamMembershipActorRow {
     id: String,
+    email: String,
     team_id: Option<String>,
     role: TeamRole,
     billing_plan: Option<BillingPlan>,
@@ -223,17 +225,9 @@ pub(crate) async fn get_pending_invitations(
     pool: &PgPool,
     user_id: &str,
 ) -> Result<Vec<PendingTeamInvitationResponse>, AppError> {
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?
-    .ok_or_else(|| AppError::not_found("User not found"))?;
+    let current_user = load_team_membership_actor(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("User not found"))?;
 
     let invitations = query_as::<_, DbPendingTeamInvitationRow>(
 		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.role::text AS role, invited_by.name AS invited_by_name, ti.expires_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.email = $1 AND ti.status = 'pending' AND ti.expires_at > $2 ORDER BY ti.created_at DESC",
@@ -293,16 +287,7 @@ pub(crate) async fn get_team(
     user_id: &str,
     input: TeamIdInput,
 ) -> Result<TeamDetailsResponse, AppError> {
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?;
+    let current_user = load_team_membership_actor(pool, user_id).await?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
@@ -413,16 +398,7 @@ pub(crate) async fn update_team(
     user_id: &str,
     input: UpdateTeamInput,
 ) -> Result<SuccessResponse, AppError> {
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?;
+    let current_user = load_team_membership_actor(pool, user_id).await?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
@@ -500,16 +476,7 @@ pub(crate) async fn create_team_image_upload(
         return Err(AppError::bad_request("Only image files are allowed"));
     }
 
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?;
+    let current_user = load_team_membership_actor(pool, user_id).await?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
@@ -853,17 +820,9 @@ async fn accept_loaded_invitation(
 
     assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
 
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?
-    .ok_or_else(|| AppError::not_found("User not found"))?;
+    let current_user = load_team_membership_actor(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("User not found"))?;
 
     if current_user.email != invitation.email {
         return Err(AppError::forbidden("This invitation is not for you"));
@@ -984,17 +943,9 @@ async fn decline_loaded_invitation(
     user_id: &str,
     invitation: DbTeamInvitationAcceptRow,
 ) -> Result<SuccessResponse, AppError> {
-    let current_user = query_as::<_, DbTeamUserRow>(
-        "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user");
-        AppError::internal("Failed to load user")
-    })?
-    .ok_or_else(|| AppError::not_found("User not found"))?;
+    let current_user = load_team_membership_actor(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("User not found"))?;
 
     if current_user.email != invitation.email {
         return Err(AppError::forbidden("This invitation is not for you"));
@@ -1113,16 +1064,7 @@ pub(crate) mod member_handlers {
         user_id: &str,
         input: TeamIdInput,
     ) -> Result<Vec<TeamMemberResponse>, AppError> {
-        let current_user = query_as::<_, DbTeamUserRow>(
-            "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
-        )
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load user");
-            AppError::internal("Failed to load user")
-        })?;
+        let current_user = load_team_membership_actor(pool, user_id).await?;
         if current_user
             .as_ref()
             .and_then(|user| user.team_id.as_deref())
@@ -1388,23 +1330,12 @@ fn ensure_team_admin(role: TeamRole) -> Result<(), AppError> {
     }
 }
 
-fn generate_secure_token() -> String {
-    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    let mut rng = rand::rng();
-    (0..32)
-        .map(|_| {
-            let index = rand::RngExt::random_range(&mut rng, 0..ALPHABET.len());
-            ALPHABET[index] as char
-        })
-        .collect()
-}
-
 async fn load_team_membership_actor(
     pool: &PgPool,
     user_id: &str,
 ) -> Result<Option<DbTeamMembershipActorRow>, AppError> {
     query_as::<_, DbTeamMembershipActorRow>(
-        "SELECT u.id, u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+        "SELECT u.id, u.email, u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
     )
     .bind(user_id)
     .fetch_optional(pool)
