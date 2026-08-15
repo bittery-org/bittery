@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMobileAccountRuntime } from "@/contexts/account-context";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -56,6 +57,25 @@ export function UnlockPage() {
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
 	const allAccounts = accounts;
+	/**
+	 * `apps/mobile/app/(auth)/unlock.tsx` mirrors the freshly borrowed MUKs into the
+	 * credential provider on every unlock path, before it navigates. The sync hook would
+	 * get there on its own a debounce later; doing it here is what makes autofill work
+	 * *immediately* after an unlock.
+	 *
+	 * It never fails the unlock. A rejected mirror means autofill has stale keys for a few
+	 * seconds until `useCredentialProviderSync` retries — a locked-out user would be worse.
+	 */
+	const mirrorUnlockedMuks = useCallback(async (unlocked: string[]) => {
+		try {
+			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(unlocked);
+		} catch (error) {
+			console.warn(
+				"[Unlock] Failed to mirror MUKs to credential provider",
+				error,
+			);
+		}
+	}, []);
 	const getPartialUnlockMessage = useCallback(
 		(unlockedCount: number) =>
 			m.toast_auth_unlock_warning_partial({
@@ -106,6 +126,7 @@ export function UnlockPage() {
 	// Unlock all accounts at once with password
 	const quickUnlockAll = useQuickUnlockAll({
 		onSuccess: async (result) => {
+			await mirrorUnlockedMuks(result.unlocked);
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			showUnlockToast({
@@ -118,6 +139,7 @@ export function UnlockPage() {
 			navigate({ to: "/vault" });
 		},
 		onPartialSuccess: async (result) => {
+			await mirrorUnlockedMuks(result.unlocked);
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));
@@ -148,6 +170,7 @@ export function UnlockPage() {
 			throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
 		}
 
+		await mirrorUnlockedMuks(unlocked);
 		await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 		showUnlockToast({
@@ -158,7 +181,7 @@ export function UnlockPage() {
 
 		await manager.refresh();
 		navigate({ to: "/vault" });
-	}, [m, manager, navigate, queryClient, showUnlockToast]);
+	}, [m, manager, mirrorUnlockedMuks, navigate, queryClient, showUnlockToast]);
 
 	const handleBiometricUnlockAll = async () => {
 		try {

@@ -123,10 +123,45 @@ export function AccountProvider({
 	}, [manager]);
 
 	useEffect(() => {
-		autolockService.current = createMobileAutolockService({ storage });
-		autolockService.current.initialize();
+		const service = createMobileAutolockService({ storage });
+		autolockService.current = service;
+		service.initialize();
 
-		const unsubscribe = autolockService.current.onLock(() => {
+		// `createMobileAutolockService().initialize()` subscribes to React Native's
+		// `AppState` through `globalThis.require("react-native")`. There is no such
+		// `require` in a Tauri WebView, so the lookup throws into the service's own
+		// `catch` and it ends up with no app-state source at all — idle auto-lock simply
+		// never fires. The service's public surface is enough to drive it from outside:
+		// `shouldLock()` and `lock()` are exported, and the background timestamp it reads
+		// is plain `AccountStore` state, so this listener replays exactly what
+		// `handleAppStateChange` does with `"background"`/`"active"`, reading
+		// `document.visibilityState` instead. `packages/core` stays untouched.
+		let visibilityInFlight: Promise<void> = Promise.resolve();
+		const handleVisibilityChange = () => {
+			// Serialised: a fast hide/show pair must not race the timestamp write against
+			// the read that decides whether to lock.
+			visibilityInFlight = visibilityInFlight.then(async () => {
+				const accountId = (await storage.getActiveAccount()) ?? undefined;
+				if (document.visibilityState === "hidden") {
+					await storage.storeBackgroundTimestamp(accountId);
+					return;
+				}
+				if (await service.shouldLock()) {
+					await service.lock();
+				}
+				await storage.clearBackgroundTimestamp(accountId);
+			});
+			void visibilityInFlight.catch((error) => {
+				console.warn(
+					"[AccountContext] Autolock visibility handling failed",
+					error,
+				);
+				visibilityInFlight = Promise.resolve();
+			});
+		};
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+
+		const unsubscribe = service.onLock(() => {
 			console.log("[AccountContext] Autolock triggered, navigating to unlock");
 			// Unlike desktop's autolock service, which takes `lockAllAccounts` as a
 			// constructor callback and runs it before notifying `onLock` subscribers,
@@ -141,8 +176,10 @@ export function AccountProvider({
 		});
 
 		return () => {
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
 			unsubscribe?.();
-			autolockService.current?.dispose();
+			service.dispose();
+			autolockService.current = null;
 		};
 	}, [lockAllAccounts, router]);
 

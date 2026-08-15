@@ -21,6 +21,7 @@ import {
 	setActiveAuthServerUrl,
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -172,6 +173,24 @@ export function LoginPage() {
 				const activeAccount = await storage.getActiveAccount();
 				if (activeAccount) {
 					await storage.storeServerUrl(normalizedServerUrl, activeAccount);
+				}
+			}
+
+			// `apps/mobile/app/(auth)/login.tsx:225` — a fresh sign-in is an unlock, so the
+			// MUK reaches the credential provider here rather than a debounce later. Never
+			// fatal: a failed mirror costs autofill a few seconds, a thrown one costs the
+			// user their sign-in.
+			const signedInAccountId = await storage.getActiveAccount();
+			if (signedInAccountId) {
+				try {
+					await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+						signedInAccountId,
+					]);
+				} catch (error) {
+					console.warn(
+						"[Login] Failed to mirror MUK to credential provider",
+						error,
+					);
 				}
 			}
 

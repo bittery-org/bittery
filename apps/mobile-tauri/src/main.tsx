@@ -7,6 +7,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { CredentialProviderSyncBridge } from "./components/credential-provider-sync-bridge";
 import {
 	AccountProvider,
 	createMobileClientRuntime,
@@ -66,6 +67,7 @@ async function initializeApp() {
 							<AccountProvider router={router} runtime={runtime}>
 								<MobileSyncProvider queryClient={queryClient}>
 									<MobilePlatformProvider>
+										<CredentialProviderSyncBridge />
 										<RouterProvider router={router} />
 									</MobilePlatformProvider>
 								</MobileSyncProvider>
