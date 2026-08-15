@@ -234,13 +234,56 @@ async fn stripe_webhook(
 #[cfg(test)]
 mod tests {
     use super::create_public_http_router;
-    use crate::{test_support::RecordingObjectStorage, AppState};
+    use crate::{
+        test_support::{
+            acquire_env_lock_async, seed_team, seed_user, with_api_test_app, ApiTestApp,
+            EnvVarGuard, RecordingObjectStorage,
+        },
+        AppState,
+    };
     use axum::{
-        body::Body,
+        body::{to_bytes, Body},
         http::{Request, StatusCode},
     };
+    use hmac::{Hmac, KeyInit, Mac};
+    use serde_json::{json, Value};
+    use sha2::Sha256;
+    use sqlx::query_as;
     use std::sync::Arc;
     use tower::ServiceExt;
+
+    type TestHmacSha256 = Hmac<Sha256>;
+
+    async fn post_stripe_event(
+        app: &ApiTestApp,
+        secret: &str,
+        event: Value,
+    ) -> (StatusCode, Value) {
+        let body = event.to_string();
+        let timestamp = chrono::Utc::now().timestamp();
+        let mut mac = TestHmacSha256::new_from_slice(secret.as_bytes())
+            .expect("test webhook secret should be valid");
+        mac.update(format!("{timestamp}.{body}").as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
+        let response = create_public_http_router()
+            .with_state(app.state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks/stripe")
+                    .header("stripe-signature", format!("t={timestamp},v1={signature}"))
+                    .body(Body::from(body))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("Stripe webhook route should respond");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("Stripe webhook response should be readable");
+        let body = serde_json::from_slice(&body).expect("Stripe webhook response should be JSON");
+        (status, body)
+    }
 
     #[tokio::test]
     async fn cdn_route_reports_and_records_storage_failure() {
@@ -286,5 +329,195 @@ mod tests {
             storage.calls(),
             vec!["presign_download:teams/team/avatar.png"]
         );
+    }
+
+    #[tokio::test]
+    async fn stripe_webhook_route_applies_billing_lifecycle_and_deduplicates_events() {
+        let _env_lock = acquire_env_lock_async().await;
+        let secret = "whsec_http_integration";
+        let _env = EnvVarGuard::set(&[
+            ("BITTERY_MODE", "cloud"),
+            ("STRIPE_SECRET_KEY", "sk_test_http_integration"),
+            ("STRIPE_WEBHOOK_SECRET", secret),
+            ("STRIPE_PRICE_TEAM_SEAT_MONTHLY", "price_team_http"),
+        ]);
+
+        with_api_test_app("stripe_webhook_http_lifecycle", |app| async move {
+            seed_user(
+                &app.pool,
+                "user_stripe_http_owner",
+                "Stripe Owner",
+                "stripe-http-owner@example.com",
+            )
+            .await;
+            seed_team(
+                &app.pool,
+                "team_stripe_http",
+                "Stripe HTTP Team",
+                "user_stripe_http_owner",
+                "organization",
+                "free",
+                "none",
+            )
+            .await;
+
+            let checkout = json!({
+                "id": "evt_checkout_http",
+                "type": "checkout.session.completed",
+                "data": { "object": {
+                    "client_reference_id": "team_stripe_http",
+                    "customer": "cus_http",
+                    "subscription": "sub_http",
+                    "metadata": { "plan": "team" }
+                }}
+            });
+            let (status, body) = post_stripe_event(&app, secret, checkout.clone()).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body, json!({ "received": true, "duplicate": false }));
+
+            let checkout_state = query_as::<_, (String, Option<String>, Option<String>)>(
+                "SELECT billing_plan::text, stripe_customer_id, stripe_subscription_id FROM team WHERE id = $1",
+            )
+            .bind("team_stripe_http")
+            .fetch_one(&app.pool)
+            .await
+            .expect("checkout billing state should load");
+            assert_eq!(
+                checkout_state,
+                (
+                    "team".to_string(),
+                    Some("cus_http".to_string()),
+                    Some("sub_http".to_string())
+                )
+            );
+
+            let (status, body) = post_stripe_event(&app, secret, checkout).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body, json!({ "received": true, "duplicate": true }));
+
+            let subscription = |event_id: &str, event_type: &str, status: &str, quantity: i64| {
+                json!({
+                    "id": event_id,
+                    "type": event_type,
+                    "data": { "object": {
+                        "id": "sub_http",
+                        "customer": "cus_http",
+                        "status": status,
+                        "cancel_at_period_end": true,
+                        "items": { "data": [{
+                            "id": "si_http",
+                            "price": { "id": "price_team_http" },
+                            "quantity": quantity,
+                            "current_period_end": 1_900_000_000_i64
+                        }] }
+                    }}
+                })
+            };
+
+            let (status, _) = post_stripe_event(
+                &app,
+                secret,
+                subscription(
+                    "evt_subscription_created_http",
+                    "customer.subscription.created",
+                    "trialing",
+                    4,
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let created_state = query_as::<_, (String, Option<i32>, Option<String>, bool)>(
+                "SELECT billing_status::text, seats_purchased, stripe_subscription_item_id, cancel_at_period_end FROM team WHERE id = $1",
+            )
+            .bind("team_stripe_http")
+            .fetch_one(&app.pool)
+            .await
+            .expect("created subscription state should load");
+            assert_eq!(
+                created_state,
+                (
+                    "trialing".to_string(),
+                    Some(4),
+                    Some("si_http".to_string()),
+                    true
+                )
+            );
+
+            let (status, _) = post_stripe_event(
+                &app,
+                secret,
+                subscription(
+                    "evt_subscription_updated_http",
+                    "customer.subscription.updated",
+                    "active",
+                    7,
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let updated_state = query_as::<_, (String, Option<i32>)>(
+                "SELECT billing_status::text, seats_purchased FROM team WHERE id = $1",
+            )
+            .bind("team_stripe_http")
+            .fetch_one(&app.pool)
+            .await
+            .expect("updated subscription state should load");
+            assert_eq!(updated_state, ("active".to_string(), Some(7)));
+
+            for (event_id, event_type, expected_status) in [
+                ("evt_invoice_failed_http", "invoice.payment_failed", "past_due"),
+                ("evt_invoice_paid_http", "invoice.paid", "active"),
+            ] {
+                let event = json!({
+                    "id": event_id,
+                    "type": event_type,
+                    "data": { "object": {
+                        "customer": "cus_http",
+                        "parent": { "subscription_details": { "subscription": "sub_http" } }
+                    }}
+                });
+                let (status, _) = post_stripe_event(&app, secret, event).await;
+                assert_eq!(status, StatusCode::OK);
+                let billing_status: String = sqlx::query_scalar(
+                    "SELECT billing_status::text FROM team WHERE id = $1",
+                )
+                .bind("team_stripe_http")
+                .fetch_one(&app.pool)
+                .await
+                .expect("invoice billing state should load");
+                assert_eq!(billing_status, expected_status);
+            }
+
+            let (status, _) = post_stripe_event(
+                &app,
+                secret,
+                subscription(
+                    "evt_subscription_deleted_http",
+                    "customer.subscription.deleted",
+                    "canceled",
+                    7,
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let deleted_state = query_as::<_, (
+                String,
+                Option<String>,
+                Option<String>,
+                Option<i32>,
+                bool,
+            )>(
+                "SELECT billing_status::text, stripe_subscription_id, stripe_subscription_item_id, seats_purchased, cancel_at_period_end FROM team WHERE id = $1",
+            )
+            .bind("team_stripe_http")
+            .fetch_one(&app.pool)
+            .await
+            .expect("deleted subscription state should load");
+            assert_eq!(
+                deleted_state,
+                ("canceled".to_string(), None, None, None, false)
+            );
+        })
+        .await;
     }
 }
