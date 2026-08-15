@@ -24,6 +24,7 @@ use crate::{
             resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
             VaultSharingEntitlement,
         },
+        transaction::acquire_advisory_lock,
         vault_key::validate_encrypted_vault_key,
     },
 };
@@ -297,29 +298,7 @@ pub(crate) async fn create_vault(
     })?;
     if input.vault_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (team_id.as_deref(), shared_vault_limit) {
-            query("SELECT pg_advisory_xact_lock(hashtext($1))")
-                .bind(format!("shared-vaults:{team_id}"))
-                .execute(&mut *transaction)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to acquire shared vault limit lock");
-                    AppError::internal("Failed to acquire shared vault limit lock")
-                })?;
-            let existing_count: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
-            )
-            .bind(team_id)
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to count shared vaults");
-                AppError::internal("Failed to count shared vaults")
-            })?;
-            if existing_count >= limit {
-                return Err(AppError::forbidden(format!(
-                    "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
-                )));
-            }
+            assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
         }
     }
 
@@ -511,29 +490,7 @@ pub(crate) async fn convert_vault_type(
     })?;
     if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (target_team_id.as_deref(), shared_vault_limit) {
-            query("SELECT pg_advisory_xact_lock(hashtext($1))")
-                .bind(format!("shared-vaults:{team_id}"))
-                .execute(&mut *transaction)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to acquire shared vault limit lock");
-                    AppError::internal("Failed to acquire shared vault limit lock")
-                })?;
-            let existing_count: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
-            )
-            .bind(team_id)
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to count shared vaults");
-                AppError::internal("Failed to count shared vaults")
-            })?;
-            if existing_count >= limit {
-                return Err(AppError::forbidden(format!(
-                    "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
-                )));
-            }
+            assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
         }
         query("UPDATE vault SET type = 'team'::vault_type, team_id = $1, updated_at = $2 WHERE id = $3")
 			.bind(target_team_id.as_deref())
@@ -1373,6 +1330,34 @@ async fn insert_vault_deleted_audit_log(
         None,
     )
     .await
+}
+
+async fn assert_shared_vault_quota(
+    transaction: &mut Transaction<'_, Postgres>,
+    team_id: &str,
+    limit: i64,
+) -> Result<(), AppError> {
+    acquire_advisory_lock(
+        &mut **transaction,
+        &format!("shared-vaults:{team_id}"),
+        "Failed to acquire shared vault limit lock",
+    )
+    .await?;
+    let existing_count: i64 =
+        query_scalar("SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'")
+            .bind(team_id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "Failed to count shared vaults");
+                AppError::internal("Failed to count shared vaults")
+            })?;
+    if existing_count >= limit {
+        return Err(AppError::forbidden(format!(
+            "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
+        )));
+    }
+    Ok(())
 }
 
 fn resolve_vault_sharing_entitlement(

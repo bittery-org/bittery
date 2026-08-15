@@ -22,7 +22,7 @@ use crate::{
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
-    services::{generate_secure_token, rate_limit},
+    services::{generate_secure_token, rate_limit, transaction::acquire_advisory_lock},
     shapes::{
         allowed_email_shape, create_share_link_shape, email_verification_shape,
         public_share_access_shape, public_share_info_shape, share_access_log_shape,
@@ -202,14 +202,12 @@ pub(crate) async fn create_share_link(
 
     if let Some(max_active_links) = share_links_access.max_active_links {
         let lock_scope = share_links_access.team_id.as_deref().unwrap_or(user_id);
-        query("SELECT pg_advisory_xact_lock(hashtext($1))")
-            .bind(format!("share-links:{lock_scope}"))
-            .execute(&mut *transaction)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to lock share link scope");
-                AppError::internal("Failed to lock share link scope")
-            })?;
+        acquire_advisory_lock(
+            &mut *transaction,
+            &format!("share-links:{lock_scope}"),
+            "Failed to lock share link scope",
+        )
+        .await?;
 
         let active_share_links = count_active_share_links(
             &mut transaction,

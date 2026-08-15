@@ -1,5 +1,18 @@
 use crate::error::AppError;
 
+pub(crate) async fn acquire_advisory_lock<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    key: &str,
+    context: &'static str,
+) -> Result<(), AppError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(key)
+        .execute(executor)
+        .await
+        .map_err(|error| database_error(error, context))?;
+    Ok(())
+}
+
 pub(crate) fn is_retryable_transaction_error(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
