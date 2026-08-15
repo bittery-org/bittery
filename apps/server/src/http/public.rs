@@ -221,14 +221,12 @@ async fn stripe_webhook(
             "duplicate": duplicate,
         }))
         .into_response(),
+        Err(StripeWebhookError::Database(_)) => {
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
         Err(error) => {
             warn!(?error, "stripe webhook processing failed");
-            match &error {
-                StripeWebhookError::Database(_) => {
-                    json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-                _ => json_error(StatusCode::BAD_REQUEST, "Invalid Stripe webhook"),
-            }
+            json_error(StatusCode::BAD_REQUEST, "Invalid Stripe webhook")
         }
     }
 }

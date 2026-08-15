@@ -192,16 +192,13 @@ impl ApiError {
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
         let (status, code, title, detail, retryable) = match error.code {
-            AppErrorCode::InternalServerError => {
-                tracing::error!(error = %error, "API request failed internally");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ErrorCode::InternalError,
-                    "Internal server error",
-                    "The server could not complete the request.".to_string(),
-                    false,
-                )
-            }
+            AppErrorCode::InternalServerError => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorCode::InternalError,
+                "Internal server error",
+                "The server could not complete the request.".to_string(),
+                false,
+            ),
             AppErrorCode::BadRequest => (
                 StatusCode::BAD_REQUEST,
                 ErrorCode::BadRequest,
