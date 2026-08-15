@@ -15,9 +15,13 @@ WORKDIR /app/apps/server
 
 COPY apps/server/Cargo.toml apps/server/Cargo.lock ./
 COPY apps/server/src ./src
+# No database reachable here, so the SQLx query macros read the committed metadata instead.
+COPY apps/server/.sqlx ./.sqlx
 COPY packages/crypto/core/Cargo.toml /app/packages/crypto/core/Cargo.toml
 COPY packages/crypto/core/crates/bittery-crypto-core /app/packages/crypto/core/crates/bittery-crypto-core
 COPY packages/crypto/kdf-policy.json /app/packages/crypto/kdf-policy.json
+
+ENV SQLX_OFFLINE=true
 
 RUN cargo build --release
 
