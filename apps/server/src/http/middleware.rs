@@ -1,4 +1,7 @@
-use std::{any::Any, env, time::Duration};
+use std::{any::Any, time::Duration};
+
+#[cfg(test)]
+use std::env;
 
 use axum::{
     body::Body,
@@ -253,6 +256,13 @@ impl Default for EdgeHttpConfig {
 }
 
 impl EdgeHttpConfig {
+    pub(crate) fn from_server_config(config: &crate::config::ServerConfig) -> Result<Self, String> {
+        Ok(Self {
+            allowed_origins: parse_cors_origins(config.cors_origin.as_deref())?,
+            request_timeout: config.request_timeout,
+        })
+    }
+
     pub(crate) fn request_timeout(&self) -> Duration {
         self.request_timeout
     }
@@ -270,6 +280,7 @@ impl EdgeHttpConfig {
     }
 }
 
+#[cfg(test)]
 pub fn load_edge_http_config() -> Result<EdgeHttpConfig, String> {
     Ok(EdgeHttpConfig {
         allowed_origins: parse_cors_origins(env::var("CORS_ORIGIN").ok().as_deref())?,
@@ -279,6 +290,7 @@ pub fn load_edge_http_config() -> Result<EdgeHttpConfig, String> {
     })
 }
 
+#[cfg(test)]
 fn request_timeout_from_value(raw_value: Option<&str>) -> Result<Duration, String> {
     let Some(raw_value) = raw_value.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(DEFAULT_REQUEST_TIMEOUT);

@@ -486,50 +486,20 @@ fn hash_normalized_email(normalized_email: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn jwt_signing_secret() -> String {
-    match std::env::var("JWT_SECRET") {
-        Ok(secret) if !secret.trim().is_empty() => secret,
-        _ => {
-            if is_production() {
-                panic!("JWT_SECRET must be set in production (NODE_ENV=production)");
-            }
-            "bittery-dev-auth-secret".to_string()
-        }
-    }
-}
-
 fn encode_hs256_token(
     claims: &impl Serialize,
+    jwt_secret: &str,
     error_message: &'static str,
 ) -> Result<String, AppError> {
     encode(
         &Header::new(Algorithm::HS256),
         claims,
-        &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )
     .map_err(|error| {
         tracing::error!(error = %error, "{error_message}");
         AppError::internal(error_message)
     })
-}
-
-fn is_production() -> bool {
-    matches!(
-        std::env::var("NODE_ENV").ok().as_deref(),
-        Some("production")
-    )
-}
-
-pub(crate) fn is_dev_auth_stub_enabled() -> bool {
-    matches!(
-        std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS")
-            .ok()
-            .as_deref(),
-        Some("true")
-    ) && !matches!(
-        std::env::var("NODE_ENV").ok().as_deref(),
-        Some("production")
-    )
 }
 
 fn validate_hex_string(value: &str, message: &str) -> Result<(), AppError> {

@@ -80,7 +80,7 @@ async fn get_meta(State(state): State<AppState>) -> Result<Json<ApiMetadata>, Ap
             requires_email_verification: registration.requires_email_verification,
             reason: registration.reason,
         },
-        crate::config::insecure_http_enabled(),
+        state.config.server.allow_insecure_http,
     )))
 }
 

@@ -5,7 +5,7 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::{format_timestamp, DeploymentMode},
     db::enums::{BillingPlan, BillingStatus, InvitationStatus, TeamRole, TeamType},
     db::models::*,
     error::AppError,
@@ -327,6 +327,7 @@ pub(crate) async fn get_team(
 
 pub(crate) async fn get_team_vaults(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: TeamIdInput,
 ) -> Result<Vec<TeamVaultResponse>, AppError> {
@@ -342,7 +343,11 @@ pub(crate) async fn get_team_vaults(
 
     let actor = actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     ensure_team_admin(actor.role)?;
-    assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
+    assert_optional_team_management_entitlement(
+        deployment_mode,
+        actor.billing_plan,
+        actor.billing_status,
+    )?;
 
     let team_vaults = query_as::<_, DbTeamVaultRow>(
         "SELECT id, name FROM vault WHERE team_id = $1 ORDER BY created_at ASC",
@@ -487,10 +492,11 @@ pub(crate) async fn create_team_image_upload(
 
 pub(crate) async fn delete_team(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: TeamIdInput,
 ) -> Result<SuccessResponse, AppError> {
-    if bittery_mode() == "self-hosted" {
+    if deployment_mode.is_self_hosted() {
         return Err(AppError::bad_request(
             "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
         ));
@@ -592,6 +598,7 @@ pub(crate) async fn delete_team(
 
 pub(crate) async fn send_invitation(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: SendInvitationInput,
 ) -> Result<SendInvitationResponse, AppError> {
@@ -616,7 +623,7 @@ pub(crate) async fn send_invitation(
 	.await
 	.map_err(|error| database_error(error, "Failed to load team"))?
 	.ok_or_else(|| AppError::not_found("Team not found"))?;
-    assert_team_management_entitlement(team.billing_plan, team.billing_status)?;
+    assert_team_management_entitlement(deployment_mode, team.billing_plan, team.billing_status)?;
 
     if let Some(member_limit) = team.member_limit {
         let current_members =
@@ -746,29 +753,32 @@ async fn load_pending_invitation_by_id(
 
 pub(crate) async fn accept_invitation(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     input: TokenInput,
 ) -> Result<AcceptInvitationResponse, AppError> {
     validate_token(&input.token)?;
     let invitation = load_pending_invitation_by_token(pool, &input.token).await?;
-    accept_loaded_invitation(pool, billing_gateway, user_id, invitation).await
+    accept_loaded_invitation(pool, deployment_mode, billing_gateway, user_id, invitation).await
 }
 
 /// Accepts an invitation the signed-in user already sees in their pending list.
 /// Exists because that list no longer exposes the raw token.
 pub(crate) async fn accept_invitation_by_id(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     input: InvitationIdInput,
 ) -> Result<AcceptInvitationResponse, AppError> {
     let invitation = load_pending_invitation_by_id(pool, &input.invitation_id).await?;
-    accept_loaded_invitation(pool, billing_gateway, user_id, invitation).await
+    accept_loaded_invitation(pool, deployment_mode, billing_gateway, user_id, invitation).await
 }
 
 async fn accept_loaded_invitation(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     invitation: DbTeamInvitationAcceptRow,
@@ -783,7 +793,11 @@ async fn accept_loaded_invitation(
         return Err(AppError::bad_request("Invitation has expired"));
     }
 
-    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
+    assert_team_management_entitlement(
+        deployment_mode,
+        invitation.billing_plan,
+        invitation.billing_status,
+    )?;
 
     let current_user = load_team_membership_actor(pool, user_id)
         .await?
@@ -918,6 +932,7 @@ async fn decline_loaded_invitation(
 
 pub(crate) async fn cancel_invitation(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: InvitationIdInput,
 ) -> Result<SuccessResponse, AppError> {
@@ -941,7 +956,11 @@ pub(crate) async fn cancel_invitation(
         return Err(AppError::forbidden("Insufficient permissions"));
     }
 
-    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
+    assert_team_management_entitlement(
+        deployment_mode,
+        invitation.billing_plan,
+        invitation.billing_status,
+    )?;
 
     query("DELETE FROM team_invitation WHERE id = $1")
         .bind(&input.invitation_id)
@@ -961,6 +980,7 @@ pub(crate) async fn cancel_invitation(
 /// token returned once so the caller can hand out a working link.
 pub(crate) async fn resend_invitation(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: InvitationIdInput,
 ) -> Result<ResendInvitationResponse, AppError> {
@@ -984,7 +1004,11 @@ pub(crate) async fn resend_invitation(
         return Err(AppError::forbidden("Insufficient permissions"));
     }
 
-    assert_team_management_entitlement(invitation.billing_plan, invitation.billing_status)?;
+    assert_team_management_entitlement(
+        deployment_mode,
+        invitation.billing_plan,
+        invitation.billing_status,
+    )?;
 
     let token = generate_secure_token();
     query(
@@ -1058,6 +1082,7 @@ pub(crate) mod invitation_handlers {
 
     pub(crate) async fn list_team_invitations(
         pool: &PgPool,
+        deployment_mode: DeploymentMode,
         user_id: &str,
         input: TeamIdInput,
     ) -> Result<Vec<TeamInvitationListEntry>, AppError> {
@@ -1074,7 +1099,11 @@ pub(crate) mod invitation_handlers {
         let actor =
             actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
         ensure_team_admin(actor.role)?;
-        assert_optional_team_management_entitlement(actor.billing_plan, actor.billing_status)?;
+        assert_optional_team_management_entitlement(
+            deployment_mode,
+            actor.billing_plan,
+            actor.billing_status,
+        )?;
 
         let invitations = query_as::<_, DbTeamInvitationListRow>(
 			"SELECT ti.id, ti.email, ti.role::text AS role, ti.status::text AS status, invited_by.name AS invited_by_name, ti.created_at, ti.expires_at FROM team_invitation ti INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.team_id = $1 AND ti.status = 'pending' ORDER BY ti.created_at DESC",
@@ -1100,10 +1129,15 @@ pub(crate) mod invitation_handlers {
 }
 
 fn assert_team_management_entitlement(
+    deployment_mode: DeploymentMode,
     billing_plan: BillingPlan,
     billing_status: BillingStatus,
 ) -> Result<(), AppError> {
-    if shared_team_management_enabled(bittery_mode(), Some(billing_plan), Some(billing_status)) {
+    if shared_team_management_enabled(
+        deployment_mode.as_str(),
+        Some(billing_plan),
+        Some(billing_status),
+    ) {
         Ok(())
     } else {
         Err(AppError::forbidden(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
@@ -1111,12 +1145,13 @@ fn assert_team_management_entitlement(
 }
 
 fn assert_optional_team_management_entitlement(
+    deployment_mode: DeploymentMode,
     billing_plan: Option<BillingPlan>,
     billing_status: Option<BillingStatus>,
 ) -> Result<(), AppError> {
     let plan = billing_plan.ok_or_else(|| AppError::not_found("Team not found"))?;
     let status = billing_status.ok_or_else(|| AppError::not_found("Team not found"))?;
-    assert_team_management_entitlement(plan, status)
+    assert_team_management_entitlement(deployment_mode, plan, status)
 }
 
 fn default_invitation_role() -> TeamRole {

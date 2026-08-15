@@ -20,8 +20,7 @@ use crate::{
         fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain,
     },
     services::billing::{
-        is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
-        StripeWebhookError,
+        is_stripe_webhook_configured, process_stripe_webhook_event, StripeWebhookError,
     },
     AppState,
 };
@@ -198,11 +197,11 @@ async fn stripe_webhook(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if is_self_hosted_mode() {
+    if app_state.config.server.mode.is_self_hosted() {
         return json_error(StatusCode::NOT_FOUND, "Not Found");
     }
 
-    if !is_stripe_webhook_configured() {
+    if !is_stripe_webhook_configured(&app_state.config.stripe) {
         return json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "Stripe webhook not configured",
@@ -215,7 +214,9 @@ async fn stripe_webhook(
         .get("stripe-signature")
         .and_then(|value| value.to_str().ok());
 
-    match process_stripe_webhook_event(pool, &body, signature_header).await {
+    match process_stripe_webhook_event(pool, &app_state.config.stripe, &body, signature_header)
+        .await
+    {
         Ok(duplicate) => Json(json!({
             "received": true,
             "duplicate": duplicate,
@@ -236,8 +237,7 @@ mod tests {
     use super::create_public_http_router;
     use crate::{
         test_support::{
-            acquire_env_lock_async, seed_team, seed_user, with_api_test_app, ApiTestApp,
-            EnvVarGuard, RecordingObjectStorage,
+            seed_team, seed_user, with_api_test_app_state, ApiTestApp, RecordingObjectStorage,
         },
         AppState,
     };
@@ -333,16 +333,18 @@ mod tests {
 
     #[tokio::test]
     async fn stripe_webhook_route_applies_billing_lifecycle_and_deduplicates_events() {
-        let _env_lock = acquire_env_lock_async().await;
         let secret = "whsec_http_integration";
-        let _env = EnvVarGuard::set(&[
-            ("BITTERY_MODE", "cloud"),
-            ("STRIPE_SECRET_KEY", "sk_test_http_integration"),
-            ("STRIPE_WEBHOOK_SECRET", secret),
-            ("STRIPE_PRICE_TEAM_SEAT_MONTHLY", "price_team_http"),
-        ]);
-
-        with_api_test_app("stripe_webhook_http_lifecycle", |app| async move {
+        with_api_test_app_state(
+            "stripe_webhook_http_lifecycle",
+            |mut state| {
+                let config = Arc::make_mut(&mut state.config);
+                config.server.mode = crate::config::DeploymentMode::Cloud;
+                config.stripe.secret_key = Some("sk_test_http_integration".to_string());
+                config.stripe.webhook_secret = Some(secret.to_string());
+                config.stripe.team_seat_monthly_price_id = Some("price_team_http".to_string());
+                state
+            },
+            |app| async move {
             seed_user(
                 &app.pool,
                 "user_stripe_http_owner",
@@ -517,7 +519,8 @@ mod tests {
                 deleted_state,
                 ("canceled".to_string(), None, None, None, false)
             );
-        })
+            },
+        )
         .await;
     }
 }

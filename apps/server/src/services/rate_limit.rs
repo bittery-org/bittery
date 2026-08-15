@@ -21,7 +21,11 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 use tracing::info;
 
-use crate::{error::AppError, services::transaction::database_error};
+use crate::{
+    config::{RateLimitAdapter, RateLimitConfig},
+    error::AppError,
+    services::transaction::database_error,
+};
 
 // ---------------------------------------------------------------------------
 // Scope names
@@ -63,42 +67,34 @@ pub struct WindowLimit {
     pub window: Duration,
 }
 
-fn env_i64(name: &str, default: i64) -> i64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.trim().parse::<i64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
-}
-
 const FIFTEEN_MINUTES: Duration = Duration::from_secs(15 * 60);
 const ONE_HOUR: Duration = Duration::from_secs(60 * 60);
 const ONE_DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
-pub fn login_ip_limit() -> WindowLimit {
+pub fn login_ip_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_LOGIN_IP", 20),
+        max: config.login_ip,
         window: FIFTEEN_MINUTES,
     }
 }
 
-pub fn login_email_limit() -> WindowLimit {
+pub fn login_email_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_LOGIN_EMAIL", 10),
+        max: config.login_email,
         window: FIFTEEN_MINUTES,
     }
 }
 
-pub fn signup_ip_limit() -> WindowLimit {
+pub fn signup_ip_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_SIGNUP_IP", 10),
+        max: config.signup_ip,
         window: ONE_HOUR,
     }
 }
 
-pub fn signup_email_limit() -> WindowLimit {
+pub fn signup_email_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_SIGNUP_EMAIL", 5),
+        max: config.signup_email,
         window: ONE_HOUR,
     }
 }
@@ -107,70 +103,67 @@ pub fn signup_email_limit() -> WindowLimit {
 /// sends an email and mints a fresh code, so this is both an email-abuse limit
 /// and the outer bound on how many independent codes an attacker can guess
 /// against (the per-email lockout below caps guesses within that budget).
-pub fn signup_verification_request_limit() -> WindowLimit {
+pub fn signup_verification_request_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", 5),
+        max: config.signup_verify_request,
         window: ONE_HOUR,
     }
 }
 
-pub fn recovery_request_limit() -> WindowLimit {
+pub fn recovery_request_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_RECOVERY_REQUEST", 5),
+        max: config.recovery_request,
         window: ONE_HOUR,
     }
 }
 
-pub fn generic_ip_limit() -> WindowLimit {
+pub fn generic_ip_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
-        max: env_i64("RATE_LIMIT_AUTH_IP", 30),
+        max: config.auth_ip,
         window: FIFTEEN_MINUTES,
     }
 }
 
-pub fn share_create_daily_limit() -> WindowLimit {
+pub fn share_create_daily_limit(config: &RateLimitConfig) -> WindowLimit {
     // `SHARE_LINK_DAILY_LIMIT` keeps working (previous env var name is preserved).
     WindowLimit {
-        max: env_i64("SHARE_LINK_DAILY_LIMIT", 50),
+        max: config.share_link_daily,
         window: ONE_DAY,
     }
 }
 
-pub fn signup_verify_max_attempts() -> i64 {
+pub fn signup_verify_max_attempts(config: &RateLimitConfig) -> i64 {
     // Lifetime lockout threshold for signup-code guessing, keyed on the email
     // hash rather than the code row. The per-code database cap
     // (`signup_verification.max_attempts`, default 5) resets whenever a new code
     // is requested, so on its own it bounds guesses per code, not per identity.
     // This limiter is what makes the ~19.8-bit code space unguessable.
-    env_i64("RATE_LIMIT_SIGNUP_VERIFY_MAX", 10)
+    config.signup_verify_max
 }
 
-pub fn signup_verify_lock_duration() -> Duration {
-    let minutes = env_i64("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", 15);
-    Duration::from_secs((minutes as u64) * 60)
+pub fn signup_verify_lock_duration(config: &RateLimitConfig) -> Duration {
+    config.signup_verify_lock
 }
 
-pub fn recovery_verify_max_attempts() -> i64 {
+pub fn recovery_verify_max_attempts(config: &RateLimitConfig) -> i64 {
     // This is the rate-limiter lockout threshold that also throttles/locks the
     // caller across recovery-code attempts. It is independent of the per-code
     // database cap enforced by `recovery_verification.max_attempts` (default 5),
     // which invalidates a single code after too many guesses regardless of this
     // limiter. Both caps apply; the stricter one trips first.
-    env_i64("RATE_LIMIT_RECOVERY_VERIFY_MAX", 5)
+    config.recovery_verify_max
 }
 
-pub fn recovery_verify_lock_duration() -> Duration {
-    let minutes = env_i64("RATE_LIMIT_RECOVERY_LOCK_MINUTES", 15);
-    Duration::from_secs((minutes as u64) * 60)
+pub fn recovery_verify_lock_duration(config: &RateLimitConfig) -> Duration {
+    config.recovery_verify_lock
 }
 
-pub fn share_email_verify_max_attempts() -> i64 {
-    env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", 5)
+pub fn share_email_verify_max_attempts(config: &RateLimitConfig) -> i64 {
+    config.share_email_verify_max
 }
 
-pub fn share_email_verify_lock_duration() -> Duration {
-    let minutes = env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", 15);
-    Duration::from_secs((minutes as u64) * 60)
+pub fn share_email_verify_lock_duration(config: &RateLimitConfig) -> Duration {
+    config.share_email_verify_lock
 }
 
 // ---------------------------------------------------------------------------
@@ -621,33 +614,26 @@ impl RateLimiter for RedisRateLimiter {
 /// Builds the configured rate limiter from `RATE_LIMIT_ADAPTER` /
 /// `RATE_LIMIT_REDIS_URL`. Fails fast on invalid combinations (e.g. `redis`
 /// without a URL, or an unreachable Redis).
-pub async fn build_rate_limiter(pool: &PgPool) -> Result<Arc<dyn RateLimiter>, String> {
-    let adapter = std::env::var("RATE_LIMIT_ADAPTER")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "auto".to_string());
-    let redis_url = std::env::var("RATE_LIMIT_REDIS_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-
-    match adapter.as_str() {
-        "postgres" => {
+pub async fn build_rate_limiter(
+    pool: &PgPool,
+    config: &RateLimitConfig,
+) -> Result<Arc<dyn RateLimiter>, String> {
+    match config.adapter {
+        RateLimitAdapter::Postgres => {
             info!("rate limiter: postgres backend");
             Ok(Arc::new(PostgresRateLimiter::new(pool.clone())))
         }
-        "redis" => {
-            let url = redis_url.ok_or_else(|| {
+        RateLimitAdapter::Redis => {
+            let url = config.redis_url.as_deref().ok_or_else(|| {
                 "RATE_LIMIT_ADAPTER=redis requires RATE_LIMIT_REDIS_URL to be set".to_string()
             })?;
-            let limiter = RedisRateLimiter::connect(&url).await?;
+            let limiter = RedisRateLimiter::connect(url).await?;
             info!("rate limiter: redis backend");
             Ok(Arc::new(limiter))
         }
-        "auto" => match redis_url {
+        RateLimitAdapter::Auto => match config.redis_url.as_deref() {
             Some(url) => {
-                let limiter = RedisRateLimiter::connect(&url).await?;
+                let limiter = RedisRateLimiter::connect(url).await?;
                 info!("rate limiter: redis backend (auto)");
                 Ok(Arc::new(limiter))
             }
@@ -656,9 +642,6 @@ pub async fn build_rate_limiter(pool: &PgPool) -> Result<Arc<dyn RateLimiter>, S
                 Ok(Arc::new(PostgresRateLimiter::new(pool.clone())))
             }
         },
-        other => Err(format!(
-            "invalid RATE_LIMIT_ADAPTER '{other}' (expected auto, postgres, or redis)"
-        )),
     }
 }
 

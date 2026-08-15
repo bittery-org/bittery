@@ -171,6 +171,7 @@ async fn status(
     Ok(Json(
         billing::get_billing_status(
             &state.db_pool,
+            &state.config.server,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
         )
@@ -185,9 +186,13 @@ async fn entitlements(
     request: AuthenticatedRequest,
 ) -> Result<Json<BillingEntitlementsResponse>, ApiError> {
     Ok(Json(
-        billing::get_billing_entitlements(&state.db_pool, &request.session.user_id)
-            .await?
-            .into(),
+        billing::get_billing_entitlements(
+            &state.db_pool,
+            &state.config.server,
+            &request.session.user_id,
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -197,9 +202,13 @@ async fn attachment_usage(
     request: AuthenticatedRequest,
 ) -> Result<Json<AttachmentUsageResponse>, ApiError> {
     Ok(Json(
-        billing::get_attachment_usage(&state.db_pool, &request.session.user_id)
-            .await?
-            .into(),
+        billing::get_attachment_usage(
+            &state.db_pool,
+            &state.config.server,
+            &request.session.user_id,
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -212,6 +221,8 @@ async fn create_checkout_session(
     Ok(Json(
         billing::create_checkout_session(
             &state.db_pool,
+            &state.config.server,
+            &state.config.stripe,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
             CheckoutPlanInput {
@@ -231,6 +242,7 @@ async fn create_portal_session(
     Ok(Json(
         billing::create_portal_session(
             &state.db_pool,
+            &state.config.server,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
         )
@@ -247,6 +259,7 @@ async fn preview_additional_team_seat(
     Ok(Json(
         billing::preview_additional_team_seat(
             &state.db_pool,
+            &state.config.server,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
         )

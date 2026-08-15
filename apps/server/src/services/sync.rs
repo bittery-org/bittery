@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use crate::{
+    config::DeploymentMode,
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -171,6 +172,7 @@ pub(crate) async fn get_events_since(
 pub(crate) async fn bootstrap_items(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: BootstrapItemsInput,
 ) -> Result<BootstrapItemsResponse, AppError> {
@@ -203,7 +205,7 @@ pub(crate) async fn bootstrap_items(
             .map(|id| SyncCursorResponse { id }),
     };
 
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
     let paged_items = fetch_bootstrap_items(pool, user_id, input.cursor.as_deref(), limit).await?;
     let count_has_more = paged_items.rows.len() > limit as usize;
     let has_more = paged_items.has_more || count_has_more;

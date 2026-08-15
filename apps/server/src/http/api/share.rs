@@ -26,6 +26,7 @@ use super::{
     idempotency,
     pagination::{
         decode_page_key, page_prefetched, query_limit, timestamp_cursor_key, ApiPageQuery,
+        CursorContext,
     },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
@@ -269,6 +270,7 @@ async fn list_share_links(
     Ok(Json(
         share::list_share_links_by_item(
             &state.db_pool,
+            &state.config.server,
             &request.session.user_id,
             share::ItemIdInput { item_id },
         )
@@ -303,14 +305,18 @@ async fn access_logs(
 ) -> Result<Json<CursorPage<ShareAccessLogResponse>>, ApiError> {
     let cursor = decode_page_key(
         &page,
-        &request.session.user_id,
-        "share-access-logs",
-        &link_id,
+        CursorContext::new(
+            &request.session.user_id,
+            "share-access-logs",
+            &link_id,
+            &state.config.auth.jwt_secret,
+        ),
     )?
     .map(|key| timestamp_cursor_key(&key))
     .transpose()?;
     let values = share::get_share_access_logs(
         &state.db_pool,
+        state.config.server.mode,
         &request.session.user_id,
         share::LinkIdInput {
             link_id: link_id.clone(),
@@ -323,9 +329,12 @@ async fn access_logs(
     Ok(Json(page_prefetched(
         values,
         &page,
-        &request.session.user_id,
-        "share-access-logs",
-        &link_id,
+        CursorContext::new(
+            &request.session.user_id,
+            "share-access-logs",
+            &link_id,
+            &state.config.auth.jwt_secret,
+        ),
         |entry| format!("{}\0{}", entry.accessed_at, entry.id),
     )?))
 }
@@ -336,9 +345,13 @@ async fn public_info(
     Path(token): Path<ShareToken>,
 ) -> Result<Json<PublicShareInfoResponse>, ApiError> {
     Ok(Json(
-        share::get_public_info(&state.db_pool, share::PublicTokenInput { token: token.0 })
-            .await?
-            .into(),
+        share::get_public_info(
+            &state.db_pool,
+            state.config.server.mode,
+            share::PublicTokenInput { token: token.0 },
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -348,9 +361,13 @@ async fn access_public(
     Path(token): Path<ShareToken>,
 ) -> Result<Json<PublicShareAccessResponse>, ApiError> {
     Ok(Json(
-        share::access_public(&state.db_pool, share::PublicTokenInput { token: token.0 })
-            .await?
-            .into(),
+        share::access_public(
+            &state.db_pool,
+            state.config.server.mode,
+            share::PublicTokenInput { token: token.0 },
+        )
+        .await?
+        .into(),
     ))
 }
 

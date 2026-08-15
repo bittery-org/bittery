@@ -3,12 +3,13 @@ use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow};
 
 use super::*;
+use crate::config::Config;
 use crate::db::enums::{ShareLinkAccessMode, ShareLinkStatus};
 use crate::error::AppErrorCode;
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
-    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app, EnvVarGuard,
+    acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
+    seed_user, seed_vault, seed_vault_key, with_api_test_app, EnvVarGuard,
 };
 
 struct ShareActorFixture {
@@ -72,44 +73,6 @@ fn sample_share_link_row() -> DbShareLinkRow {
         last_accessed_at: None,
         vault_id: "vault_123".to_string(),
     }
-}
-
-fn set_env_var(name: &str, value: Option<&str>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
-
-fn restore_env_var(name: &str, previous: Option<String>) {
-    match previous.as_deref() {
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
-
-fn with_env_vars<T>(
-    bittery_mode_value: Option<&str>,
-    web_app_url_value: Option<&str>,
-    share_link_daily_limit_value: Option<&str>,
-    test_fn: impl FnOnce() -> T,
-) -> T {
-    let _guard = acquire_env_lock();
-    let previous_mode = std::env::var("BITTERY_MODE").ok();
-    let previous_web_app_url = std::env::var("WEB_APP_URL").ok();
-    let previous_share_link_daily_limit = std::env::var("SHARE_LINK_DAILY_LIMIT").ok();
-
-    set_env_var("BITTERY_MODE", bittery_mode_value);
-    set_env_var("WEB_APP_URL", web_app_url_value);
-    set_env_var("SHARE_LINK_DAILY_LIMIT", share_link_daily_limit_value);
-
-    let result = test_fn();
-
-    restore_env_var("BITTERY_MODE", previous_mode);
-    restore_env_var("WEB_APP_URL", previous_web_app_url);
-    restore_env_var("SHARE_LINK_DAILY_LIMIT", previous_share_link_daily_limit);
-
-    result
 }
 
 #[derive(FromRow)]
@@ -253,44 +216,19 @@ fn effective_share_link_status_reports_expired_and_exhausted_states() {
 }
 
 #[test]
-fn base_share_url_uses_trimmed_env_value_and_default_fallback() {
-    with_env_vars(None, Some(" https://app.example.com/ "), None, || {
-        assert_eq!(base_share_url(), "https://app.example.com/share/");
-    });
+fn base_share_url_uses_startup_config_and_production_fallback() {
+    let mut configured = Config::for_test().server;
+    configured.web_app_url = Some("https://app.example.com/".to_string());
+    assert_eq!(
+        base_share_url(&configured),
+        "https://app.example.com/share/"
+    );
 
-    with_env_vars(None, Some("   "), None, || {
-        assert_eq!(base_share_url(), "https://app.bittery.com/share/");
-    });
-}
-
-#[test]
-fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
-    with_env_vars(Some("SELF-HOSTED"), None, None, || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-
-    with_env_vars(Some("cloud"), None, None, || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
-
-    with_env_vars(None, None, None, || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
-}
-
-#[test]
-fn share_link_daily_limit_uses_positive_env_value_or_default() {
-    with_env_vars(None, None, Some("75"), || {
-        assert_eq!(share_link_daily_limit(), 75);
-    });
-
-    with_env_vars(None, None, Some("0"), || {
-        assert_eq!(share_link_daily_limit(), DEFAULT_SHARE_LINK_DAILY_LIMIT);
-    });
-
-    with_env_vars(None, None, Some("not-a-number"), || {
-        assert_eq!(share_link_daily_limit(), DEFAULT_SHARE_LINK_DAILY_LIMIT);
-    });
+    configured.web_app_url = None;
+    assert_eq!(
+        base_share_url(&configured),
+        "https://app.bittery.com/share/"
+    );
 }
 
 fn share_token(fill: char) -> String {

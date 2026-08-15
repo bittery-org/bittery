@@ -105,7 +105,10 @@ async fn auth_public_signup_login_and_logout_flow() {
                 assert_eq!(unknown_email.body["exists"], json!(true));
                 assert_eq!(
                     unknown_email.body["secretKeyHint"],
-                    json!(deterministic_fake_hint(&normalized_email)),
+                    json!(deterministic_fake_hint(
+                        &app.state.config.auth.jwt_secret,
+                        &normalized_email
+                    )),
                 );
 
                 let request_verification = app
@@ -1381,8 +1384,8 @@ async fn auth_vault_key_pages_are_bounded_continuous_and_principal_bound() {
 
 #[test]
 fn fake_hint_is_case_insensitive() {
-    let lower = deterministic_fake_hint("case-test@example.com");
-    let upper = deterministic_fake_hint("CASE-TEST@EXAMPLE.COM");
+    let lower = deterministic_fake_hint("test-jwt-secret", "case-test@example.com");
+    let upper = deterministic_fake_hint("test-jwt-secret", "CASE-TEST@EXAMPLE.COM");
 
     assert_eq!(lower, upper);
     assert!(lower.starts_with("A3-"));
@@ -1785,6 +1788,32 @@ fn rate_limit_env(vars: &[(&str, &str)]) -> RateLimitEnvGuard {
     RateLimitEnvGuard::set(&all)
 }
 
+async fn with_rate_limit_test_app<T, F, Fut>(
+    test_name: &str,
+    vars: &[(&str, &str)],
+    test_fn: F,
+) -> T
+where
+    F: FnOnce(ApiTestApp) -> Fut,
+    Fut: Future<Output = T>,
+{
+    let _env = rate_limit_env(vars);
+    with_api_test_app(test_name, test_fn).await
+}
+
+async fn with_configured_auth_test_app<T, F, Fut>(
+    test_name: &str,
+    vars: &[(&str, &str)],
+    test_fn: F,
+) -> T
+where
+    F: FnOnce(ApiTestApp) -> Fut,
+    Fut: Future<Output = T>,
+{
+    let _env = RateLimitEnvGuard::set(vars);
+    with_api_test_app(test_name, test_fn).await
+}
+
 fn headers_with_ip(ip: &str) -> HeaderMap {
     let mut headers = unauthenticated_json_headers();
     headers.insert(
@@ -1808,13 +1837,13 @@ fn object_keys(value: &serde_json::Value) -> Vec<String> {
 #[tokio::test]
 async fn verify_recovery_code_locks_out_after_repeated_failures() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app(
+        with_rate_limit_test_app(
             "rate_limit_recovery_verify_lockout",
+            &[
+                ("RATE_LIMIT_RECOVERY_VERIFY_MAX", "3"),
+                ("RATE_LIMIT_RECOVERY_LOCK_MINUTES", "15"),
+            ],
             |app| async move {
-                let _env = rate_limit_env(&[
-                    ("RATE_LIMIT_RECOVERY_VERIFY_MAX", "3"),
-                    ("RATE_LIMIT_RECOVERY_LOCK_MINUTES", "15"),
-                ]);
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery").await;
 
                 let request = app
@@ -2029,13 +2058,15 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
 #[tokio::test]
 async fn verify_signup_verification_locks_out_across_code_re_request() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_signup_verify_lockout", |app| async move {
-            let _env = rate_limit_env(&[
+        with_rate_limit_test_app(
+            "rate_limit_signup_verify_lockout",
+            &[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "3"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
                 ("RATE_LIMIT_AUTH_IP", "50"),
-            ]);
+            ],
+            |app| async move {
             let email = "signup-verify-lockout@example.com";
             let ip = "198.51.100.20";
 
@@ -2096,7 +2127,8 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
             .await
             .expect("lock row should load");
             assert!(locked_until.is_some_and(|until| until > now_utc()));
-        })
+            },
+        )
         .await;
     })
     .await;
@@ -2107,17 +2139,19 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 #[tokio::test]
 async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_signup_verify_no_pending", |app| async move {
-            let _env = rate_limit_env(&[
+        with_rate_limit_test_app(
+            "rate_limit_signup_verify_no_pending",
+            &[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
                 ("RATE_LIMIT_AUTH_IP", "50"),
-            ]);
-            let email = "signup-verify-no-pending@example.com";
-            let ip = "198.51.100.21";
+            ],
+            |app| async move {
+                let email = "signup-verify-no-pending@example.com";
+                let ip = "198.51.100.21";
 
-            for _ in 0..4 {
-                let attempt = app
+                for _ in 0..4 {
+                    let attempt = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/signup-verifications/verify",
@@ -2125,13 +2159,14 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(attempt.body["success"], json!(false));
-            }
+                    assert_eq!(attempt.body["success"], json!(false));
+                }
 
-            // A genuine code issued afterwards still works.
-            let token = issue_signup_verification_token(&app, email, None).await;
-            assert!(!token.is_empty());
-        })
+                // A genuine code issued afterwards still works.
+                let token = issue_signup_verification_token(&app, email, None).await;
+                assert!(!token.is_empty());
+            },
+        )
         .await;
     })
     .await;
@@ -2142,12 +2177,14 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 #[tokio::test]
 async fn verify_signup_verification_rejects_malformed_codes_without_consuming_attempts() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_signup_verify_malformed", |app| async move {
-            let _env = rate_limit_env(&[
+        with_rate_limit_test_app(
+            "rate_limit_signup_verify_malformed",
+            &[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "50"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
                 ("RATE_LIMIT_AUTH_IP", "50"),
-            ]);
+            ],
+            |app| async move {
             let email = "signup-verify-malformed@example.com";
             let ip = "198.51.100.22";
 
@@ -2178,7 +2215,8 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
                 .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(verified.body["success"], json!(true));
-        })
+            },
+        )
         .await;
     })
     .await;
@@ -2188,10 +2226,10 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 #[tokio::test]
 async fn request_signup_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app(
+        with_rate_limit_test_app(
             "rate_limit_signup_verify_req_ip_rotation",
+            &[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")],
             |app| async move {
-                let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
                 let email = "signup-verify-req-rotate@example.com";
 
                 for ip in ["203.0.113.31", "203.0.113.32"] {
@@ -2230,10 +2268,10 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app(
+        with_rate_limit_test_app(
             "rate_limit_signup_verify_req_email_rotation",
+            &[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")],
             |app| async move {
-                let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
                 let ip = "203.0.113.41";
 
                 for email in ["sv-rot-a@example.com", "sv-rot-b@example.com"] {
@@ -2271,16 +2309,31 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_ip() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_start_login_ip", |app| async move {
-            let _env = rate_limit_env(&[
+        with_rate_limit_test_app(
+            "rate_limit_start_login_ip",
+            &[
                 ("RATE_LIMIT_LOGIN_IP", "3"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "50"),
-            ]);
-            let ephemeral = build_login_ephemeral_fixture();
-            let email = "rl-login-ip@example.com";
+            ],
+            |app| async move {
+                let ephemeral = build_login_ephemeral_fixture();
+                let email = "rl-login-ip@example.com";
 
-            for _ in 0..3 {
-                let response = app
+                for _ in 0..3 {
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/login-attempts",
+                            Some(
+                                json!({ "email": email, "clientPublicKey": ephemeral.public_key }),
+                            ),
+                            headers_with_ip("203.0.113.10"),
+                        )
+                        .await;
+                    assert!(response.body.is_object());
+                }
+
+                let blocked = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/login-attempts",
@@ -2288,34 +2341,24 @@ async fn start_login_is_rate_limited_per_ip() {
                         headers_with_ip("203.0.113.10"),
                     )
                     .await;
-                assert!(response.body.is_object());
-            }
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
 
-            let blocked = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/login-attempts",
-                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
-                    headers_with_ip("203.0.113.10"),
-                )
-                .await;
-            assert_handler_error(
-                &blocked.body,
-                RATE_LIMITED_CODE,
-                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
-            );
-
-            // A different IP is unaffected.
-            let other_ip = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/login-attempts",
-                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
-                    headers_with_ip("203.0.113.99"),
-                )
-                .await;
-            assert!(other_ip.body.is_object());
-        })
+                // A different IP is unaffected.
+                let other_ip = app
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/login-attempts",
+                        Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
+                        headers_with_ip("203.0.113.99"),
+                    )
+                    .await;
+                assert!(other_ip.body.is_object());
+            },
+        )
         .await;
     })
     .await;
@@ -2327,42 +2370,47 @@ async fn start_login_is_rate_limited_per_ip() {
 #[tokio::test]
 async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[
+        with_configured_auth_test_app(
+            "rate_limit_start_login_spoofed_ip",
+            &[
                 ("TRUST_PROXY_MODE", "none"),
                 ("RATE_LIMIT_LOGIN_IP", "3"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "50"),
-            ]);
-            let ephemeral = build_login_ephemeral_fixture();
-            let email = "rl-login-spoof@example.com";
+            ],
+            |app| async move {
+                let ephemeral = build_login_ephemeral_fixture();
+                let email = "rl-login-spoof@example.com";
 
-            for index in 0..3 {
-                let response = app
+                for index in 0..3 {
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/login-attempts",
+                            Some(
+                                json!({ "email": email, "clientPublicKey": ephemeral.public_key }),
+                            ),
+                            headers_with_ip(&format!("203.0.113.{index}")),
+                        )
+                        .await;
+                    assert!(response.body.is_object());
+                }
+
+                // A fourth forged address does not escape the per-IP window.
+                let blocked = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/login-attempts",
                         Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
-                        headers_with_ip(&format!("203.0.113.{index}")),
+                        headers_with_ip("203.0.113.250"),
                     )
                     .await;
-                assert!(response.body.is_object());
-            }
-
-            // A fourth forged address does not escape the per-IP window.
-            let blocked = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/login-attempts",
-                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
-                    headers_with_ip("203.0.113.250"),
-                )
-                .await;
-            assert_handler_error(
-                &blocked.body,
-                RATE_LIMITED_CODE,
-                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
-            );
-        })
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+            },
+        )
         .await;
     })
     .await;
@@ -2371,11 +2419,13 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_start_login_email", |app| async move {
-            let _env = rate_limit_env(&[
+        with_rate_limit_test_app(
+            "rate_limit_start_login_email",
+            &[
                 ("RATE_LIMIT_LOGIN_IP", "50"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "3"),
-            ]);
+            ],
+            |app| async move {
             let ephemeral = build_login_ephemeral_fixture();
             let unregistered = "rl-login-missing@example.com";
 
@@ -2417,7 +2467,8 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 object_keys(&registered.body),
                 object_keys(&fresh_missing.body),
             );
-        })
+            },
+        )
         .await;
     })
     .await;
@@ -2426,73 +2477,72 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
 #[tokio::test]
 async fn signup_is_rate_limited_per_ip_and_per_email() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_signup", |app| async move {
-            let crypto = build_auth_crypto_fixture("rl-signup", "signup-password-123");
+        with_rate_limit_test_app(
+            "rate_limit_signup",
+            &[
+                ("RATE_LIMIT_SIGNUP_IP", "2"),
+                ("RATE_LIMIT_SIGNUP_EMAIL", "2"),
+            ],
+            |app| async move {
+                let crypto = build_auth_crypto_fixture("rl-signup", "signup-password-123");
 
-            // Per-IP: same IP, varying emails.
-            {
-                let _env = rate_limit_env(&[
-                    ("RATE_LIMIT_SIGNUP_IP", "2"),
-                    ("RATE_LIMIT_SIGNUP_EMAIL", "50"),
-                ]);
-                for index in 0..2 {
-                    let response = app
+                // Per-IP: same IP, varying emails.
+                {
+                    for index in 0..2 {
+                        let response = app
+                            .api_json(
+                                Method::POST,
+                                "/api/v1/auth/signups",
+                                Some(json!(signup_params(
+                                    &crypto,
+                                    &format!("rl-signup-ip-{index}@example.com")
+                                ))),
+                                headers_with_ip("192.0.2.10"),
+                            )
+                            .await;
+                        // Rejected for a non-rate-limit reason (missing verification), but counted.
+                        assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
+                    }
+                    let blocked = app
                         .api_json(
                             Method::POST,
                             "/api/v1/auth/signups",
                             Some(json!(signup_params(
                                 &crypto,
-                                &format!("rl-signup-ip-{index}@example.com")
+                                "rl-signup-ip-blocked@example.com"
                             ))),
                             headers_with_ip("192.0.2.10"),
                         )
                         .await;
-                    // Rejected for a non-rate-limit reason (missing verification), but counted.
-                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
+                    assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
                 }
-                let blocked = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/auth/signups",
-                        Some(json!(signup_params(
-                            &crypto,
-                            "rl-signup-ip-blocked@example.com"
-                        ))),
-                        headers_with_ip("192.0.2.10"),
-                    )
-                    .await;
-                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
-            }
 
-            // Per-email: same email, varying IPs.
-            {
-                let _env = rate_limit_env(&[
-                    ("RATE_LIMIT_SIGNUP_IP", "50"),
-                    ("RATE_LIMIT_SIGNUP_EMAIL", "2"),
-                ]);
-                let email = "rl-signup-email@example.com";
-                for index in 0..2 {
-                    let response = app
+                // Per-email: same email, varying IPs.
+                {
+                    let email = "rl-signup-email@example.com";
+                    for index in 0..2 {
+                        let response = app
+                            .api_json(
+                                Method::POST,
+                                "/api/v1/auth/signups",
+                                Some(json!(signup_params(&crypto, email))),
+                                headers_with_ip(&format!("192.0.2.{}", 100 + index)),
+                            )
+                            .await;
+                        assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
+                    }
+                    let blocked = app
                         .api_json(
                             Method::POST,
                             "/api/v1/auth/signups",
                             Some(json!(signup_params(&crypto, email))),
-                            headers_with_ip(&format!("192.0.2.{}", 100 + index)),
+                            headers_with_ip("192.0.2.200"),
                         )
                         .await;
-                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
+                    assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
                 }
-                let blocked = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/auth/signups",
-                        Some(json!(signup_params(&crypto, email))),
-                        headers_with_ip("192.0.2.200"),
-                    )
-                    .await;
-                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
-            }
-        })
+            },
+        )
         .await;
     })
     .await;
@@ -2501,12 +2551,25 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 #[tokio::test]
 async fn request_recovery_verification_is_rate_limited() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_recovery_request", |app| async move {
-            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
-            let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
+        with_rate_limit_test_app(
+            "rate_limit_recovery_request",
+            &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
+            |app| async move {
+                let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
 
-            for _ in 0..2 {
-                let response = app
+                for _ in 0..2 {
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/recovery-verifications",
+                            Some(json!({ "email": fixture.email })),
+                            headers_with_ip("192.0.2.55"),
+                        )
+                        .await;
+                    assert_eq!(response.body["success"], json!(true));
+                }
+
+                let blocked = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/recovery-verifications",
@@ -2514,23 +2577,13 @@ async fn request_recovery_verification_is_rate_limited() {
                         headers_with_ip("192.0.2.55"),
                     )
                     .await;
-                assert_eq!(response.body["success"], json!(true));
-            }
-
-            let blocked = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/recovery-verifications",
-                    Some(json!({ "email": fixture.email })),
-                    headers_with_ip("192.0.2.55"),
-                )
-                .await;
-            assert_handler_error(
-                &blocked.body,
-                RATE_LIMITED_CODE,
-                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
-            );
-        })
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+            },
+        )
         .await;
     })
     .await;
@@ -2541,37 +2594,40 @@ async fn request_recovery_verification_is_rate_limited() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
-            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
-            let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
+        with_rate_limit_test_app(
+            "rate_limit_recovery_req_ip_rotation",
+            &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
+            |app| async move {
+                let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
 
-            for ip in ["198.51.100.1", "198.51.100.2"] {
-                let response = app
+                for ip in ["198.51.100.1", "198.51.100.2"] {
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/recovery-verifications",
+                            Some(json!({ "email": fixture.email })),
+                            headers_with_ip(ip),
+                        )
+                        .await;
+                    assert_eq!(response.body["success"], json!(true));
+                }
+
+                // A third, previously unseen IP still hits the per-email counter.
+                let blocked = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/recovery-verifications",
                         Some(json!({ "email": fixture.email })),
-                        headers_with_ip(ip),
+                        headers_with_ip("198.51.100.3"),
                     )
                     .await;
-                assert_eq!(response.body["success"], json!(true));
-            }
-
-            // A third, previously unseen IP still hits the per-email counter.
-            let blocked = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/recovery-verifications",
-                    Some(json!({ "email": fixture.email })),
-                    headers_with_ip("198.51.100.3"),
-                )
-                .await;
-            assert_handler_error(
-                &blocked.body,
-                RATE_LIMITED_CODE,
-                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
-            );
-        })
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+            },
+        )
         .await;
     })
     .await;
@@ -2582,39 +2638,42 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_api_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
-            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
-            let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
-            let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
-            let third = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_c").await;
+        with_rate_limit_test_app(
+            "rate_limit_recovery_req_email_rotation",
+            &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
+            |app| async move {
+                let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
+                let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
+                let third = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_c").await;
 
-            for email in [&first.email, &second.email] {
-                let response = app
+                for email in [&first.email, &second.email] {
+                    let response = app
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/recovery-verifications",
+                            Some(json!({ "email": email })),
+                            headers_with_ip("203.0.113.9"),
+                        )
+                        .await;
+                    assert_eq!(response.body["success"], json!(true));
+                }
+
+                // A third, previously unseen email still hits the per-IP counter.
+                let blocked = app
                     .api_json(
                         Method::POST,
                         "/api/v1/auth/recovery-verifications",
-                        Some(json!({ "email": email })),
+                        Some(json!({ "email": third.email })),
                         headers_with_ip("203.0.113.9"),
                     )
                     .await;
-                assert_eq!(response.body["success"], json!(true));
-            }
-
-            // A third, previously unseen email still hits the per-IP counter.
-            let blocked = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/recovery-verifications",
-                    Some(json!({ "email": third.email })),
-                    headers_with_ip("203.0.113.9"),
-                )
-                .await;
-            assert_handler_error(
-                &blocked.body,
-                RATE_LIMITED_CODE,
-                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
-            );
-        })
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+            },
+        )
         .await;
     })
     .await;

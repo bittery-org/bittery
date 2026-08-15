@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
+    config::DeploymentMode,
     db::enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole, VaultType},
     error::AppError,
     repo::access::{
@@ -78,9 +79,10 @@ pub struct MemberAccessResponse {
 pub(crate) async fn get_member_access(
     pool: &sqlx::PgPool,
     caller_user_id: &str,
+    deployment_mode: DeploymentMode,
     input: MemberAccessInput,
 ) -> Result<MemberAccessResponse, AppError> {
-    let admin = authorize_team_admin(pool, caller_user_id).await?;
+    let admin = authorize_team_admin(pool, caller_user_id, deployment_mode).await?;
 
     if !is_team_member(pool, &admin.team_id, &input.user_id).await? {
         return Ok(empty_access());

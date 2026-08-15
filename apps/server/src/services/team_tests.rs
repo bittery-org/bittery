@@ -1,16 +1,16 @@
 use super::{
-    assert_optional_team_management_entitlement, assert_team_management_entitlement, bittery_mode,
+    assert_optional_team_management_entitlement, assert_team_management_entitlement,
     ensure_team_admin, generate_secure_token, normalize_pending_vault_keys,
     parse_pending_vault_keys, validate_token, PendingVaultKeyEntry,
     TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
 };
+use crate::config::DeploymentMode;
 use crate::db::enums::{BillingPlan, BillingStatus, TeamRole};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::test_support::{
-    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app, with_api_test_app_state,
-    RecordingObjectStorage,
+    assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
+    seed_vault_key, with_api_test_app, with_api_test_app_state, RecordingObjectStorage,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::{json, Value};
@@ -18,46 +18,11 @@ use sqlx::{query, query_scalar, PgPool};
 use std::{future::Future, sync::Arc};
 use time::{Duration, OffsetDateTime};
 
-fn set_env_var(key: &str, value: Option<&str>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-}
-
-fn restore_env_var(key: &str, value: Option<String>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-}
-
-fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
-    let _guard = acquire_env_lock();
-    let previous = std::env::var("BITTERY_MODE").ok();
-
-    set_env_var("BITTERY_MODE", value);
-
-    let result = test_fn();
-
-    restore_env_var("BITTERY_MODE", previous);
-
-    result
-}
-
-async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
-where
-    F: Future<Output = T>,
-{
-    let _guard = acquire_env_lock_async().await;
-    let previous = std::env::var("BITTERY_MODE").ok();
-    set_env_var("BITTERY_MODE", value);
-
-    let result = future.await;
-
-    restore_env_var("BITTERY_MODE", previous);
-
-    result
+fn with_deployment_mode(mut state: crate::AppState, mode: DeploymentMode) -> crate::AppState {
+    let mut config = (*state.config).clone();
+    config.server.mode = mode;
+    state.config = Arc::new(config);
+    state
 }
 
 async fn with_team_storage_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
@@ -275,52 +240,54 @@ async fn seed_team_invitation(
 }
 
 #[test]
-fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
-    with_bittery_mode(None, || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
-    with_bittery_mode(Some("self-hosted"), || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-    with_bittery_mode(Some("SELF-HOSTED"), || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-    with_bittery_mode(Some("cloud"), || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
-}
-
-#[test]
 fn assert_team_management_entitlement_respects_mode_and_billing() {
-    with_bittery_mode(Some("self-hosted"), || {
-        assert!(assert_team_management_entitlement(BillingPlan::Free, BillingStatus::None).is_ok());
-    });
+    assert!(assert_team_management_entitlement(
+        DeploymentMode::SelfHosted,
+        BillingPlan::Free,
+        BillingStatus::None,
+    )
+    .is_ok());
 
-    with_bittery_mode(Some("cloud"), || {
-        assert!(
-            assert_team_management_entitlement(BillingPlan::Team, BillingStatus::Active).is_ok()
-        );
-        assert!(
-            assert_team_management_entitlement(BillingPlan::Family, BillingStatus::Trialing)
-                .is_ok()
-        );
+    assert!(assert_team_management_entitlement(
+        DeploymentMode::Cloud,
+        BillingPlan::Team,
+        BillingStatus::Active,
+    )
+    .is_ok());
+    assert!(assert_team_management_entitlement(
+        DeploymentMode::Cloud,
+        BillingPlan::Family,
+        BillingStatus::Trialing,
+    )
+    .is_ok());
 
-        let error =
-            assert_team_management_entitlement(BillingPlan::Free, BillingStatus::None).unwrap_err();
-        assert_eq!(error.code, AppErrorCode::Forbidden);
-        assert_eq!(error.message, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE);
-    });
+    let error = assert_team_management_entitlement(
+        DeploymentMode::Cloud,
+        BillingPlan::Free,
+        BillingStatus::None,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, AppErrorCode::Forbidden);
+    assert_eq!(error.message, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE);
 }
 
 #[test]
 fn assert_optional_team_management_entitlement_requires_team_billing_fields() {
-    let missing_plan =
-        assert_optional_team_management_entitlement(None, Some(BillingStatus::Active)).unwrap_err();
+    let missing_plan = assert_optional_team_management_entitlement(
+        DeploymentMode::Cloud,
+        None,
+        Some(BillingStatus::Active),
+    )
+    .unwrap_err();
     assert_eq!(missing_plan.code, AppErrorCode::NotFound);
     assert_eq!(missing_plan.message, "Team not found");
 
-    let missing_status =
-        assert_optional_team_management_entitlement(Some(BillingPlan::Team), None).unwrap_err();
+    let missing_status = assert_optional_team_management_entitlement(
+        DeploymentMode::Cloud,
+        Some(BillingPlan::Team),
+        None,
+    )
+    .unwrap_err();
     assert_eq!(missing_status.code, AppErrorCode::NotFound);
     assert_eq!(missing_status.message, "Team not found");
 }
@@ -1608,20 +1575,42 @@ async fn team_invitation_accept_and_decline_paths() {
 
 #[tokio::test]
 async fn team_delete_paths() {
+    with_api_test_app_state(
+        "team_delete_self_hosted",
+        |state| with_deployment_mode(state, DeploymentMode::SelfHosted),
+        |app| async move {
+            let fixture = build_team_router_fixture(&app.pool).await;
+            let owner_session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/teams/{}", fixture.team_id),
+                    None,
+                    authenticated_json_headers(&owner_session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_handler_error(
+                &response.body,
+                "BAD_REQUEST",
+                "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
+            );
+        },
+    )
+    .await;
+
     with_api_test_app("team_delete", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
-        let forbidden_delete = with_bittery_mode_async(
-            Some("cloud"),
-            app.api_json(
+        let forbidden_delete = app
+            .api_json(
                 Method::DELETE,
                 &format!("/api/v1/teams/{}", fixture.team_id),
                 None,
                 authenticated_json_headers(&member_session.token),
-            ),
-        )
-        .await;
+            )
+            .await;
         forbidden_delete.assert_contract_status();
         assert_handler_error(
             &forbidden_delete.body,
@@ -1630,33 +1619,14 @@ async fn team_delete_paths() {
         );
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
-        let self_hosted_delete = with_bittery_mode_async(
-            Some("self-hosted"),
-            app.api_json(
+        let members_blocked = app
+            .api_json(
                 Method::DELETE,
                 &format!("/api/v1/teams/{}", fixture.team_id),
                 None,
                 authenticated_json_headers(&owner_session.token),
-            ),
-        )
-        .await;
-        self_hosted_delete.assert_contract_status();
-        assert_handler_error(
-            &self_hosted_delete.body,
-            "BAD_REQUEST",
-            "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
-        );
-
-        let members_blocked = with_bittery_mode_async(
-            Some("cloud"),
-            app.api_json(
-                Method::DELETE,
-                &format!("/api/v1/teams/{}", fixture.team_id),
-                None,
-                authenticated_json_headers(&owner_session.token),
-            ),
-        )
-        .await;
+            )
+            .await;
         members_blocked.assert_contract_status();
         assert_handler_error(
             &members_blocked.body,
@@ -1694,16 +1664,14 @@ async fn team_delete_paths() {
         )
         .await;
         let vault_owner_session = app.issue_session(vault_owner_id).await;
-        let vault_blocked = with_bittery_mode_async(
-            Some("cloud"),
-            app.api_json(
+        let vault_blocked = app
+            .api_json(
                 Method::DELETE,
                 &format!("/api/v1/teams/{}", vault_team_id),
                 None,
                 authenticated_json_headers(&vault_owner_session.token),
-            ),
-        )
-        .await;
+            )
+            .await;
         vault_blocked.assert_contract_status();
         assert_handler_error(
             &vault_blocked.body,
@@ -1732,16 +1700,14 @@ async fn team_delete_paths() {
         .await;
         assign_user_to_team(&app.pool, success_owner_id, success_team_id, "owner").await;
         let success_session = app.issue_session(success_owner_id).await;
-        let delete_success = with_bittery_mode_async(
-            Some("cloud"),
-            app.api_json(
+        let delete_success = app
+            .api_json(
                 Method::DELETE,
                 &format!("/api/v1/teams/{}", success_team_id),
                 None,
                 authenticated_json_headers(&success_session.token),
-            ),
-        )
-        .await;
+            )
+            .await;
         delete_success.assert_contract_status();
         assert_eq!(delete_success.body["success"], json!(true));
         let deleted_team_exists =

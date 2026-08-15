@@ -5,17 +5,18 @@ use std::{future::Future, sync::Arc};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::{
-    assert_cloud_billing_enabled, bittery_mode, format_timestamp, get_billing_snapshot,
+    assert_cloud_billing_enabled, format_timestamp, get_billing_snapshot,
     self_hosted_billing_status, web_app_url, GB,
 };
+use crate::config::{Config, DeploymentMode};
 use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::integrations::stripe::{
     BillingGatewayCall, CheckoutSessionInput, StripeBillingGateway, TestBillingGateway,
 };
 use crate::test_support::{
-    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, with_api_test_app, with_api_test_app_state,
+    acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
+    seed_user, seed_vault, with_api_test_app, with_api_test_app_state,
 };
 
 struct BillingTestEnv<'a> {
@@ -79,33 +80,6 @@ fn restore_env_var(name: &str, previous: Option<String>) {
         Some(value) => unsafe { std::env::set_var(name, value) },
         None => unsafe { std::env::remove_var(name) },
     }
-}
-
-fn with_env_vars<T>(
-    bittery_mode_value: Option<&str>,
-    stripe_secret_key: Option<&str>,
-    web_app_url_value: Option<&str>,
-    test_fn: impl FnOnce() -> T,
-) -> T {
-    let _guard = acquire_env_lock();
-    let previous_mode = std::env::var("BITTERY_MODE").ok();
-    let previous_cloud_billing = std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok();
-    let previous_stripe_secret = std::env::var("STRIPE_SECRET_KEY").ok();
-    let previous_web_app_url = std::env::var("WEB_APP_URL").ok();
-
-    set_env_var("BITTERY_MODE", bittery_mode_value);
-    set_env_var("BITTERY_CLOUD_BILLING_ENABLED", None);
-    set_env_var("STRIPE_SECRET_KEY", stripe_secret_key);
-    set_env_var("WEB_APP_URL", web_app_url_value);
-
-    let result = test_fn();
-
-    restore_env_var("BITTERY_MODE", previous_mode);
-    restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
-    restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
-    restore_env_var("WEB_APP_URL", previous_web_app_url);
-
-    result
 }
 
 async fn with_billing_test_env_async<T, F>(env: BillingTestEnv<'_>, future: F) -> T
@@ -402,57 +376,39 @@ fn self_hosted_mode_enables_non_cloud_features() {
 }
 
 #[test]
-fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
-    with_env_vars(None, None, None, || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
+fn stripe_gateway_and_billing_url_use_startup_config() {
+    let mut config = Config::for_test();
+    config.stripe.secret_key = Some("sk_test_123".to_string());
+    config.server.web_app_url = Some("https://app.example.com/".to_string());
+    assert!(StripeBillingGateway::from_config(&config.stripe)
+        .unwrap()
+        .is_some());
+    assert_eq!(web_app_url(&config.server), "https://app.example.com/");
 
-    with_env_vars(Some("SELF-HOSTED"), None, None, || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-
-    with_env_vars(Some("cloud"), None, None, || {
-        assert_eq!(bittery_mode(), "cloud");
-    });
-}
-
-#[test]
-fn stripe_configuration_and_web_app_url_use_trimmed_env_values() {
-    with_env_vars(
-        None,
-        Some("  sk_test_123  "),
-        Some(" https://app.example.com/  "),
-        || {
-            assert!(StripeBillingGateway::from_env().unwrap().is_some());
-            assert_eq!(web_app_url(), "https://app.example.com/");
-        },
-    );
-
-    with_env_vars(None, Some("   "), Some("   "), || {
-        assert!(StripeBillingGateway::from_env().unwrap().is_none());
-        assert_eq!(web_app_url(), "http://localhost:3001");
-    });
+    config.stripe.secret_key = None;
+    config.server.web_app_url = None;
+    assert!(StripeBillingGateway::from_config(&config.stripe)
+        .unwrap()
+        .is_none());
+    assert_eq!(web_app_url(&config.server), "http://localhost:3001");
 }
 
 #[test]
 fn cloud_billing_guard_rejects_self_hosted_and_missing_stripe_configuration() {
-    with_env_vars(Some("self-hosted"), Some("sk_test_123"), None, || {
-        let error = assert_cloud_billing_enabled(true)
-            .expect_err("self-hosted mode should disable cloud billing handlers");
-        assert_eq!(error.code, AppErrorCode::Forbidden);
-        assert_eq!(error.message, "Billing is disabled in self-hosted mode");
-    });
+    let mut config = Config::for_test();
+    config.server.mode = DeploymentMode::SelfHosted;
+    let error = assert_cloud_billing_enabled(&config.server, true)
+        .expect_err("self-hosted mode should disable cloud billing handlers");
+    assert_eq!(error.code, AppErrorCode::Forbidden);
+    assert_eq!(error.message, "Billing is disabled in self-hosted mode");
 
-    with_env_vars(None, None, None, || {
-        let error = assert_cloud_billing_enabled(false)
-            .expect_err("missing Stripe config should be rejected");
-        assert_eq!(error.code, AppErrorCode::InternalServerError);
-        assert_eq!(error.message, "Stripe is not configured");
-    });
+    config.server.mode = DeploymentMode::Cloud;
+    let error = assert_cloud_billing_enabled(&config.server, false)
+        .expect_err("missing Stripe config should be rejected");
+    assert_eq!(error.code, AppErrorCode::InternalServerError);
+    assert_eq!(error.message, "Stripe is not configured");
 
-    with_env_vars(None, Some("sk_test_123"), None, || {
-        assert!(assert_cloud_billing_enabled(true).is_ok());
-    });
+    assert!(assert_cloud_billing_enabled(&config.server, true).is_ok());
 }
 
 #[tokio::test]

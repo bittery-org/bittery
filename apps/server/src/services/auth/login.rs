@@ -1,9 +1,8 @@
 use super::{
     bad_request_handler_error, enforce_window_limit, format_rfc3339, hash_normalized_email,
-    jwt_signing_secret, request_ip_key, validate_hex_string, AuthVaultKeyPage,
-    AuthVaultKeyResponse, FinishLoginInput, FinishLoginResponse, LoginKdfParamsResponse,
-    LoginUserResponse, StartLoginInput, StartLoginResponse, CURRENT_KDF_ALGORITHM,
-    CURRENT_KDF_ITERATIONS, CURRENT_KDF_SCHEMA_VERSION,
+    request_ip_key, validate_hex_string, AuthVaultKeyPage, AuthVaultKeyResponse, FinishLoginInput,
+    FinishLoginResponse, LoginKdfParamsResponse, LoginUserResponse, StartLoginInput,
+    StartLoginResponse, CURRENT_KDF_ALGORITHM, CURRENT_KDF_ITERATIONS, CURRENT_KDF_SCHEMA_VERSION,
 };
 use bittery_crypto_core::{
     normalize_email,
@@ -42,10 +41,9 @@ fn build_login_attempt_id(normalized_email_hash: &str) -> String {
     )
 }
 
-fn build_fake_login_salt(normalized_email: &str) -> String {
-    let secret = jwt_signing_secret();
+fn build_fake_login_salt(jwt_secret: &str, normalized_email: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
+    hasher.update(jwt_secret.as_bytes());
     hasher.update(normalized_email.as_bytes());
     hex::encode(hasher.finalize())
 }
@@ -76,14 +74,14 @@ pub(crate) async fn start_login(
         limiter,
         rate_limit::SCOPE_LOGIN_IP,
         &request_ip_key(request),
-        login_ip_limit(),
+        login_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
     enforce_window_limit(
         limiter,
         rate_limit::SCOPE_LOGIN_EMAIL,
         &normalized_email_hash,
-        login_email_limit(),
+        login_email_limit(&app_state.config.rate_limit),
     )
     .await?;
 
@@ -107,7 +105,9 @@ pub(crate) async fn start_login(
     let salt = user
         .as_ref()
         .map(|existing| existing.srp_salt.clone())
-        .unwrap_or_else(|| build_fake_login_salt(&normalized_email));
+        .unwrap_or_else(|| {
+            build_fake_login_salt(&app_state.config.auth.jwt_secret, &normalized_email)
+        });
     let verifier = user
         .as_ref()
         .map(|existing| existing.srp_verifier.clone())
@@ -233,7 +233,7 @@ pub(crate) async fn finish_login(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
     let verified = verify_login_proof_and_get_user(pool, &input).await?;

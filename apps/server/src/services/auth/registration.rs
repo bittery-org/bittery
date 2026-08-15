@@ -1,10 +1,10 @@
 use super::{
     bad_request_handler_error, encode_hs256_token, enforce_window_limit, hash_normalized_email,
-    is_dev_auth_stub_enabled, jwt_signing_secret, request_ip_key, validate_hex_string,
-    validate_resource_id, AuthSessionUserResponse, CheckEmailInput, CheckEmailResponse,
-    LogoutResponse, RegistrationStatusResponse, RequestSignupVerificationInput, SignupInput,
-    SignupResponse, SignupWithInvitationInput, ValidatedKdfProfile, VerifySignupVerificationInput,
-    VerifySignupVerificationResponse, JWT_ISSUER,
+    request_ip_key, validate_hex_string, validate_resource_id, AuthSessionUserResponse,
+    CheckEmailInput, CheckEmailResponse, LogoutResponse, RegistrationStatusResponse,
+    RequestSignupVerificationInput, SignupInput, SignupResponse, SignupWithInvitationInput,
+    ValidatedKdfProfile, VerifySignupVerificationInput, VerifySignupVerificationResponse,
+    JWT_ISSUER,
 };
 use bittery_crypto_core::normalize_email;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
@@ -20,7 +20,7 @@ const SIGNUP_VERIFICATION_TTL_MINUTES: i64 = 15;
 use super::login::load_auth_vault_keys_page;
 
 use crate::{
-    config::{bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled},
+    config::DeploymentMode,
     db::{
         enums::{BillingPlan, BillingStatus, TeamRole, TeamType},
         models::DbTeamInvitationAcceptRow,
@@ -45,9 +45,8 @@ use crate::{
     AppState,
 };
 
-pub(super) fn deterministic_fake_hint(email: &str) -> String {
-    let secret = jwt_signing_secret();
-    let digest = Sha256::digest(format!("{secret}:{}", normalize_email(email)).as_bytes());
+pub(super) fn deterministic_fake_hint(jwt_secret: &str, email: &str) -> String {
+    let digest = Sha256::digest(format!("{jwt_secret}:{}", normalize_email(email)).as_bytes());
     format!("A3-{}", hex::encode_upper(&digest[..4]))
 }
 
@@ -80,31 +79,37 @@ pub(crate) async fn request_signup_verification(
         limiter,
         rate_limit::SCOPE_SIGNUP_VERIFY_REQUEST_EMAIL,
         &hash_normalized_email(&normalized_email),
-        signup_verification_request_limit(),
+        signup_verification_request_limit(&app_state.config.rate_limit),
     )
     .await?;
     enforce_window_limit(
         limiter,
         rate_limit::SCOPE_SIGNUP_VERIFY_REQUEST_IP,
         &request_ip_key(request),
-        signup_verification_request_limit(),
+        signup_verification_request_limit(&app_state.config.rate_limit),
     )
     .await?;
 
     if let Some(invitation_token) = input.invitation_token.as_deref() {
-        let _ =
-            get_pending_invitation_for_signup(pool, invitation_token, &normalized_email).await?;
-    } else if bittery_mode() == "self-hosted" && has_any_registered_user(pool).await? {
+        let _ = get_pending_invitation_for_signup(
+            pool,
+            app_state.config.server.mode.as_str(),
+            invitation_token,
+            &normalized_email,
+        )
+        .await?;
+    } else if app_state.config.server.mode.is_self_hosted() && has_any_registered_user(pool).await?
+    {
         return Err(AppError::forbidden(
             "Public registration is disabled. Ask an admin for an invite link.",
         ));
     }
 
-    if !requires_signup_email_verification() {
+    if !requires_signup_email_verification(app_state.config.server.mode) {
         return Ok(LogoutResponse { success: true });
     }
 
-    VerificationCodeService::new(pool)
+    VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit)
         .issue_and_deliver(
             VerificationPurpose::Signup {
                 invitation_token: input.invitation_token.as_deref(),
@@ -131,16 +136,22 @@ pub(crate) async fn verify_signup_verification(
         limiter,
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
 
     if let Some(invitation_token) = input.invitation_token.as_deref() {
-        let _ =
-            get_pending_invitation_for_signup(pool, invitation_token, &normalized_email).await?;
+        let _ = get_pending_invitation_for_signup(
+            pool,
+            app_state.config.server.mode.as_str(),
+            invitation_token,
+            &normalized_email,
+        )
+        .await?;
     }
 
-    let verification_codes = VerificationCodeService::new(pool);
+    let verification_codes =
+        VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit);
     let outcome = verification_codes
         .verify_with_lockout(
             VerificationPurpose::Signup {
@@ -175,6 +186,8 @@ pub(crate) async fn verify_signup_verification(
         signup_verification_token: success
             .then(|| {
                 create_signup_verification_token(
+                    &app_state.config.auth.jwt_secret,
+                    app_state.config.auth.dev_stubs_enabled,
                     &normalized_email,
                     input.invitation_token.as_deref(),
                 )
@@ -197,33 +210,34 @@ pub(crate) async fn signup(
         limiter,
         rate_limit::SCOPE_SIGNUP_IP,
         &request_ip_key(request),
-        signup_ip_limit(),
+        signup_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
     enforce_window_limit(
         limiter,
         rate_limit::SCOPE_SIGNUP_EMAIL,
         &hash_normalized_email(&normalized_email),
-        signup_email_limit(),
+        signup_email_limit(&app_state.config.rate_limit),
     )
     .await?;
 
-    let mode = bittery_mode();
-    let self_hosted_mode = mode == "self-hosted";
+    let mode = app_state.config.server.mode;
+    let self_hosted_mode = mode.is_self_hosted();
 
     if self_hosted_mode && has_any_registered_user(pool).await? {
         return Err(AppError::forbidden(
             "Public registration is disabled. Ask an admin for an invite link.",
         ));
     }
-    if mode == "cloud" && !cloud_public_signup_enabled() {
+    if mode == DeploymentMode::Cloud && !app_state.config.server.cloud_public_signup {
         return Err(AppError::forbidden(
             "Hosted beta signup is invite-only. Join the waitlist or ask for an invite link.",
         ));
     }
 
-    if requires_signup_email_verification() {
+    if requires_signup_email_verification(mode) {
         assert_valid_signup_verification_token(
+            &app_state.config.auth.jwt_secret,
             &input.signup_verification_token,
             &normalized_email,
             None,
@@ -232,7 +246,7 @@ pub(crate) async fn signup(
     }
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
-    let selected_plan = if self_hosted_mode || !cloud_billing_enabled() {
+    let selected_plan = if self_hosted_mode || !app_state.config.server.cloud_billing {
         BillingPlan::Free
     } else {
         normalize_signup_plan(input.plan.as_deref())?
@@ -361,14 +375,21 @@ pub(crate) async fn signup_with_invitation(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
     let normalized_email = normalize_email(&input.email);
-    let invitation = get_pending_signup_invitation(pool, &input.token, &normalized_email).await?;
+    let invitation = get_pending_signup_invitation(
+        pool,
+        app_state.config.server.mode.as_str(),
+        &input.token,
+        &normalized_email,
+    )
+    .await?;
 
-    if requires_signup_email_verification() {
+    if requires_signup_email_verification(app_state.config.server.mode) {
         assert_valid_signup_verification_token(
+            &app_state.config.auth.jwt_secret,
             &input.signup_verification_token,
             &normalized_email,
             Some(&input.token),
@@ -514,12 +535,13 @@ pub(crate) async fn signup_with_invitation(
 pub(crate) async fn registration_status(
     app_state: &AppState,
 ) -> Result<RegistrationStatusResponse, AppError> {
-    let mode = bittery_mode().to_string();
-    if mode == "cloud" {
-        let allow_public_signup = cloud_public_signup_enabled();
+    let server_config = &app_state.config.server;
+    let mode = server_config.mode.as_str().to_string();
+    if server_config.mode == DeploymentMode::Cloud {
+        let allow_public_signup = server_config.cloud_public_signup;
         return Ok(RegistrationStatusResponse {
             mode,
-            billing_enabled: cloud_billing_enabled(),
+            billing_enabled: server_config.cloud_billing,
             allow_public_signup,
             requires_email_verification: true,
             reason: if allow_public_signup {
@@ -558,7 +580,9 @@ pub(crate) async fn check_email(
     .await
     .map_err(|error| database_error(error, "Failed to load account"))?
     .and_then(|row| row.secret_key_hint)
-    .unwrap_or_else(|| deterministic_fake_hint(&normalized_email));
+    .unwrap_or_else(|| {
+        deterministic_fake_hint(&app_state.config.auth.jwt_secret, &normalized_email)
+    });
 
     Ok(CheckEmailResponse {
         exists: true,
@@ -567,6 +591,7 @@ pub(crate) async fn check_email(
 }
 async fn get_pending_invitation_for_signup(
     pool: &PgPool,
+    mode: &str,
     invitation_token: &str,
     normalized_email: &str,
 ) -> Result<DbTeamInvitationAcceptRow, AppError> {
@@ -580,7 +605,7 @@ async fn get_pending_invitation_for_signup(
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
-        bittery_mode(),
+        mode,
         Some(invitation.billing_plan),
         Some(invitation.billing_status),
     ) {
@@ -599,12 +624,13 @@ async fn get_pending_invitation_for_signup(
 }
 
 async fn assert_valid_signup_verification_token(
+    jwt_secret: &str,
     signup_verification_token: &str,
     email: &str,
     invitation_token: Option<&str>,
 ) -> Result<(), AppError> {
     let Some((token_email, token_invitation)) =
-        verify_signup_verification_token(signup_verification_token).await
+        verify_signup_verification_token(jwt_secret, signup_verification_token).await
     else {
         return Err(AppError::unauthorized("Invalid signup verification"));
     };
@@ -630,6 +656,7 @@ async fn ensure_user_does_not_exist(pool: &PgPool, email: &str) -> Result<(), Ap
 
 async fn get_pending_signup_invitation(
     pool: &PgPool,
+    mode: &str,
     invitation_token: &str,
     normalized_email: &str,
 ) -> Result<DbSignupInvitationRow, AppError> {
@@ -643,7 +670,7 @@ async fn get_pending_signup_invitation(
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
-        bittery_mode(),
+        mode,
         Some(invitation.billing_plan),
         Some(invitation.billing_status),
     ) {
@@ -855,10 +882,12 @@ fn emails_match(invitation_email: &str, normalized_email: &str) -> bool {
     invitation_email.trim().to_lowercase() == normalized_email
 }
 
-fn requires_signup_email_verification() -> bool {
-    bittery_mode() != "self-hosted"
+fn requires_signup_email_verification(mode: DeploymentMode) -> bool {
+    !mode.is_self_hosted()
 }
 fn create_signup_verification_token(
+    jwt_secret: &str,
+    dev_stubs_enabled: bool,
     email: &str,
     invitation_token: Option<&str>,
 ) -> Result<String, AppError> {
@@ -875,8 +904,12 @@ fn create_signup_verification_token(
         iat: issued_at,
     };
 
-    let token = encode_hs256_token(&claims, "Failed to create signup verification token")?;
-    if is_dev_auth_stub_enabled() {
+    let token = encode_hs256_token(
+        &claims,
+        jwt_secret,
+        "Failed to create signup verification token",
+    )?;
+    if dev_stubs_enabled {
         info!(
             email = %email,
             token = %token,
@@ -887,14 +920,17 @@ fn create_signup_verification_token(
     Ok(token)
 }
 
-pub async fn verify_signup_verification_token(token: &str) -> Option<(String, Option<String>)> {
+pub async fn verify_signup_verification_token(
+    jwt_secret: &str,
+    token: &str,
+) -> Option<(String, Option<String>)> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&[SIGNUP_VERIFICATION_JWT_AUDIENCE]);
     validation.set_issuer(&[JWT_ISSUER]);
 
     decode::<SignupVerificationTokenClaims>(
         token,
-        &DecodingKey::from_secret(jwt_signing_secret().as_bytes()),
+        &DecodingKey::from_secret(jwt_secret.as_bytes()),
         &validation,
     )
     .ok()

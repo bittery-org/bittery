@@ -47,7 +47,13 @@ pub(crate) async fn sync_events(
 
     // Enforce per-plan connection limit via Redis (if available)
     if state.connection_registry.is_active() {
-        let plan_limit = resolve_connection_limit(&state.redis, pool, &session.user_id).await;
+        let plan_limit = resolve_connection_limit(
+            &state.redis,
+            pool,
+            &session.user_id,
+            state.config.server.mode,
+        )
+        .await;
 
         match state
             .connection_registry

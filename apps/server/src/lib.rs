@@ -16,6 +16,7 @@ use sqlx::PgPool;
 
 use std::sync::Arc;
 
+use config::Config;
 use fred::prelude::Pool as RedisPool;
 use integrations::favicon::{RemoteDocumentFetcher, ReqwestRemoteDocumentFetcher};
 use integrations::storage::{ObjectStorage, UnavailableObjectStorage};
@@ -34,9 +35,10 @@ pub use http::api::dto::{
 };
 pub use http::api::openapi_json;
 pub(crate) use http::api::response_headers as api_response_headers;
+#[cfg(test)]
+pub use http::middleware::load_edge_http_config;
 pub use http::middleware::{
-    catch_panic_layer, edge_http_middleware, http_trace_layer, load_edge_http_config,
-    EdgeHttpConfig,
+    catch_panic_layer, edge_http_middleware, http_trace_layer, EdgeHttpConfig,
 };
 pub use http::public::create_public_http_router;
 pub use jobs::JobRunner;
@@ -50,6 +52,7 @@ pub use services::sync_pubsub::SyncPubSub;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub(crate) config: Arc<Config>,
     pub db_pool: PgPool,
     pub redis: Option<RedisPool>,
     pub sessions: SessionService,
@@ -63,8 +66,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn from_pool(pool: PgPool) -> Self {
+    pub(crate) fn from_pool_with_config(pool: PgPool, config: Arc<Config>) -> Self {
         Self {
+            config,
             db_pool: pool.clone(),
             redis: None,
             sessions: SessionService::from_pool(pool.clone()),
@@ -76,6 +80,11 @@ impl AppState {
             remote_documents: Arc::new(ReqwestRemoteDocumentFetcher::new()),
             billing_gateway: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_pool(pool: PgPool) -> Self {
+        Self::from_pool_with_config(pool, Arc::new(Config::for_test()))
     }
 
     pub fn with_rate_limiter(mut self, rate_limiter: Arc<dyn RateLimiter>) -> Self {

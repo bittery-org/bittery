@@ -10,7 +10,7 @@ use super::{
     VaultListEntryResponse, VaultStatsResponse, VAULT_NAME_MAX_CHARS,
 };
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::{format_timestamp, DeploymentMode},
     db::{
         enums::{BillingPlan, BillingStatus, SyncEntityType, SyncEventType, VaultRole, VaultType},
         models::DbVaultRoleRow,
@@ -235,6 +235,7 @@ pub(crate) async fn create_vault_image_upload(
 
 pub(crate) async fn create_vault(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     request_client_id: Option<&str>,
     input: CreateVaultInput,
@@ -276,7 +277,7 @@ pub(crate) async fn create_vault(
             ));
         };
 
-        let entitlement = resolve_vault_sharing_entitlement(plan, status);
+        let entitlement = resolve_vault_sharing_entitlement(deployment_mode, plan, status);
         if !entitlement.allowed {
             return Err(AppError::forbidden(
                 "Shared vaults are only available on Family or Team plans with active billing.",
@@ -410,6 +411,7 @@ pub(crate) async fn update_vault(
 
 pub(crate) async fn convert_vault_type(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     request_client_id: Option<&str>,
     input: ConvertVaultTypeInput,
@@ -463,7 +465,7 @@ pub(crate) async fn convert_vault_type(
                 "You must belong to a team to convert to a shared vault",
             ));
         };
-        let entitlement = resolve_vault_sharing_entitlement(plan, status);
+        let entitlement = resolve_vault_sharing_entitlement(deployment_mode, plan, status);
         if !entitlement.allowed {
             return Err(AppError::forbidden(
                 "Shared vaults are only available on Family or Team plans with active billing.",
@@ -678,7 +680,7 @@ mod member_handlers {
         VaultAvailableMemberResponse, VaultIdInput, VaultMemberResponse,
     };
     use crate::{
-        config::bittery_mode,
+        config::DeploymentMode,
         db::{
             enums::{BillingPlan, BillingStatus, SyncEventType, VaultRole, VaultType},
             models::DbTeamBillingEntitlementRow,
@@ -740,10 +742,12 @@ mod member_handlers {
 
     pub(crate) async fn available_team_members(
         pool: &PgPool,
+        deployment_mode: DeploymentMode,
         user_id: &str,
         input: VaultIdInput,
     ) -> Result<Vec<VaultAvailableMemberResponse>, AppError> {
-        let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
+        let actor =
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id, deployment_mode).await?;
         let team_members = query_as::<_, DbVaultAvailableMemberRow>(
 			"SELECT id AS user_id, name, email, public_key FROM \"user\" WHERE team_id = $1 ORDER BY created_at ASC",
 		)
@@ -773,11 +777,13 @@ mod member_handlers {
 
     pub(crate) async fn update_vault_member_role(
         pool: &PgPool,
+        deployment_mode: DeploymentMode,
         user_id: &str,
         input: UpdateVaultMemberRoleInput,
     ) -> Result<SuccessResponse, AppError> {
         let role = validate_vault_member_role(input.role)?;
-        let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
+        let actor =
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id, deployment_mode).await?;
         assert_role_change_not_self(input.user_id == user_id)?;
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
             .await
@@ -801,13 +807,15 @@ mod member_handlers {
 
     pub(crate) async fn add_vault_member(
         pool: &PgPool,
+        deployment_mode: DeploymentMode,
         user_id: &str,
         request_client_id: Option<&str>,
         input: AddVaultMemberInput,
     ) -> Result<SuccessResponse, AppError> {
         validate_encrypted_vault_key(&input.encrypted_vault_key)?;
         let role = validate_vault_member_role(input.role)?;
-        let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
+        let actor =
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id, deployment_mode).await?;
         let target_user = query_as::<_, DbVaultLookupUserRow>(
             "SELECT id, name, email, public_key, team_id FROM \"user\" WHERE id = $1 LIMIT 1",
         )
@@ -881,6 +889,7 @@ mod member_handlers {
         pool: &PgPool,
         vault_id: &str,
         user_id: &str,
+        deployment_mode: DeploymentMode,
     ) -> Result<ManagedVaultActor, AppError> {
         let actor = query_as::<_, DbVaultOwnerAccessRow>(
 			"SELECT vk.vault_id, v.type::text AS vault_type, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
@@ -894,7 +903,7 @@ mod member_handlers {
         let billing =
             load_team_billing_entitlement(pool, user_id, "Failed to load billing entitlements")
                 .await?;
-        assert_vault_sharing_available(billing.as_ref())?;
+        assert_vault_sharing_available(deployment_mode, billing.as_ref())?;
         if !actor.role.can_manage() {
             return Err(AppError::forbidden(
                 "Only vault owner or admin can manage members",
@@ -912,9 +921,10 @@ mod member_handlers {
     }
 
     fn assert_vault_sharing_available(
+        deployment_mode: DeploymentMode,
         billing: Option<&DbTeamBillingEntitlementRow>,
     ) -> Result<(), AppError> {
-        if bittery_mode() == "self-hosted" {
+        if deployment_mode.is_self_hosted() {
             return Ok(());
         }
         let Some(billing) = billing else {
@@ -923,6 +933,7 @@ mod member_handlers {
 			));
         };
         let entitlement = resolve_vault_sharing_entitlement(
+            deployment_mode,
             billing.billing_plan.unwrap_or(BillingPlan::Free),
             billing.billing_status.unwrap_or(BillingStatus::None),
         );
@@ -945,37 +956,11 @@ mod member_handlers {
     #[cfg(test)]
     mod tests {
         use super::{
-            assert_vault_sharing_available, bittery_mode, resolve_vault_sharing_entitlement,
-            validate_vault_member_role, BillingPlan, BillingStatus, VaultRole,
+            assert_vault_sharing_available, resolve_vault_sharing_entitlement,
+            validate_vault_member_role, BillingPlan, BillingStatus, DeploymentMode, VaultRole,
         };
         use crate::db::models::DbTeamBillingEntitlementRow;
         use crate::error::AppErrorCode;
-        use crate::test_support::acquire_env_lock;
-
-        fn set_env_var(key: &str, value: Option<&str>) {
-            match value {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-
-        fn restore_env_var(key: &str, value: Option<String>) {
-            match value {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-
-        fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
-            let _guard = acquire_env_lock();
-            let previous = std::env::var("BITTERY_MODE").ok();
-
-            set_env_var("BITTERY_MODE", value);
-            let result = test_fn();
-            restore_env_var("BITTERY_MODE", previous);
-
-            result
-        }
 
         #[test]
         fn validate_vault_member_role_accepts_supported_roles() {
@@ -993,81 +978,71 @@ mod member_handlers {
         }
 
         #[test]
-        fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
-            with_bittery_mode(None, || {
-                assert_eq!(bittery_mode(), "cloud");
-            });
-
-            for value in ["self-hosted", " SELF-HOSTED "] {
-                with_bittery_mode(Some(value), || {
-                    assert_eq!(bittery_mode(), "self-hosted");
-                });
-            }
-
-            with_bittery_mode(Some("cloud"), || {
-                assert_eq!(bittery_mode(), "cloud");
-            });
-        }
-
-        #[test]
         fn resolve_vault_sharing_entitlement_respects_plan_status_and_mode() {
-            with_bittery_mode(None, || {
-                let family =
-                    resolve_vault_sharing_entitlement(BillingPlan::Family, BillingStatus::Active);
-                assert!(family.allowed);
-                assert_eq!(family.shared_vault_limit, Some(5));
+            let family = resolve_vault_sharing_entitlement(
+                DeploymentMode::Cloud,
+                BillingPlan::Family,
+                BillingStatus::Active,
+            );
+            assert!(family.allowed);
+            assert_eq!(family.shared_vault_limit, Some(5));
 
-                let team =
-                    resolve_vault_sharing_entitlement(BillingPlan::Team, BillingStatus::Trialing);
-                assert!(team.allowed);
-                assert_eq!(team.shared_vault_limit, None);
+            let team = resolve_vault_sharing_entitlement(
+                DeploymentMode::Cloud,
+                BillingPlan::Team,
+                BillingStatus::Trialing,
+            );
+            assert!(team.allowed);
+            assert_eq!(team.shared_vault_limit, None);
 
-                let free =
-                    resolve_vault_sharing_entitlement(BillingPlan::Free, BillingStatus::Active);
-                assert!(!free.allowed);
-                assert_eq!(free.shared_vault_limit, Some(0));
-            });
+            let free = resolve_vault_sharing_entitlement(
+                DeploymentMode::Cloud,
+                BillingPlan::Free,
+                BillingStatus::Active,
+            );
+            assert!(!free.allowed);
+            assert_eq!(free.shared_vault_limit, Some(0));
 
-            with_bittery_mode(Some("self-hosted"), || {
-                let entitlement =
-                    resolve_vault_sharing_entitlement(BillingPlan::Free, BillingStatus::None);
-                assert!(entitlement.allowed);
-                assert_eq!(entitlement.shared_vault_limit, None);
-            });
+            let entitlement = resolve_vault_sharing_entitlement(
+                DeploymentMode::SelfHosted,
+                BillingPlan::Free,
+                BillingStatus::None,
+            );
+            assert!(entitlement.allowed);
+            assert_eq!(entitlement.shared_vault_limit, None);
         }
 
         #[test]
         fn assert_vault_sharing_available_requires_cloud_entitlement() {
-            with_bittery_mode(None, || {
-                assert!(
-                    assert_vault_sharing_available(Some(&DbTeamBillingEntitlementRow {
-                        team_id: Some("team_123".to_string()),
-                        billing_plan: Some(BillingPlan::Family),
-                        billing_status: Some(BillingStatus::Active),
-                    }))
-                    .is_ok()
-                );
+            assert!(assert_vault_sharing_available(
+                DeploymentMode::Cloud,
+                Some(&DbTeamBillingEntitlementRow {
+                    team_id: Some("team_123".to_string()),
+                    billing_plan: Some(BillingPlan::Family),
+                    billing_status: Some(BillingStatus::Active),
+                }),
+            )
+            .is_ok());
 
-                let missing = assert_vault_sharing_available(None).unwrap_err();
-                assert_eq!(missing.code, AppErrorCode::Forbidden);
-                assert_eq!(
+            let missing = assert_vault_sharing_available(DeploymentMode::Cloud, None).unwrap_err();
+            assert_eq!(missing.code, AppErrorCode::Forbidden);
+            assert_eq!(
 					missing.message,
 					"Shared vault management is only available on Family or Team plans with active billing."
 				);
 
-                let free_plan =
-                    assert_vault_sharing_available(Some(&DbTeamBillingEntitlementRow {
-                        team_id: Some("team_123".to_string()),
-                        billing_plan: Some(BillingPlan::Free),
-                        billing_status: Some(BillingStatus::Active),
-                    }))
-                    .unwrap_err();
-                assert_eq!(free_plan.code, AppErrorCode::Forbidden);
-            });
+            let free_plan = assert_vault_sharing_available(
+                DeploymentMode::Cloud,
+                Some(&DbTeamBillingEntitlementRow {
+                    team_id: Some("team_123".to_string()),
+                    billing_plan: Some(BillingPlan::Free),
+                    billing_status: Some(BillingStatus::Active),
+                }),
+            )
+            .unwrap_err();
+            assert_eq!(free_plan.code, AppErrorCode::Forbidden);
 
-            with_bittery_mode(Some("self-hosted"), || {
-                assert!(assert_vault_sharing_available(None).is_ok());
-            });
+            assert!(assert_vault_sharing_available(DeploymentMode::SelfHosted, None).is_ok());
         }
     }
 }
@@ -1312,8 +1287,9 @@ async fn assert_shared_vault_quota(
 }
 
 fn resolve_vault_sharing_entitlement(
+    deployment_mode: DeploymentMode,
     plan: BillingPlan,
     status: BillingStatus,
 ) -> VaultSharingEntitlement {
-    shared_resolve_vault_sharing_entitlement(bittery_mode(), Some(plan), Some(status))
+    shared_resolve_vault_sharing_entitlement(deployment_mode.as_str(), Some(plan), Some(status))
 }

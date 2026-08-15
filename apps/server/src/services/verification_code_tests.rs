@@ -24,7 +24,11 @@ fn generated_codes_are_six_ascii_digits() {
 async fn codes_expire_exhaust_and_consume_once_for_each_purpose() {
     with_api_test_app("verification_code_lifecycle", |app| async move {
         seed_share_link(&app.pool).await;
-        let codes = VerificationCodeService::new(&app.pool);
+        let codes = VerificationCodeService::new(
+            &app.pool,
+            &app.state.config.auth,
+            &app.state.config.rate_limit,
+        );
 
         let signup = VerificationPurpose::Signup {
             invitation_token: None,
@@ -73,7 +77,11 @@ async fn signup_lockout_burns_pending_codes() {
     ]);
 
     with_api_test_app("verification_code_signup_lockout", |app| async move {
-        let codes = VerificationCodeService::new(&app.pool);
+        let codes = VerificationCodeService::new(
+            &app.pool,
+            &app.state.config.auth,
+            &app.state.config.rate_limit,
+        );
         let purpose = VerificationPurpose::Signup {
             invitation_token: None,
         };
@@ -114,7 +122,11 @@ async fn a_code_that_could_not_be_delivered_is_not_left_active() {
 
     with_api_test_app("verification_code_undelivered", |app| async move {
         seed_share_link(&app.pool).await;
-        let codes = VerificationCodeService::new(&app.pool);
+        let codes = VerificationCodeService::new(
+            &app.pool,
+            &app.state.config.auth,
+            &app.state.config.rate_limit,
+        );
 
         for (purpose, table) in [
             (
@@ -160,7 +172,11 @@ async fn emailed_codes_for_the_same_recipient_are_isolated_by_test_database() {
 
     let verify_in_database = |test_name: &'static str, issued: Arc<tokio::sync::Barrier>| async move {
         with_api_test_app(test_name, |app| async move {
-            let codes = VerificationCodeService::new(&app.pool);
+            let codes = VerificationCodeService::new(
+                &app.pool,
+                &app.state.config.auth,
+                &app.state.config.rate_limit,
+            );
             codes
                 .issue_and_deliver(VerificationPurpose::Recovery, EMAIL)
                 .await

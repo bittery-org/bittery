@@ -36,7 +36,7 @@ use super::{
     idempotency,
     pagination::{
         decode_page_key, page_prefetched, page_prefetched_with_more, page_values, query_limit,
-        timestamp_cursor_key, ApiPageQuery,
+        timestamp_cursor_key, ApiPageQuery, CursorContext,
     },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
@@ -628,7 +628,15 @@ async fn list_vaults(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultListEntryResponse>>, ApiError> {
     let pool = &state.db_pool;
-    let cursor = decode_page_key(&page, &auth.session.user_id, "vaults", "")?;
+    let cursor = decode_page_key(
+        &page,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vaults",
+            "",
+            &state.config.auth.jwt_secret,
+        ),
+    )?;
     let values = vault::list_vaults_page(
         pool,
         state.object_storage.as_ref(),
@@ -643,9 +651,12 @@ async fn list_vaults(
         values,
         source_has_more,
         &page,
-        &auth.session.user_id,
-        "vaults",
-        "",
+        CursorContext::new(
+            &auth.session.user_id,
+            "vaults",
+            "",
+            &state.config.auth.jwt_secret,
+        ),
         |vault| vault.id.clone(),
     )?))
 }
@@ -679,6 +690,7 @@ async fn create_vault(
     let pool = &state.db_pool;
     let result = vault::create_vault(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::CreateVaultInput {
@@ -735,6 +747,7 @@ async fn convert_vault(
     let pool = &state.db_pool;
     let result = vault::convert_vault_type(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::ConvertVaultTypeInput {
@@ -800,12 +813,21 @@ async fn list_items(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultItemDetailsResponse>>, ApiError> {
     let pool = &state.db_pool;
-    let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &vault_id)?
-        .map(|key| timestamp_cursor_key(&key))
-        .transpose()?;
+    let cursor = decode_page_key(
+        &page,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-items",
+            &vault_id,
+            &state.config.auth.jwt_secret,
+        ),
+    )?
+    .map(|key| timestamp_cursor_key(&key))
+    .transpose()?;
     let limit = query_limit(&page)?;
     let values = vault::list_vault_items_page(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         vault::VaultIdInput {
             vault_id: vault_id.clone(),
@@ -820,9 +842,12 @@ async fn list_items(
         values,
         source_has_more,
         &page,
-        &auth.session.user_id,
-        "vault-items",
-        &vault_id,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-items",
+            &vault_id,
+            &state.config.auth.jwt_secret,
+        ),
         |item| format!("{}\0{}", item.updated_at, item.id),
     )?))
 }
@@ -841,12 +866,21 @@ async fn list_all_items(
     };
     match state_filter {
         "active" => {
-            let cursor = decode_page_key(&page, &auth.session.user_id, "items", state_filter)?
-                .map(|key| timestamp_cursor_key(&key))
-                .transpose()?;
+            let cursor = decode_page_key(
+                &page,
+                CursorContext::new(
+                    &auth.session.user_id,
+                    "items",
+                    state_filter,
+                    &state.config.auth.jwt_secret,
+                ),
+            )?
+            .map(|key| timestamp_cursor_key(&key))
+            .transpose()?;
             let values = vault::list_all_vault_items_page(
                 pool,
                 state.object_storage.as_ref(),
+                state.config.server.mode,
                 &auth.session.user_id,
                 cursor,
                 query_limit(&page)?,
@@ -858,18 +892,29 @@ async fn list_all_items(
                     values.values,
                     source_has_more,
                     &page,
-                    &auth.session.user_id,
-                    "items",
-                    state_filter,
+                    CursorContext::new(
+                        &auth.session.user_id,
+                        "items",
+                        state_filter,
+                        &state.config.auth.jwt_secret,
+                    ),
                     |item| format!("{}\0{}", item.updated_at, item.id),
                 )?
                 .into(),
             ))
         }
         "trashed" => {
-            let cursor = decode_page_key(&page, &auth.session.user_id, "items", state_filter)?
-                .map(|key| timestamp_cursor_key(&key))
-                .transpose()?;
+            let cursor = decode_page_key(
+                &page,
+                CursorContext::new(
+                    &auth.session.user_id,
+                    "items",
+                    state_filter,
+                    &state.config.auth.jwt_secret,
+                ),
+            )?
+            .map(|key| timestamp_cursor_key(&key))
+            .transpose()?;
             let values = vault::list_all_deleted_vault_items_page(
                 pool,
                 state.object_storage.as_ref(),
@@ -884,9 +929,12 @@ async fn list_all_items(
                     values.values,
                     source_has_more,
                     &page,
-                    &auth.session.user_id,
-                    "items",
-                    state_filter,
+                    CursorContext::new(
+                        &auth.session.user_id,
+                        "items",
+                        state_filter,
+                        &state.config.auth.jwt_secret,
+                    ),
                     |item| {
                         format!(
                             "{}\0{}",
@@ -911,9 +959,17 @@ async fn list_all_trashed_items(
     auth: AuthenticatedRequest,
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<DeletedVaultItemWithVaultResponse>>, ApiError> {
-    let cursor = decode_page_key(&page, &auth.session.user_id, "items", "trashed")?
-        .map(|key| timestamp_cursor_key(&key))
-        .transpose()?;
+    let cursor = decode_page_key(
+        &page,
+        CursorContext::new(
+            &auth.session.user_id,
+            "items",
+            "trashed",
+            &state.config.auth.jwt_secret,
+        ),
+    )?
+    .map(|key| timestamp_cursor_key(&key))
+    .transpose()?;
     let values = vault::list_all_deleted_vault_items_page(
         &state.db_pool,
         state.object_storage.as_ref(),
@@ -929,9 +985,12 @@ async fn list_all_trashed_items(
         values,
         source_has_more,
         &page,
-        &auth.session.user_id,
-        "items",
-        "trashed",
+        CursorContext::new(
+            &auth.session.user_id,
+            "items",
+            "trashed",
+            &state.config.auth.jwt_secret,
+        ),
         |item| {
             format!(
                 "{}\0{}",
@@ -951,9 +1010,17 @@ async fn list_deleted_items(
 ) -> Result<Json<CursorPage<VaultItemResponse>>, ApiError> {
     let pool = &state.db_pool;
     let filter = format!("{vault_id}:trashed");
-    let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &filter)?
-        .map(|key| timestamp_cursor_key(&key))
-        .transpose()?;
+    let cursor = decode_page_key(
+        &page,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-items",
+            &filter,
+            &state.config.auth.jwt_secret,
+        ),
+    )?
+    .map(|key| timestamp_cursor_key(&key))
+    .transpose()?;
     let values = vault::list_deleted_vault_items_page(
         pool,
         &auth.session.user_id,
@@ -970,9 +1037,12 @@ async fn list_deleted_items(
         values,
         source_has_more,
         &page,
-        &auth.session.user_id,
-        "vault-items",
-        &filter,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-items",
+            &filter,
+            &state.config.auth.jwt_secret,
+        ),
         |item| {
             format!(
                 "{}\0{}",
@@ -990,10 +1060,14 @@ async fn get_item(
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let pool = &state.db_pool;
-    let item: ItemResponseDto =
-        vault::get_vault_item(pool, &auth.session.user_id, vault::ItemIdInput { item_id })
-            .await?
-            .into();
+    let item: ItemResponseDto = vault::get_vault_item(
+        pool,
+        state.config.server.mode,
+        &auth.session.user_id,
+        vault::ItemIdInput { item_id },
+    )
+    .await?
+    .into();
     let version = item.version;
     versioned_json(item, version)
 }
@@ -1336,6 +1410,8 @@ async fn create_attachment_upload(
     let result = vault::create_vault_attachment_upload(
         pool,
         state.object_storage.as_ref(),
+        &state.config.storage.attachment_upload_secret,
+        state.config.server.mode,
         &auth.session.user_id,
         vault::CreateAttachmentUploadInput {
             item_id,
@@ -1363,6 +1439,8 @@ async fn create_attachment(
     let result = vault::create_vault_attachment(
         pool,
         state.object_storage.as_ref(),
+        &state.config.storage.attachment_upload_secret,
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::CreateAttachmentInput {
@@ -1394,11 +1472,20 @@ async fn list_attachments(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultAttachmentResponse>>, ApiError> {
     let pool = &state.db_pool;
-    let cursor = decode_page_key(&page, &auth.session.user_id, "attachments", &item_id)?
-        .map(|key| timestamp_cursor_key(&key))
-        .transpose()?;
+    let cursor = decode_page_key(
+        &page,
+        CursorContext::new(
+            &auth.session.user_id,
+            "attachments",
+            &item_id,
+            &state.config.auth.jwt_secret,
+        ),
+    )?
+    .map(|key| timestamp_cursor_key(&key))
+    .transpose()?;
     let values = vault::list_vault_attachments_page(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         vault::ItemIdInput {
             item_id: item_id.clone(),
@@ -1411,9 +1498,12 @@ async fn list_attachments(
     Ok(Json(page_prefetched(
         values,
         &page,
-        &auth.session.user_id,
-        "attachments",
-        &item_id,
+        CursorContext::new(
+            &auth.session.user_id,
+            "attachments",
+            &item_id,
+            &state.config.auth.jwt_secret,
+        ),
         |attachment| format!("{}\0{}", attachment.created_at, attachment.id),
     )?))
 }
@@ -1429,6 +1519,7 @@ async fn create_attachment_download_url(
         vault::get_attachment_download_url(
             pool,
             state.object_storage.as_ref(),
+            state.config.server.mode,
             &auth.session.user_id,
             vault::AttachmentIdInput { attachment_id },
         )
@@ -1447,6 +1538,7 @@ async fn update_attachment(
     let pool = &state.db_pool;
     let result = vault::update_vault_attachment(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::UpdateAttachmentInput {
@@ -1471,6 +1563,7 @@ async fn delete_attachment(
     let result = vault::delete_vault_attachment(
         pool,
         state.object_storage.as_ref(),
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::AttachmentIdInput { attachment_id },
@@ -1500,9 +1593,12 @@ async fn list_members(
     Ok(Json(page_values(
         values,
         &page,
-        &auth.session.user_id,
-        "vault-members",
-        &vault_id,
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-members",
+            &vault_id,
+            &state.config.auth.jwt_secret,
+        ),
         |member| member.user_id.clone(),
     )?))
 }
@@ -1517,6 +1613,7 @@ async fn available_team_members(
     let pool = &state.db_pool;
     let values = vault::available_team_members(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         vault::VaultIdInput {
             vault_id: vault_id.clone(),
@@ -1527,9 +1624,12 @@ async fn available_team_members(
     Ok(Json(page_values(
         values,
         &page,
-        &auth.session.user_id,
-        "available-vault-members",
-        &vault_id,
+        CursorContext::new(
+            &auth.session.user_id,
+            "available-vault-members",
+            &vault_id,
+            &state.config.auth.jwt_secret,
+        ),
         |member| member.user_id.clone(),
     )?))
 }
@@ -1544,6 +1644,7 @@ async fn add_member(
     let pool = &state.db_pool;
     let result = vault::add_vault_member(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         auth.effective_client_id().as_deref(),
         vault::AddVaultMemberInput {
@@ -1569,6 +1670,7 @@ async fn update_member_role(
     let pool = &state.db_pool;
     let result = vault::update_vault_member_role(
         pool,
+        state.config.server.mode,
         &auth.session.user_id,
         vault::UpdateVaultMemberRoleInput {
             vault_id,

@@ -601,18 +601,6 @@ pub(crate) struct EnvLockGuard {
     _guard: tokio::sync::MutexGuard<'static, ()>,
 }
 
-pub(crate) fn acquire_env_lock() -> EnvLockGuard {
-    static SYNC_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    let runtime = SYNC_RT.get_or_init(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("env lock runtime should build")
-    });
-    let guard = runtime.block_on(env_lock().lock());
-    EnvLockGuard { _guard: guard }
-}
-
 pub(crate) async fn acquire_env_lock_async() -> EnvLockGuard {
     EnvLockGuard {
         _guard: env_lock().lock().await,

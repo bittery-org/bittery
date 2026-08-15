@@ -1,4 +1,4 @@
-use std::{env, fmt};
+use std::fmt;
 
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
@@ -10,7 +10,7 @@ use sqlx::{query, query_as, PgPool};
 use time::OffsetDateTime;
 
 use crate::{
-    config,
+    config::StripeConfig,
     db::enums::{BillingPlan, BillingStatus},
     services::transaction::database_error,
 };
@@ -60,20 +60,21 @@ struct DbBillingTeamRow {
     billing_plan: BillingPlan,
 }
 
-pub(crate) fn is_self_hosted_mode() -> bool {
-    config::is_self_hosted_mode()
-}
-
-pub(crate) fn is_stripe_webhook_configured() -> bool {
-    stripe_secret_key_is_configured() && stripe_webhook_secret().is_some()
+pub(crate) fn is_stripe_webhook_configured(config: &StripeConfig) -> bool {
+    config.secret_key.is_some() && config.webhook_secret.is_some()
 }
 
 pub(crate) async fn process_stripe_webhook_event(
     pool: &PgPool,
+    stripe_config: &StripeConfig,
     raw_body: &str,
     signature_header: Option<&str>,
 ) -> Result<bool, StripeWebhookError> {
-    verify_stripe_signature(raw_body, signature_header)?;
+    verify_stripe_signature(
+        stripe_config.webhook_secret.as_deref(),
+        raw_body,
+        signature_header,
+    )?;
 
     let event = serde_json::from_str::<StripeWebhookEvent>(raw_body).map_err(|error| {
         StripeWebhookError::InvalidPayload(format!("Invalid Stripe event payload: {error}"))
@@ -88,16 +89,31 @@ pub(crate) async fn process_stripe_webhook_event(
             apply_checkout_session_completed(pool, &event.data.object).await?
         }
         "customer.subscription.created" => {
-            apply_subscription_update(pool, &event.data.object, SubscriptionUpdateKind::Created)
-                .await?
+            apply_subscription_update(
+                pool,
+                stripe_config,
+                &event.data.object,
+                SubscriptionUpdateKind::Created,
+            )
+            .await?
         }
         "customer.subscription.updated" => {
-            apply_subscription_update(pool, &event.data.object, SubscriptionUpdateKind::Updated)
-                .await?
+            apply_subscription_update(
+                pool,
+                stripe_config,
+                &event.data.object,
+                SubscriptionUpdateKind::Updated,
+            )
+            .await?
         }
         "customer.subscription.deleted" => {
-            apply_subscription_update(pool, &event.data.object, SubscriptionUpdateKind::Deleted)
-                .await?
+            apply_subscription_update(
+                pool,
+                stripe_config,
+                &event.data.object,
+                SubscriptionUpdateKind::Deleted,
+            )
+            .await?
         }
         "invoice.paid" => {
             apply_invoice_status(pool, &event.data.object, BillingStatus::Active).await?
@@ -189,6 +205,7 @@ async fn apply_checkout_session_completed(
 
 async fn apply_subscription_update(
     pool: &PgPool,
+    stripe_config: &StripeConfig,
     subscription: &Value,
     kind: SubscriptionUpdateKind,
 ) -> Result<(), StripeWebhookError> {
@@ -214,7 +231,7 @@ async fn apply_subscription_update(
     };
 
     let billing_plan = parse_plan_id(metadata_string(subscription, "plan").as_deref())
-        .or_else(|| get_plan_by_stripe_price_id(stripe_price_id.as_deref()))
+        .or_else(|| get_plan_by_stripe_price_id(stripe_config, stripe_price_id.as_deref()))
         .unwrap_or(team.billing_plan);
     let clear_subscription = kind == SubscriptionUpdateKind::Deleted;
     let stripe_subscription_item_id = if clear_subscription {
@@ -370,13 +387,14 @@ async fn find_team_for_event(
 }
 
 fn verify_stripe_signature(
+    webhook_secret: Option<&str>,
     raw_body: &str,
     signature_header: Option<&str>,
 ) -> Result<(), StripeWebhookError> {
-    let webhook_secret = stripe_webhook_secret().ok_or(StripeWebhookError::NotConfigured)?;
+    let webhook_secret = webhook_secret.ok_or(StripeWebhookError::NotConfigured)?;
     let signature_header = signature_header.ok_or(StripeWebhookError::MissingSignature)?;
     verify_signature(
-        &webhook_secret,
+        webhook_secret,
         raw_body,
         signature_header,
         Utc::now().timestamp(),
@@ -444,21 +462,6 @@ fn parse_signature_header(
     }
 }
 
-fn stripe_webhook_secret() -> Option<String> {
-    env::var("STRIPE_WEBHOOK_SECRET")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn stripe_secret_key_is_configured() -> bool {
-    env::var("STRIPE_SECRET_KEY")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .is_some()
-}
-
 /// Stripe metadata is untrusted free text, so an unrecognized plan is dropped rather than stored.
 fn parse_plan_id(value: Option<&str>) -> Option<BillingPlan> {
     value?.parse().ok()
@@ -476,14 +479,26 @@ fn map_stripe_status(status: Option<&str>) -> BillingStatus {
     }
 }
 
-fn get_plan_by_stripe_price_id(price_id: Option<&str>) -> Option<BillingPlan> {
+fn get_plan_by_stripe_price_id(
+    stripe_config: &StripeConfig,
+    price_id: Option<&str>,
+) -> Option<BillingPlan> {
     let price_id = price_id?;
-    for (plan, env_name) in [
-        (BillingPlan::Personal, "STRIPE_PRICE_PERSONAL_MONTHLY"),
-        (BillingPlan::Family, "STRIPE_PRICE_FAMILY_MONTHLY"),
-        (BillingPlan::Team, "STRIPE_PRICE_TEAM_SEAT_MONTHLY"),
+    for (plan, configured_price_id) in [
+        (
+            BillingPlan::Personal,
+            stripe_config.personal_monthly_price_id.as_deref(),
+        ),
+        (
+            BillingPlan::Family,
+            stripe_config.family_monthly_price_id.as_deref(),
+        ),
+        (
+            BillingPlan::Team,
+            stripe_config.team_seat_monthly_price_id.as_deref(),
+        ),
     ] {
-        if env::var(env_name).ok().as_deref().map(str::trim) == Some(price_id) {
+        if configured_price_id == Some(price_id) {
             return Some(plan);
         }
     }

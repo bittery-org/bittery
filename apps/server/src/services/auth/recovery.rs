@@ -1,9 +1,9 @@
 use super::{
-    encode_hs256_token, enforce_window_limit, hash_normalized_email, is_dev_auth_stub_enabled,
-    jwt_signing_secret, request_ip_key, validate_hex_string, GetRecoveryDataInput,
-    GetRecoveryDataResponse, LogoutResponse, RecoveryVaultKeyResponse,
-    RequestRecoveryVerificationInput, ResetPasswordInput, ResetPasswordResponse,
-    ValidatedKdfProfile, VerifyRecoveryCodeInput, VerifyRecoveryCodeResponse, JWT_ISSUER,
+    encode_hs256_token, enforce_window_limit, hash_normalized_email, request_ip_key,
+    validate_hex_string, GetRecoveryDataInput, GetRecoveryDataResponse, LogoutResponse,
+    RecoveryVaultKeyResponse, RequestRecoveryVerificationInput, ResetPasswordInput,
+    ResetPasswordResponse, ValidatedKdfProfile, VerifyRecoveryCodeInput,
+    VerifyRecoveryCodeResponse, JWT_ISSUER,
 };
 use bittery_crypto_core::normalize_email;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
@@ -17,6 +17,7 @@ const RECOVERY_JWT_AUDIENCE: &str = "bittery-recovery";
 const RECOVERY_VERIFICATION_TTL_MINUTES: i64 = 15;
 
 use crate::{
+    config::AuthConfig,
     db::models::DbRecoveryVerificationRow,
     error::AppError,
     repo::common::{generate_resource_id, insert_audit_event},
@@ -52,14 +53,14 @@ pub(crate) async fn request_recovery_verification(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_RECOVERY_REQUEST_EMAIL,
         &hash_normalized_email(&normalized_email),
-        recovery_request_limit(),
+        recovery_request_limit(&app_state.config.rate_limit),
     )
     .await?;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_RECOVERY_REQUEST_IP,
         &request_ip_key(request),
-        recovery_request_limit(),
+        recovery_request_limit(&app_state.config.rate_limit),
     )
     .await?;
 
@@ -76,7 +77,7 @@ pub(crate) async fn request_recovery_verification(
         .and_then(|row| row.encrypted_master_key.as_ref())
         .is_some()
     {
-        VerificationCodeService::new(pool)
+        VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit)
             .issue_and_deliver(VerificationPurpose::Recovery, &normalized_email)
             .await?;
     }
@@ -99,18 +100,19 @@ pub(crate) async fn verify_recovery_code(
         limiter,
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
 
-    let outcome = VerificationCodeService::new(pool)
-        .verify_with_lockout_and_consume(
-            VerificationPurpose::Recovery,
-            &normalized_email,
-            &input.code,
-            limiter,
-        )
-        .await?;
+    let outcome =
+        VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit)
+            .verify_with_lockout_and_consume(
+                VerificationPurpose::Recovery,
+                &normalized_email,
+                &input.code,
+                limiter,
+            )
+            .await?;
 
     if outcome == LockoutVerificationCodeOutcome::LockoutTriggered {
         // Threshold reached: invalidate any pending recovery code and record an audit
@@ -141,7 +143,14 @@ pub(crate) async fn verify_recovery_code(
         LockoutVerificationCodeOutcome::Valid { verification_id } => {
             load_user_id_by_email(pool, &normalized_email)
                 .await?
-                .map(|user_id| create_recovery_token(&verification_id, &user_id, &normalized_email))
+                .map(|user_id| {
+                    create_recovery_token(
+                        &app_state.config.auth,
+                        &verification_id,
+                        &user_id,
+                        &normalized_email,
+                    )
+                })
                 .transpose()?
         }
         LockoutVerificationCodeOutcome::Invalid | LockoutVerificationCodeOutcome::Exhausted => None,
@@ -177,12 +186,13 @@ pub(crate) async fn get_recovery_data(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
-    let recovery_claims = verify_recovery_token(&input.recovery_token)
-        .await
-        .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
+    let recovery_claims =
+        verify_recovery_token(&app_state.config.auth.jwt_secret, &input.recovery_token)
+            .await
+            .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
     let recovery_data = load_recovery_data(
         pool,
         &recovery_claims.verification_id,
@@ -216,18 +226,21 @@ pub(crate) async fn reset_password(
         app_state.rate_limiter.as_ref(),
         rate_limit::SCOPE_GENERIC_IP,
         &request_ip_key(request),
-        generic_ip_limit(),
+        generic_ip_limit(&app_state.config.rate_limit),
     )
     .await?;
-    let recovery_claims = verify_recovery_token(&input.recovery_token)
-        .await
-        .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
+    let recovery_claims =
+        verify_recovery_token(&app_state.config.auth.jwt_secret, &input.recovery_token)
+            .await
+            .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
     let (user_id, revoked_session_ids) = reset_user_password_with_recovery(
         pool,
         &recovery_claims.verification_id,
         &recovery_claims.user_id,
         &input,
         kdf_profile,
+        &app_state.config.auth,
+        &app_state.config.rate_limit,
     )
     .await
     .map_err(|_| unauthorized_handler_error("Invalid recovery session"))?;
@@ -308,6 +321,8 @@ async fn reset_user_password_with_recovery(
     user_id: &str,
     input: &ResetPasswordInput,
     kdf_profile: ValidatedKdfProfile,
+    auth_config: &AuthConfig,
+    rate_limit_config: &crate::config::RateLimitConfig,
 ) -> Result<(String, Vec<String>), AppError> {
     let now = OffsetDateTime::now_utc();
     let mut transaction = pool
@@ -374,7 +389,7 @@ async fn reset_user_password_with_recovery(
         .execute(transaction.as_mut())
         .await
         .map_err(|error| database_error(error, "Failed to revoke sessions after recovery"))?;
-    if !VerificationCodeService::new(pool)
+    if !VerificationCodeService::new(pool, auth_config, rate_limit_config)
         .consume_recovery_session(&mut transaction, &verification.id)
         .await?
     {
@@ -389,6 +404,7 @@ async fn reset_user_password_with_recovery(
     Ok((user_id, revoked_session_ids))
 }
 fn create_recovery_token(
+    auth_config: &AuthConfig,
     verification_id: &str,
     user_id: &str,
     email: &str,
@@ -407,8 +423,12 @@ fn create_recovery_token(
         iat: issued_at,
     };
 
-    let token = encode_hs256_token(&claims, "Failed to create recovery token")?;
-    if is_dev_auth_stub_enabled() {
+    let token = encode_hs256_token(
+        &claims,
+        &auth_config.jwt_secret,
+        "Failed to create recovery token",
+    )?;
+    if auth_config.dev_stubs_enabled {
         info!(
             email = %email,
             token = %token,
@@ -418,14 +438,14 @@ fn create_recovery_token(
     Ok(token)
 }
 
-async fn verify_recovery_token(token: &str) -> Option<RecoveryTokenClaims> {
+async fn verify_recovery_token(jwt_secret: &str, token: &str) -> Option<RecoveryTokenClaims> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&[RECOVERY_JWT_AUDIENCE]);
     validation.set_issuer(&[JWT_ISSUER]);
 
     decode::<RecoveryTokenClaims>(
         token,
-        &DecodingKey::from_secret(jwt_signing_secret().as_bytes()),
+        &DecodingKey::from_secret(jwt_secret.as_bytes()),
         &validation,
     )
     .ok()

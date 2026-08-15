@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
 
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::{format_timestamp, DeploymentMode, ServerConfig},
     db::{
         enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole},
         models::*,
@@ -37,7 +37,6 @@ use crate::{
 const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
     "Share links are not available on your current plan. Upgrade to continue.";
 const MAX_VERIFICATION_CODES_PER_EMAIL: i64 = 5;
-const DEFAULT_SHARE_LINK_DAILY_LIMIT: i64 = 50;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,15 +176,16 @@ pub(crate) async fn create_share_link(
         return Err(AppError::forbidden("Read-only users cannot share items"));
     }
 
-    let share_links_access = assert_share_links_entitlement(pool, user_id).await?;
+    let share_links_access =
+        assert_share_links_entitlement(pool, app_state.config.server.mode, user_id).await?;
     validate_create_share_input(&input)?;
     if app_state
         .rate_limiter
         .check_and_increment(
             rate_limit::SCOPE_SHARE_CREATE_DAILY,
             user_id,
-            share_link_daily_limit(),
-            rate_limit::share_create_daily_limit().window,
+            app_state.config.rate_limit.share_link_daily,
+            rate_limit::share_create_daily_limit(&app_state.config.rate_limit).window,
         )
         .await?
         .is_limited()
@@ -272,16 +272,17 @@ pub(crate) async fn create_share_link(
         id: share_link_id,
         token,
         expires_at: format_timestamp(expires_at),
-        base_share_url: base_share_url(),
+        base_share_url: base_share_url(&app_state.config.server),
     })
 }
 
 pub(crate) async fn list_share_links_by_item(
     pool: &PgPool,
+    server_config: &ServerConfig,
     user_id: &str,
     input: ItemIdInput,
 ) -> Result<ShareLinkListResponse, AppError> {
-    assert_share_links_entitlement(pool, user_id).await?;
+    assert_share_links_entitlement(pool, server_config.mode, user_id).await?;
 
     let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
@@ -333,7 +334,7 @@ pub(crate) async fn list_share_links_by_item(
                 }
             })
             .collect(),
-        base_share_url: base_share_url(),
+        base_share_url: base_share_url(server_config),
     })
 }
 
@@ -382,12 +383,13 @@ pub(crate) async fn revoke_share_link(
 
 pub(crate) async fn get_share_access_logs(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: LinkIdInput,
     cursor: Option<(time::OffsetDateTime, String)>,
     limit: i64,
 ) -> Result<Vec<ShareAccessLogResponse>, AppError> {
-    assert_share_links_entitlement(pool, user_id).await?;
+    assert_share_links_entitlement(pool, deployment_mode, user_id).await?;
 
     let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     if visible_link.is_none() {
@@ -412,6 +414,7 @@ pub(crate) async fn get_share_access_logs(
 
 pub(crate) async fn get_public_info(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     input: PublicTokenInput,
 ) -> Result<PublicShareInfoResponse, AppError> {
     validate_public_token(&input.token)?;
@@ -420,7 +423,7 @@ pub(crate) async fn get_public_info(
         return Err(AppError::not_found("Share link not found or invalid"));
     };
 
-    let public_state = get_public_share_state(pool, &link).await?;
+    let public_state = get_public_share_state(pool, deployment_mode, &link).await?;
     if !public_state.valid {
         return Ok(PublicShareInfoResponse {
             valid: false,
@@ -442,6 +445,7 @@ pub(crate) async fn get_public_info(
 
 pub(crate) async fn access_public(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     input: PublicTokenInput,
 ) -> Result<PublicShareAccessResponse, AppError> {
     validate_public_token(&input.token)?;
@@ -456,7 +460,7 @@ pub(crate) async fn access_public(
         return Err(AppError::not_found("Share link not found"));
     };
 
-    let public_state = get_public_share_state(pool, &link).await?;
+    let public_state = get_public_share_state(pool, deployment_mode, &link).await?;
     if !public_state.valid && public_state.reason.as_deref() == Some("disabled") {
         log_share_access(
             pool,
@@ -525,7 +529,8 @@ pub(crate) async fn request_email_verification(
         return Err(AppError::not_found("Share link not found"));
     };
 
-    let public_state = get_public_share_state(pool, &details.link).await?;
+    let public_state =
+        get_public_share_state(pool, app_state.config.server.mode, &details.link).await?;
     if !public_state.valid {
         return Err(AppError::bad_request("This share link is no longer valid"));
     }
@@ -574,7 +579,7 @@ pub(crate) async fn request_email_verification(
         }
     }
 
-    VerificationCodeService::new(pool)
+    VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit)
         .issue_and_deliver(
             VerificationPurpose::ShareEmail {
                 share_link_id: &details.link.id,
@@ -607,7 +612,8 @@ pub(crate) async fn verify_email_and_access(
         return Err(AppError::not_found("Share link not found"));
     };
 
-    let public_state = get_public_share_state(pool, &details.link).await?;
+    let public_state =
+        get_public_share_state(pool, app_state.config.server.mode, &details.link).await?;
     if !public_state.valid && public_state.reason.as_deref() == Some("disabled") {
         log_share_access(
             pool,
@@ -651,7 +657,8 @@ pub(crate) async fn verify_email_and_access(
         ));
     }
 
-    let verification_codes = VerificationCodeService::new(pool);
+    let verification_codes =
+        VerificationCodeService::new(pool, &app_state.config.auth, &app_state.config.rate_limit);
     let verification_id = match verification_codes
         .verify_with_lockout(
             VerificationPurpose::ShareEmail {
@@ -841,9 +848,10 @@ async fn load_public_share_link_details_by_token(
 
 async fn assert_share_links_entitlement(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
 ) -> Result<ShareLinksAccess, AppError> {
-    let access = resolve_share_links_access(pool, user_id).await?;
+    let access = resolve_share_links_access(pool, deployment_mode, user_id).await?;
     if access.enabled {
         Ok(access)
     } else {
@@ -851,16 +859,23 @@ async fn assert_share_links_entitlement(
     }
 }
 
-async fn has_share_links_entitlement(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
-    Ok(resolve_share_links_access(pool, user_id).await?.enabled)
+async fn has_share_links_entitlement(
+    pool: &PgPool,
+    deployment_mode: DeploymentMode,
+    user_id: &str,
+) -> Result<bool, AppError> {
+    Ok(resolve_share_links_access(pool, deployment_mode, user_id)
+        .await?
+        .enabled)
 }
 
 async fn resolve_share_links_access(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
 ) -> Result<ShareLinksAccess, AppError> {
-    let mode = bittery_mode();
-    if mode == "self-hosted" {
+    let mode = deployment_mode.as_str();
+    if deployment_mode.is_self_hosted() {
         return Ok(ShareLinksAccess {
             enabled: true,
             max_active_links: None,
@@ -918,9 +933,10 @@ async fn record_share_audit_event(
 
 async fn get_public_share_state(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     link: &DbPublicShareLinkRow,
 ) -> Result<PublicShareState, AppError> {
-    if !has_share_links_entitlement(pool, &link.created_by_id).await? {
+    if !has_share_links_entitlement(pool, deployment_mode, &link.created_by_id).await? {
         return Ok(PublicShareState {
             valid: false,
             reason: Some("disabled".to_string()),
@@ -1022,12 +1038,11 @@ struct PublicShareState {
     reason: Option<String>,
 }
 
-fn base_share_url() -> String {
-    let web_app_url = std::env::var("WEB_APP_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "https://app.bittery.com".to_string());
+fn base_share_url(server_config: &ServerConfig) -> String {
+    let web_app_url = server_config
+        .web_app_url
+        .as_deref()
+        .unwrap_or("https://app.bittery.com");
     format!("{}/share/", web_app_url.trim_end_matches('/'))
 }
 
@@ -1048,14 +1063,6 @@ fn effective_share_link_status(
     } else {
         link.status
     }
-}
-
-fn share_link_daily_limit() -> i64 {
-    std::env::var("SHARE_LINK_DAILY_LIMIT")
-        .ok()
-        .and_then(|value| value.trim().parse::<i64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_SHARE_LINK_DAILY_LIMIT)
 }
 
 fn email_regex() -> &'static Regex {

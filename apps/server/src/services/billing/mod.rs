@@ -5,12 +5,11 @@ use sqlx::{query, query_scalar, PgPool};
 use time::OffsetDateTime;
 
 pub(crate) use self::webhook::{
-    is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
-    StripeWebhookError,
+    is_stripe_webhook_configured, process_stripe_webhook_event, StripeWebhookError,
 };
 use crate::integrations::stripe::{BillingGateway, CheckoutSessionInput};
 use crate::{
-    config::{bittery_mode, cloud_billing_enabled, format_timestamp},
+    config::{format_timestamp, ServerConfig, StripeConfig},
     db::{
         enums::{BillingPlan, BillingStatus, TeamRole},
         models::{DbBillingActorRow, DbBillingContactRow},
@@ -98,13 +97,14 @@ struct BillingSnapshot {
 
 pub(crate) async fn get_billing_status(
     pool: &PgPool,
+    server_config: &ServerConfig,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
 ) -> Result<BillingStatusResponse, AppError> {
-    if bittery_mode() == "self-hosted" {
+    if server_config.mode.is_self_hosted() {
         return Ok(self_hosted_billing_status());
     }
-    if !cloud_billing_enabled() {
+    if !server_config.cloud_billing {
         return Ok(cloud_billing_disabled_status());
     }
 
@@ -134,10 +134,11 @@ pub(crate) async fn get_billing_status(
 
 pub(crate) async fn get_billing_entitlements(
     db_pool: &PgPool,
+    server_config: &ServerConfig,
     user_id: &str,
 ) -> Result<BillingEntitlementsResponse, AppError> {
-    let mode = bittery_mode().to_string();
-    if mode == "self-hosted" {
+    let mode = server_config.mode.as_str().to_string();
+    if server_config.mode.is_self_hosted() {
         let state = load_optional_billing_state(db_pool, user_id).await?;
         let plan = state
             .as_ref()
@@ -159,7 +160,7 @@ pub(crate) async fn get_billing_entitlements(
             limits: snapshot.limits,
         });
     }
-    if !cloud_billing_enabled() {
+    if !server_config.cloud_billing {
         let snapshot = get_billing_snapshot(&mode, BillingPlan::Free, BillingStatus::None);
         return Ok(BillingEntitlementsResponse {
             mode,
@@ -192,10 +193,11 @@ pub(crate) async fn get_billing_entitlements(
 
 pub(crate) async fn get_attachment_usage(
     pool: &PgPool,
+    server_config: &ServerConfig,
     user_id: &str,
 ) -> Result<AttachmentUsageResponse, AppError> {
-    let mode = bittery_mode().to_string();
-    if mode == "self-hosted" {
+    let mode = server_config.mode.as_str().to_string();
+    if server_config.mode.is_self_hosted() {
         return Ok(AttachmentUsageResponse {
             mode,
             attachments_enabled: true,
@@ -221,11 +223,13 @@ pub(crate) async fn get_attachment_usage(
 
 pub(crate) async fn create_checkout_session(
     pool: &PgPool,
+    server_config: &ServerConfig,
+    stripe_config: &StripeConfig,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
     input: CheckoutPlanInput,
 ) -> Result<CheckoutSessionResponse, AppError> {
-    assert_cloud_billing_enabled(billing_gateway.is_some())?;
+    assert_cloud_billing_enabled(server_config, billing_gateway.is_some())?;
     let billing_gateway = billing_gateway.expect("billing gateway availability was checked");
     let actor = load_billing_actor(pool, user_id).await?;
     let team_id = actor
@@ -249,7 +253,7 @@ pub(crate) async fn create_checkout_session(
         ));
     }
 
-    let stripe_price_id = get_stripe_price_id(target_plan).ok_or_else(|| {
+    let stripe_price_id = get_stripe_price_id(stripe_config, target_plan).ok_or_else(|| {
         AppError::internal(format!("Missing Stripe price ID for {target_plan} plan"))
     })?;
     let quantity = if target_plan == BillingPlan::Team {
@@ -258,7 +262,7 @@ pub(crate) async fn create_checkout_session(
         1
     };
     let customer_id = ensure_team_stripe_customer(pool, billing_gateway, &actor, &team_id).await?;
-    let base_url = web_app_url().trim_end_matches('/').to_string();
+    let base_url = web_app_url(server_config).trim_end_matches('/').to_string();
     let checkout = billing_gateway
         .create_checkout_session(CheckoutSessionInput {
             team_id: team_id.clone(),
@@ -299,16 +303,21 @@ pub(crate) async fn create_checkout_session(
 
 pub(crate) async fn create_portal_session(
     pool: &PgPool,
+    server_config: &ServerConfig,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
 ) -> Result<PortalSessionResponse, AppError> {
-    assert_cloud_billing_enabled(billing_gateway.is_some())?;
+    assert_cloud_billing_enabled(server_config, billing_gateway.is_some())?;
     let billing_gateway = billing_gateway.expect("billing gateway availability was checked");
     let actor = load_billing_actor(pool, user_id).await?;
     let team = ensure_team_billing(actor.clone())?;
     ensure_billing_admin(actor.role)?;
 
-    let snapshot = get_billing_snapshot(bittery_mode(), team.billing_plan, team.billing_status);
+    let snapshot = get_billing_snapshot(
+        server_config.mode.as_str(),
+        team.billing_plan,
+        team.billing_status,
+    );
     if !snapshot.entitlements.billing_portal {
         return Err(AppError::forbidden(
             "Billing portal is unavailable for your current plan",
@@ -319,7 +328,7 @@ pub(crate) async fn create_portal_session(
         .stripe_customer_id
         .as_deref()
         .ok_or_else(|| AppError::bad_request("No Stripe customer found for this team"))?;
-    let base_url = web_app_url().trim_end_matches('/').to_string();
+    let base_url = web_app_url(server_config).trim_end_matches('/').to_string();
     let url = billing_gateway
         .create_billing_portal_session(
             stripe_customer_id.to_string(),
@@ -381,10 +390,11 @@ pub(crate) async fn sync_team_seats_best_effort(
 
 pub(crate) async fn preview_additional_team_seat(
     pool: &PgPool,
+    server_config: &ServerConfig,
     billing_gateway: Option<&dyn BillingGateway>,
     user_id: &str,
 ) -> Result<Option<TeamSeatInvoicePreviewResponse>, AppError> {
-    assert_cloud_billing_enabled(billing_gateway.is_some())?;
+    assert_cloud_billing_enabled(server_config, billing_gateway.is_some())?;
     let billing_gateway = billing_gateway.expect("billing gateway availability was checked");
 
     let actor = load_billing_actor(pool, user_id).await?;
@@ -664,14 +674,17 @@ fn cloud_billing_disabled_status() -> BillingStatusResponse {
     }
 }
 
-fn assert_cloud_billing_enabled(has_billing_gateway: bool) -> Result<(), AppError> {
-    if bittery_mode() == "self-hosted" {
+fn assert_cloud_billing_enabled(
+    server_config: &ServerConfig,
+    has_billing_gateway: bool,
+) -> Result<(), AppError> {
+    if server_config.mode.is_self_hosted() {
         return Err(AppError::forbidden(
             "Billing is disabled in self-hosted mode",
         ));
     }
 
-    if !cloud_billing_enabled() {
+    if !server_config.cloud_billing {
         return Err(AppError::forbidden(
             "Billing is disabled during the hosted beta",
         ));
@@ -694,25 +707,20 @@ fn ensure_billing_admin(role: TeamRole) -> Result<(), AppError> {
     }
 }
 
-fn get_stripe_price_id(plan: BillingPlan) -> Option<String> {
-    let env_name = match plan {
-        BillingPlan::Personal => "STRIPE_PRICE_PERSONAL_MONTHLY",
-        BillingPlan::Family => "STRIPE_PRICE_FAMILY_MONTHLY",
-        BillingPlan::Team => "STRIPE_PRICE_TEAM_SEAT_MONTHLY",
+fn get_stripe_price_id(stripe_config: &StripeConfig, plan: BillingPlan) -> Option<String> {
+    let price_id = match plan {
+        BillingPlan::Personal => &stripe_config.personal_monthly_price_id,
+        BillingPlan::Family => &stripe_config.family_monthly_price_id,
+        BillingPlan::Team => &stripe_config.team_seat_monthly_price_id,
         BillingPlan::Free => return None,
     };
-
-    std::env::var(env_name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    price_id.clone()
 }
 
-fn web_app_url() -> String {
-    std::env::var("WEB_APP_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+fn web_app_url(server_config: &ServerConfig) -> String {
+    server_config
+        .web_app_url
+        .clone()
         .unwrap_or_else(|| "http://localhost:3001".to_string())
 }
 

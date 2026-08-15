@@ -1,7 +1,7 @@
-use std::env;
-
 use fred::prelude::*;
 use tracing::{info, warn};
+
+use crate::config::RedisConfig;
 
 pub fn validate_sync_fanout_requirement(
     node_env: Option<&str>,
@@ -14,21 +14,17 @@ pub fn validate_sync_fanout_requirement(
     Ok(())
 }
 
-pub async fn init_redis() -> Option<Pool> {
-    let url = match env::var("REDIS_URL") {
-        Ok(url) if !url.is_empty() => url,
-        _ => {
+pub async fn init_redis(settings: &RedisConfig) -> Option<Pool> {
+    let url = match settings.url.as_deref() {
+        Some(url) => url,
+        None => {
             info!("REDIS_URL not set — running in local-only mode (no cross-instance sync)");
             return None;
         }
     };
+    let pool_size = settings.pool_size;
 
-    let pool_size: usize = env::var("REDIS_POOL_SIZE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(4);
-
-    let config = match Config::from_url(&url) {
+    let config = match Config::from_url(url) {
         Ok(config) => config,
         Err(error) => {
             warn!(error = %error, "failed to parse REDIS_URL — running in local-only mode");

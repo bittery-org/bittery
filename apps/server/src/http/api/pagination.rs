@@ -1,6 +1,3 @@
-#[cfg(not(test))]
-use std::env;
-
 use axum::{
     extract::{FromRequestParts, Query},
     http::request::Parts,
@@ -18,6 +15,30 @@ use super::{
 };
 
 type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Clone, Copy)]
+pub(crate) struct CursorContext<'a> {
+    principal: &'a str,
+    scope: &'a str,
+    filters: &'a str,
+    jwt_secret: &'a str,
+}
+
+impl<'a> CursorContext<'a> {
+    pub(crate) fn new(
+        principal: &'a str,
+        scope: &'a str,
+        filters: &'a str,
+        jwt_secret: &'a str,
+    ) -> Self {
+        Self {
+            principal,
+            scope,
+            filters,
+            jwt_secret,
+        }
+    }
+}
 
 pub(crate) const RESPONSE_PAGE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const RESPONSE_PAGE_ITEMS_BYTES: usize = RESPONSE_PAGE_BYTES - 16 * 1024;
@@ -76,20 +97,11 @@ struct CursorPayload {
     key: String,
 }
 
-fn cursor_secret() -> Result<Vec<u8>, ApiError> {
-    #[cfg(test)]
-    return Ok(Sha256::digest(b"pagination-test-secret").to_vec());
-    #[cfg(not(test))]
-    if let Ok(secret) = env::var("JWT_SECRET") {
-        if !secret.trim().is_empty() {
-            let mut hasher = Sha256::new();
-            hasher.update(b"bittery-page-cursor-v1\0");
-            hasher.update(secret.as_bytes());
-            return Ok(hasher.finalize().to_vec());
-        }
-    }
-    #[cfg(not(test))]
-    Err(ApiError::internal())
+fn cursor_secret(jwt_secret: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"bittery-page-cursor-v1\0");
+    hasher.update(jwt_secret.as_bytes());
+    hasher.finalize().to_vec()
 }
 
 fn principal_digest(principal: &str) -> String {
@@ -101,6 +113,7 @@ fn encode_cursor(
     scope: &str,
     filters: &str,
     key: String,
+    jwt_secret: &str,
 ) -> Result<PageCursor, ApiError> {
     let payload = serde_json::to_vec(&CursorPayload {
         version: 1,
@@ -112,7 +125,7 @@ fn encode_cursor(
     .map_err(|_| ApiError::internal())?;
     let encoded_payload = URL_SAFE_NO_PAD.encode(payload);
     let mut mac =
-        HmacSha256::new_from_slice(&cursor_secret()?).map_err(|_| ApiError::internal())?;
+        HmacSha256::new_from_slice(&cursor_secret(jwt_secret)).map_err(|_| ApiError::internal())?;
     mac.update(encoded_payload.as_bytes());
     let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     Ok(PageCursor::new(format!("{encoded_payload}.{signature}")))
@@ -123,6 +136,7 @@ fn decode_cursor(
     principal: &str,
     scope: &str,
     filters: &str,
+    jwt_secret: &str,
 ) -> Result<String, ApiError> {
     let (encoded_payload, encoded_signature) =
         cursor.as_str().split_once('.').ok_or_else(invalid_cursor)?;
@@ -130,7 +144,7 @@ fn decode_cursor(
         .decode(encoded_signature)
         .map_err(|_| invalid_cursor())?;
     let mut mac =
-        HmacSha256::new_from_slice(&cursor_secret()?).map_err(|_| ApiError::internal())?;
+        HmacSha256::new_from_slice(&cursor_secret(jwt_secret)).map_err(|_| ApiError::internal())?;
     mac.update(encoded_payload.as_bytes());
     mac.verify_slice(&signature).map_err(|_| invalid_cursor())?;
     let payload = URL_SAFE_NO_PAD
@@ -156,14 +170,20 @@ fn invalid_cursor() -> ApiError {
 
 pub(crate) fn decode_page_key(
     request: &PageRequest,
-    principal: &str,
-    scope: &str,
-    filters: &str,
+    context: CursorContext<'_>,
 ) -> Result<Option<String>, ApiError> {
     request
         .cursor
         .as_ref()
-        .map(|cursor| decode_cursor(cursor, principal, scope, filters))
+        .map(|cursor| {
+            decode_cursor(
+                cursor,
+                context.principal,
+                context.scope,
+                context.filters,
+                context.jwt_secret,
+            )
+        })
         .transpose()
 }
 
@@ -184,25 +204,21 @@ pub(crate) fn query_limit(request: &PageRequest) -> Result<i64, ApiError> {
 pub(crate) fn page_prefetched<T, F>(
     values: Vec<T>,
     request: &PageRequest,
-    principal: &str,
-    scope: &str,
-    filters: &str,
+    context: CursorContext<'_>,
     key: F,
 ) -> Result<CursorPage<T>, ApiError>
 where
     T: Serialize,
     F: Fn(&T) -> String,
 {
-    page_prefetched_with_more(values, false, request, principal, scope, filters, key)
+    page_prefetched_with_more(values, false, request, context, key)
 }
 
 pub(crate) fn page_prefetched_with_more<T, F>(
     mut values: Vec<T>,
     source_has_more: bool,
     request: &PageRequest,
-    principal: &str,
-    scope: &str,
-    filters: &str,
+    context: CursorContext<'_>,
     key: F,
 ) -> Result<CursorPage<T>, ApiError>
 where
@@ -217,7 +233,15 @@ where
     let next_cursor = if has_more {
         values
             .last()
-            .map(|value| encode_cursor(principal, scope, filters, key(value)))
+            .map(|value| {
+                encode_cursor(
+                    context.principal,
+                    context.scope,
+                    context.filters,
+                    key(value),
+                    context.jwt_secret,
+                )
+            })
             .transpose()?
     } else {
         None
@@ -242,9 +266,7 @@ pub(crate) fn validate_page_request(request: &PageRequest) -> Result<(), ApiErro
 pub(crate) fn page_values<T, F>(
     values: Vec<T>,
     request: &PageRequest,
-    principal: &str,
-    scope: &str,
-    filters: &str,
+    context: CursorContext<'_>,
     key: F,
 ) -> Result<CursorPage<T>, ApiError>
 where
@@ -254,7 +276,13 @@ where
     validate_page_request(request)?;
     let start = match request.cursor.as_ref() {
         Some(cursor) => {
-            let cursor_key = decode_cursor(cursor, principal, scope, filters)?;
+            let cursor_key = decode_cursor(
+                cursor,
+                context.principal,
+                context.scope,
+                context.filters,
+                context.jwt_secret,
+            )?;
             values
                 .iter()
                 .position(|value| key(value) == cursor_key)
@@ -291,7 +319,15 @@ where
     let next_cursor = if has_more {
         items
             .last()
-            .map(|value| encode_cursor(principal, scope, filters, key(value)))
+            .map(|value| {
+                encode_cursor(
+                    context.principal,
+                    context.scope,
+                    context.filters,
+                    key(value),
+                    context.jwt_secret,
+                )
+            })
             .transpose()?
     } else {
         None
@@ -346,9 +382,7 @@ mod tests {
                 cursor: None,
                 limit: 1,
             },
-            "user-a",
-            "items",
-            "active",
+            CursorContext::new("user-a", "items", "active", "pagination-test-secret"),
             key,
         )
         .unwrap();
@@ -358,9 +392,7 @@ mod tests {
                 cursor: first.next_cursor,
                 limit: 2,
             },
-            "user-a",
-            "items",
-            "active",
+            CursorContext::new("user-a", "items", "active", "pagination-test-secret"),
             key,
         )
         .unwrap();
@@ -379,9 +411,7 @@ mod tests {
                 cursor: None,
                 limit: 1,
             },
-            "user-a",
-            "items",
-            "active",
+            CursorContext::new("user-a", "items", "active", "pagination-test-secret"),
             key,
         )
         .unwrap();
@@ -401,9 +431,7 @@ mod tests {
                     cursor: Some(candidate),
                     limit: 1,
                 },
-                principal,
-                scope,
-                filters,
+                CursorContext::new(principal, scope, filters, "pagination-test-secret"),
                 key,
             )
             .unwrap_err();
@@ -426,9 +454,7 @@ mod tests {
                 cursor: None,
                 limit: 10,
             },
-            "user-a",
-            "items",
-            "active",
+            CursorContext::new("user-a", "items", "active", "pagination-test-secret"),
             key,
         )
         .unwrap();
@@ -448,9 +474,7 @@ mod tests {
                 cursor: None,
                 limit: 1,
             },
-            "user-a",
-            "items",
-            "active",
+            CursorContext::new("user-a", "items", "active", "pagination-test-secret"),
             key,
         )
         .unwrap_err();

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, sync::Arc};
 
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::json;
@@ -6,55 +6,15 @@ use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::*;
-use crate::config::bittery_mode;
+use crate::config::DeploymentMode;
 use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
-    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
+    seed_vault_key, with_api_test_app, with_api_test_app_state,
 };
-
-fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
-    let _guard = acquire_env_lock();
-    let previous = std::env::var("BITTERY_MODE").ok();
-
-    match value {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-
-    let result = test_fn();
-
-    match previous.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-
-    result
-}
-
-async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
-where
-    F: Future<Output = T>,
-{
-    let _guard = acquire_env_lock_async().await;
-    let previous = std::env::var("BITTERY_MODE").ok();
-    match value {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-
-    let result = future.await;
-
-    match previous.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-
-    result
-}
 
 fn sample_event(id: &str, timestamp: &str, source: EventSource) -> TeamEvent {
     TeamEvent {
@@ -283,22 +243,24 @@ fn mask_user_agent_handles_common_browsers_and_fallbacks() {
 fn team_management_enabled_respects_billing_state_and_mode() {
     // The console gate resolves entitlement on the team plan; these assertions pin
     // the billing states it accepts. The gate itself lives in `services::team_admin`.
-    let console_gate = |billing_status: Option<BillingStatus>| {
-        team_management_enabled(bittery_mode(), Some(BillingPlan::Team), billing_status)
+    let console_gate = |mode: DeploymentMode, billing_status: Option<BillingStatus>| {
+        team_management_enabled(mode.as_str(), Some(BillingPlan::Team), billing_status)
     };
 
-    with_bittery_mode(None, || {
-        assert!(!console_gate(None));
-        assert!(!console_gate(Some(BillingStatus::PastDue)));
-        assert!(console_gate(Some(BillingStatus::Active)));
-        assert!(console_gate(Some(BillingStatus::Trialing)));
-        assert_eq!(bittery_mode(), "cloud");
-    });
-
-    with_bittery_mode(Some("self-hosted"), || {
-        assert!(console_gate(None));
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
+    assert!(!console_gate(DeploymentMode::Cloud, None));
+    assert!(!console_gate(
+        DeploymentMode::Cloud,
+        Some(BillingStatus::PastDue)
+    ));
+    assert!(console_gate(
+        DeploymentMode::Cloud,
+        Some(BillingStatus::Active)
+    ));
+    assert!(console_gate(
+        DeploymentMode::Cloud,
+        Some(BillingStatus::Trialing)
+    ));
+    assert!(console_gate(DeploymentMode::SelfHosted, None));
 }
 
 #[test]
@@ -479,97 +441,99 @@ async fn team_events_requires_authentication() {
 #[tokio::test]
 async fn team_events_enforce_access_control_and_team_not_found_paths() {
     with_api_test_app("audit_team_events_access_control", |app| async move {
-        with_bittery_mode_async(Some("cloud"), async {
-            let fixture = build_audit_router_fixture(&app.pool).await;
+        let fixture = build_audit_router_fixture(&app.pool).await;
 
-            let member_session = app.issue_session(&fixture.member_user_id).await;
-            let member_response = app
-                .api_json(
-                    Method::GET,
-                    "/api/v1/audit-events",
-                    None,
-                    authenticated_json_headers(&member_session.token),
-                )
-                .await;
-            member_response.assert_contract_status();
-            assert_handler_error(
-                &member_response.body,
-                "FORBIDDEN",
-                "Only team owner or admin can access this console",
-            );
+        let member_session = app.issue_session(&fixture.member_user_id).await;
+        let member_response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/audit-events",
+                None,
+                authenticated_json_headers(&member_session.token),
+            )
+            .await;
+        member_response.assert_contract_status();
+        assert_handler_error(
+            &member_response.body,
+            "FORBIDDEN",
+            "Only team owner or admin can access this console",
+        );
 
-            let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
-            let personal_response = app
-                .api_json(
-                    Method::GET,
-                    "/api/v1/audit-events",
-                    None,
-                    authenticated_json_headers(&personal_session.token),
-                )
-                .await;
-            personal_response.assert_contract_status();
-            assert_handler_error(
-                &personal_response.body,
-                "FORBIDDEN",
-                "This console is only available on Team plans",
-            );
+        let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
+        let personal_response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/audit-events",
+                None,
+                authenticated_json_headers(&personal_session.token),
+            )
+            .await;
+        personal_response.assert_contract_status();
+        assert_handler_error(
+            &personal_response.body,
+            "FORBIDDEN",
+            "This console is only available on Team plans",
+        );
 
-            let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
-            let inactive_response = app
-                .api_json(
-                    Method::GET,
-                    "/api/v1/audit-events",
-                    None,
-                    authenticated_json_headers(&inactive_session.token),
-                )
-                .await;
-            inactive_response.assert_contract_status();
-            assert_handler_error(
-                &inactive_response.body,
-                "FORBIDDEN",
-                "Team management is unavailable until billing is active",
-            );
+        let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
+        let inactive_response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/audit-events",
+                None,
+                authenticated_json_headers(&inactive_session.token),
+            )
+            .await;
+        inactive_response.assert_contract_status();
+        assert_handler_error(
+            &inactive_response.body,
+            "FORBIDDEN",
+            "Team management is unavailable until billing is active",
+        );
 
-            let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
-            let no_team_response = app
-                .api_json(
-                    Method::GET,
-                    "/api/v1/audit-events",
-                    None,
-                    authenticated_json_headers(&no_team_session.token),
-                )
-                .await;
-            no_team_response.assert_contract_status();
-            assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
-        })
-        .await;
+        let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
+        let no_team_response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/audit-events",
+                None,
+                authenticated_json_headers(&no_team_session.token),
+            )
+            .await;
+        no_team_response.assert_contract_status();
+        assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
     })
     .await;
 }
 
 #[tokio::test]
 async fn team_events_allow_self_hosted_admins_without_team_plan() {
-    with_api_test_app("audit_team_events_self_hosted", |app| async move {
-        let fixture = build_audit_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.personal_owner_user_id).await;
-        let response = with_bittery_mode_async(
-            Some("self-hosted"),
-            app.api_json(
-                Method::GET,
-                &format!("/api/v1/audit-events?limit={}", 1),
-                None,
-                authenticated_json_headers(&session.token),
-            ),
-        )
-        .await;
+    with_api_test_app_state(
+        "audit_team_events_self_hosted",
+        |mut state| {
+            Arc::make_mut(&mut state.config).server.mode = DeploymentMode::SelfHosted;
+            state
+        },
+        |app| async move {
+            let fixture = build_audit_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.personal_owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/audit-events?limit={}", 1),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
 
-        response.assert_contract_status();
-        assert!(
-            response.body["events"].is_array(),
-            "expected team events payload, got {:?}",
-            response.body
-        );
-    })
+            response.assert_contract_status();
+            assert!(
+                response.body["events"].is_array(),
+                "expected team events payload, got {:?}",
+                response.body
+            );
+        },
+    )
     .await;
 }
 

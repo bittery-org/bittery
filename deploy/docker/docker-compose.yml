@@ -23,6 +23,8 @@ services:
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery}
+      - DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-5}
+      - DATABASE_ACQUIRE_TIMEOUT_SECONDS=${DATABASE_ACQUIRE_TIMEOUT_SECONDS:-5}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - CORS_ORIGIN=https://${DOMAIN}
       - REQUEST_TIMEOUT_SECONDS=${REQUEST_TIMEOUT_SECONDS:-30}

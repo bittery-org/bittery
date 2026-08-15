@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr};
+use std::net::SocketAddr;
 
 use bittery_server::ServerRuntime;
 use tokio::net::TcpListener;
@@ -12,19 +12,13 @@ fn init_tracing() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-fn read_bind_address() -> String {
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    format!("{host}:{port}")
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenvy::dotenv().ok();
     init_tracing();
 
-    let bind_address = read_bind_address();
     let runtime = ServerRuntime::from_env().await?;
+    let bind_address = runtime.bind_address().to_string();
     let app = runtime.app();
 
     let listener = TcpListener::bind(&bind_address).await?;

@@ -272,6 +272,7 @@ async fn bootstrap(
     let mut response: BootstrapItemsResponse = sync::bootstrap_items(
         pool,
         state.object_storage.as_ref(),
+        state.config.server.mode,
         &auth.session.user_id,
         query.into(),
     )

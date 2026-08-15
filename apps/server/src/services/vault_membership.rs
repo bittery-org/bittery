@@ -5,7 +5,7 @@ use serde_json::json;
 use sqlx::{query, query_as, PgPool};
 
 use crate::{
-    config::bittery_mode,
+    config::DeploymentMode,
     db::enums::{BillingPlan, BillingStatus, KeyRotationReason, VaultRole, VaultType},
     error::AppError,
     services::{
@@ -107,6 +107,7 @@ pub(crate) fn authorize_role_change(actor: VaultRole, target: VaultRole) -> Resu
 }
 
 fn authorize_vault_policy(
+    deployment_mode: DeploymentMode,
     vault_type: VaultType,
     team_id: Option<&str>,
     billing_plan: Option<BillingPlan>,
@@ -117,7 +118,9 @@ fn authorize_vault_policy(
             "Only team vaults support removing members",
         ));
     }
-    if !resolve_vault_sharing_entitlement(bittery_mode(), billing_plan, billing_status).allowed {
+    if !resolve_vault_sharing_entitlement(deployment_mode.as_str(), billing_plan, billing_status)
+        .allowed
+    {
         return Err(AppError::forbidden(VAULT_SHARING_UNAVAILABLE_MESSAGE));
     }
     Ok(())
@@ -127,6 +130,7 @@ async fn authorize_managed_vault(
     pool: &PgPool,
     vault_id: &str,
     actor_id: &str,
+    deployment_mode: DeploymentMode,
 ) -> Result<(), AppError> {
     let policy: (VaultType, Option<String>, Option<BillingPlan>, Option<BillingStatus>) = query_as(
         "SELECT v.type,v.team_id,t.billing_plan,t.billing_status FROM vault v JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$2 JOIN \"user\" actor ON actor.id=actor_key.user_id LEFT JOIN team t ON t.id=actor.team_id WHERE v.id=$1",
@@ -137,7 +141,13 @@ async fn authorize_managed_vault(
     .await
     .map_err(|error| database_error(error, "Vault membership operation failed"))?
     .ok_or_else(|| AppError::forbidden("Insufficient permissions"))?;
-    authorize_vault_policy(policy.0, policy.1.as_deref(), policy.2, policy.3)
+    authorize_vault_policy(
+        deployment_mode,
+        policy.0,
+        policy.1.as_deref(),
+        policy.2,
+        policy.3,
+    )
 }
 
 async fn roles(
@@ -169,13 +179,14 @@ async fn roles(
 
 pub(crate) async fn create_removal_plan(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     actor_id: &str,
     vault_id: &str,
     target_id: &str,
 ) -> Result<RotationPlanSummary, AppError> {
     let (actor, target) = roles(pool, vault_id, actor_id, target_id).await?;
     authorize(actor, target, actor_id == target_id)?;
-    authorize_managed_vault(pool, vault_id, actor_id).await?;
+    authorize_managed_vault(pool, vault_id, actor_id, deployment_mode).await?;
     vault_key_rotation::create_plan(
         pool,
         CreateRotationPlanInput {
@@ -191,6 +202,7 @@ pub(crate) async fn create_removal_plan(
 
 pub(crate) async fn finalize_removal(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     actor_id: &str,
     vault_id: &str,
     target_id: &str,
@@ -235,6 +247,7 @@ pub(crate) async fn finalize_removal(
     .await
     .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     authorize_vault_policy(
+        deployment_mode,
         row.2,
         row.3.as_deref(),
         billing.map(|value| value.0),
@@ -280,8 +293,7 @@ fn finalize_error(error: FinalizeError) -> AppError {
 mod tests {
     use super::*;
     use crate::test_support::{
-        acquire_env_lock_async, assign_user_to_team, seed_team, seed_user, seed_vault,
-        seed_vault_key, with_api_test_app, EnvVarGuard,
+        assign_user_to_team, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
     };
 
     #[test]
@@ -313,8 +325,6 @@ mod tests {
 
     #[tokio::test]
     async fn removal_requires_an_entitled_team_vault_through_finalization() {
-        let _env_lock = acquire_env_lock_async().await;
-        let _env = EnvVarGuard::set(&[("BITTERY_MODE", "cloud")]);
         with_api_test_app("vault_membership_policy", |app| async move {
             let pool = &app.pool;
             seed_user(
@@ -372,6 +382,7 @@ mod tests {
             .await;
             let inactive_error = create_removal_plan(
                 pool,
+                DeploymentMode::Cloud,
                 "inactive_actor",
                 "inactive_team_vault",
                 "inactive_target",
@@ -423,6 +434,7 @@ mod tests {
             .await;
             let personal_error = create_removal_plan(
                 pool,
+                DeploymentMode::Cloud,
                 "personal_actor",
                 "personal_removal_vault",
                 "personal_target",
@@ -484,10 +496,15 @@ mod tests {
                 "member",
             )
             .await;
-            let plan =
-                create_removal_plan(pool, "lapsed_actor", "lapsed_team_vault", "lapsed_target")
-                    .await
-                    .expect("active Vault sharing should allow preparation");
+            let plan = create_removal_plan(
+                pool,
+                DeploymentMode::Cloud,
+                "lapsed_actor",
+                "lapsed_team_vault",
+                "lapsed_target",
+            )
+            .await
+            .expect("active Vault sharing should allow preparation");
             query("UPDATE team SET billing_status='past_due' WHERE id='lapsed_vault_team'")
                 .execute(pool)
                 .await
@@ -495,6 +512,7 @@ mod tests {
 
             let finalization_error = finalize_removal(
                 pool,
+                DeploymentMode::Cloud,
                 "lapsed_actor",
                 "lapsed_team_vault",
                 "lapsed_target",

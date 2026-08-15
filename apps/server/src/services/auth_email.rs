@@ -3,6 +3,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{File, OpenOptions},
     io::Write,
+    path::Path,
 };
 
 use serde::Serialize;
@@ -11,19 +12,19 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::{info, warn};
 
 use crate::{
-    error::AppError,
-    services::{auth::is_dev_auth_stub_enabled, verification_code::VerificationPurpose},
+    config::AuthConfig, error::AppError, services::verification_code::VerificationPurpose,
 };
 
 /// The single sink every emailed verification code passes through, so a new
 /// purpose cannot be added that issues a code and forgets to send it.
 pub(crate) fn deliver_code(
+    config: &AuthConfig,
     purpose: &VerificationPurpose<'_>,
     email: &str,
     code: &str,
     _delivery_id: &str,
 ) -> Result<(), AppError> {
-    if !is_dev_auth_stub_enabled() {
+    if !config.dev_stubs_enabled {
         return Err(AppError::internal(
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
@@ -33,7 +34,7 @@ pub(crate) fn deliver_code(
     emailed_code_capture::record(_delivery_id, code);
 
     log_delivery(purpose, email, code);
-    append_to_dev_outbox(purpose, email, code);
+    append_to_dev_outbox(config.dev_mail_outbox.as_deref(), purpose, email, code);
 
     Ok(())
 }
@@ -72,8 +73,13 @@ struct DevOutboxEntry<'a> {
 
 /// An env-var opt-in behind the already-open dev stub gate keeps plaintext codes off
 /// every network surface; an endpoint serving them would be a takeover primitive.
-fn append_to_dev_outbox(purpose: &VerificationPurpose<'_>, email: &str, code: &str) {
-    let Some(path) = dev_outbox_path() else {
+fn append_to_dev_outbox(
+    path: Option<&Path>,
+    purpose: &VerificationPurpose<'_>,
+    email: &str,
+    code: &str,
+) {
+    let Some(path) = path else {
         return;
     };
     let Ok(issued_at) = OffsetDateTime::now_utc().format(&Rfc3339) else {
@@ -95,13 +101,13 @@ fn append_to_dev_outbox(purpose: &VerificationPurpose<'_>, email: &str, code: &s
     // The file holds plaintext codes, so no other account on the box may read it.
     #[cfg(unix)]
     options.mode(0o600);
-    let write = options.open(&path).and_then(|mut file| {
+    let write = options.open(path).and_then(|mut file| {
         restrict_to_owner(&file)?;
         // One `writeln!` per record: a tailing reader must never see a torn line.
         writeln!(file, "{line}")
     });
     if let Err(error) = write {
-        warn!(error = %error, path = %path, "[auth-email] Failed to append to dev mail outbox");
+        warn!(error = %error, path = %path.display(), "[auth-email] Failed to append to dev mail outbox");
     }
 }
 
@@ -123,13 +129,6 @@ fn restrict_to_owner(file: &File) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn restrict_to_owner(_file: &File) -> std::io::Result<()> {
     Ok(())
-}
-
-fn dev_outbox_path() -> Option<String> {
-    std::env::var("BITTERY_DEV_MAIL_OUTBOX")
-        .ok()
-        .map(|path| path.trim().to_string())
-        .filter(|path| !path.is_empty())
 }
 
 fn purpose_slug(purpose: &VerificationPurpose<'_>) -> &'static str {

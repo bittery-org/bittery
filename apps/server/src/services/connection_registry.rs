@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use tokio::sync::RwLock;
 use tracing::warn;
 
-use crate::config::is_self_hosted_mode;
+use crate::config::DeploymentMode;
 use crate::db::enums::{BillingPlan, BillingStatus};
 use crate::services::team_billing::load_team_billing_entitlement;
 
@@ -157,8 +157,9 @@ pub(crate) async fn resolve_connection_limit(
     redis: &Option<Pool>,
     db_pool: &PgPool,
     user_id: &str,
+    deployment_mode: DeploymentMode,
 ) -> i64 {
-    if is_self_hosted_mode() {
+    if deployment_mode.is_self_hosted() {
         return i64::MAX;
     }
 

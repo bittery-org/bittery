@@ -301,6 +301,7 @@ async fn list_audit_events(
         audit::get_team_events(
             &state.db_pool,
             &request.session.user_id,
+            state.config.server.mode,
             TeamEventsInput {
                 cursor: query.cursor,
                 limit: query.limit.map(u32::from),

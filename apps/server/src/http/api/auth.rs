@@ -20,7 +20,7 @@ use super::{
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest, PublicRequest},
     pagination::{
         decode_page_key, page_prefetched_with_more, page_values, query_limit, timestamp_cursor_key,
-        ApiPageQuery,
+        ApiPageQuery, CursorContext,
     },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
@@ -441,7 +441,10 @@ async fn signup(
     };
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(map_signup_response(response)?),
+        Json(map_signup_response(
+            response,
+            &state.config.auth.jwt_secret,
+        )?),
     ))
 }
 
@@ -480,7 +483,10 @@ async fn finish_login(
         },
     )
     .await?;
-    Ok(Json(map_finish_login_response(response)?))
+    Ok(Json(map_finish_login_response(
+        response,
+        &state.config.auth.jwt_secret,
+    )?))
 }
 
 #[utoipa::path(get, path = "/users/me/vault-keys", operation_id = "listCurrentUserVaultKeys", tag = "auth", params(PageRequest), responses((status = 200, body = CursorPage<AuthVaultKeyResponse>), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 413, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
@@ -491,9 +497,12 @@ async fn list_vault_keys(
 ) -> Result<Json<CursorPage<AuthVaultKeyResponse>>, ApiError> {
     let cursor_key = decode_page_key(
         &page,
-        &request.session.user_id,
-        "current-user-vault-keys",
-        "",
+        CursorContext::new(
+            &request.session.user_id,
+            "current-user-vault-keys",
+            "",
+            &state.config.auth.jwt_secret,
+        ),
     )?;
     let cursor = cursor_key
         .as_deref()
@@ -511,6 +520,7 @@ async fn list_vault_keys(
         service_page,
         &page,
         &request.session.user_id,
+        &state.config.auth.jwt_secret,
     )?))
 }
 
@@ -619,9 +629,12 @@ async fn list_sessions(
     Ok(Json(page_values(
         values,
         &page,
-        &request.session.user_id,
-        "sessions",
-        "",
+        CursorContext::new(
+            &request.session.user_id,
+            "sessions",
+            "",
+            &state.config.auth.jwt_secret,
+        ),
         |session| session.id.clone(),
     )?))
 }
@@ -845,6 +858,7 @@ fn map_vault_key_page(
     value: auth::AuthVaultKeyPage,
     request: &PageRequest,
     user_id: &str,
+    jwt_secret: &str,
 ) -> Result<CursorPage<AuthVaultKeyResponse>, ApiError> {
     page_prefetched_with_more(
         value
@@ -854,9 +868,7 @@ fn map_vault_key_page(
             .collect::<Result<Vec<_>, _>>()?,
         value.has_more,
         request,
-        user_id,
-        "current-user-vault-keys",
-        "",
+        CursorContext::new(user_id, "current-user-vault-keys", "", jwt_secret),
         |key| key.cursor_key.clone(),
     )
 }
@@ -864,6 +876,7 @@ fn map_vault_key_page(
 fn initial_vault_key_page(
     value: auth::AuthVaultKeyPage,
     user_id: &str,
+    jwt_secret: &str,
 ) -> Result<CursorPage<AuthVaultKeyResponse>, ApiError> {
     map_vault_key_page(
         value,
@@ -872,11 +885,13 @@ fn initial_vault_key_page(
             limit: super::dto::DEFAULT_PAGE_SIZE,
         },
         user_id,
+        jwt_secret,
     )
 }
 
 fn map_finish_login_response(
     value: auth::FinishLoginResponse,
+    jwt_secret: &str,
 ) -> Result<FinishLoginResponse, ApiError> {
     let user_id = value.user.id.clone();
     Ok(FinishLoginResponse {
@@ -894,7 +909,7 @@ fn map_finish_login_response(
             team_name: value.user.team_name,
             team_avatar_url: value.user.team_avatar_url,
         },
-        vault_keys: initial_vault_key_page(value.vault_keys, &user_id)?,
+        vault_keys: initial_vault_key_page(value.vault_keys, &user_id, jwt_secret)?,
     })
 }
 
@@ -930,7 +945,10 @@ impl From<auth::ResetPasswordResponse> for ResetPasswordResponse {
     }
 }
 
-fn map_signup_response(value: auth::SignupResponse) -> Result<SignupResponse, ApiError> {
+fn map_signup_response(
+    value: auth::SignupResponse,
+    jwt_secret: &str,
+) -> Result<SignupResponse, ApiError> {
     let user_id = value.user.id.clone();
     Ok(SignupResponse {
         success: value.success,
@@ -951,7 +969,7 @@ fn map_signup_response(value: auth::SignupResponse) -> Result<SignupResponse, Ap
             team_avatar_url: value.user.team_avatar_url,
             role: value.user.role,
         },
-        vault_keys: initial_vault_key_page(value.vault_keys, &user_id)?,
+        vault_keys: initial_vault_key_page(value.vault_keys, &user_id, jwt_secret)?,
     })
 }
 

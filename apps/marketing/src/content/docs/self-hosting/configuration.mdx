@@ -40,9 +40,18 @@ are managed outside Bittery.
 | `BITTERY_ALLOW_INSECURE_HTTP` | `false` | Advertise operator permission for non-loopback HTTP. Each client account must still confirm before sending credentials |
 | `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
 | `REQUEST_TIMEOUT_SECONDS` | `30` | Maximum duration for ordinary HTTP requests. The long-lived sync event stream is exempt |
+| `DATABASE_MAX_CONNECTIONS` | `5` | Maximum Postgres connections per server instance. Required when `NODE_ENV=production` |
+| `DATABASE_ACQUIRE_TIMEOUT_SECONDS` | `5` | Maximum wait for a Postgres pool connection before failing the request |
 | `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded`. See the warning under [Rate limiting](#rate-limiting) |
 | `PORT` | `3000` | Port the API server listens on |
 | `MIGRATIONS_FOLDER` | `/app/migrations` | Path to SQL migration files |
+
+Size `DATABASE_MAX_CONNECTIONS` per server instance, not for the deployment as a whole. For a
+managed database such as Railway Postgres, start with
+`floor((connection limit - reserved/admin connections) / maximum server replicas)`, then cap that
+number to the concurrency the instance can actually use. Leave several connections available for
+migrations and operator access, and verify that all replica pools together stay below the provider's
+limit.
 
 ## Rate limiting
 

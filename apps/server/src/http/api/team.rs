@@ -29,7 +29,7 @@ use super::{
     error_code::ErrorCode,
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest},
     idempotency,
-    pagination::{page_values, ApiPageQuery},
+    pagination::{page_values, ApiPageQuery, CursorContext},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
@@ -348,6 +348,7 @@ async fn list_team_vaults(
 ) -> Result<Json<CursorPage<TeamVaultResponse>>, ApiError> {
     let values: Vec<TeamVaultResponse> = team::get_team_vaults(
         &state.db_pool,
+        state.config.server.mode,
         &request.session.user_id,
         team::TeamIdInput {
             team_id: team_id.clone(),
@@ -360,9 +361,12 @@ async fn list_team_vaults(
     Ok(Json(page_values(
         values,
         &page,
-        &request.session.user_id,
-        "team-vaults",
-        &team_id,
+        CursorContext::new(
+            &request.session.user_id,
+            "team-vaults",
+            &team_id,
+            &state.config.auth.jwt_secret,
+        ),
         |vault| vault.id.clone(),
     )?))
 }
@@ -456,6 +460,7 @@ async fn delete_team(
     Ok(Json(
         team::delete_team(
             &state.db_pool,
+            state.config.server.mode,
             &request.session.user_id,
             team::TeamIdInput { team_id },
         )
@@ -491,9 +496,12 @@ async fn pending_invitations(
     Ok(Json(page_values(
         values,
         &page,
-        &request.session.user_id,
-        "pending-invitations",
-        "",
+        CursorContext::new(
+            &request.session.user_id,
+            "pending-invitations",
+            "",
+            &state.config.auth.jwt_secret,
+        ),
         |invitation| invitation.id.clone(),
     )?))
 }
@@ -507,6 +515,7 @@ async fn list_invitations(
 ) -> Result<Json<CursorPage<InvitationListResponse>>, ApiError> {
     let values: Vec<InvitationListResponse> = invitation_handlers::list_team_invitations(
         &state.db_pool,
+        state.config.server.mode,
         &request.session.user_id,
         team::TeamIdInput {
             team_id: team_id.clone(),
@@ -519,9 +528,12 @@ async fn list_invitations(
     Ok(Json(page_values(
         values,
         &page,
-        &request.session.user_id,
-        "team-invitations",
-        &team_id,
+        CursorContext::new(
+            &request.session.user_id,
+            "team-invitations",
+            &team_id,
+            &state.config.auth.jwt_secret,
+        ),
         |invitation| invitation.id.clone(),
     )?))
 }
@@ -547,6 +559,7 @@ async fn send_invitation(
     Ok(Json(
         team::send_invitation(
             &state.db_pool,
+            state.config.server.mode,
             &request.session.user_id,
             team::SendInvitationInput {
                 team_id,
@@ -569,6 +582,7 @@ async fn accept_invitation(
     Ok(Json(
         team::accept_invitation(
             &state.db_pool,
+            state.config.server.mode,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
             team::TokenInput { token },
@@ -587,6 +601,7 @@ async fn accept_invitation_by_id(
     Ok(Json(
         team::accept_invitation_by_id(
             &state.db_pool,
+            state.config.server.mode,
             state.billing_gateway.as_deref(),
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
@@ -639,6 +654,7 @@ async fn cancel_invitation(
     Ok(Json(
         team::cancel_invitation(
             &state.db_pool,
+            state.config.server.mode,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -658,6 +674,7 @@ async fn resend_invitation(
     Ok(Json(
         team::resend_invitation(
             &state.db_pool,
+            state.config.server.mode,
             &request.session.user_id,
             team::InvitationIdInput { invitation_id },
         )
@@ -687,9 +704,12 @@ async fn list_members(
     Ok(Json(page_values(
         values,
         &page,
-        &request.session.user_id,
-        "team-members",
-        &team_id,
+        CursorContext::new(
+            &request.session.user_id,
+            "team-members",
+            &team_id,
+            &state.config.auth.jwt_secret,
+        ),
         |member| member.user_id.clone(),
     )?))
 }
@@ -704,6 +724,7 @@ async fn member_access(
         access::get_member_access(
             &state.db_pool,
             &request.session.user_id,
+            state.config.server.mode,
             MemberAccessInput { user_id },
         )
         .await?

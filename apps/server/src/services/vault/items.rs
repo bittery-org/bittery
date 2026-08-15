@@ -19,6 +19,7 @@ use super::{
     VaultItemDetailsResponse, VaultItemResponse, VaultItemWithVaultResponse, VaultSummaryResponse,
 };
 use crate::{
+    config::DeploymentMode,
     db::{
         enums::{SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
@@ -31,6 +32,7 @@ use crate::{
 
 pub(crate) async fn list_vault_items_page(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: VaultIdInput,
     cursor: Option<(OffsetDateTime, String)>,
@@ -91,7 +93,7 @@ pub(crate) async fn list_vault_items_page(
     .fetch_all(pool)
     .await
     .map_err(|error| database_error(error, "Failed to materialize bounded vault item page"))?;
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
     } else {
@@ -117,6 +119,7 @@ pub(crate) async fn list_vault_items_page(
 pub(crate) async fn list_all_vault_items_page(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
@@ -181,7 +184,7 @@ pub(crate) async fn list_all_vault_items_page(
     .fetch_all(pool)
     .await
     .map_err(|error| database_error(error, "Failed to materialize bounded item page"))?;
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
     } else {
@@ -292,6 +295,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
 
 pub(crate) async fn get_vault_item(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: ItemIdInput,
 ) -> Result<VaultItemDetailsResponse, AppError> {
@@ -304,7 +308,7 @@ pub(crate) async fn get_vault_item(
     .map_err(|error| database_error(error, "Failed to load item"))?
     .ok_or_else(|| AppError::not_found("Item not found"))?;
     assert_item_read_access(pool, &item_row.vault_id, user_id).await?;
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, std::slice::from_ref(&item_row)).await?
     } else {

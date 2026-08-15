@@ -4,6 +4,7 @@ use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::{Duration, OffsetDateTime};
 
 use crate::{
+    config::{AuthConfig, RateLimitConfig},
     db::models::{DbRecoveryVerificationRow, DbShareEmailVerificationRow, DbSignupVerificationRow},
     error::AppError,
     repo::common::{generate_resource_id, hash_token},
@@ -26,6 +27,8 @@ pub(crate) enum VerificationPurpose<'a> {
 
 pub(crate) struct VerificationCodeService<'a> {
     pool: &'a PgPool,
+    auth_config: &'a AuthConfig,
+    rate_limit_config: &'a RateLimitConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,8 +48,16 @@ pub(crate) enum LockoutVerificationCodeOutcome {
 }
 
 impl<'a> VerificationCodeService<'a> {
-    pub(crate) fn new(pool: &'a PgPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(
+        pool: &'a PgPool,
+        auth_config: &'a AuthConfig,
+        rate_limit_config: &'a RateLimitConfig,
+    ) -> Self {
+        Self {
+            pool,
+            auth_config,
+            rate_limit_config,
+        }
     }
 
     pub(crate) fn is_valid_code(code: &str) -> bool {
@@ -61,7 +72,8 @@ impl<'a> VerificationCodeService<'a> {
         email: &str,
     ) -> Result<(), AppError> {
         let (verification_id, code) = self.issue(purpose, email).await?;
-        let Err(error) = deliver_code(&purpose, email, &code, &verification_id) else {
+        let Err(error) = deliver_code(self.auth_config, &purpose, email, &code, &verification_id)
+        else {
             return Ok(());
         };
         // A code nobody received still counts as an active code, which would burn
@@ -190,7 +202,9 @@ impl<'a> VerificationCodeService<'a> {
         code: &str,
         limiter: &dyn RateLimiter,
     ) -> Result<LockoutVerificationCodeOutcome, AppError> {
-        let Some((scope, max_attempts, lock_duration)) = lockout_settings(purpose) else {
+        let Some((scope, max_attempts, lock_duration)) =
+            lockout_settings(self.rate_limit_config, purpose)
+        else {
             return Ok(match self.verify(purpose, email, code).await? {
                 VerificationCodeOutcome::Valid { verification_id } => {
                     LockoutVerificationCodeOutcome::Valid { verification_id }
@@ -616,23 +630,24 @@ fn lockout_key(purpose: VerificationPurpose<'_>, email: &str) -> String {
 }
 
 fn lockout_settings(
+    config: &RateLimitConfig,
     purpose: VerificationPurpose<'_>,
 ) -> Option<(&'static str, i64, std::time::Duration)> {
     match purpose {
         VerificationPurpose::Signup { .. } => Some((
             rate_limit::SCOPE_SIGNUP_VERIFY,
-            signup_verify_max_attempts(),
-            signup_verify_lock_duration(),
+            signup_verify_max_attempts(config),
+            signup_verify_lock_duration(config),
         )),
         VerificationPurpose::Recovery => Some((
             rate_limit::SCOPE_RECOVERY_VERIFY,
-            recovery_verify_max_attempts(),
-            recovery_verify_lock_duration(),
+            recovery_verify_max_attempts(config),
+            recovery_verify_lock_duration(config),
         )),
         VerificationPurpose::ShareEmail { .. } => Some((
             rate_limit::SCOPE_SHARE_EMAIL_VERIFY,
-            rate_limit::share_email_verify_max_attempts(),
-            rate_limit::share_email_verify_lock_duration(),
+            rate_limit::share_email_verify_max_attempts(config),
+            rate_limit::share_email_verify_lock_duration(config),
         )),
     }
 }

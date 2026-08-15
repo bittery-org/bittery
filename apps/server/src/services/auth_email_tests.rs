@@ -3,13 +3,17 @@ use std::{fs, path::PathBuf};
 use serde_json::Value;
 
 use super::*;
-use crate::{
-    error::AppErrorCode,
-    test_support::{acquire_env_lock, EnvVarGuard},
-};
+use crate::{config::AuthConfig, error::AppErrorCode};
 
 const NOT_CONFIGURED_MESSAGE: &str = "Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.";
-const DEV_MAIL_OUTBOX_ENV: &str = "BITTERY_DEV_MAIL_OUTBOX";
+
+fn auth_config(dev_stubs_enabled: bool, dev_mail_outbox: Option<PathBuf>) -> AuthConfig {
+    AuthConfig {
+        jwt_secret: "test-jwt-secret".to_string(),
+        dev_stubs_enabled,
+        dev_mail_outbox,
+    }
+}
 
 /// Removes its file on drop so a failing assertion cannot leave the temp
 /// directory littered, and so each test gets a path nothing else writes to.
@@ -24,10 +28,6 @@ impl OutboxFile {
             rand::random::<u64>()
         ));
         Self { path }
-    }
-
-    fn as_str(&self) -> &str {
-        self.path.to_str().expect("outbox path should be utf-8")
     }
 
     fn lines(&self) -> Vec<Value> {
@@ -47,15 +47,11 @@ impl Drop for OutboxFile {
 
 #[test]
 fn deliver_code_fails_closed_when_dev_auth_stubs_are_disabled() {
-    let _lock = acquire_env_lock();
     let outbox = OutboxFile::new("stubs-off");
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "false"),
-        ("NODE_ENV", "development"),
-        (DEV_MAIL_OUTBOX_ENV, outbox.as_str()),
-    ]);
+    let config = auth_config(false, Some(outbox.path.clone()));
 
     let error = deliver_code(
+        &config,
         &VerificationPurpose::Recovery,
         "recipient@test.bittery.com",
         "482913",
@@ -73,15 +69,11 @@ fn deliver_code_fails_closed_when_dev_auth_stubs_are_disabled() {
 
 #[test]
 fn deliver_code_appends_one_json_line_per_purpose() {
-    let _lock = acquire_env_lock();
     let outbox = OutboxFile::new("purposes");
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        (DEV_MAIL_OUTBOX_ENV, outbox.as_str()),
-    ]);
+    let config = auth_config(true, Some(outbox.path.clone()));
 
     deliver_code(
+        &config,
         &VerificationPurpose::Signup {
             invitation_token: Some("invite_token_1"),
         },
@@ -91,6 +83,7 @@ fn deliver_code_appends_one_json_line_per_purpose() {
     )
     .expect("signup delivery should succeed");
     deliver_code(
+        &config,
         &VerificationPurpose::Signup {
             invitation_token: None,
         },
@@ -100,6 +93,7 @@ fn deliver_code_appends_one_json_line_per_purpose() {
     )
     .expect("public signup delivery should succeed");
     deliver_code(
+        &config,
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100003",
@@ -107,6 +101,7 @@ fn deliver_code_appends_one_json_line_per_purpose() {
     )
     .expect("recovery delivery should succeed");
     deliver_code(
+        &config,
         &VerificationPurpose::ShareEmail {
             share_link_id: "share_link_abc",
         },
@@ -148,23 +143,16 @@ fn deliver_code_appends_one_json_line_per_purpose() {
 
 #[test]
 fn deliver_code_succeeds_when_the_outbox_path_cannot_be_written() {
-    let _lock = acquire_env_lock();
     let unwritable = std::env::temp_dir()
         .join(format!(
             "bittery-missing-dir-{:016x}",
             rand::random::<u64>()
         ))
         .join("outbox.jsonl");
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        (
-            DEV_MAIL_OUTBOX_ENV,
-            unwritable.to_str().expect("path should be utf-8"),
-        ),
-    ]);
+    let config = auth_config(true, Some(unwritable));
 
     deliver_code(
+        &config,
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100005",
@@ -178,18 +166,14 @@ fn deliver_code_succeeds_when_the_outbox_path_cannot_be_written() {
 fn deliver_code_tightens_an_outbox_that_already_exists_world_readable() {
     use std::os::unix::fs::PermissionsExt;
 
-    let _lock = acquire_env_lock();
     let outbox = OutboxFile::new("loose-permissions");
     fs::write(&outbox.path, "").expect("outbox should be creatable");
     fs::set_permissions(&outbox.path, fs::Permissions::from_mode(0o644))
         .expect("outbox permissions should be settable");
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        (DEV_MAIL_OUTBOX_ENV, outbox.as_str()),
-    ]);
+    let config = auth_config(true, Some(outbox.path.clone()));
 
     deliver_code(
+        &config,
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100007",
@@ -211,15 +195,10 @@ fn deliver_code_tightens_an_outbox_that_already_exists_world_readable() {
 
 #[test]
 fn deliver_code_writes_nothing_when_the_outbox_is_unset() {
-    let _lock = acquire_env_lock();
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        (DEV_MAIL_OUTBOX_ENV, ""),
-    ]);
+    let config = auth_config(true, None);
 
-    assert_eq!(dev_outbox_path(), None);
     deliver_code(
+        &config,
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100006",

@@ -1,10 +1,7 @@
 use sqlx::PgPool;
 
 use crate::{
-    config::{bittery_mode, SELF_HOSTED_MODE},
-    db::enums::BillingPlan,
-    error::AppError,
-    repo::audit::load_actor,
+    config::DeploymentMode, db::enums::BillingPlan, error::AppError, repo::audit::load_actor,
     services::team_billing::team_management_enabled,
 };
 
@@ -24,6 +21,7 @@ pub(crate) struct TeamAdmin {
 pub(crate) async fn authorize_team_admin(
     pool: &PgPool,
     user_id: &str,
+    deployment_mode: DeploymentMode,
 ) -> Result<TeamAdmin, AppError> {
     let actor = load_actor(pool, user_id).await?;
     let team_id = actor
@@ -37,14 +35,14 @@ pub(crate) async fn authorize_team_admin(
         ));
     }
 
-    if bittery_mode() != SELF_HOSTED_MODE && actor.billing_plan != Some(BillingPlan::Team) {
+    if !deployment_mode.is_self_hosted() && actor.billing_plan != Some(BillingPlan::Team) {
         return Err(AppError::forbidden(
             "This console is only available on Team plans",
         ));
     }
 
     if !team_management_enabled(
-        bittery_mode(),
+        deployment_mode.as_str(),
         Some(BillingPlan::Team),
         actor.billing_status,
     ) {

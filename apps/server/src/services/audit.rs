@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
+    config::DeploymentMode,
     error::AppError,
     repo::audit::{
         load_audit_events, load_share_access_events, load_team_members, AuditEventFilter,
@@ -142,9 +143,12 @@ struct CursorPayload {
 pub(crate) async fn get_team_events(
     pool: &sqlx::PgPool,
     user_id: &str,
+    deployment_mode: DeploymentMode,
     input: TeamEventsInput,
 ) -> Result<TeamEventsResponse, AppError> {
-    let team_id = authorize_team_admin(pool, user_id).await?.team_id;
+    let team_id = authorize_team_admin(pool, user_id, deployment_mode)
+        .await?
+        .team_id;
 
     let members = load_team_members(pool, &team_id).await?;
     let member_map = HashMap::<String, TeamMemberRow>::from_iter(

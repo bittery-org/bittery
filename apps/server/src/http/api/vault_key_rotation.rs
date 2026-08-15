@@ -225,6 +225,7 @@ async fn start_vault_member_removal(
     Path((vault_id, user_id)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     let pool = state.db_pool.clone();
+    let deployment_mode = state.config.server.mode;
     let route = format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans");
     idempotency::execute(
         pool,
@@ -234,8 +235,14 @@ async fn start_vault_member_removal(
         &route,
         &[],
         move |pool, actor| async move {
-            let plan =
-                vault_membership::create_removal_plan(&pool, &actor, &vault_id, &user_id).await?;
+            let plan = vault_membership::create_removal_plan(
+                &pool,
+                deployment_mode,
+                &actor,
+                &vault_id,
+                &user_id,
+            )
+            .await?;
             Ok(Json(PlanSetResponse { plans: vec![plan] }).into_response())
         },
     )
@@ -258,6 +265,7 @@ async fn finalize_vault_member_removal(
     }
     let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
     let pool = state.db_pool.clone();
+    let deployment_mode = state.config.server.mode;
     let plan_id = body.plan_ids[0].clone();
     let route =
         format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans/finalize");
@@ -269,9 +277,15 @@ async fn finalize_vault_member_removal(
         &route,
         &bytes,
         move |pool, actor| async move {
-            let result =
-                vault_membership::finalize_removal(&pool, &actor, &vault_id, &user_id, &plan_id)
-                    .await?;
+            let result = vault_membership::finalize_removal(
+                &pool,
+                deployment_mode,
+                &actor,
+                &vault_id,
+                &user_id,
+                &plan_id,
+            )
+            .await?;
             Ok(Json(FinalizePlanSetResponse {
                 personal_team_id: None,
                 rotations: vec![result.rotation.into()],
@@ -292,6 +306,7 @@ async fn start_team_leave(
     Path(team_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let pool = state.db_pool.clone();
+    let deployment_mode = state.config.server.mode;
     let route = format!("/api/v1/teams/{team_id}/leave-rotation-plans");
     idempotency::execute(
         pool,
@@ -301,7 +316,9 @@ async fn start_team_leave(
         &route,
         &[],
         move |pool, actor| async move {
-            let result = member_departure::create_voluntary_plans(&pool, &team_id, &actor).await?;
+            let result =
+                member_departure::create_voluntary_plans(&pool, deployment_mode, &team_id, &actor)
+                    .await?;
             Ok(Json(PlanSetResponse {
                 plans: result.plans,
             })
@@ -319,6 +336,7 @@ async fn start_team_member_removal(
     Path((team_id, user_id)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     let pool = state.db_pool.clone();
+    let deployment_mode = state.config.server.mode;
     let route = format!("/api/v1/teams/{team_id}/members/{user_id}/removal-rotation-plans");
     idempotency::execute(
         pool,
@@ -328,9 +346,14 @@ async fn start_team_member_removal(
         &route,
         &[],
         move |pool, actor| async move {
-            let result =
-                member_departure::create_administrative_plans(&pool, &team_id, &actor, &user_id)
-                    .await?;
+            let result = member_departure::create_administrative_plans(
+                &pool,
+                deployment_mode,
+                &team_id,
+                &actor,
+                &user_id,
+            )
+            .await?;
             Ok(Json(PlanSetResponse {
                 plans: result.plans,
             })
@@ -352,6 +375,7 @@ async fn finalize_departure(
     let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
     let pool = state.db_pool.clone();
     let billing_gateway = state.billing_gateway.clone();
+    let deployment_mode = state.config.server.mode;
     let route = if administrative {
         format!("/api/v1/teams/{team_id}/members/{target_id}/removal-rotation-plans/finalize")
     } else {
@@ -369,6 +393,7 @@ async fn finalize_departure(
                 member_departure::finalize_administrative(
                     &pool,
                     billing_gateway.as_deref(),
+                    deployment_mode,
                     &team_id,
                     &actor,
                     &target_id,
@@ -379,6 +404,7 @@ async fn finalize_departure(
                 member_departure::finalize_voluntary(
                     &pool,
                     billing_gateway.as_deref(),
+                    deployment_mode,
                     &team_id,
                     &actor,
                     &body.plan_ids,

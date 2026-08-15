@@ -1,7 +1,7 @@
 use sqlx::{query_as, PgPool};
 
 use crate::{
-    config::{bittery_mode, SELF_HOSTED_MODE},
+    config::{DeploymentMode, SELF_HOSTED_MODE},
     db::{
         enums::{BillingPlan, BillingStatus},
         models::DbTeamBillingEntitlementRow,
@@ -49,9 +49,9 @@ pub(crate) async fn load_team_billing_entitlement(
 pub(crate) async fn attachments_enabled_for_user(
     pool: &PgPool,
     user_id: &str,
+    deployment_mode: DeploymentMode,
 ) -> Result<bool, AppError> {
-    let mode = bittery_mode();
-    if mode == SELF_HOSTED_MODE {
+    if deployment_mode.is_self_hosted() {
         return Ok(true);
     }
 
@@ -65,7 +65,12 @@ pub(crate) async fn attachments_enabled_for_user(
         return Ok(false);
     }
 
-    Ok(resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status).enabled)
+    Ok(resolve_attachment_entitlement(
+        deployment_mode.as_str(),
+        actor.billing_plan,
+        actor.billing_status,
+    )
+    .enabled)
 }
 
 fn is_active(billing_status: Option<BillingStatus>) -> bool {
@@ -180,8 +185,9 @@ pub(crate) fn resolve_attachment_entitlement(
 mod tests {
     use super::*;
     use crate::{
+        config::DeploymentMode,
         config::SELF_HOSTED_MODE,
-        test_support::{acquire_env_lock_async, seed_user, with_api_test_app, EnvVarGuard},
+        test_support::{seed_user, with_api_test_app},
     };
     use sqlx::postgres::PgPoolOptions;
 
@@ -288,21 +294,19 @@ mod tests {
 
     #[tokio::test]
     async fn attachment_access_is_enabled_without_a_database_in_self_hosted_mode() {
-        let _env_lock = acquire_env_lock_async().await;
-        let _env = EnvVarGuard::set(&[("BITTERY_MODE", SELF_HOSTED_MODE)]);
         let pool = PgPoolOptions::new()
             .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
             .expect("lazy test pool should be valid");
 
-        assert!(attachments_enabled_for_user(&pool, "missing_user")
-            .await
-            .unwrap());
+        assert!(
+            attachments_enabled_for_user(&pool, "missing_user", DeploymentMode::SelfHosted)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
     async fn attachment_access_is_disabled_for_a_user_without_a_team() {
-        let _env_lock = acquire_env_lock_async().await;
-        let _env = EnvVarGuard::set(&[("BITTERY_MODE", "cloud")]);
         with_api_test_app("attachment_access_without_team", |app| async move {
             seed_user(
                 &app.pool,
@@ -312,11 +316,13 @@ mod tests {
             )
             .await;
 
-            assert!(
-                !attachments_enabled_for_user(&app.pool, "user_without_team")
-                    .await
-                    .unwrap()
-            );
+            assert!(!attachments_enabled_for_user(
+                &app.pool,
+                "user_without_team",
+                DeploymentMode::Cloud
+            )
+            .await
+            .unwrap());
         })
         .await;
     }

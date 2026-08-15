@@ -10,7 +10,7 @@ use super::{
     UpdateAttachmentInput, VaultAttachmentResponse,
 };
 use crate::{
-    config::bittery_mode,
+    config::DeploymentMode,
     db::{
         enums::{SyncEventType, VaultRole},
         models::{DbBootstrapAttachmentRow, DbBootstrapItemRow},
@@ -58,6 +58,8 @@ struct AttachmentActor {
 pub(crate) async fn create_vault_attachment_upload(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    attachment_upload_secret: &str,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: CreateAttachmentUploadInput,
 ) -> Result<CreateAttachmentUploadResponse, AppError> {
@@ -67,7 +69,7 @@ pub(crate) async fn create_vault_attachment_upload(
     {
         return Err(AppError::bad_request("Invalid attachment upload request"));
     }
-    let actor = load_attachment_actor(pool, user_id).await?;
+    let actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(access.role, "Access denied")?;
@@ -78,12 +80,16 @@ pub(crate) async fn create_vault_attachment_upload(
             ));
         }
     }
-    let key = storage::create_attachment_key(user_id, &input.item_id, &input.file_name).map_err(
-        |error| {
-            tracing::error!(error = %error, "Internal error");
-            AppError::internal("An internal error occurred")
-        },
-    )?;
+    let key = storage::create_attachment_key(
+        attachment_upload_secret,
+        user_id,
+        &input.item_id,
+        &input.file_name,
+    )
+    .map_err(|error| {
+        tracing::error!(error = %error, "Internal error");
+        AppError::internal("An internal error occurred")
+    })?;
     let storage_size = encrypted_attachment_storage_size(input.file_size);
     let now = OffsetDateTime::now_utc();
     let expires_at = pending_attachment_upload_expiry(now);
@@ -166,11 +172,13 @@ pub(crate) async fn create_vault_attachment_upload(
 pub(crate) async fn create_vault_attachment(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    attachment_upload_secret: &str,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     request_client_id: Option<&str>,
     input: CreateAttachmentInput,
 ) -> Result<CreateAttachmentResponse, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(access.role, "Access denied")?;
@@ -179,12 +187,17 @@ pub(crate) async fn create_vault_attachment(
             "Unsupported attachment envelope version",
         ));
     }
-    let is_valid_key =
-        storage::is_valid_attachment_upload_key(&input.storage_key, user_id, &input.item_id, None)
-            .map_err(|error| {
-                tracing::error!(error = %error, "Internal error");
-                AppError::internal("An internal error occurred")
-            })?;
+    let is_valid_key = storage::is_valid_attachment_upload_key(
+        attachment_upload_secret,
+        &input.storage_key,
+        user_id,
+        &input.item_id,
+        None,
+    )
+    .map_err(|error| {
+        tracing::error!(error = %error, "Internal error");
+        AppError::internal("An internal error occurred")
+    })?;
     if !is_valid_key {
         return Err(AppError::bad_request(
             "Invalid or expired attachment upload key",
@@ -280,12 +293,13 @@ pub(crate) async fn create_vault_attachment(
 
 pub(crate) async fn list_vault_attachments_page(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: ItemIdInput,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
 ) -> Result<Vec<VaultAttachmentResponse>, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
     let _access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
@@ -306,10 +320,11 @@ pub(crate) async fn list_vault_attachments_page(
 pub(crate) async fn get_attachment_download_url(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     input: AttachmentIdInput,
 ) -> Result<AttachmentDownloadResponse, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     let download_url = object_storage
         .presign_download(&attachment.storage_key, Some(300))
@@ -331,11 +346,12 @@ pub(crate) async fn get_attachment_download_url(
 
 pub(crate) async fn update_vault_attachment(
     pool: &PgPool,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     request_client_id: Option<&str>,
     input: UpdateAttachmentInput,
 ) -> Result<SuccessResponse, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     assert_item_write_access(attachment.role, "Access denied")?;
     let mut transaction = pool
@@ -372,11 +388,12 @@ pub(crate) async fn update_vault_attachment(
 pub(crate) async fn delete_vault_attachment(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
+    deployment_mode: DeploymentMode,
     user_id: &str,
     request_client_id: Option<&str>,
     input: AttachmentIdInput,
 ) -> Result<SuccessResponse, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     match attachment.role {
         VaultRole::Owner | VaultRole::Admin => {}
@@ -451,11 +468,15 @@ pub(super) async fn load_item_attachments(
     Ok(grouped)
 }
 
-async fn load_attachment_actor(pool: &PgPool, user_id: &str) -> Result<AttachmentActor, AppError> {
+async fn load_attachment_actor(
+    pool: &PgPool,
+    user_id: &str,
+    deployment_mode: DeploymentMode,
+) -> Result<AttachmentActor, AppError> {
     let actor =
         load_team_billing_entitlement(pool, user_id, "Failed to load attachment entitlements")
             .await?;
-    let mode = bittery_mode();
+    let mode = deployment_mode.as_str();
     let Some(actor) = actor else {
         if mode == "self-hosted" {
             return Ok(AttachmentActor {
