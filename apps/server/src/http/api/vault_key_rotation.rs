@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
     Json,
@@ -15,7 +15,7 @@ use super::{
     error::ApiError,
     error_code::ErrorCode,
     extract::{ApiJson, AuthenticatedRequest},
-    idempotency,
+    idempotency, ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
 #[derive(IntoResponses)]
@@ -431,4 +431,45 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(finalize_team_leave))
         .routes(routes!(start_team_member_removal))
         .routes(routes!(finalize_team_member_removal))
+        .route_layer(DefaultBodyLimit::max(ORDINARY_API_BODY_LIMIT_BYTES))
+}
+
+#[cfg(test)]
+mod body_limit_tests {
+    use axum::http::{Method, StatusCode};
+
+    use crate::http::api::ORDINARY_API_BODY_LIMIT_BYTES;
+    use crate::test_support::{authenticated_json_headers, seed_user, with_api_test_app};
+
+    #[tokio::test]
+    async fn rotation_staging_rejects_an_oversized_body() {
+        with_api_test_app("rotation_stage_body_limit", |app| async move {
+            let user_id = "rotation-body-limit-user";
+            seed_user(
+                &app.pool,
+                user_id,
+                "Rotation Body Limit",
+                "rotation-body-limit@example.com",
+            )
+            .await;
+            let session = app.issue_session(user_id).await;
+            let oversized_payload = "x".repeat(ORDINARY_API_BODY_LIMIT_BYTES);
+            let body =
+                format!(r#"{{"outputs":[{{"id":"item","payload":"{oversized_payload}"}}]}}"#)
+                    .into_bytes();
+
+            let response = app
+                .api_bytes(
+                    Method::PUT,
+                    "/api/v1/vault-key-rotation-plans/missing/staged/item",
+                    body,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+
+            assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
+            assert_eq!(response.body["code"], "PAYLOAD_TOO_LARGE");
+        })
+        .await;
+    }
 }
