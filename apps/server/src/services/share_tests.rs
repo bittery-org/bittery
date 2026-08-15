@@ -8,8 +8,8 @@ use crate::db::enums::{ShareLinkAccessMode, ShareLinkStatus};
 use crate::error::AppErrorCode;
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
-    acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_api_test_app, EnvVarGuard,
+    assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
+    seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
 };
 
 struct ShareActorFixture {
@@ -745,13 +745,6 @@ async fn access_public_rejects_non_public_and_revoked_links() {
 
 #[tokio::test]
 async fn request_email_verification_persists_codes_for_allowed_emails_and_rejects_invalid_access() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        ("BITTERY_DEV_MAIL_OUTBOX", ""),
-    ]);
-
     with_api_test_app("share_request_email_verification_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
@@ -835,13 +828,6 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
 /// code: issuing one and dropping it made the whole access mode a dead end.
 #[tokio::test]
 async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        ("BITTERY_DEV_MAIL_OUTBOX", ""),
-    ]);
-
     with_api_test_app(
         "share_request_email_verification_delivers",
         |app| async move {
@@ -904,13 +890,6 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
 /// digest, and the digest itself is not replayable as a code.
 #[tokio::test]
 async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        ("BITTERY_DEV_MAIL_OUTBOX", ""),
-    ]);
-
     with_api_test_app("share_verification_code_hashed", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
@@ -1311,13 +1290,18 @@ async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts()
 
 #[tokio::test]
 async fn share_email_verification_lockout_burns_pending_code() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", "2"),
-        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", "15"),
-    ]);
-
-    with_api_test_app("share_email_verification_lockout", |app| async move {
+    with_api_test_app_state(
+        "share_email_verification_lockout",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    ("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", "2"),
+                    ("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", "15"),
+                ],
+            )
+        },
+        |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let wrong = || async {
@@ -1366,7 +1350,8 @@ async fn share_email_verification_lockout_burns_pending_code() {
             "RATE_LIMITED",
             crate::services::rate_limit::RATE_LIMITED_MESSAGE,
         );
-    })
+        },
+    )
     .await;
 }
 
@@ -1377,10 +1362,12 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 			let session = app.issue_session(&fixture.user_id).await;
 			let expected_base_share_url = format!(
 				"{}/share/",
-				std::env::var("WEB_APP_URL")
-					.ok()
-					.filter(|value| !value.trim().is_empty())
-					.unwrap_or_else(|| "https://app.bittery.com".to_string())
+				app.state
+					.config
+					.server
+					.web_app_url
+					.as_deref()
+					.unwrap_or("https://app.bittery.com")
 					.trim_end_matches('/'),
 			);
 
@@ -2028,27 +2015,39 @@ async fn seed_share_email_verification(
 
 #[tokio::test]
 async fn create_share_via_api_is_daily_rate_limited() {
-    let _guard = crate::test_support::acquire_env_lock_async().await;
-    let _env = crate::test_support::EnvVarGuard::set(&[("SHARE_LINK_DAILY_LIMIT", "2")]);
+    with_api_test_app_state(
+        "share_create_daily_rate_limit",
+        |state| with_test_config(state, &[("SHARE_LINK_DAILY_LIMIT", "2")]),
+        |app| async move {
+            let fixture = build_share_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
 
-    with_api_test_app("share_create_daily_rate_limit", |app| async move {
-        let fixture = build_share_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let headers = authenticated_json_headers(&session.token);
+            let params = json!({
+                "accessMode": "anyone",
+                "isOneTimeUse": false,
+                "expiresIn": "1day",
+                "allowedEmails": null,
+                "encryptedItemData": FIXTURE_ENCRYPTED_ITEM_DATA,
+                "encryptionIv": FIXTURE_ENCRYPTION_IV,
+                "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
+                "shareKeyIv": FIXTURE_SHARE_KEY_IV
+            });
 
-        let params = json!({
-            "accessMode": "anyone",
-            "isOneTimeUse": false,
-            "expiresIn": "1day",
-            "allowedEmails": null,
-            "encryptedItemData": FIXTURE_ENCRYPTED_ITEM_DATA,
-            "encryptionIv": FIXTURE_ENCRYPTION_IV,
-            "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
-            "shareKeyIv": FIXTURE_SHARE_KEY_IV
-        });
+            for _ in 0..2 {
+                let response = app
+                    .api_json(
+                        Method::POST,
+                        &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                        Some(params.clone()),
+                        headers.clone(),
+                    )
+                    .await;
+                response.assert_contract_status();
+                assert!(response.body.is_object());
+            }
 
-        for _ in 0..2 {
-            let response = app
+            let blocked = app
                 .api_json(
                     Method::POST,
                     &format!("/api/v1/items/{}/share-links", fixture.item_id),
@@ -2056,24 +2055,13 @@ async fn create_share_via_api_is_daily_rate_limited() {
                     headers.clone(),
                 )
                 .await;
-            response.assert_contract_status();
-            assert!(response.body.is_object());
-        }
-
-        let blocked = app
-            .api_json(
-                Method::POST,
-                &format!("/api/v1/items/{}/share-links", fixture.item_id),
-                Some(params.clone()),
-                headers.clone(),
-            )
-            .await;
-        blocked.assert_contract_status();
-        assert_handler_error(
-            &blocked.body,
-            "RATE_LIMITED",
-            "Daily share link limit reached",
-        );
-    })
+            blocked.assert_contract_status();
+            assert_handler_error(
+                &blocked.body,
+                "RATE_LIMITED",
+                "Daily share link limit reached",
+            );
+        },
+    )
     .await;
 }

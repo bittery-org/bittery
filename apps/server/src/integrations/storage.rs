@@ -101,11 +101,6 @@ pub fn object_storage_from_config(
     }
 }
 
-#[cfg(test)]
-pub fn object_storage_from_env() -> Result<std::sync::Arc<dyn ObjectStorage>, StorageError> {
-    object_storage_from_config(&crate::config::Config::for_test().storage)
-}
-
 fn normalize_cdn_url(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().trim_end_matches('/').to_string())

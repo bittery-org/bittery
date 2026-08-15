@@ -31,6 +31,22 @@ use crate::integrations::storage::{
 };
 use crate::{create_app, db, AppState, EdgeHttpConfig};
 
+pub(crate) fn with_test_config(state: AppState, overrides: &[(&str, &str)]) -> AppState {
+    with_test_config_value(state, crate::config::Config::for_test_with(overrides))
+}
+
+pub(crate) fn with_test_config_value(
+    mut state: AppState,
+    config: crate::config::Config,
+) -> AppState {
+    let config = std::sync::Arc::new(config);
+    let object_storage = crate::integrations::storage::object_storage_from_config(&config.storage)
+        .expect("test storage configuration should be complete");
+    state.config = config;
+    state.object_storage = object_storage;
+    state
+}
+
 #[derive(Default)]
 pub(crate) struct RecordingObjectStorage {
     calls: std::sync::Mutex<Vec<String>>,
@@ -814,12 +830,11 @@ where
         .await
         .expect("test database migrations should run");
 
-    let state = configure_state(
-        AppState::from_pool(pool.clone()).with_object_storage(
-            crate::integrations::storage::object_storage_from_env()
-                .expect("test storage configuration should be complete"),
-        ),
-    );
+    let state = AppState::from_pool(pool.clone());
+    let object_storage =
+        crate::integrations::storage::object_storage_from_config(&state.config.storage)
+            .expect("test storage configuration should be complete");
+    let state = configure_state(state.with_object_storage(object_storage));
     let router = create_test_router(state.clone());
 
     let result = std::panic::AssertUnwindSafe(test_fn(ApiTestApp {

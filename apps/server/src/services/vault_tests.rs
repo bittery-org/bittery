@@ -6,8 +6,8 @@ use super::{
 use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
+    seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
 };
 use axum::http::{
     header::{CONTENT_TYPE, ETAG, IF_MATCH},
@@ -15,7 +15,6 @@ use axum::http::{
 };
 use serde_json::{json, Value};
 use sqlx::{query, query_scalar, PgPool};
-use std::future::Future;
 use time::{Duration, OffsetDateTime};
 
 fn with_if_match(mut headers: HeaderMap, version: impl std::fmt::Display) -> HeaderMap {
@@ -25,91 +24,6 @@ fn with_if_match(mut headers: HeaderMap, version: impl std::fmt::Display) -> Hea
             .expect("fixture version should produce a valid ETag"),
     );
     headers
-}
-
-fn set_env_var(key: &str, value: Option<&str>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-}
-
-fn restore_env_var(key: &str, value: Option<String>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-}
-
-async fn with_storage_env_async<T, F>(future: F) -> T
-where
-    F: Future<Output = T>,
-{
-    let _guard = acquire_env_lock_async().await;
-    let previous = (
-        std::env::var("BITTERY_STORAGE_ENDPOINT").ok(),
-        std::env::var("BITTERY_STORAGE_BUCKET").ok(),
-        std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
-        std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
-        std::env::var("BITTERY_STORAGE_REGION").ok(),
-        std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
-        std::env::var("BITTERY_ATTACHMENT_UPLOAD_SECRET").ok(),
-    );
-    set_env_var(
-        "BITTERY_STORAGE_ENDPOINT",
-        Some("https://storage.example.invalid"),
-    );
-    set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
-    set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
-    set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
-    set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_CDN_URL",
-        Some("https://cdn.example.invalid/assets"),
-    );
-    set_env_var(
-        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-        Some("test-attachment-secret"),
-    );
-
-    let result = future.await;
-
-    let (
-        previous_endpoint,
-        previous_bucket,
-        previous_access_key,
-        previous_secret_key,
-        previous_region,
-        previous_cdn_url,
-        previous_attachment_secret,
-    ) = previous;
-    restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
-    restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
-    restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
-    restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
-    restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
-    restore_env_var(
-        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-        previous_attachment_secret,
-    );
-
-    result
-}
-
-async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
-where
-    F: Future<Output = T>,
-{
-    let _guard = acquire_env_lock_async().await;
-    let previous = std::env::var("BITTERY_MODE").ok();
-    set_env_var("BITTERY_MODE", value);
-
-    let result = future.await;
-
-    restore_env_var("BITTERY_MODE", previous);
-
-    result
 }
 
 fn unauthenticated_json_headers() -> HeaderMap {
@@ -2696,11 +2610,9 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 
 			set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
-			let plan_forbidden_create_response = with_bittery_mode_async(
-				Some("cloud"),
-				app.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" })), owner_headers),
-			)
-			.await;
+			let plan_forbidden_create_response = app
+				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" })), owner_headers)
+				.await;
 			plan_forbidden_create_response.assert_contract_status();
 			assert_handler_error(
 				&plan_forbidden_create_response.body,
@@ -2755,8 +2667,23 @@ async fn vault_key_write_routes_reject_oversized_keys() {
 
 #[tokio::test]
 async fn vault_attachment_handlers_cover_presign_and_access_paths() {
-    with_storage_env_async(async {
-			with_api_test_app("vault_attachment_handlers_cover_presign_and_access_paths", |app| async move {
+    with_api_test_app_state(
+        "vault_attachment_handlers_cover_presign_and_access_paths",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    ("BITTERY_STORAGE_ENDPOINT", "https://storage.example.invalid"),
+                    ("BITTERY_STORAGE_BUCKET", "bittery-test"),
+                    ("BITTERY_STORAGE_ACCESS_KEY_ID", "test-access-key"),
+                    ("BITTERY_STORAGE_SECRET_ACCESS_KEY", "test-secret-key"),
+                    ("BITTERY_STORAGE_REGION", "auto"),
+                    ("BITTERY_STORAGE_CDN_URL", "https://cdn.example.invalid/assets"),
+                    ("BITTERY_ATTACHMENT_UPLOAD_SECRET", "test-attachment-secret"),
+                ],
+            )
+        },
+        |app| async move {
 				let fixture = build_vault_router_fixture(&app.pool).await;
 				let owner_session = app.issue_session(&fixture.owner_user_id).await;
 				let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
@@ -2888,10 +2815,9 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 					"FORBIDDEN",
 					"You can only delete your own attachments",
 				);
-			})
-			.await;
-		})
-		.await;
+        },
+    )
+    .await;
 }
 
 #[tokio::test]

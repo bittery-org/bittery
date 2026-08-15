@@ -19,7 +19,8 @@ use crate::db::enums::{BillingPlan, TeamType};
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_api_test_app, with_raw_test_db, ApiTestApp,
+    seed_vault_key, with_api_test_app, with_api_test_app_state, with_raw_test_db, with_test_config,
+    ApiTestApp,
 };
 use crate::{repo::common::hash_token, services::session::now_utc};
 use time::{Duration, OffsetDateTime};
@@ -76,7 +77,7 @@ struct LoginEphemeralFixture {
 
 #[tokio::test]
 async fn auth_public_signup_login_and_logout_flow() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app(
             "auth_public_signup_login_and_logout_flow",
             |app| async move {
@@ -242,62 +243,65 @@ async fn auth_public_signup_login_and_logout_flow() {
 
 #[tokio::test]
 async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
-    with_auth_test_env_async(Some("cloud"), async {
-        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_api_test_app("auth_cloud_public_signup_disabled", |app| async move {
-            let registration = app
-                .api_json(
-                    Method::GET,
-                    "/api/meta",
-                    None,
-                    unauthenticated_json_headers(),
-                )
-                .await;
-            registration.assert_contract_status();
-            assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
-            assert_eq!(
-                registration.body["registration"]["allowPublicSignup"],
-                json!(false)
-            );
-            assert_eq!(
-                registration.body["registration"]["reason"],
-                json!("cloud_beta_invite_only")
-            );
+    with_default_cloud_auth_config(async {
+        with_api_test_app_state(
+            "auth_cloud_public_signup_disabled",
+            |state| with_test_config(state, &[("BITTERY_CLOUD_PUBLIC_SIGNUP", "false")]),
+            |app| async move {
+                let registration = app
+                    .api_json(
+                        Method::GET,
+                        "/api/meta",
+                        None,
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                registration.assert_contract_status();
+                assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
+                assert_eq!(
+                    registration.body["registration"]["allowPublicSignup"],
+                    json!(false)
+                );
+                assert_eq!(
+                    registration.body["registration"]["reason"],
+                    json!("cloud_beta_invite_only")
+                );
 
-            let email = "beta-disabled@example.com";
-            let crypto = build_auth_crypto_fixture("beta-disabled", "signup-password-123");
-            let signup_verification_token =
-                issue_signup_verification_token(&app, email, None).await;
-            let signup = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/signups",
-                    Some(json!({
-                        "email": email,
-                        "signupVerificationToken": signup_verification_token,
-                        "name": "Beta Disabled User",
-                        "plan": "free",
-                        "organizationName": null,
-                        "secretKeyHint": crypto.secret_key_hint,
-                        "srpSalt": crypto.srp_salt,
-                        "srpVerifier": crypto.srp_verifier,
-                        "publicKey": crypto.public_key,
-                        "encryptedPrivateKey": crypto.encrypted_private_key,
-                        "encryptedMasterKey": crypto.encrypted_master_key,
-                        "recoveryKeyHint": crypto.recovery_key_hint,
-                        "encryptedVaultKey": crypto.encrypted_vault_key,
-                            "kdfParams": floor_kdf_params_json(),
-                    })),
-                    unauthenticated_json_headers(),
-                )
-                .await;
-            signup.assert_contract_status();
-            assert_handler_error(
+                let email = "beta-disabled@example.com";
+                let crypto = build_auth_crypto_fixture("beta-disabled", "signup-password-123");
+                let signup_verification_token =
+                    issue_signup_verification_token(&app, email, None).await;
+                let signup = app
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "email": email,
+                            "signupVerificationToken": signup_verification_token,
+                            "name": "Beta Disabled User",
+                            "plan": "free",
+                            "organizationName": null,
+                            "secretKeyHint": crypto.secret_key_hint,
+                            "srpSalt": crypto.srp_salt,
+                            "srpVerifier": crypto.srp_verifier,
+                            "publicKey": crypto.public_key,
+                            "encryptedPrivateKey": crypto.encrypted_private_key,
+                            "encryptedMasterKey": crypto.encrypted_master_key,
+                            "recoveryKeyHint": crypto.recovery_key_hint,
+                            "encryptedVaultKey": crypto.encrypted_vault_key,
+                                "kdfParams": floor_kdf_params_json(),
+                        })),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                signup.assert_contract_status();
+                assert_handler_error(
                 &signup.body,
                 "FORBIDDEN",
                 "Hosted beta signup is invite-only. Join the waitlist or ask for an invite link.",
             );
-        })
+            },
+        )
         .await;
     })
     .await;
@@ -305,42 +309,45 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
 
 #[tokio::test]
 async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() {
-    with_auth_test_env_async(Some("cloud"), async {
-        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_api_test_app("auth_invitation_signup_public_disabled", |app| async move {
-            let fixture = build_auth_invitation_fixture(&app.pool, "beta_disabled").await;
-            let crypto = build_auth_crypto_fixture("beta-invite", "invite-success-pass");
-            let signup_verification_token = issue_signup_verification_token(
-                &app,
-                &fixture.invited_email,
-                Some(&fixture.invitation_token),
-            )
-            .await;
-
-            let signup = app
-                .api_json(
-                    Method::POST,
-                    "/api/v1/auth/signups",
-                    Some(json!({
-                        "invitationToken": fixture.invitation_token,
-                        "email": fixture.invited_email,
-                        "signupVerificationToken": signup_verification_token,
-                        "name": "Invited Beta User",
-                        "secretKeyHint": crypto.secret_key_hint,
-                        "srpSalt": crypto.srp_salt,
-                        "srpVerifier": crypto.srp_verifier,
-                        "publicKey": crypto.public_key,
-                        "encryptedPrivateKey": crypto.encrypted_private_key,
-                        "encryptedMasterKey": crypto.encrypted_master_key,
-                        "recoveryKeyHint": crypto.recovery_key_hint,
-                        "encryptedVaultKey": crypto.encrypted_vault_key,
-                            "kdfParams": floor_kdf_params_json(),
-                    })),
-                    unauthenticated_json_headers(),
+    with_default_cloud_auth_config(async {
+        with_api_test_app_state(
+            "auth_invitation_signup_public_disabled",
+            |state| with_test_config(state, &[("BITTERY_CLOUD_PUBLIC_SIGNUP", "false")]),
+            |app| async move {
+                let fixture = build_auth_invitation_fixture(&app.pool, "beta_disabled").await;
+                let crypto = build_auth_crypto_fixture("beta-invite", "invite-success-pass");
+                let signup_verification_token = issue_signup_verification_token(
+                    &app,
+                    &fixture.invited_email,
+                    Some(&fixture.invitation_token),
                 )
                 .await;
-            signup.assert_contract_status();
-        })
+
+                let signup = app
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "invitationToken": fixture.invitation_token,
+                            "email": fixture.invited_email,
+                            "signupVerificationToken": signup_verification_token,
+                            "name": "Invited Beta User",
+                            "secretKeyHint": crypto.secret_key_hint,
+                            "srpSalt": crypto.srp_salt,
+                            "srpVerifier": crypto.srp_verifier,
+                            "publicKey": crypto.public_key,
+                            "encryptedPrivateKey": crypto.encrypted_private_key,
+                            "encryptedMasterKey": crypto.encrypted_master_key,
+                            "recoveryKeyHint": crypto.recovery_key_hint,
+                            "encryptedVaultKey": crypto.encrypted_vault_key,
+                                "kdfParams": floor_kdf_params_json(),
+                        })),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                signup.assert_contract_status();
+            },
+        )
         .await;
     })
     .await;
@@ -379,79 +386,78 @@ async fn auth_protected_handlers_require_authentication() {
 
 #[tokio::test]
 async fn auth_self_hosted_registration_requires_bootstrap_invite() {
-    with_auth_test_env_async(Some("self-hosted"), async {
-        with_api_test_app(
-            "auth_self_hosted_registration_requires_bootstrap_invite",
-            |app| async move {
-                seed_user(
-                    &app.pool,
-                    "bootstrap_user_seed",
-                    "Bootstrap User",
-                    "bootstrap@example.com",
+    with_api_test_app_state(
+        "auth_self_hosted_registration_requires_bootstrap_invite",
+        |state| with_test_config(state, &[("BITTERY_MODE", "self-hosted")]),
+        |app| async move {
+            seed_user(
+                &app.pool,
+                "bootstrap_user_seed",
+                "Bootstrap User",
+                "bootstrap@example.com",
+            )
+            .await;
+
+            let registration = app
+                .api_json(
+                    Method::GET,
+                    "/api/meta",
+                    None,
+                    unauthenticated_json_headers(),
                 )
                 .await;
+            registration.assert_contract_status();
+            assert_eq!(
+                registration.body["registration"]["mode"],
+                json!("self-hosted")
+            );
+            assert_eq!(
+                registration.body["registration"]["allowPublicSignup"],
+                json!(false)
+            );
+            assert_eq!(
+                registration.body["registration"]["reason"],
+                json!("invite_only_after_bootstrap")
+            );
+            assert_eq!(
+                registration.body["registration"]["requiresEmailVerification"],
+                json!(false)
+            );
 
-                let registration = app
-                    .api_json(
-                        Method::GET,
-                        "/api/meta",
-                        None,
-                        unauthenticated_json_headers(),
-                    )
-                    .await;
-                registration.assert_contract_status();
-                assert_eq!(
-                    registration.body["registration"]["mode"],
-                    json!("self-hosted")
-                );
-                assert_eq!(
-                    registration.body["registration"]["allowPublicSignup"],
-                    json!(false)
-                );
-                assert_eq!(
-                    registration.body["registration"]["reason"],
-                    json!("invite_only_after_bootstrap")
-                );
-                assert_eq!(
-                    registration.body["registration"]["requiresEmailVerification"],
-                    json!(false)
-                );
-
-                let verification = app
-                    .api_json(
-                        Method::POST,
-                        "/api/v1/auth/signup-verifications",
-                        Some(json!({ "email": "new-user@example.com", "invitationToken": null })),
-                        unauthenticated_json_headers(),
-                    )
-                    .await;
-                verification.assert_contract_status();
-                assert_handler_error(
-                    &verification.body,
-                    "FORBIDDEN",
-                    "Public registration is disabled. Ask an admin for an invite link.",
-                );
-            },
-        )
-        .await;
-    })
+            let verification = app
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signup-verifications",
+                    Some(json!({ "email": "new-user@example.com", "invitationToken": null })),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            verification.assert_contract_status();
+            assert_handler_error(
+                &verification.body,
+                "FORBIDDEN",
+                "Public registration is disabled. Ask an admin for an invite link.",
+            );
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
-    let _guard = crate::test_support::acquire_env_lock_async().await;
-    let previous = (
-        std::env::var("BITTERY_MODE").ok(),
-        std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok(),
-        std::env::var("NODE_ENV").ok(),
-    );
-    unsafe { std::env::set_var("BITTERY_MODE", "self-hosted") };
-    unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") };
-    unsafe { std::env::set_var("NODE_ENV", "production") };
-
-    with_api_test_app(
+    with_api_test_app_state(
         "auth_self_hosted_bootstrap_signup_skips_email_verification",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    ("BITTERY_MODE", "self-hosted"),
+                    ("BITTERY_ENABLE_DEV_AUTH_STUBS", "false"),
+                    ("NODE_ENV", "production"),
+                    ("DATABASE_MAX_CONNECTIONS", "5"),
+                ],
+            )
+        },
         |app| async move {
             let email = "admin@example.com";
             let crypto = build_auth_crypto_fixture("self-hosted-admin", "bootstrap-password");
@@ -514,25 +520,11 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
         },
     )
     .await;
-
-    let (previous_mode, previous_stubs, previous_node_env) = previous;
-    match previous_mode.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-    match previous_stubs.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", value) },
-        None => unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") },
-    }
-    match previous_node_env.as_deref() {
-        Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
-        None => unsafe { std::env::remove_var("NODE_ENV") },
-    }
 }
 
 #[tokio::test]
 async fn auth_invited_signup_handles_missing_and_valid_invitations() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app(
             "auth_invited_signup_handles_missing_and_valid_invitations",
             |app| async move {
@@ -614,7 +606,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
 
 #[tokio::test]
 async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app(
             "auth_recovery_flow_verifies_codes_returns_data_and_resets_password",
             |app| async move {
@@ -1449,60 +1441,11 @@ fn derive_login_proof(
     session.proof.clone()
 }
 
-async fn with_auth_test_env_async<T, F>(mode: Option<&str>, future: F) -> T
+async fn with_default_cloud_auth_config<T, F>(future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = crate::test_support::acquire_env_lock_async().await;
-    let previous = (
-        std::env::var("BITTERY_MODE").ok(),
-        std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok(),
-        std::env::var("NODE_ENV").ok(),
-        std::env::var("BITTERY_CLOUD_PUBLIC_SIGNUP").ok(),
-        std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
-    );
-    match mode {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-    unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", "true") };
-    unsafe { std::env::remove_var("NODE_ENV") };
-    if mode == Some("cloud") {
-        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "true") };
-        unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", "true") };
-    }
-
-    let result = future.await;
-
-    let (
-        previous_mode,
-        previous_stubs,
-        previous_node_env,
-        previous_cloud_public_signup,
-        previous_cloud_billing,
-    ) = previous;
-    match previous_mode.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
-    match previous_stubs.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", value) },
-        None => unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") },
-    }
-    match previous_node_env.as_deref() {
-        Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
-        None => unsafe { std::env::remove_var("NODE_ENV") },
-    }
-    match previous_cloud_public_signup.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", value) },
-        None => unsafe { std::env::remove_var("BITTERY_CLOUD_PUBLIC_SIGNUP") },
-    }
-    match previous_cloud_billing.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", value) },
-        None => unsafe { std::env::remove_var("BITTERY_CLOUD_BILLING_ENABLED") },
-    }
-
-    result
+    future.await
 }
 
 fn unauthenticated_json_headers() -> HeaderMap {
@@ -1775,17 +1718,13 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
 
 const RATE_LIMITED_CODE: &str = "RATE_LIMITED";
 
-/// Sets (and restores on drop) `RATE_LIMIT_*` env vars. Must be constructed while
-/// the env lock is held (e.g. inside `with_auth_test_env_async`).
-use crate::test_support::EnvVarGuard as RateLimitEnvGuard;
-
 /// These tests drive the per-IP limiter through `x-forwarded-for`, which the
 /// server only honours when `TRUST_PROXY_MODE` says it sits behind a proxy — so
 /// every rate-limit test opts in alongside its own tuning vars.
-fn rate_limit_env(vars: &[(&str, &str)]) -> RateLimitEnvGuard {
+fn rate_limit_config<'a>(vars: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
     let mut all = vec![("TRUST_PROXY_MODE", "forwarded")];
     all.extend_from_slice(vars);
-    RateLimitEnvGuard::set(&all)
+    all
 }
 
 async fn with_rate_limit_test_app<T, F, Fut>(
@@ -1797,8 +1736,13 @@ where
     F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
-    let _env = rate_limit_env(vars);
-    with_api_test_app(test_name, test_fn).await
+    let overrides = rate_limit_config(vars);
+    with_api_test_app_state(
+        test_name,
+        move |state| with_test_config(state, &overrides),
+        test_fn,
+    )
+    .await
 }
 
 async fn with_configured_auth_test_app<T, F, Fut>(
@@ -1810,8 +1754,12 @@ where
     F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
-    let _env = RateLimitEnvGuard::set(vars);
-    with_api_test_app(test_name, test_fn).await
+    with_api_test_app_state(
+        test_name,
+        move |state| with_test_config(state, vars),
+        test_fn,
+    )
+    .await
 }
 
 fn headers_with_ip(ip: &str) -> HeaderMap {
@@ -1836,7 +1784,7 @@ fn object_keys(value: &serde_json::Value) -> Vec<String> {
 
 #[tokio::test]
 async fn verify_recovery_code_locks_out_after_repeated_failures() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_recovery_verify_lockout",
             &[
@@ -1920,7 +1868,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 /// disclose a redeemable code, while the normal flow keeps working.
 #[tokio::test]
 async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app("signup_verification_code_hashed", |app| async move {
             let email = "signup-code-hashed@example.com";
 
@@ -1966,7 +1914,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 /// Finding 5c: same guarantee for `recovery_verification.code_hash`.
 #[tokio::test]
 async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app("recovery_verification_code_hashed", |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "codehash").await;
 
@@ -2006,7 +1954,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
 /// digest in `signup_verification.invitation_token_hash`, and signup still works.
 #[tokio::test]
 async fn signup_verification_invitation_token_is_stored_hashed() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app("signup_verification_invite_hashed", |app| async move {
             let fixture = build_auth_invitation_fixture(&app.pool, "invite_hashed").await;
 
@@ -2057,7 +2005,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
 /// attempts made before and after the re-request add up to the same lockout.
 #[tokio::test]
 async fn verify_signup_verification_locks_out_across_code_re_request() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup_verify_lockout",
             &[
@@ -2138,7 +2086,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 /// lockout, otherwise anyone could lock an arbitrary address out of signup.
 #[tokio::test]
 async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup_verify_no_pending",
             &[
@@ -2176,7 +2124,7 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 /// an attempt against the live code.
 #[tokio::test]
 async fn verify_signup_verification_rejects_malformed_codes_without_consuming_attempts() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup_verify_malformed",
             &[
@@ -2225,7 +2173,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 /// Rotating the client IP must not mint a fresh code-request budget.
 #[tokio::test]
 async fn request_signup_verification_limits_one_email_across_rotating_ips() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup_verify_req_ip_rotation",
             &[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")],
@@ -2267,7 +2215,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 /// Rotating the email must not mint a fresh per-IP code-request budget either.
 #[tokio::test]
 async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup_verify_req_email_rotation",
             &[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")],
@@ -2308,7 +2256,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 
 #[tokio::test]
 async fn start_login_is_rate_limited_per_ip() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_start_login_ip",
             &[
@@ -2369,7 +2317,7 @@ async fn start_login_is_rate_limited_per_ip() {
 /// every request. All spoofed values must collapse onto the same key instead.
 #[tokio::test]
 async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_configured_auth_test_app(
             "rate_limit_start_login_spoofed_ip",
             &[
@@ -2418,7 +2366,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
 #[tokio::test]
 async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_start_login_email",
             &[
@@ -2476,7 +2424,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
 
 #[tokio::test]
 async fn signup_is_rate_limited_per_ip_and_per_email() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_signup",
             &[
@@ -2550,7 +2498,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 
 #[tokio::test]
 async fn request_recovery_verification_is_rate_limited() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_recovery_request",
             &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
@@ -2593,7 +2541,7 @@ async fn request_recovery_verification_is_rate_limited() {
 /// keyed on the email hash alone, so it still trips.
 #[tokio::test]
 async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_recovery_req_ip_rotation",
             &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
@@ -2637,7 +2585,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 /// keyed on the client IP alone, so a single source still trips.
 #[tokio::test]
 async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_rate_limit_test_app(
             "rate_limit_recovery_req_email_rotation",
             &[("RATE_LIMIT_RECOVERY_REQUEST", "2")],
@@ -2800,23 +2748,6 @@ async fn start_login_unknown_email_returns_stable_default_kdf_params() {
 
 const TEST_CDN_URL: &str = "https://cdn.example.invalid/assets";
 
-async fn with_storage_cdn_env_async<T, F>(future: F) -> T
-where
-    F: Future<Output = T>,
-{
-    let _guard = crate::test_support::acquire_env_lock_async().await;
-    let previous = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
-    unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", TEST_CDN_URL) };
-
-    let result = future.await;
-
-    match previous {
-        Some(value) => unsafe { std::env::set_var("BITTERY_STORAGE_CDN_URL", value) },
-        None => unsafe { std::env::remove_var("BITTERY_STORAGE_CDN_URL") },
-    }
-    result
-}
-
 async fn set_team_image_key(pool: &PgPool, team_id: &str, image_key: &str) {
     query("UPDATE team SET image_key = $1 WHERE id = $2")
         .bind(image_key)
@@ -2878,8 +2809,10 @@ async fn finish_login_ok(
 /// is a property of *having a team*, which every user does, and never of paying for one.
 #[tokio::test]
 async fn finish_login_returns_the_team_badge_a_solo_account_shows() {
-    with_storage_cdn_env_async(async {
-        with_api_test_app("finish_login_team_badge", |app| async move {
+    with_api_test_app_state(
+        "finish_login_team_badge",
+        |state| with_test_config(state, &[("BITTERY_STORAGE_CDN_URL", TEST_CDN_URL)]),
+        |app| async move {
             let crypto = build_auth_crypto_fixture("login-badge", "login-badge-password");
             insert_kdf_login_user(
                 &app.pool,
@@ -2914,9 +2847,8 @@ async fn finish_login_returns_the_team_badge_a_solo_account_shows() {
                 body["user"]["teamAvatarUrl"],
                 json!(format!("{TEST_CDN_URL}/teams/login_badge_team/avatar.png"))
             );
-        })
-        .await;
-    })
+        },
+    )
     .await;
 }
 
@@ -2946,7 +2878,7 @@ async fn finish_login_omits_the_team_badge_when_there_is_no_team() {
 
 #[tokio::test]
 async fn signup_persists_only_the_exact_current_kdf_profile() {
-    with_auth_test_env_async(Some("cloud"), async {
+    with_default_cloud_auth_config(async {
         with_api_test_app("signup_kdf_round_trip", |app| async move {
             let email = "kdf-signup@example.com";
             let crypto = build_auth_crypto_fixture("kdf-signup", "kdf-signup-pass");

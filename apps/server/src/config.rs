@@ -105,6 +105,9 @@ pub struct RateLimitConfig {
     pub signup_verify_request: i64,
     pub recovery_request: i64,
     pub auth_ip: i64,
+    pub account_mutation: i64,
+    pub device_revoke: i64,
+    pub device_rename: i64,
     pub share_link_daily: i64,
     pub signup_verify_max: i64,
     pub signup_verify_lock: Duration,
@@ -351,6 +354,9 @@ impl Config {
                 )?,
                 recovery_request: positive_i64(&mut lookup, "RATE_LIMIT_RECOVERY_REQUEST", 5)?,
                 auth_ip: positive_i64(&mut lookup, "RATE_LIMIT_AUTH_IP", 30)?,
+                account_mutation: positive_i64(&mut lookup, "RATE_LIMIT_ACCOUNT_MUTATION", 5)?,
+                device_revoke: positive_i64(&mut lookup, "RATE_LIMIT_DEVICE_REVOKE", 10)?,
+                device_rename: positive_i64(&mut lookup, "RATE_LIMIT_DEVICE_RENAME", 30)?,
                 share_link_daily: positive_i64(&mut lookup, "SHARE_LINK_DAILY_LIMIT", 50)?,
                 signup_verify_max: positive_i64(&mut lookup, "RATE_LIMIT_SIGNUP_VERIFY_MAX", 10)?,
                 signup_verify_lock: positive_minutes(
@@ -384,18 +390,24 @@ impl Config {
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::from_lookup(|name| match name {
-            "DATABASE_URL" => Some("postgres://test:test@127.0.0.1/test".to_string()),
-            "DATABASE_MAX_CONNECTIONS" => std::env::var(name)
-                .ok()
-                .or_else(|| Some(DEFAULT_DATABASE_MAX_CONNECTIONS.to_string())),
-            "JWT_SECRET" => std::env::var(name)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| Some("bittery-test-jwt-secret".to_string())),
-            _ => std::env::var(name).ok(),
+        Self::for_test_with(&[])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_with(overrides: &[(&str, &str)]) -> Self {
+        Self::from_lookup(|name| {
+            overrides
+                .iter()
+                .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
+                .or_else(|| match name {
+                    "DATABASE_URL" => Some("postgres://test:test@127.0.0.1/test".to_string()),
+                    "JWT_SECRET" => Some("bittery-test-jwt-secret".to_string()),
+                    "BITTERY_ENABLE_DEV_AUTH_STUBS" => Some("true".to_string()),
+                    "WEB_APP_URL" => Some("https://bittery.test".to_string()),
+                    _ => None,
+                })
         })
-        .expect("test environment configuration should be valid")
+        .expect("fixed test configuration should be valid")
     }
 }
 
@@ -512,6 +524,26 @@ mod tests {
         ]
     }
 
+    #[tokio::test]
+    async fn test_config_does_not_snapshot_process_environment() {
+        let _lock = crate::test_support::acquire_env_lock_async().await;
+        let _env = crate::test_support::EnvVarGuard::set(&[
+            ("NODE_ENV", "production"),
+            ("BITTERY_MODE", "invalid"),
+            ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+            ("DATABASE_MAX_CONNECTIONS", "0"),
+            ("JWT_SECRET", "  "),
+        ]);
+
+        let config = Config::for_test();
+
+        assert_eq!(config.server.node_environment, "development");
+        assert_eq!(config.server.mode, DeploymentMode::Cloud);
+        assert!(config.auth.dev_stubs_enabled);
+        assert_eq!(config.database.max_connections, 5);
+        assert_eq!(config.auth.jwt_secret, "bittery-test-jwt-secret");
+    }
+
     #[test]
     fn startup_config_parses_defaults_and_groups_secrets() {
         let config = parse(&required_values()).expect("minimal development config should parse");
@@ -522,6 +554,9 @@ mod tests {
         assert_eq!(config.server.request_timeout, Duration::from_secs(30));
         assert_eq!(config.rate_limit.adapter, RateLimitAdapter::Auto);
         assert_eq!(config.rate_limit.login_ip, 20);
+        assert_eq!(config.rate_limit.account_mutation, 5);
+        assert_eq!(config.rate_limit.device_revoke, 10);
+        assert_eq!(config.rate_limit.device_rename, 30);
         assert_eq!(config.storage.attachment_upload_secret, "test-jwt-secret");
         assert!(config.storage.s3.is_none());
         assert_eq!(config.server.bind_address(), "0.0.0.0:3000");
@@ -547,6 +582,9 @@ mod tests {
             ("REQUEST_TIMEOUT_SECONDS", "0"),
             ("DATABASE_ACQUIRE_TIMEOUT_SECONDS", "later"),
             ("RATE_LIMIT_LOGIN_IP", "-1"),
+            ("RATE_LIMIT_ACCOUNT_MUTATION", "0"),
+            ("RATE_LIMIT_DEVICE_REVOKE", "-1"),
+            ("RATE_LIMIT_DEVICE_RENAME", "0"),
             ("RATE_LIMIT_ADAPTER", "memory"),
         ] {
             let mut values = required_values();

@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use super::*;
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
-    acquire_env_lock_async, seed_item, seed_user, seed_vault, with_api_test_app, EnvVarGuard,
+    seed_item, seed_user, seed_vault, with_api_test_app, with_api_test_app_state, with_test_config,
 };
 
 const EMAIL: &str = "verification-codes@example.com";
@@ -70,104 +70,105 @@ async fn codes_expire_exhaust_and_consume_once_for_each_purpose() {
 
 #[tokio::test]
 async fn signup_lockout_burns_pending_codes() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
-        ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
-    ]);
+    with_api_test_app_state(
+        "verification_code_signup_lockout",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
+                    ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
+                ],
+            )
+        },
+        |app| async move {
+            let codes = VerificationCodeService::new(
+                &app.pool,
+                &app.state.config.auth,
+                &app.state.config.rate_limit,
+            );
+            let purpose = VerificationPurpose::Signup {
+                invitation_token: None,
+            };
+            let (_, code) = codes
+                .issue(purpose, EMAIL)
+                .await
+                .expect("code should issue");
 
-    with_api_test_app("verification_code_signup_lockout", |app| async move {
-        let codes = VerificationCodeService::new(
-            &app.pool,
-            &app.state.config.auth,
-            &app.state.config.rate_limit,
-        );
-        let purpose = VerificationPurpose::Signup {
-            invitation_token: None,
-        };
-        let (_, code) = codes
-            .issue(purpose, EMAIL)
-            .await
-            .expect("code should issue");
-
-        assert_eq!(
-            codes
-                .verify_with_lockout(purpose, EMAIL, "000000", app.state.rate_limiter.as_ref())
-                .await
-                .expect("first failure should resolve"),
-            LockoutVerificationCodeOutcome::Invalid
-        );
-        assert_eq!(
-            codes
-                .verify_with_lockout(purpose, EMAIL, "000000", app.state.rate_limiter.as_ref())
-                .await
-                .expect("second failure should resolve"),
-            LockoutVerificationCodeOutcome::LockoutTriggered
-        );
-        assert_eq!(
-            codes
-                .verify_with_lockout(purpose, EMAIL, &code, app.state.rate_limiter.as_ref())
-                .await
-                .expect("locked verification should resolve"),
-            LockoutVerificationCodeOutcome::Locked
-        );
-    })
+            assert_eq!(
+                codes
+                    .verify_with_lockout(purpose, EMAIL, "000000", app.state.rate_limiter.as_ref())
+                    .await
+                    .expect("first failure should resolve"),
+                LockoutVerificationCodeOutcome::Invalid
+            );
+            assert_eq!(
+                codes
+                    .verify_with_lockout(purpose, EMAIL, "000000", app.state.rate_limiter.as_ref())
+                    .await
+                    .expect("second failure should resolve"),
+                LockoutVerificationCodeOutcome::LockoutTriggered
+            );
+            assert_eq!(
+                codes
+                    .verify_with_lockout(purpose, EMAIL, &code, app.state.rate_limiter.as_ref())
+                    .await
+                    .expect("locked verification should resolve"),
+                LockoutVerificationCodeOutcome::Locked
+            );
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn a_code_that_could_not_be_delivered_is_not_left_active() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[("BITTERY_ENABLE_DEV_AUTH_STUBS", "false")]);
-
-    with_api_test_app("verification_code_undelivered", |app| async move {
-        seed_share_link(&app.pool).await;
-        let codes = VerificationCodeService::new(
-            &app.pool,
-            &app.state.config.auth,
-            &app.state.config.rate_limit,
-        );
-
-        for (purpose, table) in [
-            (
-                VerificationPurpose::Signup {
-                    invitation_token: None,
-                },
-                "signup_verification",
-            ),
-            (VerificationPurpose::Recovery, "recovery_verification"),
-            (
-                VerificationPurpose::ShareEmail {
-                    share_link_id: SHARE_LINK_ID,
-                },
-                "share_email_verification",
-            ),
-        ] {
-            codes
-                .issue_and_deliver(purpose, EMAIL)
-                .await
-                .expect_err("delivery should fail without the dev stub");
-
-            assert!(
-                !codes
-                    .has_active_code(purpose, EMAIL)
-                    .await
-                    .expect("active code check should resolve"),
-                "{table} kept an undelivered code active"
+    with_api_test_app_state(
+        "verification_code_undelivered",
+        |state| with_test_config(state, &[("BITTERY_ENABLE_DEV_AUTH_STUBS", "false")]),
+        |app| async move {
+            seed_share_link(&app.pool).await;
+            let codes = VerificationCodeService::new(
+                &app.pool,
+                &app.state.config.auth,
+                &app.state.config.rate_limit,
             );
-        }
-    })
+
+            for (purpose, table) in [
+                (
+                    VerificationPurpose::Signup {
+                        invitation_token: None,
+                    },
+                    "signup_verification",
+                ),
+                (VerificationPurpose::Recovery, "recovery_verification"),
+                (
+                    VerificationPurpose::ShareEmail {
+                        share_link_id: SHARE_LINK_ID,
+                    },
+                    "share_email_verification",
+                ),
+            ] {
+                codes
+                    .issue_and_deliver(purpose, EMAIL)
+                    .await
+                    .expect_err("delivery should fail without the dev stub");
+
+                assert!(
+                    !codes
+                        .has_active_code(purpose, EMAIL)
+                        .await
+                        .expect("active code check should resolve"),
+                    "{table} kept an undelivered code active"
+                );
+            }
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn emailed_codes_for_the_same_recipient_are_isolated_by_test_database() {
-    let _env_lock = acquire_env_lock_async().await;
-    let _env = EnvVarGuard::set(&[
-        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
-        ("NODE_ENV", "development"),
-        ("BITTERY_DEV_MAIL_OUTBOX", ""),
-    ]);
     let issued = Arc::new(tokio::sync::Barrier::new(2));
 
     let verify_in_database = |test_name: &'static str, issued: Arc<tokio::sync::Barrier>| async move {
