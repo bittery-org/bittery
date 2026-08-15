@@ -7,6 +7,7 @@ use crate::{
         models::DbTeamBillingEntitlementRow,
     },
     error::AppError,
+    services::transaction::database_error,
 };
 
 const TEAM_BILLING_ENTITLEMENT_QUERY: &str =
@@ -42,10 +43,7 @@ pub(crate) async fn load_team_billing_entitlement(
         .bind(user_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "{error_message}");
-            AppError::internal(error_message)
-        })
+        .map_err(|error| database_error(error, error_message))
 }
 
 pub(crate) async fn attachments_enabled_for_user(

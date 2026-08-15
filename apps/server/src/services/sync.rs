@@ -13,7 +13,10 @@ use crate::{
         fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
         fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
-    services::{team_billing::attachments_enabled_for_user, validate_resource_id},
+    services::{
+        team_billing::attachments_enabled_for_user, transaction::database_error,
+        validate_resource_id,
+    },
     shapes::{
         attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
         sync_changes_shape, sync_cursor_shape, sync_event_shape,
@@ -240,7 +243,7 @@ pub(crate) async fn bootstrap_items(
         .bind(&selected_vault_ids)
         .fetch_all(pool)
         .await
-        .map_err(|e| { tracing::error!(error = %e, "Failed to load bounded bootstrap vault summaries"); AppError::internal("Failed to load user vaults") })?
+        .map_err(|error| database_error(error, "Failed to load user vaults"))?
     };
     let vault_map: std::collections::HashMap<String, BootstrapVaultSummary> = user_vaults
         .into_iter()

@@ -22,7 +22,10 @@ use crate::{
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
-    services::{generate_secure_token, rate_limit, transaction::acquire_advisory_lock},
+    services::{
+        generate_secure_token, rate_limit,
+        transaction::{acquire_advisory_lock, database_error},
+    },
     shapes::{
         allowed_email_shape, create_share_link_shape, email_verification_shape,
         public_share_access_shape, public_share_info_shape, share_access_log_shape,
@@ -195,10 +198,10 @@ pub(crate) async fn create_share_link(
     let expires_at = calculate_expiration(&input.expires_in)?;
     let token = generate_secure_token();
     let share_link_id = generate_resource_id("share_link");
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to create share link transaction");
-        AppError::internal("Failed to create share link transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to create share link transaction"))?;
 
     if let Some(max_active_links) = share_links_access.max_active_links {
         let lock_scope = share_links_access.team_id.as_deref().unwrap_or(user_id);
@@ -242,7 +245,7 @@ pub(crate) async fn create_share_link(
 	.bind(expires_at)
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link"); AppError::internal("Failed to insert share link") })?;
+	.map_err(|error| database_error(error, "Failed to insert share link"))?;
 
     if input.access_mode == ShareLinkAccessMode::EmailRestricted {
         for email in input.allowed_emails.as_ref().into_iter().flatten() {
@@ -254,14 +257,14 @@ pub(crate) async fn create_share_link(
 			.bind(email.to_ascii_lowercase())
 			.execute(&mut *transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link allowed email"); AppError::internal("Failed to insert share link allowed email") })?;
+			.map_err(|error| database_error(error, "Failed to insert share link allowed email"))?;
         }
     }
 
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit share link transaction");
-        AppError::internal("Failed to commit share link transaction")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit share link transaction"))?;
 
     record_share_audit_event(pool, user_id, "share_created", &share_link_id).await?;
 
@@ -351,10 +354,7 @@ pub(crate) async fn revoke_share_link(
     .bind(&visible_link.link.created_by_id)
     .fetch_one(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load share link creator role");
-        AppError::internal("Failed to load share link creator role")
-    })?
+    .map_err(|error| database_error(error, "Failed to load share link creator role"))?
     .unwrap_or(VaultRole::Member);
 
     let revoker_outranks_creator = match visible_link.actor_role {
@@ -373,10 +373,7 @@ pub(crate) async fn revoke_share_link(
         .bind(&input.link_id)
         .execute(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to revoke share link");
-            AppError::internal("Failed to revoke share link")
-        })?;
+        .map_err(|error| database_error(error, "Failed to revoke share link"))?;
 
     record_share_audit_event(pool, user_id, "share_revoked", &input.link_id).await?;
 
@@ -454,7 +451,7 @@ pub(crate) async fn access_public(
 	.bind(hash_token(&input.token))
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); AppError::internal("Failed to load public share link") })?;
+	.map_err(|error| database_error(error, "Failed to load public share link"))?;
     let Some(link) = link else {
         return Err(AppError::not_found("Share link not found"));
     };
@@ -552,7 +549,7 @@ pub(crate) async fn request_email_verification(
 	.bind(&normalized_email)
 	.fetch_one(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to count share email verification codes"); AppError::internal("Failed to count share email verification codes") })?;
+	.map_err(|error| database_error(error, "Failed to count share email verification codes"))?;
     if total_codes >= MAX_VERIFICATION_CODES_PER_EMAIL {
         return Err(AppError::too_many_requests(
             "Too many verification attempts for this email. Contact the link creator.",
@@ -567,7 +564,7 @@ pub(crate) async fn request_email_verification(
 	.bind(now)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load existing share email verification"); AppError::internal("Failed to load existing share email verification") })?;
+	.map_err(|error| database_error(error, "Failed to load existing share email verification"))?;
 
     if let Some(existing_verification) = existing_verification {
         if (now - existing_verification.created_at) < time::Duration::minutes(1) {
@@ -751,7 +748,7 @@ pub(crate) async fn verify_email_and_access(
 	.bind(&normalized_email)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to mark allowed email as verified"); AppError::internal("Failed to mark allowed email as verified") })?;
+	.map_err(|error| database_error(error, "Failed to mark allowed email as verified"))?;
 
     log_share_access(pool, &details.link.id, Some(&input.email), true, None).await?;
 
@@ -774,7 +771,7 @@ async fn load_visible_share_link(
 	.bind(link_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link"); AppError::internal("Failed to load share link") })?;
+	.map_err(|error| database_error(error, "Failed to load share link"))?;
 
     let Some(link) = link else {
         return Ok(None);
@@ -787,10 +784,7 @@ async fn load_visible_share_link(
     .bind(actor_user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load actor vault access");
-        AppError::internal("Failed to load actor vault access")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load actor vault access"))?;
 
     let Some(actor_role) = actor_role else {
         return Ok(None);
@@ -826,7 +820,7 @@ async fn load_public_share_link_details_by_token(
 		.fetch_optional(pool)
 		.await,
 	}
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link details"); AppError::internal("Failed to load public share link details") })?;
+	.map_err(|error| database_error(error, "Failed to load public share link details"))?;
 
     let Some(link) = link else {
         return Ok(None);
@@ -837,7 +831,7 @@ async fn load_public_share_link_details_by_token(
 	.bind(&link.id)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link allowed emails"); AppError::internal("Failed to load public share link allowed emails") })?;
+	.map_err(|error| database_error(error, "Failed to load public share link allowed emails"))?;
 
     Ok(Some(PublicShareLinkDetails {
         link,

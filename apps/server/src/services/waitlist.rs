@@ -4,7 +4,7 @@ use sqlx::{query_as, FromRow, PgPool};
 use std::sync::LazyLock;
 use time::OffsetDateTime;
 
-use crate::error::AppError;
+use crate::{error::AppError, services::transaction::database_error};
 
 static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").expect("email regex should compile")
@@ -94,10 +94,7 @@ async fn upsert_beta_waitlist_entry(
     .bind(OffsetDateTime::now_utc())
     .fetch_one(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to join waitlist");
-        AppError::internal("Failed to join waitlist")
-    })
+    .map_err(|error| database_error(error, "Failed to join waitlist"))
 }
 
 fn normalize_email(email: &str) -> Result<String, AppError> {

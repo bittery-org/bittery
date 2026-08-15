@@ -12,6 +12,7 @@ use time::OffsetDateTime;
 use crate::{
     config,
     db::enums::{BillingPlan, BillingStatus},
+    services::transaction::database_error,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -135,7 +136,11 @@ async fn insert_event_log(
 	.execute(pool)
 	.await
 	.map(|result| result.rows_affected())
-	.map_err(|error| StripeWebhookError::Database(format!("Failed to persist Stripe event log: {error}")))
+	.map_err(|error| {
+        StripeWebhookError::Database(
+            database_error(error, "Failed to persist Stripe event log").message,
+        )
+    })
 }
 
 async fn apply_checkout_session_completed(
@@ -173,7 +178,11 @@ async fn apply_checkout_session_completed(
 	.bind(team.id)
 	.execute(pool)
 	.await
-	.map_err(|error| StripeWebhookError::Database(format!("Failed to update Stripe checkout session state: {error}")))?;
+	.map_err(|error| {
+        StripeWebhookError::Database(
+            database_error(error, "Failed to update Stripe checkout session state").message,
+        )
+    })?;
 
     Ok(())
 }
@@ -261,7 +270,11 @@ async fn apply_subscription_update(
 	.bind(team.id)
 	.execute(pool)
 	.await
-	.map_err(|error| StripeWebhookError::Database(format!("Failed to update Stripe subscription state: {error}")))?;
+	.map_err(|error| {
+        StripeWebhookError::Database(
+            database_error(error, "Failed to update Stripe subscription state").message,
+        )
+    })?;
 
     Ok(())
 }
@@ -293,7 +306,9 @@ async fn apply_invoice_status(
         .execute(pool)
         .await
         .map_err(|error| {
-            StripeWebhookError::Database(format!("Failed to update invoice billing state: {error}"))
+            StripeWebhookError::Database(
+                database_error(error, "Failed to update invoice billing state").message,
+            )
         })?;
 
     Ok(())
@@ -313,7 +328,9 @@ async fn find_team_for_event(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            StripeWebhookError::Database(format!("Failed to load billing team by id: {error}"))
+            StripeWebhookError::Database(
+                database_error(error, "Failed to load billing team by id").message,
+            )
         })? {
             return Ok(Some(team));
         }
@@ -327,9 +344,9 @@ async fn find_team_for_event(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            StripeWebhookError::Database(format!(
-                "Failed to load billing team by subscription: {error}"
-            ))
+            StripeWebhookError::Database(
+                database_error(error, "Failed to load billing team by subscription").message,
+            )
         })? {
             return Ok(Some(team));
         }
@@ -343,9 +360,9 @@ async fn find_team_for_event(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            StripeWebhookError::Database(format!(
-                "Failed to load billing team by customer: {error}"
-            ))
+            StripeWebhookError::Database(
+                database_error(error, "Failed to load billing team by customer").message,
+            )
         });
     }
 

@@ -21,7 +21,7 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 use tracing::info;
 
-use crate::error::AppError;
+use crate::{error::AppError, services::transaction::database_error};
 
 // ---------------------------------------------------------------------------
 // Scope names
@@ -300,10 +300,7 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(now)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to initialize rate limit state");
-            AppError::internal("Failed to initialize rate limit state")
-        })?;
+        .map_err(|error| database_error(error, "Failed to initialize rate limit state"))?;
 
         let count = query_scalar::<_, Option<i32>>(
             "UPDATE rate_limit_state SET count = CASE WHEN window_start_at IS NULL OR window_start_at < $3 THEN 1 ELSE count + 1 END, window_start_at = CASE WHEN window_start_at IS NULL OR window_start_at < $3 THEN $4 ELSE window_start_at END, updated_at = $4 WHERE scope = $1 AND key = $2 AND ((window_start_at IS NULL OR window_start_at < $3) OR count < $5) RETURNING count",
@@ -315,10 +312,7 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(limit as i32)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to increment rate limit window");
-            AppError::internal("Failed to increment rate limit window")
-        })?;
+        .map_err(|error| database_error(error, "Failed to increment rate limit window"))?;
 
         if count.flatten().is_none() {
             Ok(RateLimitOutcome::Limited)
@@ -343,10 +337,11 @@ impl RateLimiter for PostgresRateLimiter {
         // there self-evict after a day while paced attempts still accumulate.
         let now = OffsetDateTime::now_utc();
 
-        let mut tx = self.pool.begin().await.map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to start rate limit transaction");
-            AppError::internal("Failed to start rate limit transaction")
-        })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| database_error(error, "Failed to start rate limit transaction"))?;
 
         query(
             "INSERT INTO rate_limit_state (scope, key, subject, attempts, updated_at) VALUES ($1, $2, $2, 0, $3) ON CONFLICT DO NOTHING",
@@ -356,10 +351,7 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to initialize lockout state");
-            AppError::internal("Failed to initialize lockout state")
-        })?;
+        .map_err(|error| database_error(error, "Failed to initialize lockout state"))?;
 
         let row = query_as::<_, (i32, Option<OffsetDateTime>)>(
             "SELECT attempts, locked_until FROM rate_limit_state WHERE scope = $1 AND key = $2 FOR UPDATE",
@@ -368,19 +360,15 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(key)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to load lockout state");
-            AppError::internal("Failed to load lockout state")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load lockout state"))?;
 
         let (attempts, locked_until) = row;
 
         // Already locked: report Limited without recording another attempt.
         if locked_until.is_some_and(|until| until > now) {
-            tx.commit().await.map_err(|e| {
-                tracing::error!(error = %e, scope, "Failed to commit lockout transaction");
-                AppError::internal("Failed to commit lockout transaction")
-            })?;
+            tx.commit()
+                .await
+                .map_err(|error| database_error(error, "Failed to commit lockout transaction"))?;
             return Ok(RateLimitOutcome::Limited);
         }
 
@@ -405,15 +393,11 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to update lockout state");
-            AppError::internal("Failed to update lockout state")
-        })?;
+        .map_err(|error| database_error(error, "Failed to update lockout state"))?;
 
-        tx.commit().await.map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to commit lockout transaction");
-            AppError::internal("Failed to commit lockout transaction")
-        })?;
+        tx.commit()
+            .await
+            .map_err(|error| database_error(error, "Failed to commit lockout transaction"))?;
 
         if now_locked {
             Ok(RateLimitOutcome::Limited)
@@ -431,10 +415,7 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(key)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to read lockout state");
-            AppError::internal("Failed to read lockout state")
-        })?
+        .map_err(|error| database_error(error, "Failed to read lockout state"))?
         .flatten();
 
         if locked_until.is_some_and(|until| until > now) {
@@ -453,10 +434,7 @@ impl RateLimiter for PostgresRateLimiter {
         .bind(OffsetDateTime::now_utc())
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, scope, "Failed to clear lockout state");
-            AppError::internal("Failed to clear lockout state")
-        })?;
+        .map_err(|error| database_error(error, "Failed to clear lockout state"))?;
         Ok(())
     }
 }

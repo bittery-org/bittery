@@ -11,6 +11,7 @@ use crate::{
         common::insert_user_sync_event,
         travel_mode::{fetch_user_travel_mode, upsert_user_travel_mode, validate_vault_access},
     },
+    services::transaction::database_error,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,10 +95,10 @@ async fn persist_travel_mode_with_sync_event(
     hidden_vault_ids: &[String],
     enabled_at: Option<OffsetDateTime>,
 ) -> Result<TravelModeResponse, AppError> {
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start travel mode transaction");
-        AppError::internal("Failed to save travel mode config")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to save travel mode config"))?;
 
     let row = upsert_user_travel_mode(
         &mut *transaction,
@@ -117,10 +118,10 @@ async fn persist_travel_mode_with_sync_event(
     )
     .await?;
 
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit travel mode transaction");
-        AppError::internal("Failed to save travel mode config")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to save travel mode config"))?;
 
     Ok(map_travel_mode_row(row))
 }

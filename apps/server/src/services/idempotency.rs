@@ -1,6 +1,6 @@
 use sqlx::{query, query_as, PgPool};
 
-use crate::error::AppError;
+use crate::{error::AppError, services::transaction::database_error};
 
 pub(crate) const RESPONSE_BODY_LIMIT: usize = 2 * 1024 * 1024;
 
@@ -56,7 +56,7 @@ pub(crate) async fn claim(
     .bind(fingerprint.as_slice())
     .execute(pool)
     .await
-    .map_err(database_error)?
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?
     .rows_affected()
         == 1;
     if inserted {
@@ -73,7 +73,7 @@ pub(crate) async fn claim(
     .bind(fingerprint.as_slice())
     .execute(pool)
     .await
-    .map_err(database_error)?
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?
     .rows_affected()
         == 1;
     if reclaimed {
@@ -89,7 +89,7 @@ pub(crate) async fn claim(
     .bind(scope.key)
     .fetch_one(pool)
     .await
-    .map_err(database_error)?;
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?;
 
     if row.request_fingerprint != fingerprint {
         return Ok(Claim::FingerprintMismatch);
@@ -143,7 +143,7 @@ pub(crate) async fn complete(
     .bind(response.etag.as_deref())
     .execute(pool)
     .await
-    .map_err(database_error)?
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?
     .rows_affected();
     if updated != 1 {
         return Err(AppError::internal(
@@ -159,17 +159,12 @@ async fn maintain_records(pool: &PgPool) -> Result<(), AppError> {
     )
     .execute(pool)
     .await
-    .map_err(database_error)?;
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?;
     query(
         "WITH stale AS (SELECT ctid FROM idempotency_record WHERE state = 'pending' AND claim_expires_at <= NOW() ORDER BY claim_expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) UPDATE idempotency_record record SET state = 'indeterminate', claim_expires_at = NULL, terminal_reason = 'OUTCOME_UNKNOWN_AFTER_CLAIM_TIMEOUT' FROM stale WHERE record.ctid = stale.ctid",
     )
     .execute(pool)
     .await
-    .map_err(database_error)?;
+    .map_err(|error| database_error(error, "Idempotency database operation failed"))?;
     Ok(())
-}
-
-fn database_error(error: sqlx::Error) -> AppError {
-    tracing::error!(error = %error, "Idempotency database operation failed");
-    AppError::internal("Idempotency database operation failed")
 }

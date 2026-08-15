@@ -20,6 +20,7 @@ use crate::{
         count_team_members, get_committed_attachment_storage_bytes, load_billing_actor,
         load_billing_contact, load_optional_billing_state,
     },
+    services::transaction::database_error,
     shapes::{
         attachment_usage_shape, billing_entitlements_response_shape, billing_entitlements_shape,
         billing_status_shape, checkout_session_shape, entitlement_limits_shape,
@@ -288,7 +289,7 @@ pub(crate) async fn create_checkout_session(
 	.bind(&team_id)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to update team billing state"); AppError::internal("Failed to update team billing state") })?;
+	.map_err(|error| database_error(error, "Failed to update team billing state"))?;
 
     Ok(CheckoutSessionResponse {
         url: redirect_url,
@@ -511,10 +512,7 @@ async fn ensure_team_stripe_customer(
         .bind(team_id)
         .execute(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to persist Stripe customer");
-            AppError::internal("Failed to persist Stripe customer")
-        })?;
+        .map_err(|error| database_error(error, "Failed to persist Stripe customer"))?;
 
     Ok(Some(customer_id))
 }
