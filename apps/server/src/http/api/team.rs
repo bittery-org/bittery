@@ -8,15 +8,15 @@ use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    db::enums::{
-        InvitationStatus, ShareLinkAccessMode, ShareLinkStatus, TeamRole, TeamType, VaultRole,
-        VaultType,
-    },
+    db::enums::{InvitationStatus, TeamRole, TeamType},
     services::{
         access::{self, MemberAccessInput},
         team::{self, invitation_handlers, member_handlers},
     },
-    shapes::{team_details_shape, team_summary_shape},
+    shapes::{
+        member_access_shape, member_device_shape, member_share_link_shape,
+        member_vault_access_shape, team_details_shape, team_summary_shape,
+    },
     AppState,
 };
 
@@ -135,117 +135,33 @@ response_dto!(AcceptInvitationResponse from team::AcceptInvitationResponse {
     team_name: String,
 });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct MemberVaultAccessResponse {
-    id: String,
-    name: String,
-    vault_type: VaultType,
-    role: VaultRole,
-    granted_at: String,
-    item_count: u32,
-}
+member_vault_access_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct MemberVaultAccessResponse
+});
+member_vault_access_shape!(shape_from { access::MemberVaultAccess => MemberVaultAccessResponse });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct MemberDeviceResponse {
-    id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    platform: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    browser_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    os_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    masked_ip: Option<String>,
-    created_at: String,
-    last_active_at: String,
-    expires_at: String,
-}
+member_device_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct MemberDeviceResponse
+});
+member_device_shape!(shape_from { access::MemberDevice => MemberDeviceResponse });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct MemberShareLinkResponse {
-    id: String,
-    item_id: String,
-    status: ShareLinkStatus,
-    access_mode: ShareLinkAccessMode,
-    access_count: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_access_count: Option<u32>,
-    expires_at: String,
-    created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_accessed_at: Option<String>,
-    is_expired: bool,
-}
+member_share_link_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct MemberShareLinkResponse
+});
+member_share_link_shape!(shape_from { access::MemberShareLink => MemberShareLinkResponse });
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct MemberAccessResponse {
-    #[schema(max_items = 500)]
-    vaults: Vec<MemberVaultAccessResponse>,
-    #[schema(max_items = 500)]
-    devices: Vec<MemberDeviceResponse>,
-    #[schema(max_items = 100)]
-    share_links: Vec<MemberShareLinkResponse>,
-    share_link_total: u32,
-    active_share_link_count: u32,
-}
-
-impl From<access::MemberAccessResponse> for MemberAccessResponse {
-    fn from(value: access::MemberAccessResponse) -> Self {
-        Self {
-            vaults: value
-                .vaults
-                .into_iter()
-                .map(|item| MemberVaultAccessResponse {
-                    id: item.id,
-                    name: item.name,
-                    vault_type: item.vault_type,
-                    role: item.role,
-                    granted_at: item.granted_at,
-                    item_count: item.item_count,
-                })
-                .collect(),
-            devices: value
-                .devices
-                .into_iter()
-                .map(|item| MemberDeviceResponse {
-                    id: item.id,
-                    device_name: item.device_name,
-                    platform: item.platform,
-                    browser_name: item.browser_name,
-                    os_name: item.os_name,
-                    masked_ip: item.masked_ip,
-                    created_at: item.created_at,
-                    last_active_at: item.last_active_at,
-                    expires_at: item.expires_at,
-                })
-                .collect(),
-            share_links: value
-                .share_links
-                .into_iter()
-                .map(|item| MemberShareLinkResponse {
-                    id: item.id,
-                    item_id: item.item_id,
-                    status: item.status,
-                    access_mode: item.access_mode,
-                    access_count: item.access_count,
-                    max_access_count: item.max_access_count,
-                    expires_at: item.expires_at,
-                    created_at: item.created_at,
-                    last_accessed_at: item.last_accessed_at,
-                    is_expired: item.is_expired,
-                })
-                .collect(),
-            share_link_total: value.share_link_total,
-            active_share_link_count: value.active_share_link_count,
-        }
-    }
-}
+member_access_shape!(wire_struct {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct MemberAccessResponse
+});
+member_access_shape!(shape_from { access::MemberAccessResponse => MemberAccessResponse });
 
 #[derive(IntoResponses)]
 #[allow(dead_code)]
