@@ -1370,31 +1370,48 @@ join-based fail-closed pattern is correct; the fix is sharing one query, not add
    `docs/openapi-breaking-changes.md` makes it cheap. If a client is already pinned to `me` /
    `start_login`, this changes. **Is the API deployed to anyone yet?**
 
+   - Anwer: no, its not deployed to anyone yet. But i'm not sure if we need to change it.
+
 2. **Post-auth rate limiting.** `change_password`, `regenerate_secret_key`, `update_email` and
    `delete_account` have no limit and each revokes every other session on success. Deliberate, or a gap?
+
+   -  Answer: I think we should add rate limiting to these endpoints. It seems like a gap.
 
 3. **Migration policy after launch.** ADR 0011 says migrations become additive-only after the first REST
    release. Four committed migrations are destructive (`DROP TABLE "folder"`, two column renames, a
    `DELETE FROM` on three tables). Nothing in CI distinguishes pre- from post-launch. **Should
    `scripts/check-migrations.mjs` gain an additive-only mode, triggered by a flag file or a release tag?**
 
+   - Anwer: No rephrase of the adr is needed.
+
 4. **Boot-time migrations under rolling deploys.** `runtime.rs:27` runs migrations on every instance
    start. sqlx's advisory lock makes that concurrency-safe, but during a rollout old-code instances run
    against the new schema. Fine today; incompatible with rolling deploys once migrations stop being
    additive. **Should the server stop migrating at boot and rely on `bin/migrate` in the deploy pipeline?**
 
+   - Anwer: I think we should stop migrating at boot and rely on bin/migrate in the deploy pipeline.
+   - The issue is probably that railway deploys i think don't have access to internal network so the migrate command will probably fail.
+
 5. **`DATABASE_MAX_CONNECTIONS` default of 5** (`db/mod.rs:12`) with no request timeout. What is it set to
    in production, and what is the expected concurrency?
+
+   - Answer: I think they are not set in prod ad att right now we should probably set it to 20 or 30. I think we should also add a request timeout.
 
 6. **Is the `cargo run --bin migrate` step in CI (`ci.yml:629-636`) still needed?** It migrates the base
    `bittery_test` database, which tests do not query — they only use its URL to derive the admin
    connection. It looks like leftover setup.
 
+   - Answer: I'm not sure please investigate on this further.
+
 7. **Graceful shutdown.** `ServerRuntime::Drop` aborts the Redis dispatch task but sends no signal to
    `JobRunner`. Is in-flight job completion on shutdown a requirement?
 
+   - Answer: I think we should add a graceful shutdown to the job runner. It seems like a good idea.
+
 8. **Phase 5 timing.** The `domains/` move is one large mechanical PR. **When is the branch queue quiet
    enough** to land it without painful conflicts?
+
+   - Answer: It is already quiet, no others are working on it. We can do it directly.
 
 ---
 
