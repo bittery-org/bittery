@@ -1,5 +1,5 @@
 use super::{
-    bad_request_handler_error, enforce_window_limit, hash_normalized_email,
+    bad_request_handler_error, encode_hs256_token, enforce_window_limit, hash_normalized_email,
     is_dev_auth_stub_enabled, jwt_signing_secret, request_ip_key, validate_hex_string,
     validate_resource_id, AuthSessionUserResponse, CheckEmailInput, CheckEmailResponse,
     LogoutResponse, RegistrationStatusResponse, RequestSignupVerificationInput, SignupInput,
@@ -7,7 +7,7 @@ use super::{
     VerifySignupVerificationResponse, JWT_ISSUER,
 };
 use bittery_crypto_core::normalize_email;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool, Postgres};
@@ -910,15 +910,7 @@ fn create_signup_verification_token(
         iat: issued_at,
     };
 
-    let token = encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
-    )
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create signup verification token");
-        AppError::internal("Failed to create signup verification token")
-    })?;
+    let token = encode_hs256_token(&claims, "Failed to create signup verification token")?;
     if is_dev_auth_stub_enabled() {
         info!(
             email = %email,

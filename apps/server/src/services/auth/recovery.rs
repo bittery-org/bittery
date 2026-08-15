@@ -1,12 +1,12 @@
 use super::{
-    enforce_window_limit, hash_normalized_email, is_dev_auth_stub_enabled, jwt_signing_secret,
-    request_ip_key, validate_hex_string, GetRecoveryDataInput, GetRecoveryDataResponse,
-    LogoutResponse, RecoveryVaultKeyResponse, RequestRecoveryVerificationInput, ResetPasswordInput,
-    ResetPasswordResponse, ValidatedKdfProfile, VerifyRecoveryCodeInput,
-    VerifyRecoveryCodeResponse, JWT_ISSUER,
+    encode_hs256_token, enforce_window_limit, hash_normalized_email, is_dev_auth_stub_enabled,
+    jwt_signing_secret, request_ip_key, validate_hex_string, GetRecoveryDataInput,
+    GetRecoveryDataResponse, LogoutResponse, RecoveryVaultKeyResponse,
+    RequestRecoveryVerificationInput, ResetPasswordInput, ResetPasswordResponse,
+    ValidatedKdfProfile, VerifyRecoveryCodeInput, VerifyRecoveryCodeResponse, JWT_ISSUER,
 };
 use bittery_crypto_core::normalize_email;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
@@ -436,15 +436,7 @@ fn create_recovery_token(
         iat: issued_at,
     };
 
-    let token = encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
-    )
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create recovery token");
-        AppError::internal("Failed to create recovery token")
-    })?;
+    let token = encode_hs256_token(&claims, "Failed to create recovery token")?;
     if is_dev_auth_stub_enabled() {
         info!(
             email = %email,

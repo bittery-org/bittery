@@ -1,5 +1,6 @@
 #[cfg(test)]
 use bittery_crypto_core::normalize_email;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -495,6 +496,21 @@ fn jwt_signing_secret() -> String {
             "bittery-dev-auth-secret".to_string()
         }
     }
+}
+
+fn encode_hs256_token(
+    claims: &impl Serialize,
+    error_message: &'static str,
+) -> Result<String, AppError> {
+    encode(
+        &Header::new(Algorithm::HS256),
+        claims,
+        &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
+    )
+    .map_err(|error| {
+        tracing::error!(error = %error, "{error_message}");
+        AppError::internal(error_message)
+    })
 }
 
 fn is_production() -> bool {
