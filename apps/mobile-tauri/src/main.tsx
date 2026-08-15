@@ -11,6 +11,7 @@ import {
 	AccountProvider,
 	createMobileClientRuntime,
 } from "./contexts/account-context";
+import { installClipboardBridge } from "./lib/clipboard-bridge";
 import { createMobileApiClient, queryClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { I18nProvider } from "./providers/i18n-provider";
@@ -40,6 +41,10 @@ declare module "@tanstack/react-router" {
 }
 
 async function initializeApp() {
+	// Item-detail copy buttons (`@bittery/ui`) call `navigator.clipboard.writeText` directly —
+	// install the fallback before any screen can render a copy button. See clipboard-bridge.ts.
+	installClipboardBridge();
+
 	// Initialize storage adapter (loads Tauri plugins)
 	await initializeStorage();
 	const apiClient = await createMobileApiClient();

@@ -13,7 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DebugRouteImport } from './routes/debug'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as UnlockRouteImport } from './routes/unlock'
+import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
+import { Route as VaultIdIndexRouteImport } from './routes/vault/$id/index'
+import { Route as VaultIdItemIdIndexRouteImport } from './routes/vault/$id/$itemId/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -35,18 +38,36 @@ const UnlockRoute = UnlockRouteImport.update({
   path: '/unlock',
   getParentRoute: () => rootRouteImport,
 } as any)
-const VaultIndexRoute = VaultIndexRouteImport.update({
-  id: '/vault/',
-  path: '/vault/',
+const VaultRouteRoute = VaultRouteRouteImport.update({
+  id: '/vault',
+  path: '/vault',
   getParentRoute: () => rootRouteImport,
+} as any)
+const VaultIndexRoute = VaultIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultIdIndexRoute = VaultIdIndexRouteImport.update({
+  id: '/$id/',
+  path: '/$id/',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultIdItemIdIndexRoute = VaultIdItemIdIndexRouteImport.update({
+  id: '/$id/$itemId/',
+  path: '/$id/$itemId/',
+  getParentRoute: () => VaultRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/vault': typeof VaultRouteRouteWithChildren
   '/debug': typeof DebugRoute
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/': typeof VaultIndexRoute
+  '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,29 +75,58 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault': typeof VaultIndexRoute
+  '/vault/$id': typeof VaultIdIndexRoute
+  '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/vault': typeof VaultRouteRouteWithChildren
   '/debug': typeof DebugRoute
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/': typeof VaultIndexRoute
+  '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/debug' | '/login' | '/unlock' | '/vault/'
+  fullPaths:
+    | '/'
+    | '/vault'
+    | '/debug'
+    | '/login'
+    | '/unlock'
+    | '/vault/'
+    | '/vault/$id/'
+    | '/vault/$id/$itemId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/debug' | '/login' | '/unlock' | '/vault'
-  id: '__root__' | '/' | '/debug' | '/login' | '/unlock' | '/vault/'
+  to:
+    | '/'
+    | '/debug'
+    | '/login'
+    | '/unlock'
+    | '/vault'
+    | '/vault/$id'
+    | '/vault/$id/$itemId'
+  id:
+    | '__root__'
+    | '/'
+    | '/vault'
+    | '/debug'
+    | '/login'
+    | '/unlock'
+    | '/vault/'
+    | '/vault/$id/'
+    | '/vault/$id/$itemId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  VaultRouteRoute: typeof VaultRouteRouteWithChildren
   DebugRoute: typeof DebugRoute
   LoginRoute: typeof LoginRoute
   UnlockRoute: typeof UnlockRoute
-  VaultIndexRoute: typeof VaultIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -109,22 +159,59 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UnlockRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/vault': {
+      id: '/vault'
+      path: '/vault'
+      fullPath: '/vault'
+      preLoaderRoute: typeof VaultRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/vault/': {
       id: '/vault/'
-      path: '/vault'
+      path: '/'
       fullPath: '/vault/'
       preLoaderRoute: typeof VaultIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/$id/': {
+      id: '/vault/$id/'
+      path: '/$id'
+      fullPath: '/vault/$id/'
+      preLoaderRoute: typeof VaultIdIndexRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/$id/$itemId/': {
+      id: '/vault/$id/$itemId/'
+      path: '/$id/$itemId'
+      fullPath: '/vault/$id/$itemId/'
+      preLoaderRoute: typeof VaultIdItemIdIndexRouteImport
+      parentRoute: typeof VaultRouteRoute
     }
   }
 }
 
+interface VaultRouteRouteChildren {
+  VaultIndexRoute: typeof VaultIndexRoute
+  VaultIdIndexRoute: typeof VaultIdIndexRoute
+  VaultIdItemIdIndexRoute: typeof VaultIdItemIdIndexRoute
+}
+
+const VaultRouteRouteChildren: VaultRouteRouteChildren = {
+  VaultIndexRoute: VaultIndexRoute,
+  VaultIdIndexRoute: VaultIdIndexRoute,
+  VaultIdItemIdIndexRoute: VaultIdItemIdIndexRoute,
+}
+
+const VaultRouteRouteWithChildren = VaultRouteRoute._addFileChildren(
+  VaultRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  VaultRouteRoute: VaultRouteRouteWithChildren,
   DebugRoute: DebugRoute,
   LoginRoute: LoginRoute,
   UnlockRoute: UnlockRoute,
-  VaultIndexRoute: VaultIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
