@@ -8,7 +8,10 @@
 		"dev:vite": "vite",
 		"dev": "tauri dev",
 		"build": "tsc && vite build",
-		"tauri": "tauri"
+		"tauri": "tauri",
+		"android:dev": "tauri android dev",
+		"android:build": "tauri android build --debug --target aarch64 --apk",
+		"ios:dev": "tauri ios dev"
 	},
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",
