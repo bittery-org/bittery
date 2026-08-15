@@ -5,6 +5,7 @@ use crate::db::models::{
     DbPublicShareLinkRow, DbShareAccessLogRow, DbShareLinkAllowedEmailRow, DbShareLinkRow,
 };
 use crate::error::AppError;
+use crate::shared::transaction::database_error;
 
 pub async fn load_share_links_for_item(
     pool: &PgPool,
@@ -16,7 +17,7 @@ pub async fn load_share_links_for_item(
 	.bind(item_id)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share links"); AppError::internal("Failed to load share links") })
+	.map_err(|error| database_error(error, "Failed to load share links"))
 }
 
 /// `token` is the caller-supplied plaintext; only its digest is ever compared,
@@ -31,7 +32,7 @@ pub async fn load_public_share_link_by_token(
 	.bind(hash_token(token))
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); AppError::internal("Failed to load public share link") })
+	.map_err(|error| database_error(error, "Failed to load public share link"))
 }
 
 pub async fn load_allowed_emails_for_links(
@@ -48,7 +49,7 @@ pub async fn load_allowed_emails_for_links(
 	.bind(link_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link allowed emails"); AppError::internal("Failed to load share link allowed emails") })?;
+	.map_err(|error| database_error(error, "Failed to load share link allowed emails"))?;
 
     let mut grouped = std::collections::HashMap::new();
     for row in rows {
@@ -79,7 +80,7 @@ pub async fn log_share_access(
 	.bind(time::OffsetDateTime::now_utc())
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record share access log"); AppError::internal("Failed to record share access log") })?;
+	.map_err(|error| database_error(error, "Failed to record share access log"))?;
 
     Ok(())
 }
@@ -96,7 +97,7 @@ pub async fn consume_share_link_access(
 	.bind(now)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to consume share link access"); AppError::internal("Failed to consume share link access") })?
+	.map_err(|error| database_error(error, "Failed to consume share link access"))?
 	.rows_affected();
 
     Ok(updated_rows > 0)
@@ -124,7 +125,7 @@ pub async fn count_active_share_links(
 		.fetch_one(&mut **transaction)
 		.await,
 	}
-	.map_err(|e| { tracing::error!(error = %e, "Failed to count active share links"); AppError::internal("Failed to count active share links") })?;
+	.map_err(|error| database_error(error, "Failed to count active share links"))?;
 
     Ok(count)
 }
@@ -146,5 +147,5 @@ pub async fn load_share_access_logs(
 	.bind(limit)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share access logs"); AppError::internal("Failed to load share access logs") })
+	.map_err(|error| database_error(error, "Failed to load share access logs"))
 }

@@ -6,6 +6,7 @@ use crate::{
     config::DeploymentMode,
     db::enums::{ShareLinkAccessMode, ShareLinkStatus, VaultRole, VaultType},
     error::AppError,
+    shared::transaction::database_error,
 };
 
 use super::authorize_team_admin;
@@ -75,10 +76,7 @@ async fn load_member_vaults(
     .bind(team_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "Failed to load member vaults");
-        AppError::internal("Failed to load member vaults")
-    })
+    .map_err(|error| database_error(error, "Failed to load member vaults"))
 }
 
 /// Unexpired sessions for the member. Sessions double as devices in this schema.
@@ -98,10 +96,7 @@ async fn load_member_sessions(
     .bind(MAX_SESSIONS)
     .fetch_all(pool)
     .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "Failed to load member sessions");
-        AppError::internal("Failed to load member sessions")
-    })
+    .map_err(|error| database_error(error, "Failed to load member sessions"))
 }
 
 /// Share links the member created, newest first, capped at [`MAX_SHARE_LINKS`].
@@ -121,10 +116,7 @@ async fn load_member_share_links(
     .bind(MAX_SHARE_LINKS)
     .fetch_all(pool)
     .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "Failed to load member share links");
-        AppError::internal("Failed to load member share links")
-    })
+    .map_err(|error| database_error(error, "Failed to load member share links"))
 }
 
 /// Total share links created by the member, so the UI can say when its list is capped.
@@ -133,10 +125,7 @@ async fn count_member_share_links(pool: &PgPool, user_id: &str) -> Result<i64, A
         .bind(user_id)
         .fetch_one(pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to count member share links");
-            AppError::internal("Failed to count member share links")
-        })
+        .map_err(|error| database_error(error, "Failed to count member share links"))
 }
 
 /// Whether `user_id` belongs to `team_id`. Guards cross-team lookups.
@@ -146,10 +135,7 @@ async fn is_team_member(pool: &PgPool, team_id: &str, user_id: &str) -> Result<b
         .bind(team_id)
         .fetch_one(pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to verify team membership");
-            AppError::internal("Failed to verify team membership")
-        })
+        .map_err(|error| database_error(error, "Failed to verify team membership"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

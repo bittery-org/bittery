@@ -1,6 +1,6 @@
 use sqlx::{query_as, FromRow, PgPool};
 
-use crate::{db::models::*, error::AppError};
+use crate::{db::models::*, error::AppError, shared::transaction::database_error};
 
 const BOOTSTRAP_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 
@@ -39,10 +39,7 @@ pub async fn fetch_user_vault_ids(pool: &PgPool, user_id: &str) -> Result<Vec<St
             .bind(user_id)
             .fetch_all(pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to load vault access");
-                AppError::internal("Failed to load vault access")
-            })?;
+            .map_err(|error| database_error(error, "Failed to load vault access"))?;
 
     Ok(user_vaults
         .into_iter()
@@ -64,7 +61,7 @@ pub async fn fetch_visible_cursor_event(
 		.bind(user_id)
 		.fetch_optional(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load sync cursor event"); AppError::internal("Failed to load sync cursor event") });
+		.map_err(|error| database_error(error, "Failed to load sync cursor event"));
     }
 
     query_as::<_, DbSyncEventCursorRow>(
@@ -75,7 +72,7 @@ pub async fn fetch_visible_cursor_event(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load sync cursor event"); AppError::internal("Failed to load sync cursor event") })
+	.map_err(|error| database_error(error, "Failed to load sync cursor event"))
 }
 
 pub async fn fetch_latest_visible_event_id(
@@ -91,7 +88,7 @@ pub async fn fetch_latest_visible_event_id(
 		.fetch_optional(pool)
 		.await
 		.map(|row| row.map(|row| row.id))
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load latest visible event"); AppError::internal("Failed to load latest visible event") });
+		.map_err(|error| database_error(error, "Failed to load latest visible event"));
     }
 
     query_as::<_, DbSyncEventIdRow>(
@@ -102,7 +99,7 @@ pub async fn fetch_latest_visible_event_id(
 	.fetch_optional(pool)
 	.await
 	.map(|row| row.map(|row| row.id))
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest visible event"); AppError::internal("Failed to load latest visible event") })
+	.map_err(|error| database_error(error, "Failed to load latest visible event"))
 }
 
 pub async fn fetch_visible_events_since(
@@ -170,10 +167,7 @@ pub async fn fetch_visible_events_since(
         .fetch_all(pool)
         .await
     }
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to size sync event page");
-        AppError::internal("Failed to load sync events")
-    })?;
+    .map_err(|error| database_error(error, "Failed to size sync event page"))?;
 
     let Some(first) = weights.first() else {
         return Ok(BoundedSyncEventRows {
@@ -196,10 +190,7 @@ pub async fn fetch_visible_events_since(
     .bind(&event_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded sync event page");
-        AppError::internal("Failed to load sync events")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded sync event page"))?;
     Ok(BoundedSyncEventRows { rows, has_more })
 }
 
@@ -244,10 +235,7 @@ pub async fn fetch_bootstrap_items(
     .bind(BOOTSTRAP_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to size bootstrap item page");
-        AppError::internal("Failed to load bootstrap items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to size bootstrap item page"))?;
     let Some(first) = weights.first() else {
         return Ok(BoundedBootstrapRows {
             rows: Vec::new(),
@@ -269,10 +257,7 @@ pub async fn fetch_bootstrap_items(
     .bind(&item_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded bootstrap item page");
-        AppError::internal("Failed to load bootstrap items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded bootstrap item page"))?;
     Ok(BoundedBootstrapRows { rows, has_more })
 }
 
@@ -286,5 +271,5 @@ pub async fn load_bootstrap_attachment_rows(
 	.bind(item_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load bootstrap attachments"); AppError::internal("Failed to load bootstrap attachments") })
+	.map_err(|error| database_error(error, "Failed to load bootstrap attachments"))
 }

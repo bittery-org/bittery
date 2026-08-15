@@ -1,7 +1,7 @@
 use sqlx::{query_as, PgPool};
 use time::OffsetDateTime;
 
-use crate::{db::models::*, error::AppError};
+use crate::{db::models::*, error::AppError, shared::transaction::database_error};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DbUserTravelModeRow {
@@ -23,10 +23,7 @@ pub async fn fetch_user_travel_mode(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load travel mode config");
-        AppError::internal("Failed to load travel mode config")
-    })
+    .map_err(|error| database_error(error, "Failed to load travel mode config"))
 }
 
 pub async fn upsert_user_travel_mode<'e>(
@@ -47,10 +44,7 @@ pub async fn upsert_user_travel_mode<'e>(
     .bind(now)
     .fetch_one(executor)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to save travel mode config");
-        AppError::internal("Failed to save travel mode config")
-    })
+    .map_err(|error| database_error(error, "Failed to save travel mode config"))
 }
 
 pub async fn fetch_accessible_vault_ids_for_user(
@@ -61,10 +55,7 @@ pub async fn fetch_accessible_vault_ids_for_user(
         .bind(user_id)
         .fetch_all(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load accessible vault ids");
-            AppError::internal("Failed to load accessible vault ids")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load accessible vault ids"))?;
 
     Ok(rows.into_iter().map(|row| row.vault_id).collect())
 }

@@ -29,7 +29,7 @@ async fn load_billing_actor(pool: &PgPool, user_id: &str) -> Result<DbBillingAct
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load billing actor"); AppError::internal("Failed to load billing actor") })?
+	.map_err(|error| database_error(error, "Failed to load billing actor"))?
 	.ok_or_else(|| AppError::not_found("Team not found"))
 }
 
@@ -43,7 +43,7 @@ async fn load_optional_billing_state(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load billing actor"); AppError::internal("Failed to load billing actor") })
+	.map_err(|error| database_error(error, "Failed to load billing actor"))
 }
 
 async fn load_billing_contact(
@@ -58,10 +58,7 @@ async fn load_billing_contact(
     .bind(team_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load billing contact");
-        AppError::internal("Failed to load billing contact")
-    })
+    .map_err(|error| database_error(error, "Failed to load billing contact"))
 }
 
 async fn count_team_members(pool: &PgPool, team_id: &str) -> Result<i64, AppError> {
@@ -69,10 +66,7 @@ async fn count_team_members(pool: &PgPool, team_id: &str) -> Result<i64, AppErro
         .bind(team_id)
         .fetch_one(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to count team members");
-            AppError::internal("Failed to count team members")
-        })
+        .map_err(|error| database_error(error, "Failed to count team members"))
 }
 
 async fn get_committed_attachment_storage_bytes(
@@ -85,7 +79,7 @@ async fn get_committed_attachment_storage_bytes(
 	.bind(team_id)
 	.fetch_one(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment usage"); AppError::internal("Failed to load attachment usage") })
+	.map_err(|error| database_error(error, "Failed to load attachment usage"))
 }
 
 billing_status_shape!(service_struct {

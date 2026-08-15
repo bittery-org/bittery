@@ -10,6 +10,7 @@ use crate::{
     config::DeploymentMode,
     db::enums::{BillingPlan, BillingStatus, TeamRole},
     error::AppError,
+    shared::transaction::database_error,
 };
 
 use super::admin::authorize_team_admin;
@@ -74,7 +75,7 @@ pub(super) async fn load_actor(pool: &PgPool, user_id: &str) -> Result<AuditActo
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team actor"); AppError::internal("Failed to load team actor") })?
+	.map_err(|error| database_error(error, "Failed to load team actor"))?
 	.ok_or_else(|| AppError::not_found("Team not found"))
 }
 
@@ -83,10 +84,7 @@ async fn load_team_members(pool: &PgPool, team_id: &str) -> Result<Vec<TeamMembe
         .bind(team_id)
         .fetch_all(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load team members");
-            AppError::internal("Failed to load team members")
-        })
+        .map_err(|error| database_error(error, "Failed to load team members"))
 }
 
 async fn load_audit_events(
@@ -132,7 +130,7 @@ async fn load_audit_events(
 	.bind(filter.scan_limit)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load audit events"); AppError::internal("Failed to load audit events") })
+	.map_err(|error| database_error(error, "Failed to load audit events"))
 }
 
 async fn load_share_access_events(
@@ -171,7 +169,7 @@ async fn load_share_access_events(
 	.bind(filter.scan_limit)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share access events"); AppError::internal("Failed to load share access events") })
+	.map_err(|error| database_error(error, "Failed to load share access events"))
 }
 
 pub(crate) const DEFAULT_LIMIT: u32 = 50;
