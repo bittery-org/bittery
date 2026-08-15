@@ -206,7 +206,22 @@ fn parse_tracestate_member_count(value: &str) -> Option<usize> {
     Some(members.len())
 }
 
-const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
+// `tauri.localhost` is the origin a Tauri v2 WebView uses to serve the
+// bundled app on Android and Windows. It is not a routable host — it never
+// leaves the device — so it is admitted here for the same reason `localhost`
+// is: the https requirement below exists to stop credentials crossing a
+// network in the clear, and this origin has no network to cross. Allowing it
+// grants an attacker nothing, because `Origin` is set by the browser/WebView
+// and can't be forged from a web page, and a malicious native app never
+// needed CORS to begin with — it can just issue the request directly. CORS
+// only protects browser-embedded callers, and this entry lets exactly one
+// such local WebView through. Compare the comment near `apply_cors_headers`
+// about the desktop webview's `tauri://localhost`: that origin can never be
+// allowlisted because `tauri://` isn't an http(s) scheme, but Android's
+// `http://tauri.localhost` is, which is why it can go in this list. Nothing
+// here is automatic — this only takes effect once an operator actually adds
+// `http://tauri.localhost` to `CORS_ORIGIN`.
+const LOCALHOST_HOSTS: [&str; 5] = ["localhost", "127.0.0.1", "::1", "[::1]", "tauri.localhost"];
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Content-Type, Authorization, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
 const EXPOSE_HEADERS: &str = "Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After, Idempotency-Replayed";
@@ -773,6 +788,20 @@ mod tests {
     fn rejects_paths_and_wildcards() {
         assert!(parse_cors_origins(Some("*")).is_err());
         assert!(parse_cors_origins(Some("https://app.example.com/path")).is_err());
+    }
+
+    #[test]
+    fn accepts_tauri_android_webview_origin_but_not_other_bare_http_hosts() {
+        assert_eq!(
+            parse_cors_origins(Some("http://tauri.localhost"))
+                .expect("the Tauri Android WebView origin should be accepted"),
+            vec!["http://tauri.localhost".to_string()],
+        );
+
+        assert_eq!(
+            parse_cors_origins(Some("http://example.com")).unwrap_err(),
+            "CORS_ORIGIN must use https outside localhost development: http://example.com"
+        );
     }
 
     /// A panicking handler — e.g. `rand` 0.10's `ThreadRng` failing to reseed —
