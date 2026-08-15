@@ -17,6 +17,7 @@ use crate::{
         VaultKeyRotationStaleReason,
     },
     error::AppError,
+    services::transaction::database_error,
 };
 
 const IDLE_LIFETIME: Duration = Duration::minutes(30);
@@ -145,26 +146,24 @@ pub(crate) async fn lock_plan_policy(
     .ok_or(FinalizeError::InvalidState)
 }
 
-fn database(error: sqlx::Error) -> AppError {
-    tracing::error!(%error, "Vault key rotation database operation failed");
-    AppError::internal("Vault key rotation operation failed")
-}
-
 /// Snapshots authoritative state. Authorization must already have succeeded in the policy caller.
 pub(crate) async fn create_plan(
     pool: &PgPool,
     input: CreateRotationPlanInput,
 ) -> Result<RotationPlanSummary, AppError> {
-    let mut tx = pool.begin().await.map_err(database)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await
-        .map_err(database)?;
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     let expected_key_version: i32 = query_scalar("SELECT key_version FROM vault WHERE id = $1")
         .bind(&input.vault_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(database)?
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
         .ok_or_else(|| AppError::not_found("Vault not found"))?;
     let now = OffsetDateTime::now_utc();
     let id = Uuid::new_v4().to_string();
@@ -176,16 +175,18 @@ pub(crate) async fn create_plan(
     query("INSERT INTO vault_key_rotation_plan (id, vault_id, initiator_user_id, reason, authorization_context, excluded_user_id, expected_key_version, idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, $4::key_rotation_reason, $5, $6, $7, $8, $9)")
         .bind(&id).bind(&input.vault_id).bind(&input.initiator_user_id).bind(input.reason)
         .bind(&input.authorization_context).bind(&input.excluded_user_id).bind(expected_key_version)
-        .bind(idle_expires_at).bind(absolute_expires_at).execute(&mut *tx).await.map_err(database)?;
+        .bind(idle_expires_at).bind(absolute_expires_at).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
 
     query("INSERT INTO vault_key_rotation_plan_manifest (plan_id, kind, entity_id, expected_version, payload) SELECT $1, 'member', vk.user_id, $2, json_build_object('userId', vk.user_id, 'publicKey', u.public_key, 'role', vk.role)::text FROM vault_key vk JOIN \"user\" u ON u.id=vk.user_id WHERE vk.vault_id = $3 AND ($4::text IS NULL OR vk.user_id <> $4) ORDER BY vk.user_id")
         .bind(&id).bind(expected_key_version).bind(&input.vault_id).bind(&input.excluded_user_id)
-        .execute(&mut *tx).await.map_err(database)?;
+        .execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     query("INSERT INTO vault_key_rotation_plan_manifest (plan_id, kind, entity_id, expected_version, payload) SELECT $1, 'item', i.id, i.version, json_build_object('id', i.id, 'vaultId', i.vault_id, 'encryptedData', i.encrypted_data, 'encryptionIv', i.encryption_iv, 'encryptionAlgorithm', i.encryption_algorithm, 'encryptionVersion', i.encryption_version, 'encryptedByUserId', i.encrypted_by_user_id)::text FROM item i WHERE i.vault_id = $2 ORDER BY i.id")
-        .bind(&id).bind(&input.vault_id).execute(&mut *tx).await.map_err(database)?;
+        .bind(&id).bind(&input.vault_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     query("INSERT INTO vault_key_rotation_plan_manifest (plan_id, kind, entity_id, expected_version, payload) SELECT $1, 'attachment', a.id, a.envelope_version, json_build_object('encryptedAttachmentKey', a.encrypted_attachment_key, 'attachmentKeyIv', a.attachment_key_iv, 'attachmentKeyAlgorithm', a.attachment_key_algorithm, 'vaultId', a.vault_id, 'attachmentId', a.id, 'uploadedBy', a.uploaded_by, 'envelopeVersion', a.envelope_version)::text FROM item_attachment a WHERE a.vault_id = $2 ORDER BY a.id")
-        .bind(&id).bind(&input.vault_id).execute(&mut *tx).await.map_err(database)?;
-    tx.commit().await.map_err(database)?;
+        .bind(&id).bind(&input.vault_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
 
     Ok(RotationPlanSummary {
         id,
@@ -207,7 +208,7 @@ where
     E: sqlx::Executor<'a, Database = Postgres>,
 {
     let row: PlanRow = query_as("SELECT p.id, p.vault_id, p.initiator_user_id, p.expected_key_version, p.state, p.idle_expires_at, p.absolute_expires_at FROM vault_key_rotation_plan p WHERE p.id = $1 AND p.initiator_user_id = $2 AND EXISTS (SELECT 1 FROM vault_key vk WHERE vk.vault_id=p.vault_id AND vk.user_id=$2) FOR UPDATE")
-        .bind(plan_id).bind(initiator_user_id).fetch_optional(executor).await.map_err(database)?
+        .bind(plan_id).bind(initiator_user_id).fetch_optional(executor).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
         .ok_or_else(|| AppError::not_found("Rotation plan not found"))?;
     let now = OffsetDateTime::now_utc();
     if row.4 != VaultKeyRotationPlanState::Preparing && row.4 != VaultKeyRotationPlanState::Ready {
@@ -227,11 +228,14 @@ pub(crate) async fn read_preparation_page(
     cursor: Option<&str>,
     requested_limit: usize,
 ) -> Result<PreparationPage, AppError> {
-    let mut tx = pool.begin().await.map_err(database)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     let plan = load_active_plan(&mut *tx, plan_id, initiator_user_id).await?;
     let limit = requested_limit.clamp(1, MAX_PAGE_RECORDS);
     let rows: Vec<(String, i32, String)> = query_as("SELECT entity_id, expected_version, payload FROM vault_key_rotation_plan_manifest WHERE plan_id = $1 AND kind = $2::vault_key_rotation_manifest_kind AND entity_id > $3 ORDER BY entity_id LIMIT $4")
-        .bind(plan_id).bind(kind).bind(cursor.unwrap_or("")).bind((limit + 1) as i64).fetch_all(&mut *tx).await.map_err(database)?;
+        .bind(plan_id).bind(kind).bind(cursor.unwrap_or("")).bind((limit + 1) as i64).fetch_all(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     let available = rows.len();
     let mut records = Vec::new();
     let mut bytes = 0usize;
@@ -256,8 +260,10 @@ pub(crate) async fn read_preparation_page(
         .then(|| records.last().map(|record| record.id.clone()))
         .flatten();
     query("UPDATE vault_key_rotation_plan SET idle_expires_at = LEAST($1, absolute_expires_at) WHERE id = $2 AND idle_expires_at = $3")
-        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(database)?;
-    tx.commit().await.map_err(database)?;
+        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     Ok(PreparationPage {
         next_cursor,
         records,
@@ -274,7 +280,10 @@ pub(crate) async fn stage_outputs(
     if outputs.is_empty() || outputs.len() > MAX_PAGE_RECORDS {
         return Err(AppError::bad_request("Invalid staged output page size"));
     }
-    let mut tx = pool.begin().await.map_err(database)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     let plan = load_active_plan(&mut *tx, plan_id, initiator_user_id).await?;
     let page_bytes: usize = outputs
         .iter()
@@ -290,7 +299,7 @@ pub(crate) async fn stage_outputs(
             return Err(AppError::payload_too_large("Staged output exceeds limit"));
         }
         let exists: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault_key_rotation_plan_manifest WHERE plan_id = $1 AND kind = $2::vault_key_rotation_manifest_kind AND entity_id = $3)")
-            .bind(plan_id).bind(kind).bind(&output.id).fetch_one(&mut *tx).await.map_err(database)?;
+            .bind(plan_id).bind(kind).bind(&output.id).fetch_one(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
         if !exists {
             return Err(AppError::bad_request(
                 "Staged output is not in the plan manifest",
@@ -299,7 +308,7 @@ pub(crate) async fn stage_outputs(
         validate_staged_payload(kind, &output.payload)?;
         let hash = hex::encode(Sha256::digest(output.payload.as_bytes()));
         let stored: Option<String> = query_scalar("INSERT INTO vault_key_rotation_plan_staged_output (plan_id, kind, entity_id, payload, payload_hash) VALUES ($1, $2::vault_key_rotation_manifest_kind, $3, $4, $5) ON CONFLICT (plan_id, kind, entity_id) DO UPDATE SET payload_hash = vault_key_rotation_plan_staged_output.payload_hash WHERE vault_key_rotation_plan_staged_output.payload_hash = EXCLUDED.payload_hash RETURNING payload_hash")
-            .bind(plan_id).bind(kind).bind(&output.id).bind(&output.payload).bind(&hash).fetch_optional(&mut *tx).await.map_err(database)?;
+            .bind(plan_id).bind(kind).bind(&output.id).bind(&output.payload).bind(&hash).fetch_optional(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
         if stored.is_none() {
             return Err(AppError::conflict(
                 "Staged output conflicts with an earlier upload",
@@ -307,10 +316,12 @@ pub(crate) async fn stage_outputs(
         }
     }
     query("UPDATE vault_key_rotation_plan p SET state='ready' WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM vault_key_rotation_plan_manifest m LEFT JOIN vault_key_rotation_plan_staged_output s ON s.plan_id=m.plan_id AND s.kind=m.kind AND s.entity_id=m.entity_id WHERE m.plan_id=p.id AND s.entity_id IS NULL)")
-        .bind(plan_id).execute(&mut *tx).await.map_err(database)?;
+        .bind(plan_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     query("UPDATE vault_key_rotation_plan SET idle_expires_at = LEAST($1, absolute_expires_at) WHERE id = $2 AND idle_expires_at = $3")
-        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(database)?;
-    tx.commit().await.map_err(database)
+        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))
 }
 
 pub(crate) async fn abandon_plan(
@@ -319,7 +330,7 @@ pub(crate) async fn abandon_plan(
     initiator_user_id: &str,
 ) -> Result<(), AppError> {
     let changed = query("UPDATE vault_key_rotation_plan SET state='abandoned' WHERE id=$1 AND initiator_user_id=$2 AND state IN ('preparing','ready') AND idle_expires_at>now() AND absolute_expires_at>now()")
-        .bind(plan_id).bind(initiator_user_id).execute(pool).await.map_err(database)?.rows_affected();
+        .bind(plan_id).bind(initiator_user_id).execute(pool).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?.rows_affected();
     if changed == 0 {
         return Err(AppError::conflict("Rotation plan is no longer active"));
     }
@@ -433,7 +444,7 @@ pub(crate) async fn record_stale(
     reason: VaultKeyRotationStaleReason,
 ) -> Result<(), AppError> {
     query("UPDATE vault_key_rotation_plan SET state='stale', stale_reason=$2::vault_key_rotation_stale_reason WHERE id=$1 AND state IN ('preparing','ready')")
-        .bind(plan_id).bind(reason).execute(pool).await.map_err(database)?;
+        .bind(plan_id).bind(reason).execute(pool).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     Ok(())
 }
 

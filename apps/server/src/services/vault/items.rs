@@ -26,7 +26,7 @@ use crate::{
     error::AppError,
     integrations::storage,
     repo::common::{generate_resource_id, insert_audit_event, insert_sync_event},
-    services::team_billing::attachments_enabled_for_user,
+    services::{team_billing::attachments_enabled_for_user, transaction::database_error},
 };
 
 pub(crate) async fn list_vault_items_page(
@@ -72,10 +72,7 @@ pub(crate) async fn list_vault_items_page(
     .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load vault item page");
-        AppError::internal("Failed to load vault items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load vault item page"))?;
     let (item_ids, source_has_more) = bounded_page_ids(
         weights,
         ITEM_PAGE_QUERY_BYTES,
@@ -93,10 +90,7 @@ pub(crate) async fn list_vault_items_page(
     .bind(&item_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded vault item page");
-        AppError::internal("Failed to load vault items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded vault item page"))?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
@@ -168,10 +162,7 @@ pub(crate) async fn list_all_vault_items_page(
     .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item page");
-        AppError::internal("Failed to load items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load item page"))?;
     let (item_ids, source_has_more) = bounded_page_ids(
         weights,
         ITEM_PAGE_QUERY_BYTES,
@@ -189,10 +180,7 @@ pub(crate) async fn list_all_vault_items_page(
     .bind(&item_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded item page");
-        AppError::internal("Failed to load items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded item page"))?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
@@ -264,10 +252,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
     .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load deleted item page");
-        AppError::internal("Failed to load deleted items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load deleted item page"))?;
     let (item_ids, source_has_more) = bounded_page_ids(
         weights,
         ITEM_PAGE_QUERY_BYTES,
@@ -285,10 +270,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
     .bind(&item_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded deleted item page");
-        AppError::internal("Failed to load deleted items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded deleted item page"))?;
     let selected_vault_ids = distinct_item_vault_ids(&item_rows);
     let vault_map = build_vault_summary_map(
         object_storage,
@@ -319,10 +301,7 @@ pub(crate) async fn get_vault_item(
     .bind(&input.item_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item");
-        AppError::internal("Failed to load item")
-    })?
+    .map_err(|error| database_error(error, "Failed to load item"))?
     .ok_or_else(|| AppError::not_found("Item not found"))?;
     assert_item_read_access(pool, &item_row.vault_id, user_id).await?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
@@ -353,10 +332,10 @@ pub(crate) async fn create_vault_item(
         .clone()
         .unwrap_or_else(|| generate_resource_id("item"));
     let version = 1;
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start item transaction");
-        AppError::internal("Failed to start item transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start item transaction"))?;
     query(
 		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, $7, $8, $8)",
 	)
@@ -370,7 +349,7 @@ pub(crate) async fn create_vault_item(
 	.bind(user_id)
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create item"); AppError::internal("Failed to create item") })?;
+	.map_err(|error| database_error(error, "Failed to create item"))?;
     insert_item_sync_event(
         &mut *transaction,
         SyncEventType::ItemCreated,
@@ -381,10 +360,10 @@ pub(crate) async fn create_vault_item(
         version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit item creation");
-        AppError::internal("Failed to commit item creation")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item creation"))?;
     insert_item_audit_log(
         pool,
         "item_created",
@@ -433,10 +412,10 @@ pub(crate) async fn bulk_import_vault_items(
         ));
     }
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start bulk import transaction");
-        AppError::internal("Failed to start bulk import transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start bulk import transaction"))?;
     for item in &input.items {
         query(
 			"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, 1, 1, $8, $8)",
@@ -451,7 +430,7 @@ pub(crate) async fn bulk_import_vault_items(
 		.bind(user_id)
 		.execute(&mut *transaction)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to import vault items"); AppError::internal("Failed to import vault items") })?;
+		.map_err(|error| database_error(error, "Failed to import vault items"))?;
     }
     insert_bulk_import_sync_event(
         &mut transaction,
@@ -461,10 +440,10 @@ pub(crate) async fn bulk_import_vault_items(
         json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit bulk import");
-        AppError::internal("Failed to commit bulk import")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit bulk import"))?;
     insert_bulk_import_audit_event(
         pool,
         "vault_updated",
@@ -494,10 +473,10 @@ pub(crate) async fn update_vault_item(
         || input.encryption_iv.is_some()
         || input.encryption_algorithm.is_some();
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start item update transaction");
-        AppError::internal("Failed to start item update transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start item update transaction"))?;
     let new_version = query_scalar::<_, i32>(
 		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, encryption_version = CASE WHEN $4 THEN version + 1 ELSE encryption_version END, encrypted_by_user_id = CASE WHEN $4 THEN $5 ELSE encrypted_by_user_id END, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
@@ -511,7 +490,7 @@ pub(crate) async fn update_vault_item(
 	.bind(expected_version)
 	.fetch_optional(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to update item"); AppError::internal("Failed to update item") })?
+	.map_err(|error| database_error(error, "Failed to update item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut *transaction,
@@ -523,10 +502,10 @@ pub(crate) async fn update_vault_item(
         new_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit item update");
-        AppError::internal("Failed to commit item update")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item update"))?;
 
     Ok(UpdateItemResponse {
         success: true,
@@ -548,10 +527,10 @@ pub(crate) async fn toggle_vault_favorite(
     assert_item_write_access(access.role, "Access denied")?;
 
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start favorite update transaction");
-        AppError::internal("Failed to start favorite update transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start favorite update transaction"))?;
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET favorite = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
     )
@@ -561,10 +540,7 @@ pub(crate) async fn toggle_vault_favorite(
         .bind(expected_version)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update favorite state");
-            AppError::internal("Failed to update favorite state")
-        })?
+        .map_err(|error| database_error(error, "Failed to update favorite state"))?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut *transaction,
@@ -576,10 +552,10 @@ pub(crate) async fn toggle_vault_favorite(
         new_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit favorite update");
-        AppError::internal("Failed to commit favorite update")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit favorite update"))?;
 
     Ok(SuccessResponse { success: true })
 }
@@ -594,10 +570,10 @@ pub(crate) async fn delete_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start item delete transaction");
-        AppError::internal("Failed to start item delete transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start item delete transaction"))?;
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET deleted_at = $1, version = version + 1, last_modified_by = $2, updated_at = $3 WHERE id = $4 AND version = $5 RETURNING version",
     )
@@ -608,10 +584,7 @@ pub(crate) async fn delete_vault_item(
         .bind(expected_version)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete item");
-            AppError::internal("Failed to delete item")
-        })?
+        .map_err(|error| database_error(error, "Failed to delete item"))?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut *transaction,
@@ -623,10 +596,10 @@ pub(crate) async fn delete_vault_item(
         new_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit item delete");
-        AppError::internal("Failed to commit item delete")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item delete"))?;
     insert_item_audit_log(
         pool,
         "item_deleted",
@@ -676,10 +649,7 @@ pub(crate) async fn list_deleted_vault_items_page(
     .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load deleted item page");
-        AppError::internal("Failed to load deleted items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load deleted item page"))?;
 
     let (item_ids, source_has_more) = bounded_page_ids(
         weights,
@@ -698,10 +668,7 @@ pub(crate) async fn list_deleted_vault_items_page(
     .bind(&item_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to materialize bounded deleted vault item page");
-        AppError::internal("Failed to load deleted items")
-    })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded deleted vault item page"))?;
 
     Ok(ByteBoundedPage {
         values: item_rows.into_iter().map(map_item).collect(),
@@ -722,10 +689,10 @@ pub(crate) async fn restore_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start item restore transaction");
-        AppError::internal("Failed to start item restore transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start item restore transaction"))?;
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET deleted_at = NULL, version = version + 1, last_modified_by = $1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
     )
@@ -735,10 +702,7 @@ pub(crate) async fn restore_vault_item(
     .bind(expected_version)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to restore item");
-        AppError::internal("Failed to restore item")
-    })?
+    .map_err(|error| database_error(error, "Failed to restore item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut *transaction,
@@ -750,10 +714,10 @@ pub(crate) async fn restore_vault_item(
         new_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit item restore");
-        AppError::internal("Failed to commit item restore")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item restore"))?;
     insert_item_audit_log(
         pool,
         "item_restored",
@@ -791,10 +755,10 @@ pub(crate) async fn move_vault_item(
     assert_item_write_access(target_access.role, "Cannot move items to a read-only vault")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start item move transaction");
-        AppError::internal("Failed to start item move transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start item move transaction"))?;
     let new_version = query_scalar::<_, i32>(
 		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = $4, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
@@ -808,7 +772,7 @@ pub(crate) async fn move_vault_item(
 	.bind(expected_version)
 	.fetch_optional(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to move item"); AppError::internal("Failed to move item") })?
+	.map_err(|error| database_error(error, "Failed to move item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event_with_metadata(
         &mut transaction,
@@ -821,10 +785,10 @@ pub(crate) async fn move_vault_item(
         json!({ "sourceVaultId": input.source_vault_id }),
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit item move");
-        AppError::internal("Failed to commit item move")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item move"))?;
     insert_item_audit_log(
         pool,
         "item_moved",
@@ -859,10 +823,10 @@ pub(crate) async fn permanently_delete_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start permanent delete transaction");
-        AppError::internal("Failed to start permanent delete transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start permanent delete transaction"))?;
     let deleted_version = query_scalar::<_, i32>(
         "DELETE FROM item WHERE id = $1 AND version = $2 RETURNING version + 1",
     )
@@ -870,10 +834,7 @@ pub(crate) async fn permanently_delete_vault_item(
     .bind(expected_version)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to permanently delete item");
-        AppError::internal("Failed to permanently delete item")
-    })?
+    .map_err(|error| database_error(error, "Failed to permanently delete item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut *transaction,
@@ -885,10 +846,10 @@ pub(crate) async fn permanently_delete_vault_item(
         deleted_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit permanent delete");
-        AppError::internal("Failed to commit permanent delete")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit permanent delete"))?;
     insert_item_audit_log(
         pool,
         "item_permanently_deleted",
@@ -1034,10 +995,7 @@ async fn load_user_vault_summaries(
     .bind(vault_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load user vaults");
-        AppError::internal("Failed to load user vaults")
-    })
+    .map_err(|error| database_error(error, "Failed to load user vaults"))
 }
 
 fn distinct_item_vault_ids(items: &[DbBootstrapItemRow]) -> Vec<String> {

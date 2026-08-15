@@ -15,6 +15,7 @@ use crate::{
     services::{
         billing::sync_team_seats_best_effort,
         team_billing::team_management_enabled,
+        transaction::database_error,
         vault_key_rotation::{
             self, CreateRotationPlanInput, FinalizeError, RotationPlanSummary, RotationResult,
         },
@@ -122,7 +123,7 @@ async fn create_plans(
         BillingStatus,
     ) = query_as(
         "SELECT actor.role,target.role,t.type,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3",
-    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(pool).await.map_err(database)?
+    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?
       .ok_or_else(|| AppError::not_found("Team member not found"))?;
     authorize(
         intent,
@@ -134,7 +135,7 @@ async fn create_plans(
     authorize_entitlement(intent, billing_plan, billing_status)?;
     if intent == Intent::Administrative {
         let has_unmanaged_vault: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 LEFT JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND (actor_key.role IS NULL OR actor_key.role NOT IN ('owner','admin')))")
-            .bind(team_id).bind(target_id).bind(actor_id).fetch_one(pool).await.map_err(database)?;
+            .bind(team_id).bind(target_id).bind(actor_id).fetch_one(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
         if has_unmanaged_vault {
             return Err(AppError::forbidden(
                 "You cannot remove this member from only part of their team vault access.",
@@ -142,7 +143,7 @@ async fn create_plans(
         }
     }
     let vault_ids: Vec<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2 ORDER BY v.id")
-        .bind(team_id).bind(target_id).fetch_all(pool).await.map_err(database)?;
+        .bind(team_id).bind(target_id).fetch_all(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
     let mut plans = Vec::with_capacity(vault_ids.len());
     for vault_id in vault_ids {
         plans.push(
@@ -208,11 +209,14 @@ async fn finalize(
     intent: Intent,
     plan_ids: &[String],
 ) -> Result<(DepartureResult, BillingPlan), AppError> {
-    let mut tx = pool.begin().await.map_err(database)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
     query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
         .execute(&mut *tx)
         .await
-        .map_err(database)?;
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
     let member: (
         TeamRole,
         TeamRole,
@@ -222,15 +226,15 @@ async fn finalize(
         BillingStatus,
     ) = query_as(
         "SELECT actor.role,target.role,t.type,target.name,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3 FOR UPDATE OF actor,target,t",
-    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut *tx).await.map_err(database)?
+    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?
       .ok_or_else(|| AppError::conflict("Team membership changed while departure was prepared"))?;
     authorize(intent, member.0, member.1, actor_id == target_id, member.2)?;
     authorize_entitlement(intent, member.4, member.5)?;
     let expected: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2")
-        .bind(team_id).bind(target_id).fetch_all(&mut *tx).await.map_err(database)?.into_iter().collect();
+        .bind(team_id).bind(target_id).fetch_all(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
     if intent == Intent::Administrative {
         let managed: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND actor_key.role IN ('owner','admin')")
-            .bind(team_id).bind(target_id).bind(actor_id).fetch_all(&mut *tx).await.map_err(database)?.into_iter().collect();
+            .bind(team_id).bind(target_id).bind(actor_id).fetch_all(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
         if managed != expected {
             return Err(AppError::forbidden(
                 "You cannot remove this member from only part of their team vault access.",
@@ -268,7 +272,9 @@ async fn finalize(
             Ok(rotation) => rotations.push(rotation),
             Err(FinalizeError::Stale(reason)) => {
                 let stale_plan_id = plan_id.clone();
-                tx.rollback().await.map_err(database)?;
+                tx.rollback()
+                    .await
+                    .map_err(|error| database_error(error, "Member departure operation failed"))?;
                 vault_key_rotation::record_stale(pool, &stale_plan_id, reason).await?;
                 return Err(finalize_error(FinalizeError::Stale(reason)));
             }
@@ -281,32 +287,34 @@ async fn finalize(
             .bind(target_id)
             .fetch_all(&mut *tx)
             .await
-            .map_err(database)?;
+            .map_err(|error| database_error(error, "Member departure operation failed"))?;
     for session_id in &session_ids {
         query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'session_revoked','session',$3,$4)")
             .bind(format!("audit_{}", Uuid::new_v4())).bind(target_id).bind(session_id)
             .bind(json!({"reason": if intent == Intent::Voluntary { "team_left" } else { "team_member_removed" }}).to_string())
-            .execute(&mut *tx).await.map_err(database)?;
+            .execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
     }
     query("DELETE FROM session WHERE user_id=$1")
         .bind(target_id)
         .execute(&mut *tx)
         .await
-        .map_err(database)?;
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
     let personal_team_id = format!("team_{}", Uuid::new_v4());
     query("INSERT INTO team (id,name,owner_id,type,member_limit,billing_plan,billing_status) VALUES ($1,$2,$3,'personal',1,'free','none')")
-        .bind(&personal_team_id).bind(format!("{}'s Team", member.3)).bind(target_id).execute(&mut *tx).await.map_err(database)?;
+        .bind(&personal_team_id).bind(format!("{}'s Team", member.3)).bind(target_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
     query("UPDATE \"user\" SET team_id=$1,role='owner' WHERE id=$2")
         .bind(&personal_team_id)
         .bind(target_id)
         .execute(&mut *tx)
         .await
-        .map_err(database)?;
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
     query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'team_member_removed','user',$3,$4)")
         .bind(format!("audit_{}", Uuid::new_v4())).bind(actor_id).bind(target_id)
         .bind(json!({"teamId":team_id,"reason":intent.audit_reason(),"vaultsRotated":rotations.len()}).to_string())
-        .execute(&mut *tx).await.map_err(database)?;
-    tx.commit().await.map_err(database)?;
+        .execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
     Ok((
         DepartureResult {
             personal_team_id,
@@ -349,9 +357,6 @@ pub(crate) async fn finalize_administrative(
     Ok(result)
 }
 
-fn database(error: sqlx::Error) -> AppError {
-    crate::services::transaction::database_error(error, "Member departure operation failed")
-}
 fn finalize_error(error: FinalizeError) -> AppError {
     match error {
         FinalizeError::Stale(reason) => AppError::rotation_stale(reason),

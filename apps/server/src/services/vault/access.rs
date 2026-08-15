@@ -7,6 +7,7 @@ use crate::{
     },
     error::AppError,
     repo::common::insert_sync_event,
+    services::transaction::database_error,
 };
 
 #[derive(Debug, sqlx::FromRow)]
@@ -21,10 +22,7 @@ pub(super) async fn load_vault_access<'e>(
 ) -> Result<VaultAccess, AppError> {
     query_vault_access(executor, vault_id, user_id)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to verify vault access");
-            AppError::internal("Failed to verify vault access")
-        })?
+        .map_err(|error| database_error(error, "Failed to verify vault access"))?
         .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }
 
@@ -35,10 +33,7 @@ pub(super) async fn assert_item_read_access<'e>(
 ) -> Result<(), AppError> {
     query_vault_access(executor, vault_id, user_id)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to verify item access");
-            AppError::internal("Failed to verify item access")
-        })?
+        .map_err(|error| database_error(error, "Failed to verify item access"))?
         .map(|_| ())
         .ok_or_else(|| AppError::forbidden("Access denied"))
 }
@@ -75,10 +70,7 @@ pub(super) async fn load_item_row<'e>(
     .bind(item_id)
     .fetch_optional(executor)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item");
-        AppError::internal("Failed to load item")
-    })?
+    .map_err(|error| database_error(error, "Failed to load item"))?
     .ok_or_else(|| AppError::not_found("Item not found"))
 }
 

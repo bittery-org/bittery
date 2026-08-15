@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     services::{
         team_billing::resolve_vault_sharing_entitlement,
+        transaction::database_error,
         vault_key_rotation::{
             self, CreateRotationPlanInput, FinalizeError, RotationPlanSummary, RotationResult,
         },
@@ -134,7 +135,7 @@ async fn authorize_managed_vault(
     .bind(actor_id)
     .fetch_optional(pool)
     .await
-    .map_err(database)?
+    .map_err(|error| database_error(error, "Vault membership operation failed"))?
     .ok_or_else(|| AppError::forbidden("Insufficient permissions"))?;
     authorize_vault_policy(policy.0, policy.1.as_deref(), policy.2, policy.3)
 }
@@ -151,10 +152,7 @@ async fn roles(
             .bind(actor_id)
             .fetch_optional(pool)
             .await
-            .map_err(|error| {
-                tracing::error!(%error, "failed to load Vault removal actor");
-                AppError::internal("Failed to load Vault membership")
-            })?
+            .map_err(|error| database_error(error, "failed to load Vault removal actor"))?
             .ok_or_else(|| AppError::forbidden("Insufficient permissions"))?
             .0;
     let target =
@@ -163,10 +161,7 @@ async fn roles(
             .bind(target_id)
             .fetch_optional(pool)
             .await
-            .map_err(|error| {
-                tracing::error!(%error, "failed to load Vault removal target");
-                AppError::internal("Failed to load Vault membership")
-            })?
+            .map_err(|error| database_error(error, "failed to load Vault removal target"))?
             .ok_or_else(|| AppError::not_found("Member not found"))?
             .0;
     Ok((actor, target))
@@ -201,11 +196,14 @@ pub(crate) async fn finalize_removal(
     target_id: &str,
     plan_id: &str,
 ) -> Result<VaultMemberRemovalResult, AppError> {
-    let mut tx = pool.begin().await.map_err(database)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
         .execute(&mut *tx)
         .await
-        .map_err(database)?;
+        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     let policy = vault_key_rotation::lock_plan_policy(&mut tx, plan_id)
         .await
         .map_err(finalize_error)?;
@@ -221,7 +219,7 @@ pub(crate) async fn finalize_removal(
     }
     let row = query_as::<_, (VaultRole, VaultRole, VaultType, Option<String>)>(
         "SELECT actor.role,target.role,v.type,v.team_id FROM vault_key actor JOIN vault_key target ON target.vault_id=actor.vault_id JOIN vault v ON v.id=actor.vault_id WHERE actor.vault_id=$1 AND actor.user_id=$2 AND target.user_id=$3 FOR UPDATE OF actor,target,v",
-    ).bind(vault_id).bind(actor_id).bind(target_id).fetch_optional(&mut *tx).await.map_err(database)?
+    ).bind(vault_id).bind(actor_id).bind(target_id).fetch_optional(&mut *tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?
       .ok_or_else(|| AppError::conflict("Vault membership changed while rotation was prepared"))?;
     authorize(row.0, row.1, actor_id == target_id)?;
     if row.2 != VaultType::Team || row.3.is_none() {
@@ -235,7 +233,7 @@ pub(crate) async fn finalize_removal(
     .bind(actor_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(database)?;
+    .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     authorize_vault_policy(
         row.2,
         row.3.as_deref(),
@@ -246,7 +244,9 @@ pub(crate) async fn finalize_removal(
     {
         Ok(rotation) => rotation,
         Err(FinalizeError::Stale(reason)) => {
-            tx.rollback().await.map_err(database)?;
+            tx.rollback()
+                .await
+                .map_err(|error| database_error(error, "Vault membership operation failed"))?;
             vault_key_rotation::record_stale(pool, plan_id, reason).await?;
             return Err(finalize_error(FinalizeError::Stale(reason)));
         }
@@ -254,14 +254,13 @@ pub(crate) async fn finalize_removal(
     };
     query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ('audit_' || md5(random()::text || clock_timestamp()::text),$1,'vault_member_removed','vault',$2,$3)")
         .bind(actor_id).bind(vault_id).bind(json!({"removedUserId": target_id, "keyRotationId": rotation.rotation_id}).to_string())
-        .execute(&mut *tx).await.map_err(database)?;
-    tx.commit().await.map_err(database)?;
+        .execute(&mut *tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     Ok(VaultMemberRemovalResult { rotation })
 }
 
-fn database(error: sqlx::Error) -> AppError {
-    crate::services::transaction::database_error(error, "Vault membership operation failed")
-}
 fn finalize_error(error: FinalizeError) -> AppError {
     match error {
         FinalizeError::Stale(reason) => AppError::rotation_stale(reason),

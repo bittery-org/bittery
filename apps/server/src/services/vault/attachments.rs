@@ -18,7 +18,10 @@ use crate::{
     error::AppError,
     integrations::storage,
     repo::common::generate_resource_id,
-    services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+    services::{
+        team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+        transaction::database_error,
+    },
 };
 
 const ATTACHMENT_ENVELOPE_VERSION: i32 = 1;
@@ -85,25 +88,22 @@ pub(crate) async fn create_vault_attachment_upload(
     let now = OffsetDateTime::now_utc();
     let expires_at = pending_attachment_upload_expiry(now);
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start attachment upload transaction");
-        AppError::internal("Failed to start attachment upload transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start attachment upload transaction"))?;
     query("SELECT pg_advisory_xact_lock(hashtext($1))")
         .bind(attachment_quota_lock_key(&actor.team_id))
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to lock attachment quota");
-            AppError::internal("Failed to lock attachment quota")
-        })?;
+        .map_err(|error| database_error(error, "Failed to lock attachment quota"))?;
     let committed_usage = query_scalar::<_, i64>(
 		"SELECT COALESCE(SUM(ia.storage_size), 0)::bigint FROM item_attachment ia INNER JOIN \"user\" u ON ia.uploaded_by = u.id WHERE u.team_id = $1",
 	)
 	.bind(&actor.team_id)
 	.fetch_one(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment usage"); AppError::internal("Failed to load attachment usage") })?;
+	.map_err(|error| database_error(error, "Failed to load attachment usage"))?;
     let pending_usage = query_scalar::<_, i64>(
 		"SELECT COALESCE(SUM(storage_size), 0)::bigint FROM pending_attachment_upload WHERE team_id = $1 AND consumed_at IS NULL AND expires_at > $2",
 	)
@@ -111,7 +111,7 @@ pub(crate) async fn create_vault_attachment_upload(
 	.bind(now)
 	.fetch_one(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load pending attachment usage"); AppError::internal("Failed to load pending attachment usage") })?;
+	.map_err(|error| database_error(error, "Failed to load pending attachment usage"))?;
     let current_usage = committed_usage + pending_usage;
     if let Some(quota_bytes) = actor.attachment_storage_bytes {
         if current_usage + i64::from(storage_size) > quota_bytes {
@@ -138,11 +138,11 @@ pub(crate) async fn create_vault_attachment_upload(
 	.bind(now)
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to reserve attachment upload"); AppError::internal("Failed to reserve attachment upload") })?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit attachment upload reservation");
-        AppError::internal("Failed to commit attachment upload reservation")
-    })?;
+	.map_err(|error| database_error(error, "Failed to reserve attachment upload"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit attachment upload reservation"))?;
 
     let upload = object_storage
         .presign_upload(
@@ -225,10 +225,10 @@ pub(crate) async fn create_vault_attachment(
             "Uploaded attachment does not match the reserved encrypted size.",
         ));
     }
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start attachment create transaction");
-        AppError::internal("Failed to start attachment create transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start attachment create transaction"))?;
     query(
 		"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 	)
@@ -251,16 +251,13 @@ pub(crate) async fn create_vault_attachment(
 	.bind(OffsetDateTime::now_utc())
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create attachment"); AppError::internal("Failed to create attachment") })?;
+	.map_err(|error| database_error(error, "Failed to create attachment"))?;
     query("UPDATE pending_attachment_upload SET consumed_at = $1 WHERE id = $2")
         .bind(OffsetDateTime::now_utc())
         .bind(&reservation.id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to consume attachment reservation");
-            AppError::internal("Failed to consume attachment reservation")
-        })?;
+        .map_err(|error| database_error(error, "Failed to consume attachment reservation"))?;
     insert_item_sync_event(
         &mut *transaction,
         SyncEventType::ItemUpdated,
@@ -271,10 +268,10 @@ pub(crate) async fn create_vault_attachment(
         scoped_item.version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit attachment create");
-        AppError::internal("Failed to commit attachment create")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit attachment create"))?;
 
     Ok(CreateAttachmentResponse {
         attachment_id: input.attachment_id,
@@ -302,10 +299,7 @@ pub(crate) async fn list_vault_attachments_page(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item attachment page");
-        AppError::internal("Failed to load item attachments")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load item attachment page"))?;
     Ok(attachment_rows.into_iter().map(map_attachment).collect())
 }
 
@@ -344,10 +338,10 @@ pub(crate) async fn update_vault_attachment(
     let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     assert_item_write_access(attachment.role, "Access denied")?;
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start attachment update transaction");
-        AppError::internal("Failed to start attachment update transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start attachment update transaction"))?;
     query(
 		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3 WHERE id = $4",
 	)
@@ -357,7 +351,7 @@ pub(crate) async fn update_vault_attachment(
 	.bind(&input.attachment_id)
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to update attachment"); AppError::internal("Failed to update attachment") })?;
+	.map_err(|error| database_error(error, "Failed to update attachment"))?;
     insert_item_sync_event(
         &mut *transaction,
         SyncEventType::ItemUpdated,
@@ -368,10 +362,10 @@ pub(crate) async fn update_vault_attachment(
         load_item_row(pool, &attachment.item_id).await?.version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit attachment update");
-        AppError::internal("Failed to commit attachment update")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit attachment update"))?;
     Ok(SuccessResponse { success: true })
 }
 
@@ -402,18 +396,15 @@ pub(crate) async fn delete_vault_attachment(
             AppError::internal("An internal error occurred")
         })?;
     let item_version = load_item_row(pool, &attachment.item_id).await?.version;
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start attachment delete transaction");
-        AppError::internal("Failed to start attachment delete transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start attachment delete transaction"))?;
     query("DELETE FROM item_attachment WHERE id = $1")
         .bind(&input.attachment_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete attachment");
-            AppError::internal("Failed to delete attachment")
-        })?;
+        .map_err(|error| database_error(error, "Failed to delete attachment"))?;
     insert_item_sync_event(
         &mut *transaction,
         SyncEventType::ItemUpdated,
@@ -424,10 +415,10 @@ pub(crate) async fn delete_vault_attachment(
         item_version,
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit attachment delete");
-        AppError::internal("Failed to commit attachment delete")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit attachment delete"))?;
     Ok(SuccessResponse { success: true })
 }
 
@@ -448,7 +439,7 @@ pub(super) async fn load_item_attachments(
 	.bind(&item_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load item attachments"); AppError::internal("Failed to load item attachments") })?;
+	.map_err(|error| database_error(error, "Failed to load item attachments"))?;
 
     let mut grouped = HashMap::<String, Vec<VaultAttachmentResponse>>::new();
     for attachment in attachment_rows {
@@ -544,7 +535,7 @@ async fn load_pending_attachment_reservation(
 	.bind(OffsetDateTime::now_utc())
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment reservation"); AppError::internal("Failed to load attachment reservation") })
+	.map_err(|error| database_error(error, "Failed to load attachment reservation"))
 }
 
 async fn load_attachment_access(
@@ -559,6 +550,6 @@ async fn load_attachment_access(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment"); AppError::internal("Failed to load attachment") })?
+	.map_err(|error| database_error(error, "Failed to load attachment"))?
 	.ok_or_else(|| AppError::not_found("Attachment not found"))
 }

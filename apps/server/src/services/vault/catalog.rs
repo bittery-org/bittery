@@ -24,7 +24,7 @@ use crate::{
             resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
             VaultSharingEntitlement,
         },
-        transaction::acquire_advisory_lock,
+        transaction::{acquire_advisory_lock, database_error},
         vault_key::validate_encrypted_vault_key,
     },
 };
@@ -90,10 +90,7 @@ pub(crate) async fn list_vaults_page(
         .bind(cursor_id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to resolve vault page cursor");
-            AppError::internal("Failed to load vaults")
-        })?
+        .map_err(|error| database_error(error, "Failed to resolve vault page cursor"))?
         .ok_or_else(|| AppError::bad_request("Invalid cursor"))?;
         Some(created_at)
     } else {
@@ -125,10 +122,7 @@ pub(crate) async fn list_vaults_page(
     .bind(VAULT_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load vaults");
-        AppError::internal("Failed to load vaults")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load vaults"))?;
 
     let (vault_ids, has_more) = bounded_page_ids(
         weights,
@@ -148,7 +142,7 @@ pub(crate) async fn list_vaults_page(
     .bind(&vault_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| { tracing::error!(error = %e, "Failed to materialize bounded vault page"); AppError::internal("Failed to load vaults") })?;
+    .map_err(|error| database_error(error, "Failed to materialize bounded vault page"))?;
     let values = vault_rows
         .into_iter()
         .map(|vault| VaultListEntryResponse {
@@ -182,7 +176,7 @@ pub(crate) async fn get_vault(
 	.bind(&input.vault_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault"); AppError::internal("Failed to load vault") })?
+	.map_err(|error| database_error(error, "Failed to load vault"))?
 	else {
 		return Err(AppError::not_found("Vault not found or access denied"));
 	};
@@ -220,7 +214,7 @@ pub(crate) async fn create_vault_image_upload(
 		.bind(user_id)
 		.fetch_optional(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault role"); AppError::internal("Failed to load vault role") })?;
+		.map_err(|error| database_error(error, "Failed to load vault role"))?;
         let Some(role) = role else {
             return Err(AppError::forbidden("Access denied"));
         };
@@ -292,10 +286,10 @@ pub(crate) async fn create_vault(
         shared_vault_limit = entitlement.shared_vault_limit;
     }
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start vault transaction");
-        AppError::internal("Failed to start vault transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
     if input.vault_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (team_id.as_deref(), shared_vault_limit) {
             assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
@@ -324,10 +318,10 @@ pub(crate) async fn create_vault(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit vault transaction");
-        AppError::internal("Failed to commit vault transaction")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit vault transaction"))?;
 
     insert_vault_created_audit_log(pool, &vault_id, user_id).await?;
 
@@ -353,7 +347,7 @@ pub(crate) async fn update_vault(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault"); AppError::internal("Failed to load vault") })?
+	.map_err(|error| database_error(error, "Failed to load vault"))?
 	else {
 		return Err(AppError::forbidden("Access denied"));
 	};
@@ -374,10 +368,10 @@ pub(crate) async fn update_vault(
         .clone()
         .unwrap_or(current_vault.image_key.clone());
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start vault transaction");
-        AppError::internal("Failed to start vault transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
     query("UPDATE vault SET name = $1, icon = $2, image_key = $3, updated_at = $4 WHERE id = $5")
         .bind(&updated_name)
         .bind(updated_icon.as_deref())
@@ -386,10 +380,7 @@ pub(crate) async fn update_vault(
         .bind(&input.vault_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update vault");
-            AppError::internal("Failed to update vault")
-        })?;
+        .map_err(|error| database_error(error, "Failed to update vault"))?;
     insert_vault_updated_sync_event(
         &mut transaction,
         &input.vault_id,
@@ -397,10 +388,10 @@ pub(crate) async fn update_vault(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit vault update");
-        AppError::internal("Failed to commit vault update")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit vault update"))?;
 
     insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(old_image_key) = old_image_key {
@@ -435,7 +426,7 @@ pub(crate) async fn convert_vault_type(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault ownership"); AppError::internal("Failed to load vault ownership") })?
+	.map_err(|error| database_error(error, "Failed to load vault ownership"))?
 	else {
 		return Err(AppError::forbidden("Only the vault owner can convert vault type"));
 	};
@@ -484,10 +475,10 @@ pub(crate) async fn convert_vault_type(
         shared_vault_limit = entitlement.shared_vault_limit;
     }
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start vault conversion transaction");
-        AppError::internal("Failed to start vault conversion transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start vault conversion transaction"))?;
     if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (target_team_id.as_deref(), shared_vault_limit) {
             assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
@@ -498,7 +489,7 @@ pub(crate) async fn convert_vault_type(
 			.bind(&input.vault_id)
 			.execute(&mut *transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to convert vault to team"); AppError::internal("Failed to convert vault to team") })?;
+			.map_err(|error| database_error(error, "Failed to convert vault to team"))?;
     } else if previous_type == VaultType::Team && input.target_type == VaultType::Personal {
         let member_rows = query_as::<_, DbVaultRoleRow>(
 			"SELECT vault_id, role::text AS role FROM vault_key WHERE vault_id = $1 ORDER BY created_at ASC",
@@ -506,16 +497,13 @@ pub(crate) async fn convert_vault_type(
 		.bind(&input.vault_id)
 		.fetch_all(&mut *transaction)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault members"); AppError::internal("Failed to load vault members") })?;
+		.map_err(|error| database_error(error, "Failed to load vault members"))?;
         let member_count: i64 =
             query_scalar("SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1")
                 .bind(&input.vault_id)
                 .fetch_one(&mut *transaction)
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to count vault members");
-                    AppError::internal("Failed to count vault members")
-                })?;
+                .map_err(|error| database_error(error, "Failed to count vault members"))?;
         if member_count != 1 || member_rows.first().map(|row| row.role) != Some(VaultRole::Owner) {
             return Err(AppError::bad_request(
                 "Team vault can only be converted to personal when the owner is the only member",
@@ -526,7 +514,7 @@ pub(crate) async fn convert_vault_type(
 			.bind(&input.vault_id)
 			.execute(&mut *transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to convert vault to personal"); AppError::internal("Failed to convert vault to personal") })?;
+			.map_err(|error| database_error(error, "Failed to convert vault to personal"))?;
         if let Some(personal_key) = input.personal_encrypted_vault_key.as_deref() {
             query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
 				.bind(personal_key)
@@ -534,7 +522,7 @@ pub(crate) async fn convert_vault_type(
 				.bind(user_id)
 				.execute(&mut *transaction)
 				.await
-				.map_err(|e| { tracing::error!(error = %e, "Failed to update personal vault key"); AppError::internal("Failed to update personal vault key") })?;
+				.map_err(|error| database_error(error, "Failed to update personal vault key"))?;
         }
     }
     insert_vault_updated_sync_event(
@@ -544,10 +532,10 @@ pub(crate) async fn convert_vault_type(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit vault conversion");
-        AppError::internal("Failed to commit vault conversion")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit vault conversion"))?;
 
     insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
 
@@ -573,7 +561,7 @@ pub(crate) async fn delete_vault(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault"); AppError::internal("Failed to load vault") })?
+	.map_err(|error| database_error(error, "Failed to load vault"))?
 	else {
 		return Err(AppError::forbidden("Only the vault owner can delete the vault"));
 	};
@@ -589,15 +577,12 @@ pub(crate) async fn delete_vault(
     .bind(&input.vault_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load vault members");
-        AppError::internal("Failed to load vault members")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load vault members"))?;
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start vault delete transaction");
-        AppError::internal("Failed to start vault delete transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start vault delete transaction"))?;
     insert_vault_deleted_sync_event(
         &mut transaction,
         &input.vault_id,
@@ -621,38 +606,26 @@ pub(crate) async fn delete_vault(
         .bind(&input.vault_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete vault attachments");
-            AppError::internal("Failed to delete vault attachments")
-        })?;
+        .map_err(|error| database_error(error, "Failed to delete vault attachments"))?;
     query("DELETE FROM item WHERE vault_id = $1")
         .bind(&input.vault_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete vault items");
-            AppError::internal("Failed to delete vault items")
-        })?;
+        .map_err(|error| database_error(error, "Failed to delete vault items"))?;
     query("DELETE FROM vault_key WHERE vault_id = $1")
         .bind(&input.vault_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete vault memberships");
-            AppError::internal("Failed to delete vault memberships")
-        })?;
+        .map_err(|error| database_error(error, "Failed to delete vault memberships"))?;
     query("DELETE FROM vault WHERE id = $1")
         .bind(&input.vault_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete vault");
-            AppError::internal("Failed to delete vault")
-        })?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit vault deletion");
-        AppError::internal("Failed to commit vault deletion")
-    })?;
+        .map_err(|error| database_error(error, "Failed to delete vault"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit vault deletion"))?;
 
     insert_vault_deleted_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(image_key) = vault.image_key {
@@ -672,24 +645,21 @@ pub(crate) async fn get_vault_stats(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user team info"); AppError::internal("Failed to load user team info") })?
+	.map_err(|error| database_error(error, "Failed to load user team info"))?
 	.unwrap_or(0) as i32;
     let vault_count =
         query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_key WHERE user_id = $1")
             .bind(user_id)
             .fetch_one(pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to count user vaults");
-                AppError::internal("Failed to count user vaults")
-            })?;
+            .map_err(|error| database_error(error, "Failed to count user vaults"))?;
     let item_count = query_scalar::<_, i64>(
 		"SELECT COUNT(*)::bigint FROM item i INNER JOIN vault_key vk ON vk.vault_id = i.vault_id WHERE vk.user_id = $1 AND i.deleted_at IS NULL",
 	)
 	.bind(user_id)
 	.fetch_one(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to count vault items"); AppError::internal("Failed to count vault items") })?;
+	.map_err(|error| database_error(error, "Failed to count vault items"))?;
 
     Ok(VaultStatsResponse {
         team_count,
@@ -721,6 +691,7 @@ mod member_handlers {
         repo::common::generate_resource_id,
         services::{
             team_billing::load_team_billing_entitlement,
+            transaction::database_error,
             vault_key::validate_encrypted_vault_key,
             vault_membership::{assert_role_change_not_self, authorize_role_change},
         },
@@ -759,7 +730,7 @@ mod member_handlers {
 		.bind(&input.vault_id)
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault members"); AppError::internal("Failed to load vault members") })?;
+		.map_err(|error| database_error(error, "Failed to load vault members"))?;
         Ok(members
             .into_iter()
             .map(|member| VaultMemberResponse {
@@ -783,16 +754,13 @@ mod member_handlers {
 		.bind(actor.team_id.as_deref())
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load team members"); AppError::internal("Failed to load team members") })?;
+		.map_err(|error| database_error(error, "Failed to load team members"))?;
         let existing_member_ids =
             query_scalar::<_, String>("SELECT user_id FROM vault_key WHERE vault_id = $1")
                 .bind(&input.vault_id)
                 .fetch_all(pool)
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to load vault members");
-                    AppError::internal("Failed to load vault members")
-                })?;
+                .map_err(|error| database_error(error, "Failed to load vault members"))?;
         let existing_member_ids: std::collections::HashSet<String> =
             existing_member_ids.into_iter().collect();
         Ok(team_members
@@ -831,10 +799,7 @@ mod member_handlers {
             .bind(&input.user_id)
             .execute(pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update vault member role");
-                AppError::internal("Failed to update vault member role")
-            })?;
+            .map_err(|error| database_error(error, "Failed to update vault member role"))?;
         Ok(SuccessResponse { success: true })
     }
 
@@ -853,10 +818,7 @@ mod member_handlers {
         .bind(&input.user_id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load target user");
-            AppError::internal("Failed to load target user")
-        })?
+        .map_err(|error| database_error(error, "Failed to load target user"))?
         .ok_or_else(|| AppError::not_found("User not found"))?;
         if target_user.team_id.as_deref() != actor.team_id.as_deref() {
             return Err(AppError::bad_request(
@@ -870,16 +832,12 @@ mod member_handlers {
         .bind(&input.user_id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load existing vault member");
-            AppError::internal("Failed to load existing vault member")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load existing vault member"))?;
         if existing_member.is_some() {
             return Err(AppError::conflict("User is already a member of this vault"));
         }
-        let mut transaction = pool.begin().await.map_err(|e| {
-            tracing::error!(error = %e, "Failed to start vault member add transaction");
-            AppError::internal("Failed to start vault member add transaction")
+        let mut transaction = pool.begin().await.map_err(|error| {
+            database_error(error, "Failed to start vault member add transaction")
         })?;
         query(
 			"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role, created_at) VALUES ($1, $2, $3, $4, $5::vault_role, $6)",
@@ -892,7 +850,7 @@ mod member_handlers {
 		.bind(OffsetDateTime::now_utc())
 		.execute(&mut *transaction)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to add vault member"); AppError::internal("Failed to add vault member") })?;
+		.map_err(|error| database_error(error, "Failed to add vault member"))?;
         insert_vault_member_sync_event(
             &mut transaction,
             SyncEventType::VaultMemberAdded,
@@ -903,10 +861,10 @@ mod member_handlers {
             json!({ "addedUserId": input.user_id, "role": role }),
         )
         .await?;
-        transaction.commit().await.map_err(|e| {
-            tracing::error!(error = %e, "Failed to commit vault member add");
-            AppError::internal("Failed to commit vault member add")
-        })?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Failed to commit vault member add"))?;
         insert_vault_audit_log_with_metadata(
             pool,
             "vault_member_added",
@@ -935,7 +893,7 @@ mod member_handlers {
 		.bind(user_id)
 		.fetch_optional(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault access"); AppError::internal("Failed to load vault access") })?
+		.map_err(|error| database_error(error, "Failed to load vault access"))?
 		.ok_or_else(|| AppError::forbidden("Access denied to this vault"))?;
         let billing =
             load_team_billing_entitlement(pool, user_id, "Failed to load billing entitlements")
@@ -1142,7 +1100,7 @@ async fn insert_vault(
 	.bind(OffsetDateTime::now_utc())
 	.execute(&mut **transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault"); AppError::internal("Failed to create vault") })?;
+	.map_err(|error| database_error(error, "Failed to create vault"))?;
     Ok(())
 }
 
@@ -1155,7 +1113,7 @@ async fn insert_vault_key(
     validate_encrypted_vault_key(encrypted_vault_key)?;
     query("INSERT INTO vault_key (id,vault_id,user_id,encrypted_vault_key,role,created_at) VALUES ($1,$2,$3,$4,'owner',$5)")
         .bind(generate_resource_id("vault_key")).bind(vault_id).bind(user_id).bind(encrypted_vault_key).bind(OffsetDateTime::now_utc())
-        .execute(&mut **transaction).await.map_err(|e| { tracing::error!(error=%e,"Failed to create vault key"); AppError::internal("Failed to create vault key") })?;
+        .execute(&mut **transaction).await.map_err(|error| database_error(error, "Failed to create vault key"))?;
     Ok(())
 }
 
@@ -1348,10 +1306,7 @@ async fn assert_shared_vault_quota(
             .bind(team_id)
             .fetch_one(&mut **transaction)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to count shared vaults");
-                AppError::internal("Failed to count shared vaults")
-            })?;
+            .map_err(|error| database_error(error, "Failed to count shared vaults"))?;
     if existing_count >= limit {
         return Err(AppError::forbidden(format!(
             "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
