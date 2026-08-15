@@ -16,6 +16,7 @@ pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
 mod access;
 mod attachments;
 mod catalog;
+mod favicon;
 pub(crate) mod http;
 mod items;
 pub(crate) mod key;
@@ -33,6 +34,7 @@ pub(crate) use catalog::{
     convert_vault_type, create_vault, create_vault_image_upload, delete_vault, get_vault,
     get_vault_stats, list_vaults_page, update_vault,
 };
+pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
     bulk_import_vault_items, create_vault_item, delete_vault_item, get_vault_item,
     list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,

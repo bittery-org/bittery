@@ -115,3 +115,5 @@ impl std::fmt::Display for AppError {
         write!(f, "{:?}: {}", self.code, self.message)
     }
 }
+
+impl std::error::Error for AppError {}

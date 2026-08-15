@@ -19,9 +19,8 @@ use crate::{
     domains::billing::{
         is_stripe_webhook_configured, process_stripe_webhook_event, StripeWebhookError,
     },
-    integrations::favicon::{
-        fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain,
-    },
+    domains::vaults::{fetch_and_store_favicon, get_fetched_favicon},
+    integrations::favicon::normalize_favicon_domain,
     AppState,
 };
 
@@ -149,8 +148,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
                 .into_response();
         }
         Ok(None) => {}
-        Err(error) => {
-            warn!(?error, domain, "failed to read favicon from database");
+        Err(_) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read favicon");
         }
     }
@@ -164,8 +162,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
             )
                 .into_response();
         }
-        Err(error) => {
-            warn!(?error, domain, "failed to fetch favicon");
+        Err(_) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch favicon");
         }
     }
@@ -182,13 +179,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
             cache_control_header(FAVICON_CACHE_CONTROL),
         )
             .into_response(),
-        Err(error) => {
-            warn!(
-                ?error,
-                domain, "failed to reload fetched favicon from database"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

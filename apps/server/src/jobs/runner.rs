@@ -14,11 +14,11 @@ use super::sql::{
     cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
     prune_rate_limit_state, prune_sync_events,
 };
-use crate::domains::vaults::rotation::plans::{cleanup_rotation_plans, MAX_CLEANUP_BATCH};
-use crate::integrations::{
-    favicon::{fetch_and_store_favicon, list_domains_to_refresh, RemoteDocumentFetcher},
-    storage::ObjectStorage,
+use crate::domains::vaults::{
+    fetch_and_store_favicon, list_domains_to_refresh,
+    rotation::plans::{cleanup_rotation_plans, MAX_CLEANUP_BATCH},
 };
+use crate::integrations::{favicon::RemoteDocumentFetcher, storage::ObjectStorage};
 
 type JobError = Box<dyn std::error::Error + Send + Sync>;
 type JobFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;
