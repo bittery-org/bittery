@@ -9,7 +9,7 @@ use super::{
         assert_item_read_access, assert_item_write_access, insert_item_sync_event, load_item_row,
         load_vault_access,
     },
-    attachments::{attachments_enabled_for_user, load_item_attachments},
+    attachments::load_item_attachments,
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
 use super::{
@@ -26,6 +26,7 @@ use crate::{
     error::AppError,
     integrations::storage,
     repo::common::{generate_resource_id, insert_audit_event, insert_sync_event},
+    services::team_billing::attachments_enabled_for_user,
 };
 
 pub(crate) async fn list_vault_items_page(

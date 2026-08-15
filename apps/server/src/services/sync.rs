@@ -6,7 +6,6 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use crate::{
-    config::bittery_mode,
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -14,10 +13,7 @@ use crate::{
         fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
         fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
-    services::{
-        team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
-        validate_resource_id,
-    },
+    services::{team_billing::attachments_enabled_for_user, validate_resource_id},
     shapes::{
         attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
         sync_changes_shape, sync_cursor_shape, sync_event_shape,
@@ -338,26 +334,6 @@ pub(crate) fn sse_heartbeat_event() -> Result<Event, AppError> {
         "heartbeat {}",
         timestamp_millis(OffsetDateTime::now_utc())
     )))
-}
-
-async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
-    let mode = bittery_mode();
-    if mode == "self-hosted" {
-        return Ok(true);
-    }
-
-    let actor =
-        load_team_billing_entitlement(pool, user_id, "Failed to load attachment entitlements")
-            .await?;
-
-    let Some(actor) = actor else {
-        return Ok(false);
-    };
-    let Some(_team_id) = actor.team_id else {
-        return Ok(false);
-    };
-
-    Ok(resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status).enabled)
 }
 
 async fn load_bootstrap_attachments(

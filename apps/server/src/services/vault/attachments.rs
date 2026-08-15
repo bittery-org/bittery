@@ -460,28 +460,6 @@ pub(super) async fn load_item_attachments(
     Ok(grouped)
 }
 
-pub(super) async fn attachments_enabled_for_user(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<bool, AppError> {
-    let mode = bittery_mode();
-    if mode == "self-hosted" {
-        return Ok(true);
-    }
-
-    let actor =
-        load_team_billing_entitlement(pool, user_id, "Failed to load attachment entitlements")
-            .await?;
-
-    let Some(actor) = actor else {
-        return Ok(false);
-    };
-    let Some(_team_id) = actor.team_id else {
-        return Ok(false);
-    };
-    Ok(resolve_attachment_entitlement(mode, actor.billing_plan, actor.billing_status).enabled)
-}
-
 async fn load_attachment_actor(pool: &PgPool, user_id: &str) -> Result<AttachmentActor, AppError> {
     let actor =
         load_team_billing_entitlement(pool, user_id, "Failed to load attachment entitlements")
