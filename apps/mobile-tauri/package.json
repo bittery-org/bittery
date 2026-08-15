@@ -4,7 +4,8 @@
 	"version": "0.5.2",
 	"type": "module",
 	"scripts": {
-		"check-types": "tsc --noEmit",
+		"check-types": "tsc --noEmit && pnpm run lint:promises",
+		"lint:promises": "biome lint --only=nursery/noMisusedPromises src",
 		"dev:vite": "vite",
 		"dev": "tauri dev",
 		"build": "tsc && vite build",

@@ -30,12 +30,29 @@ pub struct UserIdArgs {
     pub user_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// No `#[derive(Debug)]`. This struct carries the master unlock key, and a derived
+/// `Debug` would print it in full — one `tracing::error!("{args:?}")` away from the MUK
+/// in logcat, where every app on the device could read it before API 16 and where a bug
+/// report attaches it today. The hand-written impl below prints its length instead.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetMasterUnlockKeyArgs {
     pub muk_base64: String,
     pub user_id: Option<String>,
     pub auto_lock_timeout_ms: Option<f64>,
+}
+
+impl std::fmt::Debug for SetMasterUnlockKeyArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetMasterUnlockKeyArgs")
+            .field(
+                "muk_base64",
+                &format_args!("<redacted, {} chars>", self.muk_base64.len()),
+            )
+            .field("user_id", &self.user_id)
+            .field("auto_lock_timeout_ms", &self.auto_lock_timeout_ms)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

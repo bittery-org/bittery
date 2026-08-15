@@ -1,12 +1,15 @@
 package com.bittery.mobile.credentialprovider
 
 import android.app.Activity
+import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.webkit.WebView
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
@@ -141,20 +144,113 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	private val pluginScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
 	/**
-	 * The activity the plugin was constructed with, refreshed when the platform hands
-	 * back a newer one.
+	 * The live host activity, or `null` when there is none on screen.
 	 *
-	 * Tauri's `PluginManager` keeps the *first* activity forever (there is a `TODO` in
-	 * its `onActivityCreate` saying so), and a `BiometricPrompt` attached to a destroyed
-	 * `FragmentActivity` never shows. `onRestart` is the one hook that carries a current
-	 * instance, so it is taken. In practice the app's manifest declares `configChanges`
-	 * broadly enough that `MainActivity` is not recreated on rotation, so this rarely
-	 * fires.
+	 * Tauri's `PluginManager` keeps the *first* activity forever — there is a `TODO` in
+	 * its `onActivityCreate` saying so — and a `BiometricPrompt` attached to a destroyed
+	 * or stopped `FragmentActivity` never shows and never calls back. So the plugin
+	 * tracks the activity itself, the way the Expo module's `appContext.currentActivity`
+	 * did: [activityTracker] is registered on the `Application` in [load] and writes here
+	 * on every resume.
+	 *
+	 * `onRestart` alone could not do this. `Plugin.onRestart` arrives from
+	 * `TauriActivity.onRestart()`, which only a *stopped and restarted* instance
+	 * delivers — never a freshly created one. A recreated `MainActivity` (low memory,
+	 * "Don't keep activities", a font-size change the manifest's `configChanges` does not
+	 * cover) would have left this pointing at the dead instance forever.
+	 *
+	 * `@Volatile` because the tracker runs on the main thread while a `@Command` may read
+	 * it from a coroutine.
 	 */
-	private var boundActivity: Activity = activity
+	@Volatile
+	private var boundActivity: Activity? = activity
 
+	/**
+	 * The activity class the plugin was constructed with — `MainActivity`.
+	 *
+	 * The tracker binds only to instances of it. The credential-provider service starts
+	 * its own activities (`GetCredentialsActivity` and friends) in this same process, and
+	 * they resume like any other; without this filter a system autofill screen would
+	 * become the prompt host.
+	 */
+	private val hostActivityClass: Class<out Activity> = activity.javaClass
+
+	private var trackerRegistered = false
+
+	/**
+	 * Follows the host activity across recreation. `onActivityResumed` is the hook —
+	 * a resumed activity is by definition not destroyed, not finishing, and its
+	 * `FragmentManager` has not saved state, which is exactly the precondition
+	 * `BiometricPrompt` needs.
+	 */
+	private val activityTracker = object : Application.ActivityLifecycleCallbacks {
+		override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+
+		override fun onActivityStarted(activity: Activity) {}
+
+		override fun onActivityResumed(activity: Activity) {
+			if (activity.javaClass != hostActivityClass) {
+				return
+			}
+			val changed = boundActivity !== activity
+			boundActivity = activity
+			Log.d(
+				TAG,
+				"onActivityResumed: rebind host activity ${activity.javaClass.simpleName}" +
+					"@${System.identityHashCode(activity)} (changed=$changed)",
+			)
+		}
+
+		override fun onActivityPaused(activity: Activity) {}
+
+		override fun onActivityStopped(activity: Activity) {}
+
+		override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+
+		override fun onActivityDestroyed(activity: Activity) {
+			if (boundActivity === activity) {
+				boundActivity = null
+				Log.d(TAG, "onActivityDestroyed: cleared the bound host activity")
+			}
+		}
+	}
+
+	/**
+	 * Registers the tracker. `PluginManager` calls this once per plugin, either at
+	 * registration or from `onWebViewCreated`, so [trackerRegistered] guards the double
+	 * call — `registerActivityLifecycleCallbacks` keeps a plain list and would happily
+	 * hold two copies.
+	 *
+	 * Nothing unregisters it. `Plugin` has no teardown hook: the only shutdown callback
+	 * is `onDestroy(activity)`, which fires per *activity* destruction, and unregistering
+	 * there would break the rebind this exists for. The tracker is bound to the
+	 * `Application`, which outlives the plugin, and the plugin lives for the whole
+	 * process — so there is nothing to leak into.
+	 */
+	override fun load(webView: WebView) {
+		super.load(webView)
+		if (trackerRegistered) {
+			return
+		}
+		trackerRegistered = true
+		activity.application.registerActivityLifecycleCallbacks(activityTracker)
+		Log.d(TAG, "load: registered the activity lifecycle tracker")
+	}
+
+	/**
+	 * Kept as a second source of truth. It cannot cover a recreated activity, but a
+	 * restarted one costs nothing to record and does not depend on the tracker.
+	 */
 	override fun onRestart(activity: AppCompatActivity) {
-		boundActivity = activity
+		if (activity.javaClass == hostActivityClass) {
+			boundActivity = activity
+		}
+	}
+
+	override fun onDestroy(activity: AppCompatActivity) {
+		if (boundActivity === activity) {
+			boundActivity = null
+		}
 	}
 
 	/**
@@ -177,6 +273,24 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	 */
 	private val currentActivity: FragmentActivity?
 		get() = boundActivity as? FragmentActivity
+
+	/**
+	 * Whether `activity` can actually host a `BiometricPrompt` right now.
+	 *
+	 * `BiometricPrompt.authenticate` opens with
+	 * `if (mClientFragmentManager.isStateSaved()) { Log.e(…); return }` — it logs and
+	 * returns, and **no callback ever fires**. An `Invoke` that neither resolves nor
+	 * rejects leaves `run_mobile_plugin` blocked in `rx.recv()` and the JS `await`
+	 * pending forever, which the UI cannot recover from. `isStateSaved()` is
+	 * `mStateSaved || mStopped`, so a merely stopped activity is enough.
+	 *
+	 * Checking first turns a silent hang into a `NO_ACTIVITY` rejection the caller can
+	 * see. [activityTracker] should make this unreachable; it is the second layer.
+	 */
+	private fun canHostPrompt(activity: FragmentActivity): Boolean =
+		!activity.isDestroyed &&
+			!activity.isFinishing &&
+			!activity.supportFragmentManager.isStateSaved
 
 	private fun ensureVaultStateManagerInitialized() {
 		try {
@@ -380,6 +494,14 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		}
 
 		activity.runOnUiThread {
+			if (!canHostPrompt(activity)) {
+				Log.e(TAG, "escrowMukWithBiometric: host activity cannot show a prompt")
+				invoke.reject(
+					"No activity able to show the biometric prompt",
+					"NO_ACTIVITY",
+				)
+				return@runOnUiThread
+			}
 			try {
 				val cipher = mukEscrowManager.getEncryptCipher()
 				val executor = ContextCompat.getMainExecutor(context)
@@ -471,6 +593,14 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		}
 
 		activity.runOnUiThread {
+			if (!canHostPrompt(activity)) {
+				Log.e(TAG, "retrieveEscrowedMuk: host activity cannot show a prompt")
+				invoke.reject(
+					"No activity able to show the biometric prompt",
+					"NO_ACTIVITY",
+				)
+				return@runOnUiThread
+			}
 			try {
 				val cipher = mukEscrowManager.getDecryptCipher()
 				val executor = ContextCompat.getMainExecutor(context)
