@@ -114,7 +114,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 request_verification.assert_contract_status();
                 assert_eq!(request_verification.body["success"], json!(true));
 
-                let code = latest_signup_verification_code(email, None);
+                let code = latest_signup_verification_code(&app.pool, email, None).await;
 
                 let wrong_code = app
                     .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), unauthenticated_json_headers())
@@ -629,7 +629,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 request_recovery.assert_contract_status();
                 assert_eq!(request_recovery.body["success"], json!(true));
 
-                let code = latest_recovery_code(&fixture.email);
+                let code = latest_recovery_code(&app.pool, &fixture.email).await;
 
                 let wrong_code = app
                     .api_json(
@@ -1546,17 +1546,43 @@ fn build_valid_token(label: &str) -> String {
 
 /// Verification codes are stored as SHA-256 digests, so the plaintext can only be
 /// obtained where a real user would get it: the outbound email.
-fn latest_signup_verification_code(email: &str, invitation_token: Option<&str>) -> String {
-    emailed_code_capture::latest(&emailed_code_capture::signup_key(
-        &normalize_email(email),
-        invitation_token,
-    ))
-    .expect("signup verification code should have been emailed")
+async fn latest_signup_verification_code(
+    pool: &PgPool,
+    email: &str,
+    invitation_token: Option<&str>,
+) -> String {
+    let normalized_email = normalize_email(email);
+    let verification_id = match invitation_token {
+        Some(invitation_token) => query_scalar::<_, String>(
+            "SELECT id FROM signup_verification WHERE email = $1 AND invitation_token_hash = $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&normalized_email)
+        .bind(hash_token(invitation_token))
+        .fetch_one(pool)
+        .await,
+        None => query_scalar::<_, String>(
+            "SELECT id FROM signup_verification WHERE email = $1 AND invitation_token_hash IS NULL AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&normalized_email)
+        .fetch_one(pool)
+        .await,
+    }
+    .expect("signup verification row should exist in this test database");
+
+    emailed_code_capture::latest(&verification_id)
+        .expect("signup verification code should have been emailed")
 }
 
-fn latest_recovery_code(email: &str) -> String {
-    emailed_code_capture::latest(&emailed_code_capture::recovery_key(&normalize_email(email)))
-        .expect("recovery code should have been emailed")
+async fn latest_recovery_code(pool: &PgPool, email: &str) -> String {
+    let verification_id = query_scalar::<_, String>(
+        "SELECT id FROM recovery_verification WHERE email = $1 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(normalize_email(email))
+    .fetch_one(pool)
+    .await
+    .expect("recovery verification row should exist in this test database");
+
+    emailed_code_capture::latest(&verification_id).expect("recovery code should have been emailed")
 }
 
 async fn issue_signup_verification_token(
@@ -1575,7 +1601,7 @@ async fn issue_signup_verification_token(
     request.assert_contract_status();
     assert_eq!(request.body["success"], json!(true));
 
-    let code = latest_signup_verification_code(email, invitation_token);
+    let code = latest_signup_verification_code(&app.pool, email, invitation_token).await;
     let verified = app
         .api_json(
             Method::POST,
@@ -1795,7 +1821,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                     .api_json(Method::POST, "/api/v1/auth/recovery-verifications", Some(json!({ "email": fixture.email })), unauthenticated_json_headers())
                     .await;
                 request.assert_contract_status();
-                let code = latest_recovery_code(&fixture.email);
+                let code = latest_recovery_code(&app.pool, &fixture.email).await;
 
                 // Two wrong attempts stay below the threshold.
                 for _ in 0..2 {
@@ -1874,7 +1900,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
-            let code = latest_signup_verification_code(email, None);
+            let code = latest_signup_verification_code(&app.pool, email, None).await;
             let stored = query_scalar::<_, String>(
                 "SELECT code_hash FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
             )
@@ -1920,7 +1946,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
-            let code = latest_recovery_code(&fixture.email);
+            let code = latest_recovery_code(&app.pool, &fixture.email).await;
             let stored = query_scalar::<_, String>(
                 "SELECT code_hash FROM recovery_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
             )
@@ -1976,8 +2002,12 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
             assert_eq!(stored, hash_token(&fixture.invitation_token));
 
             // Redeeming with the raw token still resolves the same row.
-            let code =
-                latest_signup_verification_code(&fixture.invited_email, Some(&fixture.invitation_token));
+            let code = latest_signup_verification_code(
+                &app.pool,
+                &fixture.invited_email,
+                Some(&fixture.invitation_token),
+            )
+            .await;
             let verified = app
                 .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({
                         "email": fixture.invited_email,
@@ -2027,7 +2057,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
                 .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(re_request.body["success"], json!(true));
-            let code = latest_signup_verification_code(email, None);
+            let code = latest_signup_verification_code(&app.pool, email, None).await;
 
             // The lifetime counter is unaffected, so the very next wrong guess trips it.
             let tripped = app
@@ -2125,7 +2155,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
                 .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(request.body["success"], json!(true));
-            let code = latest_signup_verification_code(email, None);
+            let code = latest_signup_verification_code(&app.pool, email, None).await;
 
             for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
                 let attempt = app

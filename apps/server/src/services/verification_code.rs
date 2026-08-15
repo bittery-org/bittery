@@ -61,7 +61,7 @@ impl<'a> VerificationCodeService<'a> {
         email: &str,
     ) -> Result<(), AppError> {
         let (verification_id, code) = self.issue(purpose, email).await?;
-        let Err(error) = deliver_code(&purpose, email, &code) else {
+        let Err(error) = deliver_code(&purpose, email, &code, &verification_id) else {
             return Ok(());
         };
         // A code nobody received still counts as an active code, which would burn

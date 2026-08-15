@@ -21,6 +21,7 @@ pub(crate) fn deliver_code(
     purpose: &VerificationPurpose<'_>,
     email: &str,
     code: &str,
+    _delivery_id: &str,
 ) -> Result<(), AppError> {
     if !is_dev_auth_stub_enabled() {
         return Err(AppError::internal(
@@ -29,7 +30,7 @@ pub(crate) fn deliver_code(
     }
 
     #[cfg(test)]
-    emailed_code_capture::record(capture_key(purpose, email), code);
+    emailed_code_capture::record(_delivery_id, code);
 
     log_delivery(purpose, email, code);
     append_to_dev_outbox(purpose, email, code);
@@ -154,21 +155,9 @@ fn purpose_context(purpose: &VerificationPurpose<'_>) -> Value {
     }
 }
 
-#[cfg(test)]
-fn capture_key(purpose: &VerificationPurpose<'_>, email: &str) -> String {
-    match purpose {
-        VerificationPurpose::Signup { invitation_token } => {
-            emailed_code_capture::signup_key(email, *invitation_token)
-        }
-        VerificationPurpose::Recovery => emailed_code_capture::recovery_key(email),
-        VerificationPurpose::ShareEmail { share_link_id } => {
-            emailed_code_capture::share_key(share_link_id, email)
-        }
-    }
-}
-
 /// Codes are persisted as digests, so a test can only act as the recipient by
-/// capturing the plaintext on its way out.
+/// capturing the plaintext on its way out. The production-generated delivery ID
+/// scopes each entry to one verification row, including across parallel test databases.
 #[cfg(test)]
 pub(crate) mod emailed_code_capture {
     use std::{
@@ -181,34 +170,18 @@ pub(crate) mod emailed_code_capture {
         STORE.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
-    pub(crate) fn signup_key(email: &str, invitation_token: Option<&str>) -> String {
-        format!(
-            "signup|{}|{}",
-            email.to_ascii_lowercase(),
-            invitation_token.unwrap_or("")
-        )
-    }
-
-    pub(crate) fn recovery_key(email: &str) -> String {
-        format!("recovery|{}", email.to_ascii_lowercase())
-    }
-
-    pub(crate) fn share_key(share_link_id: &str, email: &str) -> String {
-        format!("share_email|{share_link_id}|{}", email.to_ascii_lowercase())
-    }
-
-    pub(crate) fn record(key: String, code: &str) {
+    pub(crate) fn record(delivery_id: &str, code: &str) {
         store()
             .lock()
             .expect("emailed code capture should not be poisoned")
-            .insert(key, code.to_string());
+            .insert(delivery_id.to_string(), code.to_string());
     }
 
-    pub(crate) fn latest(key: &str) -> Option<String> {
+    pub(crate) fn latest(delivery_id: &str) -> Option<String> {
         store()
             .lock()
             .expect("emailed code capture should not be poisoned")
-            .get(key)
+            .get(delivery_id)
             .cloned()
     }
 }

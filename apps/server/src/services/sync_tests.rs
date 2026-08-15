@@ -165,12 +165,10 @@ async fn sync_pubsub_broadcasts_session_revocation() {
 
     pubsub.notify_session_revoked("user-1", "session-1", "device_revoked");
 
-    // Give the spawned task a moment to send
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-    let notification = control_rx
-        .try_recv()
-        .expect("control notification should be received");
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(1), control_rx.recv())
+        .await
+        .expect("control notification should arrive before the timeout")
+        .expect("control notification channel should remain open");
     match notification {
         SyncNotification::SessionRevoked { session_id, reason } => {
             assert_eq!(session_id, "session-1");

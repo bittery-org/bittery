@@ -59,6 +59,7 @@ fn deliver_code_fails_closed_when_dev_auth_stubs_are_disabled() {
         &VerificationPurpose::Recovery,
         "recipient@test.bittery.com",
         "482913",
+        "delivery_stubs_off",
     )
     .expect_err("delivery should fail without a configured provider");
 
@@ -86,6 +87,7 @@ fn deliver_code_appends_one_json_line_per_purpose() {
         },
         "signup@test.bittery.com",
         "100001",
+        "delivery_signup_invited",
     )
     .expect("signup delivery should succeed");
     deliver_code(
@@ -94,12 +96,14 @@ fn deliver_code_appends_one_json_line_per_purpose() {
         },
         "public-signup@test.bittery.com",
         "100002",
+        "delivery_signup_public",
     )
     .expect("public signup delivery should succeed");
     deliver_code(
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100003",
+        "delivery_recovery",
     )
     .expect("recovery delivery should succeed");
     deliver_code(
@@ -108,6 +112,7 @@ fn deliver_code_appends_one_json_line_per_purpose() {
         },
         "share@test.bittery.com",
         "100004",
+        "delivery_share",
     )
     .expect("share email delivery should succeed");
 
@@ -163,6 +168,7 @@ fn deliver_code_succeeds_when_the_outbox_path_cannot_be_written() {
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100005",
+        "delivery_unwritable",
     )
     .expect("an unwritable outbox must not fail the request");
 }
@@ -187,6 +193,7 @@ fn deliver_code_tightens_an_outbox_that_already_exists_world_readable() {
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100007",
+        "delivery_permissions",
     )
     .expect("recovery delivery should succeed");
 
@@ -216,6 +223,22 @@ fn deliver_code_writes_nothing_when_the_outbox_is_unset() {
         &VerificationPurpose::Recovery,
         "recovery@test.bittery.com",
         "100006",
+        "delivery_no_outbox",
     )
     .expect("delivery should succeed without an outbox");
+}
+
+#[test]
+fn emailed_code_capture_is_scoped_to_the_verification_delivery() {
+    emailed_code_capture::record("verification_in_database_a", "100001");
+    emailed_code_capture::record("verification_in_database_b", "200002");
+
+    assert_eq!(
+        emailed_code_capture::latest("verification_in_database_a").as_deref(),
+        Some("100001")
+    );
+    assert_eq!(
+        emailed_code_capture::latest("verification_in_database_b").as_deref(),
+        Some("200002")
+    );
 }

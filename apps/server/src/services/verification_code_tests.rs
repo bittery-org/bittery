@@ -1,7 +1,9 @@
 use sqlx::{query, query_scalar};
+use std::sync::Arc;
 use time::OffsetDateTime;
 
 use super::*;
+use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     acquire_env_lock_async, seed_item, seed_user, seed_vault, with_api_test_app, EnvVarGuard,
 };
@@ -144,6 +146,53 @@ async fn a_code_that_could_not_be_delivered_is_not_left_active() {
         }
     })
     .await;
+}
+
+#[tokio::test]
+async fn emailed_codes_for_the_same_recipient_are_isolated_by_test_database() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+        ("NODE_ENV", "development"),
+        ("BITTERY_DEV_MAIL_OUTBOX", ""),
+    ]);
+    let issued = Arc::new(tokio::sync::Barrier::new(2));
+
+    let verify_in_database = |test_name: &'static str, issued: Arc<tokio::sync::Barrier>| async move {
+        with_api_test_app(test_name, |app| async move {
+            let codes = VerificationCodeService::new(&app.pool);
+            codes
+                .issue_and_deliver(VerificationPurpose::Recovery, EMAIL)
+                .await
+                .expect("recovery code should be delivered");
+            let verification_id = query_scalar::<_, String>(
+                "SELECT id FROM recovery_verification WHERE email = $1 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(EMAIL)
+            .fetch_one(&app.pool)
+            .await
+            .expect("this test database should contain its verification row");
+
+            // Force both deliveries to exist before either test reads its plaintext code.
+            // An email-keyed global map deterministically returned the same last write here.
+            issued.wait().await;
+            let code = emailed_code_capture::latest(&verification_id)
+                .expect("this verification delivery should retain its own code");
+            assert!(matches!(
+                codes
+                    .verify(VerificationPurpose::Recovery, EMAIL, &code)
+                    .await
+                    .expect("verification should resolve"),
+                VerificationCodeOutcome::Valid { .. }
+            ));
+        })
+        .await;
+    };
+
+    tokio::join!(
+        verify_in_database("verification_capture_database_a", issued.clone()),
+        verify_in_database("verification_capture_database_b", issued),
+    );
 }
 
 async fn assert_exhausts_after_five_wrong_attempts(

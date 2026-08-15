@@ -926,11 +926,16 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
             requested.assert_contract_status();
             assert_eq!(requested.body["success"], json!(true));
 
-            let code = emailed_code_capture::latest(&emailed_code_capture::share_key(
-                &fixture.email_link_id,
-                &fixture.request_email,
-            ))
-            .expect("share email verification code should have been emailed");
+            let verification_id = query_scalar::<_, String>(
+                "SELECT id FROM share_email_verification WHERE share_link_id = $1 AND email = $2 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(&fixture.email_link_id)
+            .bind(&fixture.request_email)
+            .fetch_one(&app.pool)
+            .await
+            .expect("share email verification row should exist in this test database");
+            let code = emailed_code_capture::latest(&verification_id)
+                .expect("share email verification code should have been emailed");
 
             let accessed = app
                 .api_json(
