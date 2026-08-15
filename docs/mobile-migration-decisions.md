@@ -76,28 +76,78 @@ components, different route composition.
 
 ---
 
-## D4 — Secure storage: `@choochmeque/tauri-plugin-biometry-api` `setData`/`getData`
+## D4 — Secure storage. Superseded by D4a. Kept for the reasoning.
 
-**Choice.** The `secret` tier of `PlatformPort` on mobile is backed by the biometry plugin's
-`setData`/`getData`, not by `impierce/tauri-plugin-keystore`.
+**Original choice.** Back the `secret` tier with the biometry plugin's `setData`/`getData`,
+because that plugin is already a desktop dependency and already an optional peer of
+`@bittery/storage`, so it adds no new supply-chain surface, and on Android it stores through
+the Android Keystore.
 
-**Why.** The biometry plugin is *already a desktop dependency of this repo* and already a
-declared optional peer of `@bittery/storage`. Using it for both biometrics and secret storage
-adds zero new supply-chain surface, where `tauri-plugin-keystore` would add a whole new
-single-maintainer crate. On Android it stores through the Android Keystore /
-`EncryptedSharedPreferences`, which is the hardware-backed answer `PlatformPort.secretBacking`
-has to give.
+**Why it was wrong.** Implementing it (chunk M1-C3) turned up three facts by reading the
+plugin's own Kotlin and Swift, at
+`~/.cargo/registry/src/*/tauri-plugin-biometry-0.2.8/android/src/main/java/BiometryPlugin.kt`
+and `.../ios/Sources/BiometryPlugin.swift`:
 
-**SUPPLY-CHAIN RISK, recorded deliberately.** `@choochmeque/tauri-plugin-biometry-api` is
-community code with a single maintainer, and under this decision it holds `vault_keys` and the
-wrapped master unlock key. That is a genuine security-review question before any release. It is
-not a reason to stop the migration, and it is not worse than the alternative — the alternative
-is a *different* single-maintainer crate with the same exposure and no existing footprint in
-this repo. Desktop's `keyring` crate has no mobile backend, so there is no first-party option.
+1. **`getData` raises a biometric prompt on every read.** Android builds a `BiometricPrompt`
+   with a `CryptoObject`; iOS uses a `.userPresence` access control. `AccountStore` reads
+   secret-tier values on ordinary paths — `jwt_token` is read on **every API request** through
+   `getAccountSnapshot`. That is a fingerprint prompt per HTTP call. Not a rough edge; the app
+   would be unusable.
+2. **`setData` deletes every sibling under the same `domain`** — it calls
+   `keyStore.deleteEntry(args.domain)` and regenerates a 4096-bit RSA key pair on every write.
+   Workable (give each key its own domain) but it means a write is expensive.
+3. **`setData` throws on a device with no secure lock screen**, because key generation sets
+   `setUserAuthenticationRequired(true)`. Such a device could not use the app at all.
 
-**Revisit when.** A security review runs, or Tauri ships an official keychain plugin. The seam
-is `PlatformPort.secretGet/secretSet/secretDelete` in one adapter file — swapping the backing
-store is a one-file change by construction.
+Point 1 alone kills it.
+
+**Why not `impierce/tauri-plugin-keystore` instead.** Checked directly against crates.io: one
+published version, `2.1.0-alpha.1`, dated 2025-02-20, 2 626 downloads all-time, and **no
+companion package on npm** (`tauri-plugin-keystore-api` is a 404). Adopting it means vendoring
+its guest-JS from GitHub and betting M1 on an 18-month-stale alpha. That is worse supply chain
+than the incumbent, not better, and it is a build risk under this run's clock.
+
+---
+
+## D4a — The `secret` tier on mobile is `store.json`, and this is a recorded security downgrade
+
+**Choice.** `secretGet`/`secretSet`/`secretDelete` are backed by `@tauri-apps/plugin-store`, in
+a store file separate from the `kv` one, under its own namespace. `BiometricPort` keeps using
+`@choochmeque/tauri-plugin-biometry-api` for `checkStatus`/`authenticate` — prompting is the
+entire point there, so none of the above applies.
+
+`PlatformPort.secretBacking` must say so plainly, in the shape the web adapter already uses:
+no at-rest separation from the plain tier on this platform.
+
+**THIS IS THE MIGRATION'S NUMBER ONE SECURITY GAP. Read this before any release.**
+
+What it costs, precisely. Android app-private storage is sandboxed from other apps and is
+covered by file-based encryption at rest, so this is not "plaintext on the SD card". But the
+secret tier holds `device_key`, which is raw key material, and it sits beside the master unlock
+key that `device_key` wraps. Anything that can read the app's private directory — root, a
+device-owner backup, a physical extraction — gets quick-unlock material that the Android
+Keystore would have kept in the TEE. **The Expo app used `expo-secure-store`, which is
+Keystore-backed, so this is a regression against the app being replaced.** It is not a
+regression against desktop, which uses the OS keychain and is unaffected.
+
+Full sign-in material is not exposed by this: the master password and Secret Key are never
+persisted, and the stored master unlock key is wrapped. The exposure is quick unlock.
+
+**Why ship it anyway.** There is no third option. Every hardware-backed store reachable from
+Tauri on Android today either prompts on read (D4, unusable) or is an unmaintained alpha with
+no JS binding (rejected above). The migration brief anticipated exactly this and called it "a
+security-review question for later, not a reason to stop now". Shipping M1 behind this gap,
+loudly recorded, beats not shipping M1.
+
+**Revisit — and this one genuinely must be revisited.** The fix is a first-party Tauri command
+in `apps/mobile-tauri/src-tauri` that calls the Android Keystore directly without
+`setUserAuthenticationRequired`, mirroring what `apps/desktop/src-tauri/src/keychain.rs` does
+with the `keyring` crate. That is the right answer and it is maybe half a day of Rust and
+Kotlin. It was not attempted here only because this run has hours, not days.
+
+The seam makes the swap cheap by construction: it is three functions in one adapter file,
+behind the `TauriMobileDeps` loader interface, with a conformance suite that already proves the
+contract. Nothing above `PlatformPort` changes.
 
 ---
 

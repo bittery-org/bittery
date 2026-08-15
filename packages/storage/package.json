@@ -26,6 +26,9 @@
 		"./adapters/tauri": {
 			"default": "./src/adapters/tauri.ts"
 		},
+		"./adapters/tauri-mobile": {
+			"default": "./src/adapters/tauri-mobile.ts"
+		},
 		"./adapters/react-native": {
 			"default": "./src/adapters/react-native.ts"
 		}
@@ -37,12 +40,14 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@tauri-apps/api": "^2.11.1",
+		"@tauri-apps/plugin-sql": "^2.4.0",
 		"@types/chrome": "^0.2.5"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
 		"@tauri-apps/api": "^2.0.0",
 		"@tauri-apps/plugin-store": "^2.0.0",
+		"@tauri-apps/plugin-sql": "^2.0.0",
 		"@choochmeque/tauri-plugin-biometry-api": "^0.2.0",
 		"expo-local-authentication": "^17.0.0",
 		"expo-secure-store": "^15.0.0",
@@ -53,6 +58,9 @@
 			"optional": true
 		},
 		"@tauri-apps/plugin-store": {
+			"optional": true
+		},
+		"@tauri-apps/plugin-sql": {
 			"optional": true
 		},
 		"@choochmeque/tauri-plugin-biometry-api": {

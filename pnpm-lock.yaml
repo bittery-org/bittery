@@ -549,6 +549,100 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  apps/mobile-tauri:
+    dependencies:
+      '@bittery/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
+      '@bittery/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@bittery/crypto-port':
+        specifier: workspace:*
+        version: link:../../packages/crypto/port
+      '@bittery/crypto-wasm':
+        specifier: workspace:*
+        version: link:../../packages/crypto/wasm
+      '@bittery/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      '@bittery/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
+      '@bittery/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@inlang/paraglide-js':
+        specifier: ^2.23.2
+        version: 2.23.2(typescript@5.8.3)(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.3(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      '@tanstack/react-form':
+        specifier: ^1.33.4
+        version: 1.33.5(@tanstack/react-start@1.168.44(crossws@0.4.10(srvx@0.11.22))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))(webpack@5.105.0(esbuild@0.28.1)))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/react-query':
+        specifier: ^5.101.4
+        version: 5.101.4(react@19.2.8)
+      '@tanstack/react-router':
+        specifier: ^1.170.24
+        version: 1.170.27(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tauri-apps/api':
+        specifier: ^2.11.1
+        version: 2.11.1
+      lucide-react:
+        specifier: ^0.525.0
+        version: 0.525.0(react@19.2.8)
+      nanoid:
+        specifier: ^6.0.1
+        version: 6.0.1
+      next-themes:
+        specifier: ^0.4.6
+        version: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@tanstack/router-plugin':
+        specifier: ^1.168.28
+        version: 1.168.30(@tanstack/react-router@1.170.27(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))(webpack@5.105.0(esbuild@0.28.1))
+      '@tauri-apps/cli':
+        specifier: ^2.11.4
+        version: 2.11.4
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.4(@types/react@19.2.18)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.5
+        version: 6.0.5(babel-plugin-react-compiler@1.0.0)(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vite:
+        specifier: ^8.2.1
+        version: 8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
+
   apps/server: {}
 
   apps/web:
@@ -898,6 +992,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
+      '@tauri-apps/plugin-sql':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@types/chrome':
         specifier: ^0.2.5
         version: 0.2.5
@@ -1015,6 +1112,46 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  spikes/tauri-mobile:
+    dependencies:
+      '@bittery/crypto-port':
+        specifier: workspace:*
+        version: link:../../packages/crypto/port
+      '@bittery/crypto-wasm':
+        specifier: workspace:*
+        version: link:../../packages/crypto/wasm
+      '@tauri-apps/api':
+        specifier: ^2.11.1
+        version: 2.11.1
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@tauri-apps/cli':
+        specifier: ^2.11.4
+        version: 2.11.4
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.4(@types/react@19.2.18)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.5
+        version: 6.0.5(babel-plugin-react-compiler@1.0.0)(vite@8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vite:
+        specifier: ^8.2.1
+        version: 8.2.1(@types/node@25.0.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
 packages:
 
@@ -4620,6 +4757,9 @@ packages:
 
   '@tauri-apps/plugin-opener@2.5.4':
     resolution: {integrity: sha512-1HnPkb+AmgO29HBazm4uPLKB+r7zzcTBW1d0fyYp1uP+jwtpoiNDGKMMzz58SFp49nOIrxdE3aUJtT57lfO9CQ==}
+
+  '@tauri-apps/plugin-sql@2.4.0':
+    resolution: {integrity: sha512-SIICc5JlnK6OrBZzOw7MmhXHPlmASpt5zLWIu10WW4kLr5cDYOXHdV2MoCgYQkgZLQfyBYgF3SQa5XCisUiQkw==}
 
   '@tauri-apps/plugin-store@2.4.4':
     resolution: {integrity: sha512-oxSMaj/QpVfJcBMYX5aOQV94fWvga0MwQMfD6TLlbK2dh+ShPWAzefd8HWXhvOKjPRJdGVAkW7ZGO76JzzjaDA==}
@@ -10156,7 +10296,7 @@ snapshots:
       glob: 13.0.0
       hermes-parser: 0.36.1
       jsc-safe-url: 0.2.4
-      lightningcss: 1.32.0
+      lightningcss: 1.33.0
       picomatch: 4.0.5
       postcss: 8.5.26
       resolve-from: 5.0.0
@@ -10189,7 +10329,7 @@ snapshots:
       glob: 13.0.0
       hermes-parser: 0.36.1
       jsc-safe-url: 0.2.4
-      lightningcss: 1.32.0
+      lightningcss: 1.33.0
       picomatch: 4.0.5
       postcss: 8.5.26
       resolve-from: 5.0.0
@@ -13162,6 +13302,10 @@ snapshots:
       '@tauri-apps/cli-win32-x64-msvc': 2.11.4
 
   '@tauri-apps/plugin-opener@2.5.4':
+    dependencies:
+      '@tauri-apps/api': 2.11.1
+
+  '@tauri-apps/plugin-sql@2.4.0':
     dependencies:
       '@tauri-apps/api': 2.11.1
 
