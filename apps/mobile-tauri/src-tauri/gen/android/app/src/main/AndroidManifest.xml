@@ -5,7 +5,15 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!--
+      allowBackup=false is hand-added and must survive: `shared_prefs/bittery_keystore_secrets.xml`
+      holds the secret tier's ciphertext, and a password manager's data does not belong in Google
+      cloud backup. The ciphertext is useless without the Keystore key, which never leaves the
+      device, so a restored copy would only decrypt to nothing and sign the user out silently.
+      `pnpm tauri android init` regenerates this file and drops the attribute — see README.
+    -->
     <application
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.bittery_mobile"

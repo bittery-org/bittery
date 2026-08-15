@@ -76,7 +76,7 @@ components, different route composition.
 
 ---
 
-## D4 — Secure storage. Superseded by D4a. Kept for the reasoning.
+## D4 — Secure storage. Superseded by D4a, then by D4b. Kept for the reasoning.
 
 **Original choice.** Back the `secret` tier with the biometry plugin's `setData`/`getData`,
 because that plugin is already a desktop dependency and already an optional peer of
@@ -111,6 +111,11 @@ than the incumbent, not better, and it is a build risk under this run's clock.
 
 ## D4a — The `secret` tier on mobile is `store.json`, and this is a recorded security downgrade
 
+> **Superseded on Android by D4b.** The gap this entry calls the migration's number one is
+> closed there: `secret*` goes through the Android Keystore. Everything below still describes
+> **iOS**, and any Android build where the Keystore probe declines, because that is still the
+> fallback. Read it as "what the fallback costs", not as the current state on Android.
+
 **Choice.** `secretGet`/`secretSet`/`secretDelete` are backed by `@tauri-apps/plugin-store`, in
 a store file separate from the `kv` one, under its own namespace. `BiometricPort` keeps using
 `@choochmeque/tauri-plugin-biometry-api` for `checkStatus`/`authenticate` — prompting is the
@@ -119,7 +124,8 @@ entire point there, so none of the above applies.
 `PlatformPort.secretBacking` must say so plainly, in the shape the web adapter already uses:
 no at-rest separation from the plain tier on this platform.
 
-**THIS IS THE MIGRATION'S NUMBER ONE SECURITY GAP. Read this before any release.**
+**THIS WAS THE MIGRATION'S NUMBER ONE SECURITY GAP.** Closed on Android by D4b; still open on
+iOS. Read this before any release.
 
 What it costs, precisely. Android app-private storage is sandboxed from other apps and is
 covered by file-based encryption at rest, so this is not "plaintext on the SD card". But the
@@ -143,11 +149,69 @@ loudly recorded, beats not shipping M1.
 in `apps/mobile-tauri/src-tauri` that calls the Android Keystore directly without
 `setUserAuthenticationRequired`, mirroring what `apps/desktop/src-tauri/src/keychain.rs` does
 with the `keyring` crate. That is the right answer and it is maybe half a day of Rust and
-Kotlin. It was not attempted here only because this run has hours, not days.
+Kotlin. **Done — see D4b.**
 
 The seam makes the swap cheap by construction: it is three functions in one adapter file,
 behind the `TauriMobileDeps` loader interface, with a conformance suite that already proves the
-contract. Nothing above `PlatformPort` changes.
+contract. Nothing above `PlatformPort` changed, and that held.
+
+---
+
+## D4b — The `secret` tier on Android is the Android Keystore, through a first-party plugin
+
+**Choice.** `apps/mobile-tauri/src-tauri/plugins/keystore` — `tauri-plugin-bittery-keystore`,
+first-party, Rust plus Kotlin. One AES-256-GCM key in the `AndroidKeyStore` provider under alias
+`bittery_secret_v1`; values are sealed with it and only the ciphertext lands on disk, in
+`shared_prefs/bittery_keystore_secrets.xml` as `v1:<base64 IV>:<base64 ciphertext+tag>`. The
+adapter probes once in `initialize()` with a real encrypt/decrypt round trip, drains any existing
+`secrets.json` entries into the Keystore write-verify-then-delete, and only then adopts it.
+
+This is D4a's recommended fix, carried out. D4a is superseded on Android.
+
+**What it does guarantee.**
+
+- `vault_keys`, the wrapped master unlock key, `device_key`, `encrypted_private_key`,
+  `session_data` and `jwt_token` are no longer readable from the app's private directory alone.
+  Anything that reads the file gets ciphertext; the key is not in the file and cannot be
+  exported from the provider.
+- No prompt on read. `setUserAuthenticationRequired` is deliberately not set and must never be
+  added — `jwt_token` is read on every API request, and a prompt per read is what killed D4's
+  option. Prompting stays in `BiometricPort`, where the user asked for it.
+- A value is deleted only when it is *provably* unreadable forever — a GCM tag mismatch or a
+  corrupt envelope. A transient Keystore failure (`BackendBusyException`, a keystore2 restart)
+  answers `null` and writes nothing, because the retry can succeed and a wrong deletion here
+  costs a full sign-in with master password *and* Secret Key.
+
+**What it does not guarantee.**
+
+- **Not hardware backing.** `AndroidKeyStore` is TEE-backed only where the device provides a
+  TEE. `secret_available` reports the level `KeyInfo` actually observed, and
+  `PlatformPort.secretBacking` passes that string through verbatim — including
+  `NOT hardware-backed (software, KeyInfo.securityLevel)`, which is what the Pixel_9 emulator
+  this was built on reports. No code here claims hardware; it reports what it was told.
+- **Not StrongBox.** `setIsStrongBoxBacked(true)` throws `StrongBoxUnavailableException` at key
+  generation on devices with no secure element, which would lock those users out of their own
+  vault. Not requested.
+- **Not protection against a compromised running app.** The key is usable without a prompt by
+  anything running as this app's UID. The threat this closes is offline access to the private
+  directory, not code execution inside it.
+- **Not durable against genuine key loss.** If the alias really is gone — factory-reset
+  keystore, some restore paths — the ciphertexts are dead, and the plugin rotates the key and
+  clears them so the app degrades to a full sign-in rather than wedging.
+
+**The fallback stays.** iOS has no implementation here, and any Android build where the probe
+declines keeps using `secrets.json` with D4a's downgrade in force. That path is not dead code:
+it is what runs on iOS today, it is what a failed probe lands on, and `secretBacking` says so
+plainly in both states.
+
+**Backup.** `android:allowBackup="false"` is set by hand in `gen/android/app/src/main/
+AndroidManifest.xml` so the ciphertext file does not go to Google cloud backup. `tauri android
+init` regenerates that file and drops the attribute; `apps/mobile-tauri/README.md` records it.
+
+**Revisit when.** iOS work starts — the Keychain equivalent belongs behind the same seam, and
+`TauriKeystoreInvoke` is already the shape for it. Also if a `v2` envelope is ever needed: the
+version tag is checked, and an unrecognised one is left on disk untouched rather than deleted,
+so a rollback onto an older build does not destroy data.
 
 ---
 

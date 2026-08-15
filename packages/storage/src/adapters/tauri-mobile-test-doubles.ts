@@ -12,7 +12,17 @@
  * are SQLite rows.
  *
  * Each double models the behaviour the adapter actually depends on, taken from the plugins'
- * own sources rather than from what would be convenient:
+ * own sources rather than from what would be convenient — with one honest exception, stated
+ * first because it is the one a reader could be misled by:
+ *
+ *   - **`KeystoreDouble` models the adapter's contract, not `KeystorePlugin.kt`.** It sits at
+ *     the invoke boundary and answers the four commands; it does not encrypt, so the envelope
+ *     (`v1:<b64 iv>:<b64 ct>`, `Base64.NO_WRAP`, a 128-bit tag, UTF-8, a fresh IV per seal, the
+ *     `:` split) is exercised by nothing in this process. Neither is the key-rotation branch in
+ *     `getOrCreateKey`, which is the most dangerous code in that plugin. Its failure modes are
+ *     *mirrors* of the Kotlin's, written by hand to match it — they constrain this file and the
+ *     adapter above it, and they constrain the Kotlin not at all. There are no Kotlin tests. A
+ *     test here that reads like a statement about the plugin says so in a comment.
  *
  *   - There are **two** databases here, and the distinction matters. `RealSqliteDatabase` is
  *     `bun:sqlite` — the same engine `tauri-plugin-sql` runs — and it is what says whether the
@@ -440,19 +450,33 @@ export class BiometryDouble implements TauriMobileBiometry {
  *
  * Its stored values are plaintext. Encryption is `KeystorePlugin.kt`'s business and no test in
  * this process can observe it; what a test can observe is *which* backend a value reached, and
- * that is what `contents` answers.
+ * that is what `contents` answers. See this file's header for what that leaves unconstrained.
  */
 export class KeystoreDouble {
 	/** Key -> value, keyed exactly as the adapter sends it (so `secret:`-prefixed). */
 	readonly contents = new Map<string, string>();
 	/** What `secret_available` answers. */
 	available = true;
-	/** The `backing` the probe reports — the Kotlin's own words, as the adapter surfaces them. */
+	/**
+	 * The `backing` the probe reports — the Kotlin's own words, as the adapter surfaces them.
+	 *
+	 * The default is the *pessimistic* one, and deliberately: the only device this has run on is
+	 * a Pixel_9 AVD with a software keymaster, where `KeyInfo.getSecurityLevel()` answers
+	 * `SECURITY_LEVEL_SOFTWARE`. A security double whose default overstates its protection is
+	 * the wrong way round. A test that wants the TEE string sets it.
+	 */
 	backing =
-		"Android Keystore AES-256-GCM, alias bittery_secret_v1, no user-auth required — hardware-backed (TEE, KeyInfo.securityLevel)";
+		"Android Keystore AES-256-GCM, alias bittery_secret_v1, no user-auth required — NOT hardware-backed (software, KeyInfo.securityLevel)";
 	/** When set, the probe rejects: the shape of "this build has no such plugin". */
 	probeFailure: unknown = null;
-	/** When set, every `secret_get` rejects. */
+	/**
+	 * When set, every `secret_get` rejects.
+	 *
+	 * This is an *IPC-level* rejection — a dead plugin, a broken bridge. A Keystore error inside
+	 * the plugin never reaches the adapter as a rejection, because `KeystorePlugin.secretGet`
+	 * catches everything and resolves `null`; those two cases are `unreadable` and
+	 * `undecryptable` below.
+	 */
 	getFailure: unknown = null;
 	/** When set, every `secret_set` rejects. */
 	setFailure: unknown = null;
@@ -471,6 +495,20 @@ export class KeystoreDouble {
 	 * A write that silently did not land is the reason the migration reads back at all.
 	 */
 	readonly corruptReadBack = new Set<string>();
+	/**
+	 * Keys whose read fails **transiently** — `BackendBusyException`, a keystore2 restart.
+	 *
+	 * The plugin answers `null` and leaves the ciphertext alone, so the value is still here for
+	 * the next read. Mirrors `KeystorePlugin.isPermanentlyUnreadable` returning `false`.
+	 */
+	readonly unreadable = new Set<string>();
+	/**
+	 * Keys whose ciphertext is **provably** dead — a GCM tag mismatch, a corrupt envelope.
+	 *
+	 * The plugin answers `null` *and* removes the entry, which is the only case in which it
+	 * deletes anything on a read. Mirrors `isPermanentlyUnreadable` returning `true`.
+	 */
+	readonly undecryptable = new Set<string>();
 	/** Every command, in order, with the key it named. */
 	readonly calls: Array<{ cmd: string; key?: string }> = [];
 
@@ -511,8 +549,19 @@ export class KeystoreDouble {
 				if (this.corruptReadBack.has(key)) {
 					return { value: "not-what-was-written" };
 				}
-				// The plugin answers `null` for a key it never held and for one it can no
-				// longer decrypt; both are "gone", and neither is a throw.
+				if (this.undecryptable.has(key)) {
+					// Provably dead: `null`, and the plugin drops the stale ciphertext.
+					this.contents.delete(key);
+					return { value: null };
+				}
+				if (this.unreadable.has(key)) {
+					// Could not be read *this time*. `null`, and nothing is written: the value
+					// must survive for the retry.
+					return { value: null };
+				}
+				// The plugin answers `null` for a key it never held, for one it could not read
+				// and for one it can no longer decrypt. All three are `null`, none is a throw,
+				// and only the third costs the stored bytes.
 				return { value: this.contents.get(key) ?? null };
 			}
 			case "plugin:bittery-keystore|secret_set": {

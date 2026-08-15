@@ -8,6 +8,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -16,6 +17,8 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
 import java.security.KeyStore
+import javax.crypto.AEADBadTagException
+import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -32,6 +35,22 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * Not `androidx.security:security-crypto` / `EncryptedSharedPreferences`: Google deprecated it,
  * and the file this class writes holds `vault_keys` and `device_key`.
+ *
+ * **A stored value is deleted only when it is provably unreadable forever.** "I could not read
+ * this" and "this can never be read" are different facts and the whole file turns on the
+ * difference — see [isPermanentlyUnreadable]. A transient Keystore failure (keystore2 restarted,
+ * `BackendBusyException`, a binder hiccup) answers `null` and touches no disk, because the next
+ * attempt can succeed and a wrong deletion here costs the user a full sign-in with master
+ * password *and* Secret Key.
+ *
+ * **Threading.** Every `@Command` here runs on the Android main thread, serialised: Tauri's
+ * `PluginHandle.invoke` calls the method reflectively and synchronously with no executor, and the
+ * Rust side dispatches through `run_on_android_context` onto wry's single main-thread pipe. That
+ * is the only reason [getOrCreateKey] needs no lock — two calls can never interleave, so two
+ * threads can never generate over the same alias and clobber each other's ciphertexts. `Cipher`
+ * instances are created per call and never shared, so those are safe either way. If anyone ever
+ * moves a command onto a background executor, this class needs a monitor around
+ * [getOrCreateKey] first.
  */
 @TauriPlugin
 class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
@@ -63,6 +82,12 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 	 * because "the alias is present" and "this device can actually use it" are different facts
 	 * and only the second one is worth routing `vault_keys` through. Any failure answers
 	 * `available: false`, which sends the adapter back to `secrets.json` — the M1 behaviour.
+	 *
+	 * It runs on every launch, before the `secrets.json` drain, so it must not be able to destroy
+	 * anything: it writes no entry of its own, and the only clear in this class now happens after
+	 * a fresh key exists and only when the old one was provably gone. A transient Keystore error
+	 * during the probe costs this launch a fallback to `secrets.json` — a sign-out at worst — and
+	 * leaves every ciphertext where it was for the next launch to read.
 	 */
 	@Command
 	fun secretAvailable(invoke: Invoke) {
@@ -103,10 +128,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 	}
 
 	/**
-	 * Missing key -> `null`, never a throw.
+	 * Missing key -> `null`, never a throw. Unreadable key -> `null`, also never a throw.
 	 *
-	 * An undecryptable value is also `null`, and the stale ciphertext is removed. See
-	 * [getOrCreateKey] on why that case is real and what it costs.
+	 * The value is removed only when the failure proves it can never be decrypted again —
+	 * [isPermanentlyUnreadable]. Everything else answers `null` and leaves the bytes alone: a
+	 * `BackendBusyException` is documented by Android as "try again with a back-off", a
+	 * keystore2 restart resolves itself, and deleting on either turns a retryable read into
+	 * permanent key loss.
 	 */
 	@Command
 	fun secretGet(invoke: Invoke) {
@@ -120,10 +148,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 				result.put("value", plaintext)
 			}
 		} catch (cause: Throwable) {
-			// The ciphertext cannot be read back, now or ever: the key that made it is gone.
-			// Clearing it means the next `secretSet` starts clean instead of the app reading
-			// the same corpse on every launch.
-			prefs().edit().remove(args.key).apply()
+			if (isPermanentlyUnreadable(cause)) {
+				// The key that made this ciphertext is gone, or the ciphertext is not an
+				// envelope at all. Clearing it means the next `secretSet` starts clean instead
+				// of the app reading the same corpse on every launch. `commit`, not `apply`,
+				// for the durability reason given on `secretSet`.
+				commitOrWarn(prefs().edit().remove(args.key), "remove ${args.key}")
+			}
 			result.put("value", JSONObject.NULL)
 		}
 		invoke.resolve(result)
@@ -161,29 +192,46 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 	 * element, which would lock those users out of their own vault entirely. The TEE is what
 	 * the platform gives us and it is what we take.
 	 *
-	 * **Key loss is data loss, and it is handled here.** If the alias has vanished or been
-	 * invalidated — a lock-screen change, a restored backup, a factory-reset keystore — every
-	 * ciphertext already on disk is permanently undecryptable. Rather than wedge, this
-	 * regenerates the key and clears the stale ciphertexts: the app then sees an empty secret
+	 * **Key loss is data loss, and it is handled here — but only when the loss is proven.** If the
+	 * alias has genuinely vanished — a lock-screen change, a restored backup, a factory-reset
+	 * keystore — every ciphertext already on disk is permanently undecryptable. Rather than wedge,
+	 * this regenerates the key and clears the stale ciphertexts: the app then sees an empty secret
 	 * tier and falls back to a full sign-in, which is the recoverable outcome.
+	 *
+	 * Two rules keep that from firing on a device whose Keystore is merely *unwell*:
+	 *
+	 *  1. **A read error propagates.** `AndroidKeyStoreSpi.engineGetKey` returns `null` for
+	 *     exactly one condition, `KEY_NOT_FOUND`; every other keystore2 failure — service
+	 *     restart, `SYSTEM_ERROR`, `VALUE_CORRUPTED`, a binder hiccup — is rethrown as
+	 *     `UnrecoverableKeyException`. Swallowing that would read "the key is gone" off a
+	 *     perfectly good key. `containsAlias` is no help either: it *swallows* the same
+	 *     exception and answers `false`. So `null` from `getKey`, and only that, means absent.
+	 *     Callers cope: `secretGet` turns a throw into `null`, `secretDelete` swallows, and the
+	 *     probe answers `available: false` and sends the adapter to `secrets.json` for one
+	 *     launch.
+	 *  2. **Generate first, clear second.** If `generateKey()` throws — `KeyStoreConnectException`,
+	 *     `ProviderException` — the ciphertexts are still there for the next attempt. Clearing
+	 *     first would destroy them with no key to show for it.
 	 */
 	private fun getOrCreateKey(): SecretKey {
 		val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-		val existing = try {
-			keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-		} catch (_: Throwable) {
-			null
-		}
+		// Deliberately uncaught: see rule 1 above.
+		val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
 		if (existing != null) {
 			return existing
 		}
 
-		if (keyStore.containsAlias(KEY_ALIAS)) {
-			keyStore.deleteEntry(KEY_ALIAS)
-		}
-		// Everything under the old key is unreadable; drop it in one go.
-		prefs().edit().clear().commit()
+		// Provably `KEY_NOT_FOUND` (or an entry that is not a secret key, which this alias never
+		// holds and which generation overwrites anyway). Only now is a rotation warranted.
+		val fresh = generateKey()
+		// Everything under the old key is unreadable; drop it in one go. If the clear fails the
+		// stale entries stay, and `secretGet` drops each one as it fails to decrypt — the same
+		// end state, one read later.
+		commitOrWarn(prefs().edit().clear(), "clear after key rotation")
+		return fresh
+	}
 
+	private fun generateKey(): SecretKey {
 		val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
 		generator.init(
 			KeyGenParameterSpec.Builder(
@@ -246,7 +294,8 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 	 *
 	 * Two fixed-alphabet fields separated by a character base64 never emits, so the split is
 	 * unambiguous; the `v1` tag makes a future format change a detected mismatch rather than a
-	 * decrypt failure that looks like key loss.
+	 * decrypt failure that looks like key loss — and, because the two are told apart in
+	 * [isPermanentlyUnreadable], a `v2` value survives a rollback onto this build untouched.
 	 */
 	private fun seal(key: SecretKey, plaintext: String): String {
 		val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -258,14 +307,72 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
 	private fun open(key: SecretKey, stored: String): String {
 		val parts = stored.split(":")
-		if (parts.size != 3 || parts[0] != FORMAT_VERSION) {
-			throw IllegalArgumentException("unrecognised stored format")
+		if (parts.size != 3) {
+			throw CorruptEnvelopeException("expected 3 fields, got ${parts.size}")
 		}
-		val iv = Base64.decode(parts[1], Base64.NO_WRAP)
-		val ciphertext = Base64.decode(parts[2], Base64.NO_WRAP)
+		if (parts[0] != FORMAT_VERSION) {
+			// Not damage: a build that knows a later format wrote this, and this build was
+			// rolled back onto it. Deleting would destroy a value the newer build reads fine.
+			throw UnknownEnvelopeVersionException(parts[0])
+		}
+		val iv = decodeField(parts[1], "IV")
+		val ciphertext = decodeField(parts[2], "ciphertext")
 		val cipher = Cipher.getInstance(TRANSFORMATION)
 		cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
 		return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+	}
+
+	private fun decodeField(field: String, what: String): ByteArray =
+		try {
+			Base64.decode(field, Base64.NO_WRAP)
+		} catch (cause: IllegalArgumentException) {
+			throw CorruptEnvelopeException("$what is not base64: ${describe(cause)}")
+		}
+
+	/** A `v1` envelope this build can never parse. The bytes are damaged, not merely unread. */
+	private class CorruptEnvelopeException(message: String) : Exception(message)
+
+	/** A well-formed envelope from another format version. Ours to skip, never ours to delete. */
+	private class UnknownEnvelopeVersionException(version: String) :
+		Exception("stored format version '$version' is not $FORMAT_VERSION")
+
+	// ------------------------------------------------------------------
+	// Permanent vs transient
+	// ------------------------------------------------------------------
+
+	/**
+	 * Whether a failed read proves the stored value is unreadable **forever**.
+	 *
+	 * Only these two families qualify:
+	 *
+	 *  - a GCM tag mismatch (`AEADBadTagException`, and its parent `BadPaddingException`), which
+	 *    means the ciphertext was made under a key that no longer exists — no retry recovers it;
+	 *  - a [CorruptEnvelopeException], where the stored string is not a decodable `v1` envelope.
+	 *
+	 * Everything else is transient until proven otherwise, and the caller must leave the disk
+	 * alone: `BackendBusyException` is documented as retryable ("try again with a back-off
+	 * period"), `KeyStoreConnectException` and other `ProviderException`s mean keystore2 was
+	 * momentarily unreachable, and [UnknownEnvelopeVersionException] means the value belongs to a
+	 * different build of this plugin. Guessing wrong in this direction costs a launch; guessing
+	 * wrong in the other costs the user their vault keys.
+	 */
+	private fun isPermanentlyUnreadable(cause: Throwable): Boolean = when (cause) {
+		is AEADBadTagException, is BadPaddingException, is CorruptEnvelopeException -> true
+		else -> false
+	}
+
+	/**
+	 * `commit`, and say so when it fails.
+	 *
+	 * A dropped write here is never fatal — the callers are self-healing — but a silent one is
+	 * how a stale ciphertext survives unexplained, so it goes in the log.
+	 */
+	private fun commitOrWarn(editor: SharedPreferences.Editor, what: String): Boolean {
+		val committed = editor.commit()
+		if (!committed) {
+			Log.w(LOG_TAG, "SharedPreferences.commit returned false: $what")
+		}
+		return committed
 	}
 
 	private fun describe(cause: Throwable): String =
@@ -278,5 +385,6 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 		private const val TRANSFORMATION = "AES/GCM/NoPadding"
 		private const val GCM_TAG_BITS = 128
 		private const val FORMAT_VERSION = "v1"
+		private const val LOG_TAG = "BitteryKeystore"
 	}
 }

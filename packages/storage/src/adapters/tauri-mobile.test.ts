@@ -965,7 +965,12 @@ describe("tauri-mobile adapter — Android Keystore secret backing", () => {
 		expect(platform.secretBacking).not.toContain("secrets.json");
 	});
 
-	/** A software-backed key must read as software-backed, not as "the Keystore, so hardware". */
+	/**
+	 * A software-backed key must read as software-backed, not as "the Keystore, so hardware".
+	 *
+	 * The double already defaults to this string — the emulator's real answer — but it is set
+	 * here anyway so the test states what it pins rather than leaning on a default.
+	 */
 	test("secretBacking does not upgrade a software-backed key into a hardware claim", async () => {
 		const { platform } = await makeKeystorePlatform({}, (d) => {
 			d.keystore.backing =
@@ -989,12 +994,50 @@ describe("tauri-mobile adapter — Android Keystore secret backing", () => {
 	// The contract survives a plugin that throws
 	// ------------------------------------------------------------------
 
+	/**
+	 * An invoke *rejection* — a dead bridge, an unregistered command. `KeystorePlugin.secretGet`
+	 * itself never rejects; it catches everything and resolves `null`. The two tests below cover
+	 * that side.
+	 */
 	test("a Keystore that throws on get answers null rather than propagating", async () => {
 		const { platform, doubles } = await makeKeystorePlatform();
 		await platform.secretSet("bittery_jwt_token", "jwt");
 		doubles.keystore.getFailure = new Error("keystore read failed");
 
 		expect(await platform.secretGet("bittery_jwt_token")).toBeNull();
+	});
+
+	/**
+	 * A read that failed *this time* must not cost the value.
+	 *
+	 * `BackendBusyException` is documented by Android as retryable, and a keystore2 restart
+	 * resolves itself; deleting on either turns a 50 ms hiccup into "re-enter your master
+	 * password and Secret Key". The real guarantee lives in `KeystorePlugin.isPermanentlyUnreadable`
+	 * and **nothing in this process can constrain that Kotlin** — `KeystoreDouble.unreadable` is
+	 * a hand-written mirror of it. This test pins the mirror and the adapter's behaviour above
+	 * it; the Kotlin is held by review only.
+	 */
+	test("a transient Keystore read failure answers null and keeps the value for the retry", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+		await platform.secretSet("bittery_vault_keys", "vk");
+		doubles.keystore.unreadable.add("secret:bittery_vault_keys");
+
+		expect(await platform.secretGet("bittery_vault_keys")).toBeNull();
+
+		doubles.keystore.unreadable.clear();
+		expect(await platform.secretGet("bittery_vault_keys")).toBe("vk");
+	});
+
+	/** The one read that may delete: the ciphertext is provably dead, so it is dropped. */
+	test("a provably undecryptable value answers null and is dropped", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+		await platform.secretSet("bittery_vault_keys", "vk");
+		doubles.keystore.undecryptable.add("secret:bittery_vault_keys");
+
+		expect(await platform.secretGet("bittery_vault_keys")).toBeNull();
+		expect(doubles.keystore.contents.has("secret:bittery_vault_keys")).toBe(
+			false,
+		);
 	});
 
 	/**

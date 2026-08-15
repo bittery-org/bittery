@@ -19,7 +19,7 @@
  * `apps/mobile-tauri/src-tauri/plugins/keystore` plugin, and falls back to `secrets.json` when
  * that plugin is not there to answer — iOS, an old Android, a build without it. The fallback is
  * a **recorded security downgrade**, not a secure store. See `SECRET_BACKING_FALLBACK` below and
- * `docs/mobile-migration-decisions.md` D4a.
+ * `docs/mobile-migration-decisions.md` D4b (the Keystore) and D4a (what the fallback costs).
  *
  * `sessionSurvivesRestart` is `true`, for the same reason as the react-native adapter: killing
  * and relaunching a mobile app does not end the user's session. So `deriveScope` never asks
@@ -66,7 +66,8 @@ import type { StorageScope } from "../tiers";
  * This is also the answer *before* `initialize()`, because before the probe has run it is the
  * truth: nothing has established that a Keystore exists.
  *
- * `docs/mobile-migration-decisions.md` D4a records what it costs.
+ * `docs/mobile-migration-decisions.md` D4a records what it costs. It is still the live path on
+ * iOS and on any Android build whose Keystore probe declines; D4b is the Android answer.
  */
 const SECRET_BACKING_FALLBACK =
 	"@tauri-apps/plugin-store secrets.json — NO at-rest separation from the plain tier; the app's private directory is the trust boundary";
@@ -486,7 +487,11 @@ export function createTauriMobilePlatformPort(
 				key,
 			});
 			if (readBack.value !== value) {
-				// Unverified. Phase 2 never runs, so the store keeps every original.
+				// Unverified. Phase 2 never runs, so the store keeps every original. The values
+				// already written into the Keystore stay there, unowned until the next attempt
+				// overwrites them under the same keys — they are copies of data the app still
+				// holds, so orphaning them costs nothing and deleting them would add a failure
+				// mode to the abort path.
 				return false;
 			}
 			verified.push(key);
@@ -559,8 +564,9 @@ export function createTauriMobilePlatformPort(
 		 *
 		 * So `apps/mobile-tauri/src-tauri/plugins/keystore` is first-party: one AES-256-GCM
 		 * key in the `AndroidKeyStore` provider *without* `setUserAuthenticationRequired`, so
-		 * a read costs nothing. `docs/mobile-migration-decisions.md` D4a holds the long form,
-		 * including what the fallback costs when the plugin is absent.
+		 * a read costs nothing. `docs/mobile-migration-decisions.md` D4b holds the long form,
+		 * including what it does and does not guarantee; D4a holds what the fallback costs when
+		 * the plugin is absent.
 		 *
 		 * The two backends obey the same three rules — missing key answers `null`, deleting
 		 * an absent key is a no-op, `secretSet` overwrites — and `secretSet` is the one call

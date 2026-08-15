@@ -47,10 +47,16 @@ this machine set up for the mobile work):
 
 `pnpm android:dev` runs `tauri android dev` against a running emulator or a USB-attached device.
 
-**Three things to not get wrong:**
+**Four things to not get wrong:**
 
 - **Never re-run `pnpm tauri android init`.** It rewrites `AndroidManifest.xml`,
   `app/build.gradle.kts`, and `tauri.settings.gradle`, and resets the Kotlin version bump below.
+- **`AndroidManifest.xml` must keep `android:allowBackup="false"`.** It is hand-added, and
+  `android init` drops it. Without it `shared_prefs/bittery_keystore_secrets.xml` — the secret
+  tier's ciphertext — goes to Google cloud backup. The bytes are useless without the Keystore
+  key, which never leaves the device, so the visible symptom on a restored device is a silent
+  sign-out; the reason to keep it is that a password manager's data does not belong in a cloud
+  backup at all.
 - **`gen/android/build.gradle.kts` must stay on Kotlin 2.1.20.** Tauri 2.11.5 generates 1.9.25,
   which cannot read the Kotlin 2.1 metadata that `androidx.credentials` (needed for the
   credential-provider plugin) ships. See the comment above the `classpath(...)` line in that file.

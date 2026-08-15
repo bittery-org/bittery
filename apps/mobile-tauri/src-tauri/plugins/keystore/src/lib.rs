@@ -4,11 +4,14 @@
 //! `@choochmeque/tauri-plugin-biometry-api`'s `setData`/`getData` raises a biometric
 //! prompt on **every read**, and `jwt_token` is read on every API request;
 //! `impierce/tauri-plugin-keystore` is a single 18-month-stale alpha with no npm
-//! package. `docs/mobile-migration-decisions.md` D4/D4a holds the long form.
+//! package. `docs/mobile-migration-decisions.md` D4b holds the long form.
 //!
 //! The Kotlin in `android/` holds one AES-256-GCM key in the `AndroidKeyStore`
 //! provider **without** `setUserAuthenticationRequired`, which is the whole point: the
-//! key never leaves the TEE, and reading a secret costs no prompt.
+//! key is held by the provider, which is TEE-backed *where the device provides one*,
+//! and reading a secret costs no prompt. Hardware backing is not assumed here —
+//! `secret_available` reports the level `KeyInfo` observed, and on an emulator with a
+//! software keymaster that answer is "NOT hardware-backed (software)".
 //!
 //! Nothing here is load-bearing for the app's ability to *boot*. If the plugin is
 //! missing, fails to register, or answers `available: false`, the storage adapter falls
