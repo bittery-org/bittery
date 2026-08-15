@@ -98,15 +98,14 @@ impl From<sqlx::Error> for FinalizeError {
     }
 }
 
-type PlanRow = (
-    String,
-    String,
-    String,
-    i32,
-    VaultKeyRotationPlanState,
-    OffsetDateTime,
-    OffsetDateTime,
-);
+#[derive(Debug)]
+struct PlanRow {
+    vault_id: String,
+    expected_key_version: i32,
+    state: VaultKeyRotationPlanState,
+    idle_expires_at: OffsetDateTime,
+    absolute_expires_at: OffsetDateTime,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct LockedPlanPolicy {
@@ -159,12 +158,14 @@ pub(crate) async fn create_plan(
         .execute(&mut *tx)
         .await
         .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
-    let expected_key_version: i32 = query_scalar("SELECT key_version FROM vault WHERE id = $1")
-        .bind(&input.vault_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
-        .ok_or_else(|| AppError::not_found("Vault not found"))?;
+    let expected_key_version: i32 = sqlx::query_scalar!(
+        "SELECT key_version FROM vault WHERE id = $1",
+        &input.vault_id
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
+    .ok_or_else(|| AppError::not_found("Vault not found"))?;
     let now = OffsetDateTime::now_utc();
     let id = Uuid::new_v4().to_string();
     let idle_expires_at = now + IDLE_LIFETIME;
@@ -207,14 +208,36 @@ async fn load_active_plan<'a, E>(
 where
     E: sqlx::Executor<'a, Database = Postgres>,
 {
-    let row: PlanRow = query_as("SELECT p.id, p.vault_id, p.initiator_user_id, p.expected_key_version, p.state, p.idle_expires_at, p.absolute_expires_at FROM vault_key_rotation_plan p WHERE p.id = $1 AND p.initiator_user_id = $2 AND EXISTS (SELECT 1 FROM vault_key vk WHERE vk.vault_id=p.vault_id AND vk.user_id=$2) FOR UPDATE")
-        .bind(plan_id).bind(initiator_user_id).fetch_optional(executor).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
-        .ok_or_else(|| AppError::not_found("Rotation plan not found"))?;
+    let row = sqlx::query_as!(
+        PlanRow,
+        r#"SELECT p.vault_id,
+                  p.expected_key_version,
+                  p.state AS "state: VaultKeyRotationPlanState",
+                  p.idle_expires_at,
+                  p.absolute_expires_at
+           FROM vault_key_rotation_plan p
+           WHERE p.id = $1
+             AND p.initiator_user_id = $2
+             AND EXISTS (
+                 SELECT 1
+                 FROM vault_key vk
+                 WHERE vk.vault_id = p.vault_id AND vk.user_id = $2
+             )
+           FOR UPDATE"#,
+        plan_id,
+        initiator_user_id,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
+    .ok_or_else(|| AppError::not_found("Rotation plan not found"))?;
     let now = OffsetDateTime::now_utc();
-    if row.4 != VaultKeyRotationPlanState::Preparing && row.4 != VaultKeyRotationPlanState::Ready {
+    if row.state != VaultKeyRotationPlanState::Preparing
+        && row.state != VaultKeyRotationPlanState::Ready
+    {
         return Err(AppError::conflict("Rotation plan is no longer active"));
     }
-    if row.5 <= now || row.6 <= now {
+    if row.idle_expires_at <= now || row.absolute_expires_at <= now {
         return Err(AppError::conflict("Rotation plan expired"));
     }
     Ok(row)
@@ -260,7 +283,7 @@ pub(crate) async fn read_preparation_page(
         .then(|| records.last().map(|record| record.id.clone()))
         .flatten();
     query("UPDATE vault_key_rotation_plan SET idle_expires_at = LEAST($1, absolute_expires_at) WHERE id = $2 AND idle_expires_at = $3")
-        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.idle_expires_at).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     tx.commit()
         .await
         .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
@@ -298,8 +321,21 @@ pub(crate) async fn stage_outputs(
         if output.payload.len() > MAX_PAGE_BYTES {
             return Err(AppError::payload_too_large("Staged output exceeds limit"));
         }
-        let exists: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault_key_rotation_plan_manifest WHERE plan_id = $1 AND kind = $2::vault_key_rotation_manifest_kind AND entity_id = $3)")
-            .bind(plan_id).bind(kind).bind(&output.id).fetch_one(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+        let exists = sqlx::query_scalar!(
+            r#"SELECT EXISTS(
+                   SELECT 1
+                   FROM vault_key_rotation_plan_manifest
+                   WHERE plan_id = $1
+                     AND kind = $2::vault_key_rotation_manifest_kind
+                     AND entity_id = $3
+               ) AS "exists!""#,
+            plan_id,
+            kind as _,
+            &output.id,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
         if !exists {
             return Err(AppError::bad_request(
                 "Staged output is not in the plan manifest",
@@ -318,7 +354,7 @@ pub(crate) async fn stage_outputs(
     query("UPDATE vault_key_rotation_plan p SET state='ready' WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM vault_key_rotation_plan_manifest m LEFT JOIN vault_key_rotation_plan_staged_output s ON s.plan_id=m.plan_id AND s.kind=m.kind AND s.entity_id=m.entity_id WHERE m.plan_id=p.id AND s.entity_id IS NULL)")
         .bind(plan_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     query("UPDATE vault_key_rotation_plan SET idle_expires_at = LEAST($1, absolute_expires_at) WHERE id = $2 AND idle_expires_at = $3")
-        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.5).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+        .bind(OffsetDateTime::now_utc() + IDLE_LIFETIME).bind(plan_id).bind(plan.idle_expires_at).execute(&mut *tx).await.map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     tx.commit()
         .await
         .map_err(|error| database_error(error, "Vault key rotation database operation failed"))
@@ -343,23 +379,43 @@ pub(crate) async fn finalize_locked_plan(
     plan_id: &str,
     initiator_user_id: &str,
 ) -> Result<RotationResult, FinalizeError> {
-    let plan: PlanRow = query_as("SELECT p.id, p.vault_id, p.initiator_user_id, p.expected_key_version, p.state, p.idle_expires_at, p.absolute_expires_at FROM vault_key_rotation_plan p WHERE p.id = $1 AND p.initiator_user_id = $2 AND EXISTS (SELECT 1 FROM vault_key vk WHERE vk.vault_id=p.vault_id AND vk.user_id=$2) FOR UPDATE")
-        .bind(plan_id).bind(initiator_user_id).fetch_optional(&mut **tx).await?.ok_or(FinalizeError::InvalidState)?;
+    let plan = sqlx::query_as!(
+        PlanRow,
+        r#"SELECT p.vault_id,
+                  p.expected_key_version,
+                  p.state AS "state: VaultKeyRotationPlanState",
+                  p.idle_expires_at,
+                  p.absolute_expires_at
+           FROM vault_key_rotation_plan p
+           WHERE p.id = $1
+             AND p.initiator_user_id = $2
+             AND EXISTS (
+                 SELECT 1
+                 FROM vault_key vk
+                 WHERE vk.vault_id = p.vault_id AND vk.user_id = $2
+             )
+           FOR UPDATE"#,
+        plan_id,
+        initiator_user_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(FinalizeError::InvalidState)?;
     if !matches!(
-        plan.4,
+        plan.state,
         VaultKeyRotationPlanState::Preparing | VaultKeyRotationPlanState::Ready
-    ) || plan.5 <= OffsetDateTime::now_utc()
-        || plan.6 <= OffsetDateTime::now_utc()
+    ) || plan.idle_expires_at <= OffsetDateTime::now_utc()
+        || plan.absolute_expires_at <= OffsetDateTime::now_utc()
     {
         return Err(FinalizeError::InvalidState);
     }
     let current_key_version: i32 =
         query_scalar("SELECT key_version FROM vault WHERE id = $1 FOR UPDATE")
-            .bind(&plan.1)
+            .bind(&plan.vault_id)
             .fetch_optional(&mut **tx)
             .await?
             .ok_or(FinalizeError::InvalidState)?;
-    if current_key_version != plan.3 {
+    if current_key_version != plan.expected_key_version {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::VaultVersion).await?;
         return Err(FinalizeError::Stale(
             VaultKeyRotationStaleReason::VaultVersion,
@@ -374,19 +430,19 @@ pub(crate) async fn finalize_locked_plan(
         }
     }
     let member_stale: bool = query_scalar("SELECT EXISTS((SELECT entity_id, payload::jsonb->>'publicKey', payload::jsonb->>'role' FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='member' EXCEPT SELECT vk.user_id, u.public_key, vk.role::text FROM vault_key vk JOIN \"user\" u ON u.id=vk.user_id JOIN vault_key_rotation_plan p ON p.id=$1 WHERE vk.vault_id=$2 AND (p.excluded_user_id IS NULL OR vk.user_id<>p.excluded_user_id)) UNION ALL (SELECT vk.user_id, u.public_key, vk.role::text FROM vault_key vk JOIN \"user\" u ON u.id=vk.user_id JOIN vault_key_rotation_plan p ON p.id=$1 WHERE vk.vault_id=$2 AND (p.excluded_user_id IS NULL OR vk.user_id<>p.excluded_user_id) EXCEPT SELECT entity_id, payload::jsonb->>'publicKey', payload::jsonb->>'role' FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='member'))")
-        .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
+        .bind(plan_id).bind(&plan.vault_id).fetch_one(&mut **tx).await?;
     if member_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::MemberSet).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::MemberSet));
     }
     let item_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='item') m FULL JOIN (SELECT id, version FROM item WHERE vault_id=$2) i ON i.id=m.entity_id WHERE i.id IS NULL OR m.entity_id IS NULL OR i.version<>m.expected_version)")
-        .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
+        .bind(plan_id).bind(&plan.vault_id).fetch_one(&mut **tx).await?;
     if item_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::ItemState).await?;
         return Err(FinalizeError::Stale(VaultKeyRotationStaleReason::ItemState));
     }
     let attachment_stale: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT entity_id, expected_version FROM vault_key_rotation_plan_manifest WHERE plan_id=$1 AND kind='attachment') m FULL JOIN (SELECT id, envelope_version FROM item_attachment WHERE vault_id=$2) a ON a.id=m.entity_id WHERE a.id IS NULL OR m.entity_id IS NULL OR a.envelope_version<>m.expected_version)")
-        .bind(plan_id).bind(&plan.1).fetch_one(&mut **tx).await?;
+        .bind(plan_id).bind(&plan.vault_id).fetch_one(&mut **tx).await?;
     if attachment_stale {
         mark_stale(tx, plan_id, VaultKeyRotationStaleReason::AttachmentState).await?;
         return Err(FinalizeError::Stale(
@@ -394,14 +450,14 @@ pub(crate) async fn finalize_locked_plan(
         ));
     }
 
-    query("DELETE FROM vault_key vk USING vault_key_rotation_plan p WHERE p.id=$1 AND vk.vault_id=$2 AND vk.user_id=p.excluded_user_id").bind(plan_id).bind(&plan.1).execute(&mut **tx).await?;
-    query("UPDATE vault_key vk SET encrypted_vault_key=s.payload::jsonb->>'encryptedVaultKey' FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='member' AND vk.vault_id=$2 AND vk.user_id=s.entity_id").bind(plan_id).bind(&plan.1).execute(&mut **tx).await?;
-    query("UPDATE item i SET encrypted_data=s.payload::jsonb->>'encryptedData', encryption_iv=s.payload::jsonb->>'encryptionIv', encryption_algorithm=s.payload::jsonb->>'encryptionAlgorithm', version=i.version+1, updated_at=now() FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='item' AND i.vault_id=$2 AND i.id=s.entity_id").bind(plan_id).bind(&plan.1).execute(&mut **tx).await?;
-    query("UPDATE item_attachment a SET encrypted_attachment_key=s.payload::jsonb->>'encryptedAttachmentKey', attachment_key_iv=s.payload::jsonb->>'attachmentKeyIv', attachment_key_algorithm=s.payload::jsonb->>'attachmentKeyAlgorithm', envelope_version=a.envelope_version+1 FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='attachment' AND a.vault_id=$2 AND a.id=s.entity_id").bind(plan_id).bind(&plan.1).execute(&mut **tx).await?;
+    query("DELETE FROM vault_key vk USING vault_key_rotation_plan p WHERE p.id=$1 AND vk.vault_id=$2 AND vk.user_id=p.excluded_user_id").bind(plan_id).bind(&plan.vault_id).execute(&mut **tx).await?;
+    query("UPDATE vault_key vk SET encrypted_vault_key=s.payload::jsonb->>'encryptedVaultKey' FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='member' AND vk.vault_id=$2 AND vk.user_id=s.entity_id").bind(plan_id).bind(&plan.vault_id).execute(&mut **tx).await?;
+    query("UPDATE item i SET encrypted_data=s.payload::jsonb->>'encryptedData', encryption_iv=s.payload::jsonb->>'encryptionIv', encryption_algorithm=s.payload::jsonb->>'encryptionAlgorithm', version=i.version+1, updated_at=now() FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='item' AND i.vault_id=$2 AND i.id=s.entity_id").bind(plan_id).bind(&plan.vault_id).execute(&mut **tx).await?;
+    query("UPDATE item_attachment a SET encrypted_attachment_key=s.payload::jsonb->>'encryptedAttachmentKey', attachment_key_iv=s.payload::jsonb->>'attachmentKeyIv', attachment_key_algorithm=s.payload::jsonb->>'attachmentKeyAlgorithm', envelope_version=a.envelope_version+1 FROM vault_key_rotation_plan_staged_output s WHERE s.plan_id=$1 AND s.kind='attachment' AND a.vault_id=$2 AND a.id=s.entity_id").bind(plan_id).bind(&plan.vault_id).execute(&mut **tx).await?;
     let key_version = current_key_version + 1;
     query("UPDATE vault SET key_version=$1, updated_at=now() WHERE id=$2")
         .bind(key_version)
-        .bind(&plan.1)
+        .bind(&plan.vault_id)
         .execute(&mut **tx)
         .await?;
     let rotation_id = Uuid::new_v4().to_string();
@@ -412,14 +468,14 @@ pub(crate) async fn finalize_locked_plan(
         .execute(&mut **tx)
         .await?;
     query("INSERT INTO sync_event (id, event_type, vault_id, entity_id, entity_type, version, user_id, metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || vk.user_id), 'vault_key_rotated', $2, $2, 'vault_key', $3, vk.user_id, json_build_object('rotationId', $1)::text FROM vault_key vk WHERE vk.vault_id=$2")
-        .bind(&rotation_id).bind(&plan.1).bind(key_version).execute(&mut **tx).await?;
+        .bind(&rotation_id).bind(&plan.vault_id).bind(key_version).execute(&mut **tx).await?;
     query("INSERT INTO sync_event (id,event_type,vault_id,entity_id,entity_type,version,user_id,metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || vk.user_id || 'member_removed'),'vault_member_removed',p.vault_id,p.excluded_user_id,'vault_member',$2,vk.user_id,json_build_object('rotationId',$1,'removedUserId',p.excluded_user_id)::text FROM vault_key_rotation_plan p JOIN vault_key vk ON vk.vault_id=p.vault_id WHERE p.id=$3 AND p.reason='member_removed' AND p.excluded_user_id IS NOT NULL")
         .bind(&rotation_id).bind(key_version).bind(plan_id).execute(&mut **tx).await?;
     query("INSERT INTO sync_event (id,event_type,vault_id,entity_id,entity_type,version,user_id,metadata) SELECT 'syncevt_' || md5(random()::text || clock_timestamp()::text || excluded_user_id),'vault_access_revoked',vault_id,vault_id,'vault',$2,excluded_user_id,json_build_object('rotationId',$1)::text FROM vault_key_rotation_plan WHERE id=$3 AND excluded_user_id IS NOT NULL")
         .bind(&rotation_id).bind(key_version).bind(plan_id).execute(&mut **tx).await?;
     Ok(RotationResult {
         plan_id: plan_id.to_owned(),
-        vault_id: plan.1,
+        vault_id: plan.vault_id,
         key_version,
         rotation_id,
     })

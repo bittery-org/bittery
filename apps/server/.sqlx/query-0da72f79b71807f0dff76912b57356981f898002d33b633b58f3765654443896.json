@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.vault_id,\n                  p.expected_key_version,\n                  p.state AS \"state: VaultKeyRotationPlanState\",\n                  p.idle_expires_at,\n                  p.absolute_expires_at\n           FROM vault_key_rotation_plan p\n           WHERE p.id = $1\n             AND p.initiator_user_id = $2\n             AND EXISTS (\n                 SELECT 1\n                 FROM vault_key vk\n                 WHERE vk.vault_id = p.vault_id AND vk.user_id = $2\n             )\n           FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "vault_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "expected_key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "state: VaultKeyRotationPlanState",
+        "type_info": {
+          "Custom": {
+            "name": "vault_key_rotation_plan_state",
+            "kind": {
+              "Enum": [
+                "preparing",
+                "ready",
+                "completed",
+                "stale",
+                "failed",
+                "abandoned",
+                "expired"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "idle_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "absolute_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0da72f79b71807f0dff76912b57356981f898002d33b633b58f3765654443896"
+}
