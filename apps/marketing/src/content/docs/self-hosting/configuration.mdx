@@ -39,6 +39,7 @@ are managed outside Bittery.
 | `BITTERY_CLOUD_BILLING_ENABLED` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to disable Stripe billing |
 | `BITTERY_ALLOW_INSECURE_HTTP` | `false` | Advertise operator permission for non-loopback HTTP. Each client account must still confirm before sending credentials |
 | `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Maximum duration for ordinary HTTP requests. The long-lived sync event stream is exempt |
 | `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded`. See the warning under [Rate limiting](#rate-limiting) |
 | `PORT` | `3000` | Port the API server listens on |
 | `MIGRATIONS_FOLDER` | `/app/migrations` | Path to SQL migration files |

@@ -1,5 +1,17 @@
-use axum::{middleware, routing::get, Json, Router};
+use std::time::Duration;
+
+use axum::{
+    body::Body,
+    extract::State,
+    http::{Request, StatusCode},
+    middleware::{self, Next},
+    response::Response,
+    routing::get,
+    Json, Router,
+};
 use serde_json::json;
+use tower::ServiceExt;
+use tower_http::timeout::Timeout;
 
 use crate::{
     api_response_headers, catch_panic_layer, create_api_router, create_public_http_router,
@@ -16,14 +28,26 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
         ))
         .with_state(state);
 
-    Router::new()
+    let routes = Router::new()
         .route("/", get(|| async { "OK" }))
         .route(
             "/healthz",
             get(|| async { Json(json!({ "status": "ok" })) }),
         )
         .merge(public_http_routes)
-        .merge(api_routes)
+        .merge(api_routes);
+
+    apply_http_layers(routes, edge_config)
+}
+
+pub(crate) fn apply_http_layers(routes: Router, edge_config: EdgeHttpConfig) -> Router {
+    let request_timeout = edge_config.request_timeout();
+
+    routes
+        .layer(middleware::from_fn_with_state(
+            request_timeout,
+            request_timeout_middleware,
+        ))
         // Catch panics before the edge layer so its 500 receives security/CORS headers
         // and the outer trace layer records the completed response.
         .layer(catch_panic_layer())
@@ -34,6 +58,21 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
         .layer(http_trace_layer())
 }
 
+async fn request_timeout_middleware(
+    State(timeout): State<Duration>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    if request.uri().path() == "/api/v1/sync/events" {
+        return next.run(request).await;
+    }
+
+    Timeout::with_status_code(next, StatusCode::REQUEST_TIMEOUT, timeout)
+        .oneshot(request)
+        .await
+        .expect("axum middleware is infallible")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, time::Duration};
@@ -42,12 +81,14 @@ mod tests {
     use axum::{
         body::{to_bytes, Body},
         http::{header, HeaderMap, Request, StatusCode},
+        routing::get,
+        Router,
     };
     use serde_json::json;
     use sqlx::postgres::PgPoolOptions;
     use tower::util::ServiceExt;
 
-    use super::create_app;
+    use super::{apply_http_layers, create_app};
     use crate::{
         error::AppError,
         services::rate_limit::{RateLimitOutcome, RateLimiter},
@@ -203,6 +244,74 @@ mod tests {
     }
 
     struct PanickingRateLimiter;
+
+    #[tokio::test]
+    async fn slow_requests_timeout_and_keep_edge_headers() {
+        let edge_config = EdgeHttpConfig::default()
+            .with_request_timeout(Duration::from_millis(10))
+            .with_allowed_origin("https://app.example.com");
+        let router = apply_http_layers(
+            Router::new().route(
+                "/api/v1/test/slow",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    StatusCode::NO_CONTENT
+                }),
+            ),
+            edge_config,
+        );
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/test/slow")
+                    .header(header::ORIGIN, "https://app.example.com")
+                    .body(Body::empty())
+                    .expect("slow request should build"),
+            )
+            .await
+            .expect("timeout should become an HTTP response");
+
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&header::HeaderValue::from_static("https://app.example.com"))
+        );
+        assert_eq!(
+            response.headers().get("x-content-type-options"),
+            Some(&header::HeaderValue::from_static("nosniff"))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&header::HeaderValue::from_static("no-store, max-age=0"))
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_event_stream_is_exempt_from_request_timeout() {
+        let router = apply_http_layers(
+            Router::new().route(
+                "/api/v1/sync/events",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    StatusCode::NO_CONTENT
+                }),
+            ),
+            EdgeHttpConfig::default().with_request_timeout(Duration::from_millis(10)),
+        );
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/sync/events")
+                    .body(Body::empty())
+                    .expect("SSE request should build"),
+            )
+            .await
+            .expect("SSE route should respond");
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
 
     #[async_trait]
     impl RateLimiter for PanickingRateLimiter {

@@ -25,6 +25,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - CORS_ORIGIN=https://${DOMAIN}
+      - REQUEST_TIMEOUT_SECONDS=${REQUEST_TIMEOUT_SECONDS:-30}
       - BITTERY_MODE=${BITTERY_MODE:-self-hosted}
       - BITTERY_ALLOW_INSECURE_HTTP=${BITTERY_ALLOW_INSECURE_HTTP:-false}
       - TRUST_PROXY_MODE=${TRUST_PROXY_MODE:-none}

@@ -22,7 +22,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "time"] }
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
-tower-http = { version = "0.7", features = ["catch-panic", "trace"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["catch-panic", "timeout", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
@@ -49,4 +50,3 @@ bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto
 
 [dev-dependencies]
 futures-util = "0.3"
-tower = { version = "0.5", features = ["util"] }
