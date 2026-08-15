@@ -248,3 +248,7 @@ fn generate_sync_event_id() -> String {
     rand::rng().fill_bytes(&mut bytes);
     format!("syncevt_{}", hex::encode(bytes))
 }
+
+#[cfg(test)]
+#[path = "sql_tests.rs"]
+mod tests;
