@@ -103,6 +103,21 @@ export function createAccountSync({
 				assembly: AccountSyncAssembly;
 		  }
 		| undefined;
+	let initialization: Promise<void> | undefined;
+
+	function initialize(): Promise<void> {
+		initialization ??= Promise.all([
+			storage.initialize(),
+			itemCache.initialize(),
+		])
+			.then(() => undefined)
+			.catch((error) => {
+				// A transient platform failure must remain retryable on the next rebuild.
+				initialization = undefined;
+				throw error;
+			});
+		return initialization;
+	}
 
 	async function resolveAccount(
 		accountId: string,
@@ -136,7 +151,7 @@ export function createAccountSync({
 
 	return {
 		async assemble({ clientId, activeAccountId }) {
-			await Promise.all([storage.initialize(), itemCache.initialize()]);
+			await initialize();
 			const accountId =
 				activeAccountId === undefined
 					? await storage.getActiveAccount()

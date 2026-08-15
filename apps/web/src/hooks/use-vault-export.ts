@@ -6,16 +6,16 @@ import {
 } from "@bittery/core/services/attachment-crypto";
 import type { KeyRef } from "@bittery/crypto-port";
 import { useApiClient } from "@bittery/shared/api";
+import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
+import JSZip from "jszip";
+import { useCallback, useState } from "react";
+import { normalizeItemCategory } from "@/lib/api-normalizers";
 import type {
 	ExportedAttachment,
 	ExportedItem,
 	ExportedVault,
 	VaultExportPayload,
-} from "@bittery/shared/export-types";
-import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
-import JSZip from "jszip";
-import { useCallback, useState } from "react";
-import { normalizeItemCategory } from "@/lib/api-normalizers";
+} from "@/lib/export-types";
 
 export type ExportStage =
 	| "idle"

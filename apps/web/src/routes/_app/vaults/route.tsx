@@ -12,6 +12,7 @@ import {
 import {
 	Button,
 	CreateVaultDialog,
+	DeleteVaultDialog,
 	EditVaultDialog,
 	Sheet,
 	SheetContent,
@@ -27,7 +28,7 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
-import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
+
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -186,12 +187,15 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={accounts.map(({ accountId, email, name, teamName }) => ({
-						accountId,
-						email,
-						name,
-						teamName,
-					}))}
+					accounts={accounts.map(
+						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
+							accountId,
+							email,
+							name,
+							teamName,
+							teamAvatarUrl,
+						}),
+					)}
 					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 

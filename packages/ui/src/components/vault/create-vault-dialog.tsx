@@ -1,8 +1,14 @@
 import { useI18n } from "@bittery/i18n/react";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useRef, useState } from "react";
+import { AccountAvatar } from "../account-avatar";
 import { Button } from "../button";
-import { cn } from "../../lib/utils";
+import {
+	cn,
+	getAccountLabel,
+	hasAccountChoice,
+	resolveSelectedAccountId,
+} from "../../lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../dialog";
 import { Input } from "../input";
 import { Label } from "../label";
@@ -27,6 +33,7 @@ export interface AccountOption {
 	email: string;
 	name?: string;
 	teamName?: string;
+	teamAvatarUrl?: string | null;
 }
 
 interface CreateVaultDialogProps {
@@ -82,7 +89,10 @@ function CreateVaultDialogForm({
 	const [isDragging, setIsDragging] = useState(false);
 	const [selectedAccountId, setSelectedAccountId] = useState<
 		string | undefined
-	>(defaultAccountId);
+	>(() => resolveSelectedAccountId(accounts, defaultAccountId));
+	const selectedAccount = accounts.find(
+		(account) => account.accountId === selectedAccountId,
+	);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const updateImagePreview = useCallback((nextPreview: string | null) => {
@@ -128,7 +138,7 @@ function CreateVaultDialogForm({
 		setIcon("lock");
 		setImageFile(undefined);
 		updateImagePreview(null);
-		setSelectedAccountId(defaultAccountId);
+		setSelectedAccountId(resolveSelectedAccountId(accounts, defaultAccountId));
 	};
 
 	const processFile = useCallback(
@@ -295,37 +305,49 @@ function CreateVaultDialogForm({
 					</div>
 				</div>
 
-				{/* Account Selector (multi-account mode) */}
+				{/* Account: a picker only when there is more than one account to pick */}
 				{accounts.length > 0 && (
 					<div className="space-y-2">
-						<Label htmlFor="account" className="text-muted-foreground text-xs">
+						<Label
+							htmlFor={hasAccountChoice(accounts) ? "account" : undefined}
+							className="text-muted-foreground text-xs"
+						>
 							{m.vaults_create_dialog_field_account()}
 						</Label>
-						<Select
-							value={selectedAccountId}
-							onValueChange={setSelectedAccountId}
-							disabled={form.state.isSubmitting}
-						>
-							<SelectTrigger id="account" className="h-10">
-								<SelectValue
-									placeholder={m.vaults_create_dialog_placeholder_account()}
-								/>
-							</SelectTrigger>
-							<SelectContent>
-								{accounts.map((account) => (
-									<SelectItem key={account.accountId} value={account.accountId}>
-										<div className="flex flex-col">
-											<span className="font-medium">
-												{account.teamName || account.name || account.email}
-											</span>
-											<span className="text-muted-foreground text-xs">
-												{account.email}
-											</span>
-										</div>
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+						{hasAccountChoice(accounts) ? (
+							<Select
+								value={selectedAccountId}
+								onValueChange={setSelectedAccountId}
+								disabled={form.state.isSubmitting}
+							>
+								<SelectTrigger id="account" className="h-12">
+									{selectedAccount ? (
+										<AccountRow account={selectedAccount} />
+									) : (
+										<SelectValue
+											placeholder={m.vaults_create_dialog_placeholder_account()}
+										/>
+									)}
+								</SelectTrigger>
+								<SelectContent>
+									{accounts.map((account) => (
+										<SelectItem
+											key={account.accountId}
+											value={account.accountId}
+											textValue={`${getAccountLabel(account)} ${account.email}`}
+										>
+											<AccountRow account={account} />
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						) : (
+							selectedAccount && (
+								<div className="flex h-12 items-center rounded-md border bg-muted/30 px-3">
+									<AccountRow account={selectedAccount} />
+								</div>
+							)
+						)}
 					</div>
 				)}
 
@@ -443,5 +465,22 @@ function CreateVaultDialogForm({
 				</div>
 			</form>
 		</DialogContent>
+	);
+}
+
+/** Account identity as the switcher shows it: team avatar, name, email. */
+function AccountRow({ account }: { account: AccountOption }) {
+	return (
+		<div className="flex min-w-0 items-center gap-2.5 text-left">
+			<AccountAvatar account={account} size="sm" />
+			<div className="flex min-w-0 flex-col">
+				<span className="truncate font-medium text-sm leading-tight">
+					{getAccountLabel(account)}
+				</span>
+				<span className="truncate text-[11px] text-muted-foreground leading-tight">
+					{account.email}
+				</span>
+			</div>
+		</div>
 	);
 }

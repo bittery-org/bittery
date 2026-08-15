@@ -305,8 +305,10 @@ export function ItemDetailPage({
 							}
 							vaultIcon={vaultInfo?.vaultIcon}
 							vaultImageUrl={vaultInfo?.vaultImageUrl}
+							accountEmail={vaultInfo?.accountEmail}
 							accountName={vaultInfo?.accountName}
 							accountTeamName={vaultInfo?.accountTeamName}
+							accountTeamAvatarUrl={vaultInfo?.accountTeamAvatarUrl}
 						/>
 					</div>
 					<div className="flex shrink-0 items-center gap-1">

@@ -2,7 +2,7 @@ import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useDesktopAccountRuntime } from "@/contexts/account-context";
-import { useDesktopClientId, useDesktopSync } from "../hooks/use-desktop-sync";
+import { useDesktopSync } from "../hooks/use-desktop-sync";
 
 /**
  * Desktop resolves its sync sources asynchronously (auth token + server URL per account, out
@@ -27,8 +27,8 @@ export function DesktopSyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const { manager, vaultRuntime } = useDesktopAccountRuntime();
-	const syncState = useDesktopSync(queryClient, manager, vaultRuntime, enabled);
+	const { manager } = useDesktopAccountRuntime();
+	const syncState = useDesktopSync(queryClient, manager, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>
@@ -44,14 +44,6 @@ export function useSyncContext() {
 		throw new Error("useSyncContext must be used within a DesktopSyncProvider");
 	}
 	return context;
-}
-
-/**
- * Hook to get client ID without needing the full context
- * Useful for mutations that need to pass clientId
- */
-export function useClientId(): string {
-	return useDesktopClientId();
 }
 
 /**

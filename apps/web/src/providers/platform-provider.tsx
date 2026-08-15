@@ -11,9 +11,8 @@
 import { PlatformProvider } from "@bittery/core/hooks";
 import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
 import type { IAutolockService } from "@bittery/core/services/autolock";
-import type { ISyncContext } from "@bittery/sync";
+import { useSyncCapability } from "@bittery/sync";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
@@ -51,23 +50,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 	const syncContext = useSyncContext();
 	const { manager, vaultRuntime } = useAccountRuntime();
 
-	// Map sync context to ISyncContext interface
-	const sync: ISyncContext = useMemo(
-		() => ({
-			clientId: syncContext.clientId,
-			isConnected: syncContext.isConnected,
-			isOnline: syncContext.isOnline,
-			invalidator: syncContext.invalidator,
-			outboundQueue: syncContext.outboundQueue,
-		}),
-		[
-			syncContext.clientId,
-			syncContext.isConnected,
-			syncContext.isOnline,
-			syncContext.invalidator,
-			syncContext.outboundQueue,
-		],
-	);
+	const sync = useSyncCapability(syncContext);
 
 	return (
 		<PlatformProvider

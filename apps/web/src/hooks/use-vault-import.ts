@@ -4,6 +4,7 @@ import {
 	usePlatformCrypto,
 } from "@bittery/core/hooks";
 import { getClientForAccount } from "@bittery/core/services/account-resolver";
+import { useCallback, useMemo, useState } from "react";
 import {
 	getImportProvider,
 	type ImportErrorCode,
@@ -14,8 +15,7 @@ import {
 	type ImportSourceItem,
 	type ImportSourceVault,
 	type ImportSourceVaultNameCode,
-} from "@bittery/shared/import";
-import { useCallback, useMemo, useState } from "react";
+} from "@/lib/import";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "@/providers/sync-provider";

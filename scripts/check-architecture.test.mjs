@@ -21,7 +21,7 @@ test("extracts supported imports without matching comments or ordinary strings",
 		export { thing } from "../shared/src/thing";
 		export * from '@bittery/types';
 		const lazy = import(\`@bittery/sync\`);
-		const configured = import("@bittery/device", { with: { type: "json" } });
+		const configured = import("@bittery/config", { with: { type: "json" } });
 		const rejected = import(\`ignored-\${name}\`);
 		const interpolated = \`ignored-\${import("@bittery/storage")}\`;
 		const legacy = require("../../apps/web/src/config"); // require("ignored")
@@ -34,7 +34,7 @@ test("extracts supported imports without matching comments or ordinary strings",
 		"../shared/src/thing",
 		"@bittery/types",
 		"@bittery/sync",
-		"@bittery/device",
+		"@bittery/config",
 		"@bittery/storage",
 		"../../apps/web/src/config",
 	]);

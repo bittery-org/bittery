@@ -1,4 +1,4 @@
-import { Button, toast, type VaultIconState } from "@bittery/ui";
+import { AccountAvatar, Button, toast, type VaultIconState } from "@bittery/ui";
 import {
 	IconEye,
 	IconEyeOff,
@@ -17,23 +17,6 @@ import { PENDING_DESKTOP_UNLOCK } from "../background/desktop-protocol";
 import { sendMessage } from "../lib/messaging";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
-
-/** teamName → name → email initials, never a raw-email slice artifact. */
-function getInitials(account: {
-	teamName?: string;
-	name: string;
-	email: string;
-}) {
-	const source = account.teamName || account.name;
-	if (source) {
-		const parts = source.trim().split(/\s+/);
-		if (parts.length >= 2) {
-			return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-		}
-		return source.slice(0, 2).toUpperCase();
-	}
-	return account.email.slice(0, 2).toUpperCase();
-}
 
 export function UnlockPage() {
 	const navigate = useNavigate();
@@ -335,12 +318,11 @@ export function UnlockPage() {
 				<div className="mt-1.5 mb-[18px] flex items-center gap-1.5 text-muted-foreground text-xs">
 					{isSingle && primaryAccount ? (
 						<>
-							<span
-								aria-hidden
-								className="flex size-4 items-center justify-center rounded-[4.5px] bg-linear-to-br from-primary to-primary-deep font-semibold text-[7.5px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.18)]"
-							>
-								{getInitials(primaryAccount)}
-							</span>
+							<AccountAvatar
+								account={primaryAccount}
+								size="xs"
+								className="size-4 rounded-[4.5px] text-[7.5px]"
+							/>
 							<span className="max-w-[240px] truncate">
 								{primaryAccount.email}
 							</span>

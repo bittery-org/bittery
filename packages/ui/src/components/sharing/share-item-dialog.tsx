@@ -475,7 +475,7 @@ export function ShareItemDialog({
 						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={handleClose}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							variant="destructive"
 						>
 							{m.sharing_item_dialog_action_close_anyway()}
 						</AlertDialogAction>

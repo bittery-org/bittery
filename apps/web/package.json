@@ -27,7 +27,6 @@
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/sync": "workspace:*",
-		"@bittery/types": "workspace:*",
 		"@bittery/ui": "workspace:*",
 		"@dnd-kit/core": "^6.3.1",
 		"@inlang/paraglide-js": "^2.23.2",
@@ -50,7 +49,7 @@
 		"tailwindcss": "^4.3.3",
 		"tw-animate-css": "^1.2.5",
 		"use-sync-external-store": "^1.6.0",
-		"vite-tsconfig-paths": "^6.1.1",
+		"zod": "catalog:",
 		"zxcvbn": "^4.4.2"
 	},
 	"devDependencies": {

@@ -1,8 +1,10 @@
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import {
+	ActiveRail,
 	Avatar,
 	AvatarFallback,
+	activeRailTarget,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -27,6 +29,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useRef } from "react";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
 import {
@@ -153,6 +156,7 @@ export function AppSidebar() {
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
 	const { state, isMobile, setOpenMobile } = useSidebar();
+	const navGroupRef = useRef<HTMLDivElement>(null);
 
 	const handleMobileLinkClick = () => {
 		if (isMobile) setOpenMobile(false);
@@ -217,7 +221,8 @@ export function AppSidebar() {
 			<SidebarContent className="relative">
 				<SidebarGroup>
 					<SidebarGroupLabel>{m.nav_group_navigation()}</SidebarGroupLabel>
-					<SidebarGroupContent>
+					<SidebarGroupContent ref={navGroupRef} className="relative">
+						<ActiveRail containerRef={navGroupRef} className="-left-2" />
 						<SidebarMenu>
 							{navItems.map((item) => {
 								const label = getNavLabel(item.path, m);
@@ -225,16 +230,11 @@ export function AppSidebar() {
 
 								return (
 									<SidebarMenuItem key={item.path}>
-										{isActive && (
-											<span
-												aria-hidden
-												className="absolute top-[6px] bottom-[6px] -left-2 z-10 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-											/>
-										)}
 										<SidebarMenuButton
 											asChild
 											isActive={isActive}
 											tooltip={label}
+											{...activeRailTarget(isActive)}
 										>
 											<Link to={item.path} onClick={handleMobileLinkClick}>
 												<item.icon />

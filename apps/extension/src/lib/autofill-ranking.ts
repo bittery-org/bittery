@@ -13,7 +13,7 @@
  */
 
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { getBaseDomain, normalizeHost, parseHostname } from "./hostname";
+import { normalizeHost, parseHostname, registrableDomain } from "./hostname";
 
 /**
  * Match quality of a single item URL against the page's hostname.
@@ -50,7 +50,7 @@ export function scoreUrlMatch(url: string, targetHostname: string): number {
 	if (itemHost === target) return UrlMatchScore.EXACT;
 	if (target.endsWith(`.${itemHost}`)) return UrlMatchScore.PARENT_DOMAIN;
 	if (itemHost.endsWith(`.${target}`)) return UrlMatchScore.SUBDOMAIN;
-	if (getBaseDomain(itemHost) === getBaseDomain(target)) {
+	if (registrableDomain(itemHost) === registrableDomain(target)) {
 		return UrlMatchScore.SIBLING_DOMAIN;
 	}
 

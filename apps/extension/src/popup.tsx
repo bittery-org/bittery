@@ -15,6 +15,7 @@ import { subscribeBackgroundPushes } from "./lib/background-events";
 import { sendMessage } from "./lib/messaging";
 import { subscribePopupAccountRuntime } from "./lib/popup-account-runtime-bridge";
 import { createPopupAccountVaultRuntime } from "./lib/popup-account-vault-runtime";
+import { getOrCreateRoot } from "./lib/react-root";
 import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
@@ -131,7 +132,7 @@ function Popup() {
 
 const root = document.getElementById("root");
 if (root) {
-	ReactDOM.createRoot(root).render(
+	getOrCreateRoot(root, (container) => ReactDOM.createRoot(container)).render(
 		<React.StrictMode>
 			<Popup />
 		</React.StrictMode>,

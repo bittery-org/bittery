@@ -7,11 +7,7 @@
  */
 
 // Account metadata sync hooks
-export {
-	type UseAccountMetadataSyncOptions,
-	useAccountMetadataSync,
-	useAccountMetadataSyncAll,
-} from "./use-account-metadata-sync";
+export { useAccountMetadataSyncAll } from "./use-account-metadata-sync";
 // Account switcher hook (multi-account management)
 export {
 	type UseAccountSwitcherOptions,
@@ -26,11 +22,6 @@ export {
 	type UseBiometricUnlockOptions,
 	useBiometricUnlock,
 } from "./use-biometric-unlock";
-// Check email hook
-export {
-	type UseCheckEmailOptions,
-	useCheckEmail,
-} from "./use-check-email";
 // Login hook
 export {
 	type LoginInput,

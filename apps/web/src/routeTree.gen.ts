@@ -9,48 +9,63 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/_auth'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ShareTokenRouteImport } from './routes/share.$token'
-import { Route as AuthSignupRouteImport } from './routes/_auth/signup'
-import { Route as AuthRecoverRouteImport } from './routes/_auth/recover'
-import { Route as AuthLoginRouteImport } from './routes/_auth/login'
-import { Route as AppSecurityRouteImport } from './routes/_app/security'
-import { Route as AppHomeRouteImport } from './routes/_app/home'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
+import { Route as AppHomeRouteImport } from './routes/_app/home'
+import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppVaultsRouteRouteImport } from './routes/_app/vaults/route'
-import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
-import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
-import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AuthLoginRouteImport } from './routes/_auth/login'
+import { Route as AuthRecoverRouteImport } from './routes/_auth/recover'
+import { Route as AuthSignupRouteImport } from './routes/_auth/signup'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
-import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
-import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
+import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppVaultsFavoritesRouteImport } from './routes/_app/vaults/favorites'
+import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
+import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
 import { Route as AppVaultsTagTagNameRouteImport } from './routes/_app/vaults/tag.$tagName'
 
-const AuthRoute = AuthRouteImport.update({
-  id: '/_auth',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
   id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/_auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ShareTokenRoute = ShareTokenRouteImport.update({
-  id: '/share/$token',
-  path: '/share/$token',
-  getParentRoute: () => rootRouteImport,
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
 } as any)
-const AuthSignupRoute = AuthSignupRouteImport.update({
-  id: '/signup',
-  path: '/signup',
+const AppHomeRoute = AppHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSecurityRoute = AppSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppRoute,
+} as any).lazy(() => import('./routes/_app/security.lazy').then((d) => d.Route))
+const AppVaultsRouteRoute = AppVaultsRouteRouteImport.update({
+  id: '/vaults',
+  path: '/vaults',
+  getParentRoute: () => AppRoute,
+} as any)
+const AuthLoginRoute = AuthLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => AuthRoute,
 } as any)
 const AuthRecoverRoute = AuthRecoverRouteImport.update({
@@ -58,39 +73,19 @@ const AuthRecoverRoute = AuthRecoverRouteImport.update({
   path: '/recover',
   getParentRoute: () => AuthRoute,
 } as any)
-const AuthLoginRoute = AuthLoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const AuthSignupRoute = AuthSignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
   getParentRoute: () => AuthRoute,
 } as any)
-const AppSecurityRoute = AppSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
-  getParentRoute: () => AppRoute,
-} as any).lazy(() => import('./routes/_app/security.lazy').then((d) => d.Route))
-const AppHomeRoute = AppHomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => AppRoute,
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AppBillingRoute = AppBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppVaultsRouteRoute = AppVaultsRouteRouteImport.update({
-  id: '/vaults',
-  path: '/vaults',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppVaultsRouteRoute,
-} as any)
-const AppTeamIndexRoute = AppTeamIndexRouteImport.update({
-  id: '/team/',
-  path: '/team/',
+const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -98,25 +93,30 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/settings/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
-  id: '/admin/',
-  path: '/admin/',
+const AppTeamIndexRoute = AppTeamIndexRouteImport.update({
+  id: '/team/',
+  path: '/team/',
   getParentRoute: () => AppRoute,
 } as any)
-const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
-  id: '/invite/$token',
-  path: '/invite/$token',
-  getParentRoute: () => AuthRoute,
-} as any)
-const AppVaultsTrashRoute = AppVaultsTrashRouteImport.update({
-  id: '/trash',
-  path: '/trash',
+const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => AppVaultsRouteRoute,
 } as any)
 const AppVaultsFavoritesRoute = AppVaultsFavoritesRouteImport.update({
   id: '/favorites',
   path: '/favorites',
   getParentRoute: () => AppVaultsRouteRoute,
+} as any)
+const AppVaultsTrashRoute = AppVaultsTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AppVaultsRouteRoute,
+} as any)
+const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => AuthRoute,
 } as any)
 const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
   id: '/$vaultId/',
@@ -264,11 +264,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_auth': {
-      id: '/_auth'
-      path: ''
+    '/': {
+      id: '/'
+      path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof AuthRouteImport
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app': {
@@ -278,46 +278,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
+    '/_auth': {
+      id: '/_auth'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/share/$token': {
-      id: '/share/$token'
-      path: '/share/$token'
-      fullPath: '/share/$token'
-      preLoaderRoute: typeof ShareTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_auth/signup': {
-      id: '/_auth/signup'
-      path: '/signup'
-      fullPath: '/signup'
-      preLoaderRoute: typeof AuthSignupRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/recover': {
-      id: '/_auth/recover'
-      path: '/recover'
-      fullPath: '/recover'
-      preLoaderRoute: typeof AuthRecoverRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/login': {
-      id: '/_auth/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof AuthLoginRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_app/security': {
-      id: '/_app/security'
-      path: '/security'
-      fullPath: '/security'
-      preLoaderRoute: typeof AppSecurityRouteImport
+    '/_app/billing': {
+      id: '/_app/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/home': {
@@ -327,11 +299,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHomeRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/billing': {
-      id: '/_app/billing'
-      path: '/billing'
-      fullPath: '/billing'
-      preLoaderRoute: typeof AppBillingRouteImport
+    '/_app/security': {
+      id: '/_app/security'
+      path: '/security'
+      fullPath: '/security'
+      preLoaderRoute: typeof AppSecurityRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/vaults': {
@@ -341,18 +313,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultsRouteRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/vaults/': {
-      id: '/_app/vaults/'
-      path: '/'
-      fullPath: '/vaults/'
-      preLoaderRoute: typeof AppVaultsIndexRouteImport
-      parentRoute: typeof AppVaultsRouteRoute
+    '/_auth/login': {
+      id: '/_auth/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof AuthLoginRouteImport
+      parentRoute: typeof AuthRoute
     }
-    '/_app/team/': {
-      id: '/_app/team/'
-      path: '/team'
-      fullPath: '/team/'
-      preLoaderRoute: typeof AppTeamIndexRouteImport
+    '/_auth/recover': {
+      id: '/_auth/recover'
+      path: '/recover'
+      fullPath: '/recover'
+      preLoaderRoute: typeof AuthRecoverRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/signup': {
+      id: '/_auth/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof AuthSignupRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/admin/': {
+      id: '/_app/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AppAdminIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -362,25 +355,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/admin/': {
-      id: '/_app/admin/'
-      path: '/admin'
-      fullPath: '/admin/'
-      preLoaderRoute: typeof AppAdminIndexRouteImport
+    '/_app/team/': {
+      id: '/_app/team/'
+      path: '/team'
+      fullPath: '/team/'
+      preLoaderRoute: typeof AppTeamIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_auth/invite/$token': {
-      id: '/_auth/invite/$token'
-      path: '/invite/$token'
-      fullPath: '/invite/$token'
-      preLoaderRoute: typeof AuthInviteTokenRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_app/vaults/trash': {
-      id: '/_app/vaults/trash'
-      path: '/trash'
-      fullPath: '/vaults/trash'
-      preLoaderRoute: typeof AppVaultsTrashRouteImport
+    '/_app/vaults/': {
+      id: '/_app/vaults/'
+      path: '/'
+      fullPath: '/vaults/'
+      preLoaderRoute: typeof AppVaultsIndexRouteImport
       parentRoute: typeof AppVaultsRouteRoute
     }
     '/_app/vaults/favorites': {
@@ -389,6 +375,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/vaults/favorites'
       preLoaderRoute: typeof AppVaultsFavoritesRouteImport
       parentRoute: typeof AppVaultsRouteRoute
+    }
+    '/_app/vaults/trash': {
+      id: '/_app/vaults/trash'
+      path: '/trash'
+      fullPath: '/vaults/trash'
+      preLoaderRoute: typeof AppVaultsTrashRouteImport
+      parentRoute: typeof AppVaultsRouteRoute
+    }
+    '/_auth/invite/$token': {
+      id: '/_auth/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof AuthInviteTokenRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/_app/vaults/$vaultId/': {
       id: '/_app/vaults/$vaultId/'

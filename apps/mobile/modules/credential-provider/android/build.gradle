@@ -66,6 +66,13 @@ dependencies {
   implementation "androidx.room:room-runtime:2.7.0"
   implementation "androidx.room:room-ktx:2.7.0"
   kapt "androidx.room:room-compiler:2.7.0"
+
+  // JVM unit tests (src/test) - no emulator, so they can run anywhere.
+  // org.json is only a stub in the android.jar the unit-test classpath uses;
+  // the real artifact is needed to parse the shared domain-matching vectors.
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20250107"
+
   androidTestImplementation "androidx.room:room-testing:2.7.0"
   androidTestImplementation "androidx.test:core:1.6.1"
   androidTestImplementation "androidx.test.ext:junit:1.2.1"

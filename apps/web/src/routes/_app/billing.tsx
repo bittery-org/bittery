@@ -1,3 +1,4 @@
+import { formatDate } from "@bittery/i18n/format/browser";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries, apiQueryKeys } from "@bittery/shared/api-query";
@@ -33,7 +34,6 @@ import {
 	formatUsagePercentage,
 	getAttachmentUsageSnapshot,
 } from "@/lib/billing-attachment-usage";
-import { formatDate } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/billing")({

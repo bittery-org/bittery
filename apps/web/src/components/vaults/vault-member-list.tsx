@@ -1,19 +1,11 @@
 import type { VaultMember } from "@bittery/api-contract";
 import { useApiClient } from "@bittery/shared/api";
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
 	Avatar,
 	AvatarFallback,
 	Badge,
 	Button,
+	ConfirmDialog,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -269,8 +261,8 @@ export function VaultMemberList({
 								)}
 
 								{canRemove && (
-									<AlertDialog>
-										<AlertDialogTrigger asChild>
+									<ConfirmDialog
+										trigger={
 											<Button
 												variant="ghost"
 												size="icon"
@@ -284,44 +276,35 @@ export function VaultMemberList({
 													<Trash2 className="h-3.5 w-3.5" />
 												)}
 											</Button>
-										</AlertDialogTrigger>
-										<AlertDialogContent>
-											<AlertDialogHeader>
-												<AlertDialogTitle>
-													{m.vaults_member_list_remove_dialog_title()}
-												</AlertDialogTitle>
-												<AlertDialogDescription>
-													{m.vaults_member_list_remove_dialog_description({
-														name: member.name,
-													})}
-													<br />
-													<br />
-													<span className="text-muted-foreground text-xs">
-														{m.vaults_member_list_remove_dialog_rotation_notice()}
-													</span>
-												</AlertDialogDescription>
-											</AlertDialogHeader>
-											<AlertDialogFooter>
-												<AlertDialogCancel disabled={isRotating}>
-													{m.vaults_member_list_remove_dialog_action_cancel()}
-												</AlertDialogCancel>
-												<AlertDialogAction
-													onClick={() => handleRemove(member.userId)}
-													disabled={isRotating}
-													className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-												>
-													{isRotating ? (
-														<>
-															<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-															{m.vaults_member_list_remove_dialog_action_rotating()}
-														</>
-													) : (
-														m.vaults_member_list_remove_dialog_action_confirm()
-													)}
-												</AlertDialogAction>
-											</AlertDialogFooter>
-										</AlertDialogContent>
-									</AlertDialog>
+										}
+										title={m.vaults_member_list_remove_dialog_title()}
+										description={
+											<>
+												{m.vaults_member_list_remove_dialog_description({
+													name: member.name,
+												})}
+												<br />
+												<br />
+												<span className="text-muted-foreground text-xs">
+													{m.vaults_member_list_remove_dialog_rotation_notice()}
+												</span>
+											</>
+										}
+										cancelLabel={m.vaults_member_list_remove_dialog_action_cancel()}
+										confirmLabel={
+											isRotating ? (
+												<>
+													<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+													{m.vaults_member_list_remove_dialog_action_rotating()}
+												</>
+											) : (
+												m.vaults_member_list_remove_dialog_action_confirm()
+											)
+										}
+										onConfirm={() => handleRemove(member.userId)}
+										busy={isRotating}
+										destructive
+									/>
 								)}
 							</div>
 						</div>

@@ -29,6 +29,8 @@ import type {
 	TauriBiometryStatus,
 	TauriDeps,
 	TauriInvoke,
+	TauriRecordStoreApplyArgs,
+	TauriRecordStoreEntry,
 	TauriStore,
 } from "./tauri";
 
@@ -43,40 +45,57 @@ import type {
  * `sets` is what proves `recordPut` writes one key rather than rewriting a collection.
  */
 export class TauriStoreDouble implements TauriStore {
-	readonly entries = new Map<string, unknown>();
+	readonly contents = new Map<string, unknown>();
+	/** Every plugin-store method crosses the Tauri IPC boundary in production. */
+	ipcCalls = 0;
 	/** Every `set` call, in order, as `[key, value]`. */
 	readonly sets: Array<[string, unknown]> = [];
 	/** Every deleted key, in order. */
 	readonly deletes: string[] = [];
+	/** Every single-key read, in order. Each one is an IPC round trip. */
+	readonly gets: string[] = [];
 	/** How many times `save()` — an fsync in production — has been called. */
 	saves = 0;
 
 	async get<T>(key: string): Promise<T | undefined> {
-		return this.entries.has(key) ? (this.entries.get(key) as T) : undefined;
+		this.ipcCalls += 1;
+		this.gets.push(key);
+		return this.contents.has(key) ? (this.contents.get(key) as T) : undefined;
 	}
 
 	async set(key: string, value: unknown): Promise<void> {
+		this.ipcCalls += 1;
 		this.sets.push([key, value]);
-		this.entries.set(key, value);
+		this.contents.set(key, value);
 	}
 
 	async delete(key: string): Promise<boolean> {
+		this.ipcCalls += 1;
 		this.deletes.push(key);
-		return this.entries.delete(key);
+		return this.contents.delete(key);
 	}
 
 	async keys(): Promise<string[]> {
-		return [...this.entries.keys()];
+		this.ipcCalls += 1;
+		return [...this.contents.keys()];
+	}
+
+	async entries<T>(): Promise<Array<[string, T]>> {
+		this.ipcCalls += 1;
+		return [...this.contents] as Array<[string, T]>;
 	}
 
 	async save(): Promise<void> {
+		this.ipcCalls += 1;
 		this.saves += 1;
 	}
 
 	/** Forget the recorded calls without touching the stored data. */
 	resetCallLog(): void {
+		this.ipcCalls = 0;
 		this.sets.length = 0;
 		this.deletes.length = 0;
+		this.gets.length = 0;
 		this.saves = 0;
 	}
 }
@@ -100,19 +119,22 @@ export interface InvokeCall {
 export class KeychainDouble {
 	readonly entries = new Map<string, string>();
 	readonly calls: InvokeCall[] = [];
+	readonly recordCalls: InvokeCall[] = [];
 	/** When set, the next `keychain_get` rejects with it instead of answering. */
 	failNextGet: unknown = null;
 	/** When set, every `keychain_delete` rejects with it. */
 	failDelete: unknown = null;
+
+	constructor(private readonly store: TauriStoreDouble) {}
 
 	/** Typed exactly as the adapter consumes it. */
 	readonly invoke: TauriInvoke = ((
 		cmd: string,
 		args: Record<string, unknown>,
 	): Promise<unknown> => {
-		this.calls.push({ cmd, args });
 		switch (cmd) {
 			case "keychain_get": {
+				this.calls.push({ cmd, args });
 				if (this.failNextGet !== null) {
 					const failure = this.failNextGet;
 					this.failNextGet = null;
@@ -124,21 +146,67 @@ export class KeychainDouble {
 				);
 			}
 			case "keychain_set": {
+				this.calls.push({ cmd, args });
 				this.entries.set(String(args.key), String(args.value));
 				return Promise.resolve(undefined);
 			}
 			case "keychain_delete": {
+				this.calls.push({ cmd, args });
 				if (this.failDelete !== null) {
 					return Promise.reject(this.failDelete);
 				}
 				return Promise.resolve(this.entries.delete(String(args.key)));
+			}
+			case "record_store_apply": {
+				this.recordCalls.push({ cmd, args });
+				this.store.ipcCalls += 1;
+				const mutation = args as unknown as TauriRecordStoreApplyArgs;
+				let changed = mutation.puts.length > 0;
+				for (const prefix of mutation.clearPrefixes) {
+					for (const key of [...this.store.contents.keys()]) {
+						if (key.startsWith(prefix)) {
+							this.store.deletes.push(key);
+							changed = this.store.contents.delete(key) || changed;
+						}
+					}
+				}
+				for (const key of mutation.deletes) {
+					this.store.deletes.push(key);
+					changed = this.store.contents.delete(key) || changed;
+				}
+				for (const { key, value } of mutation.puts) {
+					this.store.sets.push([key, value]);
+					this.store.contents.set(key, value);
+				}
+				if (changed) {
+					this.store.saves += 1;
+				}
+				return Promise.resolve(undefined);
+			}
+			case "record_store_get": {
+				this.recordCalls.push({ cmd, args });
+				this.store.ipcCalls += 1;
+				const value = this.store.contents.get(String(args.key));
+				return Promise.resolve(typeof value === "string" ? value : null);
+			}
+			case "record_store_list": {
+				this.recordCalls.push({ cmd, args });
+				this.store.ipcCalls += 1;
+				const prefix = String(args.prefix);
+				const records: TauriRecordStoreEntry[] = [];
+				for (const [key, value] of this.store.contents) {
+					if (key.startsWith(prefix) && typeof value === "string") {
+						records.push({ key, value });
+					}
+				}
+				return Promise.resolve(records);
 			}
 			default:
 				return Promise.reject(
 					new Error(`Unexpected Tauri command "${cmd}" from a storage port`),
 				);
 		}
-	}) as TauriInvoke;
+	}) as unknown as TauriInvoke;
 }
 
 // ============================================================================
@@ -202,7 +270,7 @@ export function createTauriDoubles(
 	const store = new TauriStoreDouble();
 	stores.set("store.json", store);
 
-	const keychain = new KeychainDouble();
+	const keychain = new KeychainDouble(store);
 	const biometry = new BiometryDouble();
 
 	const deps: TauriDeps = {

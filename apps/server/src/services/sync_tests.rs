@@ -698,6 +698,213 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
 }
 
 #[tokio::test]
+async fn vault_deleted_event_remains_visible_after_its_vault_is_deleted() {
+    with_sync_test_app("sync_deleted_vault_cursor", |app| async move {
+        let owner_user_id = "user_sync_delete_owner";
+        let outsider_user_id = "user_sync_delete_outsider";
+        let retained_vault_id = "vault_sync_delete_retained";
+        let deleted_vault_id = "vault_sync_delete_target";
+        let baseline_event_id = "event_sync_delete_baseline";
+        let deleted_vault_prior_event_id = "event_sync_delete_target_prior";
+
+        seed_user(
+            &app.pool,
+            owner_user_id,
+            "Sync Delete Owner",
+            "sync-delete-owner@example.com",
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            outsider_user_id,
+            "Sync Delete Outsider",
+            "sync-delete-outsider@example.com",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            retained_vault_id,
+            "Retained Vault",
+            "personal",
+            owner_user_id,
+            None,
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            deleted_vault_id,
+            "Deleted Vault",
+            "personal",
+            owner_user_id,
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vault_key_sync_delete_retained",
+            retained_vault_id,
+            owner_user_id,
+            "encrypted-retained-key",
+            "owner",
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vault_key_sync_delete_target",
+            deleted_vault_id,
+            owner_user_id,
+            "encrypted-deleted-key",
+            "owner",
+        )
+        .await;
+        seed_sync_event(
+            &app.pool,
+            baseline_event_id,
+            "vault_updated",
+            retained_vault_id,
+            "vault",
+            Some(retained_vault_id),
+            owner_user_id,
+            1,
+            Some("offline-client"),
+            None,
+            datetime!(2025-05-01 10:00 UTC),
+        )
+        .await;
+        seed_sync_event(
+            &app.pool,
+            deleted_vault_prior_event_id,
+            "vault_updated",
+            deleted_vault_id,
+            "vault",
+            Some(deleted_vault_id),
+            owner_user_id,
+            1,
+            Some("offline-client"),
+            None,
+            datetime!(2025-05-01 11:00 UTC),
+        )
+        .await;
+
+        let owner_session = app.issue_session(owner_user_id).await;
+        let owner_headers = authenticated_json_headers(&owner_session.token);
+        let delete_response = app
+            .api_json(
+                Method::DELETE,
+                &format!("/api/v1/vaults/{deleted_vault_id}"),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
+        delete_response.assert_contract_status();
+        assert_eq!(delete_response.body["success"], json!(true));
+
+        let (deleted_event_id, deleted_event_vault_id) =
+            query_as::<_, (String, Option<String>)>(
+                "SELECT id, vault_id FROM sync_event WHERE user_id = $1 AND event_type = 'vault_deleted'::sync_event_type ORDER BY seq DESC LIMIT 1",
+            )
+            .bind(owner_user_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("vault deletion event should survive the vault deletion");
+        assert_eq!(deleted_event_vault_id, None);
+
+        let offline_catch_up = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/sync/changes?sinceId={baseline_event_id}"),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
+        offline_catch_up.assert_contract_status();
+        assert_eq!(offline_catch_up.body["requiresFullRefresh"], json!(false));
+        assert_eq!(offline_catch_up.body["events"].as_array().map(Vec::len), Some(1));
+        assert_eq!(offline_catch_up.body["events"][0]["id"], json!(deleted_event_id));
+        assert_eq!(offline_catch_up.body["events"][0]["type"], json!("vault_deleted"));
+        assert_eq!(
+            offline_catch_up.body["events"][0]["entityId"],
+            json!(deleted_vault_id)
+        );
+        assert_eq!(offline_catch_up.body["events"][0]["vaultId"], Value::Null);
+        assert_eq!(
+            offline_catch_up.body["cursor"]["id"],
+            json!(deleted_event_id)
+        );
+
+        let already_caught_up = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/sync/changes?sinceId={deleted_event_id}"),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
+        already_caught_up.assert_contract_status();
+        assert_eq!(already_caught_up.body["events"], json!([]));
+        assert_eq!(already_caught_up.body["requiresFullRefresh"], json!(false));
+
+        let offline_cursor_from_deleted_vault = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/sync/changes?sinceId={deleted_vault_prior_event_id}"),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
+        offline_cursor_from_deleted_vault.assert_contract_status();
+        assert_eq!(offline_cursor_from_deleted_vault.body["events"], json!([]));
+        assert_eq!(
+            offline_cursor_from_deleted_vault.body["requiresFullRefresh"],
+            json!(true)
+        );
+
+        let delete_last_vault = app
+            .api_json(
+                Method::DELETE,
+                &format!("/api/v1/vaults/{retained_vault_id}"),
+                None,
+                owner_headers.clone(),
+            )
+            .await;
+        delete_last_vault.assert_contract_status();
+        let last_vault_deleted_event_id = query_scalar::<_, String>(
+            "SELECT id FROM sync_event WHERE user_id = $1 AND event_type = 'vault_deleted'::sync_event_type AND entity_id = $2 ORDER BY seq DESC LIMIT 1",
+        )
+        .bind(owner_user_id)
+        .bind(retained_vault_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("last-vault deletion event should survive the vault deletion");
+        let no_remaining_vaults = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/sync/changes?sinceId={last_vault_deleted_event_id}"),
+                None,
+                owner_headers,
+            )
+            .await;
+        no_remaining_vaults.assert_contract_status();
+        assert_eq!(no_remaining_vaults.body["events"], json!([]));
+        assert_eq!(no_remaining_vaults.body["requiresFullRefresh"], json!(false));
+
+        let outsider_session = app.issue_session(outsider_user_id).await;
+        let outsider_probe = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/sync/changes?sinceId={deleted_event_id}"),
+                None,
+                authenticated_json_headers(&outsider_session.token),
+            )
+            .await;
+        outsider_probe.assert_contract_status();
+        assert_eq!(outsider_probe.body["events"], json!([]));
+        assert_eq!(outsider_probe.body["requiresFullRefresh"], json!(true));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
     with_sync_test_app("sync_changes_byte_budget", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;

@@ -40,14 +40,12 @@
 		"remark-mdx-frontmatter": "^5.2.0",
 		"tailwind-merge": "^3.6.0",
 		"tailwindcss": "^4.3.3",
-		"tw-animate-css": "^1.2.5",
-		"vite-tsconfig-paths": "^6.1.1"
+		"tw-animate-css": "^1.2.5"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@remotion/cli": "^4.0.507",
 		"@remotion/tailwind-v4": "^4.0.507",
-		"remotion": "^4.0.507",
 		"@tanstack/devtools-vite": "^0.8.3",
 		"@testing-library/dom": "^10.4.0",
 		"@testing-library/react": "^16.2.0",
@@ -56,6 +54,7 @@
 		"@types/react-dom": "catalog:",
 		"@vitejs/plugin-react": "^6.0.5",
 		"jsdom": "^26.0.0",
+		"remotion": "^4.0.507",
 		"typescript": "^5.7.2",
 		"vite": "^8.2.1",
 		"vitest": "^3.0.5",

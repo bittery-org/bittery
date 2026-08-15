@@ -17,6 +17,9 @@
 		"./adapters/wasm": {
 			"default": "./src/adapters/wasm.ts"
 		},
+		"./adapters/wasm-static": {
+			"default": "./src/adapters/wasm-static.ts"
+		},
 		"./adapters/react-native": {
 			"default": "./src/adapters/react-native.ts"
 		}

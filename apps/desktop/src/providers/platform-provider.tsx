@@ -8,9 +8,8 @@
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ISyncContext } from "@bittery/sync";
+import { useSyncCapability } from "@bittery/sync";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { useDesktopAccountRuntime } from "@/contexts/account-context";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
@@ -40,23 +39,7 @@ export function DesktopPlatformProvider({
 	const syncContext = useSyncContext();
 	const { manager, vaultRuntime } = useDesktopAccountRuntime();
 
-	// Map sync context to ISyncContext interface
-	const sync: ISyncContext = useMemo(
-		() => ({
-			clientId: syncContext.clientId,
-			isConnected: syncContext.isConnected,
-			isOnline: syncContext.isOnline,
-			invalidator: syncContext.invalidator,
-			outboundQueue: syncContext.outboundQueue,
-		}),
-		[
-			syncContext.clientId,
-			syncContext.isConnected,
-			syncContext.isOnline,
-			syncContext.invalidator,
-			syncContext.outboundQueue,
-		],
-	);
+	const sync = useSyncCapability(syncContext);
 
 	return (
 		<PlatformProvider

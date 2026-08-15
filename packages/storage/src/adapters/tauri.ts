@@ -12,7 +12,7 @@
  * | `secret*`              | `invoke("keychain_get" / "keychain_set" / ...)`      |
  * | `kv*` scope `device`   | `store.json`, key as given                           |
  * | `kv*` scope `session`  | `store.json`, key under the `session:` namespace     |
- * | records                | `store.json`, keys `record:{collection}:{id}`        |
+ * | records                | Rust batch commands over `store.json` record keys    |
  * | biometric              | `@choochmeque/tauri-plugin-biometry-api`             |
  *
  * `sessionSurvivesRestart` is `true`: a desktop process restart does not end the user's
@@ -28,7 +28,8 @@
  * `device_key` is secret-tier, so it lives only in the keychain; this port never mirrors it
  * into `store.json`.
  *
- * `recordPut` / `recordDelete` are O(1) — one `store.set` / `store.delete` on one key.
+ * Record mutations cross IPC once and flush once. The Rust command loops over store keys;
+ * a JavaScript loop over plugin-store methods would turn every record into another IPC call.
  *
  * All three Tauri modules are optional peer dependencies, so they stay behind dynamic
  * `import()` and their loaded handles are memoised in a closure. The imports are reachable
@@ -76,14 +77,16 @@ const RECORD_PREFIX = "record:";
  * The slice of `@tauri-apps/plugin-store`'s `Store` this adapter uses.
  *
  * Declared structurally rather than imported as the plugin's `Store` class so the test
- * doubles have five methods to implement instead of a class to subclass. The real `Store`
- * satisfies it.
+ * doubles have a handful of methods to implement instead of a class to subclass. The real
+ * `Store` satisfies it.
  */
 export interface TauriStore {
 	get<T>(key: string): Promise<T | undefined>;
 	set(key: string, value: unknown): Promise<void>;
 	delete(key: string): Promise<boolean>;
 	keys(): Promise<string[]>;
+	/** Every key and value in one call. `recordList` needs it to stay a single round trip. */
+	entries<T>(): Promise<Array<[string, T]>>;
 	save(): Promise<void>;
 }
 
@@ -106,6 +109,23 @@ export interface TauriInvoke {
 	(cmd: "keychain_set", args: { key: string; value: string }): Promise<void>;
 	(cmd: "keychain_get", args: { key: string }): Promise<string | null>;
 	(cmd: "keychain_delete", args: { key: string }): Promise<boolean>;
+	(cmd: "record_store_apply", args: TauriRecordStoreApplyArgs): Promise<void>;
+	(cmd: "record_store_get", args: { key: string }): Promise<string | null>;
+	(
+		cmd: "record_store_list",
+		args: { prefix: string },
+	): Promise<TauriRecordStoreEntry[]>;
+}
+
+export interface TauriRecordStoreEntry {
+	key: string;
+	value: string;
+}
+
+export interface TauriRecordStoreApplyArgs {
+	puts: TauriRecordStoreEntry[];
+	deletes: string[];
+	clearPrefixes: string[];
 }
 
 /** `Status` from `@choochmeque/tauri-plugin-biometry-api`, widened to what we read. */
@@ -144,7 +164,7 @@ const defaultDeps: TauriDeps = {
 	},
 	loadInvoke: async () => {
 		const module = await import("@tauri-apps/api/core");
-		return module.invoke as TauriInvoke;
+		return module.invoke as unknown as TauriInvoke;
 	},
 	loadBiometry: async () =>
 		await import("@choochmeque/tauri-plugin-biometry-api"),
@@ -390,61 +410,64 @@ export function createTauriRecordPort(
 	deps: TauriDeps = defaultDeps,
 ): RecordPort {
 	const store = memoise(() => deps.loadStore(STORE_PATH));
+	const invoke = memoise(() => deps.loadInvoke());
 
-	/** Keys currently in the store that belong to `collection`. */
-	const keysIn = async (
-		handle: TauriStore,
-		collection: string,
-	): Promise<string[]> => {
-		const prefix = collectionPrefix(collection);
-		return (await handle.keys()).filter((key) => key.startsWith(prefix));
+	const apply = async (args: TauriRecordStoreApplyArgs): Promise<void> => {
+		await (await invoke())("record_store_apply", args);
 	};
 
 	return {
 		recordKeyPrefix: RECORD_PREFIX,
 		initialize: async () => {
 			await store();
+			await invoke();
 		},
 
-		recordPut: async (collection, id, value) => {
-			const handle = await store();
-			await commit(handle, () => handle.set(recordKey(collection, id), value));
+		recordPut: async (collection, id, value) =>
+			apply({
+				puts: [{ key: recordKey(collection, id), value }],
+				deletes: [],
+				clearPrefixes: [],
+			}),
+
+		recordPutMany: async (collection, records) => {
+			if (records.length === 0) {
+				return;
+			}
+			await apply({
+				puts: records.map((record) => ({
+					key: recordKey(collection, record.id),
+					value: record.value,
+				})),
+				deletes: [],
+				clearPrefixes: [],
+			});
 		},
 
 		recordGet: async (collection, id) =>
-			readString(await store(), recordKey(collection, id)),
+			(await invoke())("record_store_get", {
+				key: recordKey(collection, id),
+			}),
 
-		recordDelete: async (collection, id) => {
-			const handle = await store();
-			await commit(handle, () => handle.delete(recordKey(collection, id)));
-		},
+		recordDelete: async (collection, id) =>
+			apply({
+				puts: [],
+				deletes: [recordKey(collection, id)],
+				clearPrefixes: [],
+			}),
 
 		recordList: async (collection) => {
-			const handle = await store();
 			const prefix = collectionPrefix(collection);
-			const records: Array<{ id: string; value: string }> = [];
-			for (const key of await keysIn(handle, collection)) {
-				const value = await readString(handle, key);
-				if (value !== null) {
-					records.push({ id: key.slice(prefix.length), value });
-				}
-			}
-			return records;
+			return (await (await invoke())("record_store_list", { prefix })).map(
+				({ key, value }) => ({ id: key.slice(prefix.length), value }),
+			);
 		},
 
-		recordClear: async (collection) => {
-			const handle = await store();
-			const keys = await keysIn(handle, collection);
-			if (keys.length === 0) {
-				return;
-			}
-			// N deletes, one fsync — the widest coalescing that still flushes before the
-			// call the caller awaited resolves.
-			await commit(handle, async () => {
-				for (const key of keys) {
-					await handle.delete(key);
-				}
-			});
-		},
+		recordClear: async (collection) =>
+			apply({
+				puts: [],
+				deletes: [],
+				clearPrefixes: [collectionPrefix(collection)],
+			}),
 	};
 }

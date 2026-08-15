@@ -48,16 +48,29 @@ Light mode mirrors this (bg `0.985` → sidebar `0.965` → card/popover white) 
 
 ## Recipes (copy these, don't invent)
 
-**Selection (list rows, nav items, table rows)** — never a solid purple fill, never flipped text color:
+**Active nav rows and selected list rows** — the row carries no fill at all. Selection is weight, colour, and one indicator bar that the *list* owns:
+
+```
+font-medium text-foreground        // nav rows; the icon also goes text-primary
+```
+
+The bar is `ActiveRail` (`packages/ui/src/components/active-rail.tsx`): one element per list that measures the active row and slides to it, so moving between rows reads as a single object travelling rather than a bar teleporting. Mount it inside the list's scroll container (which must be `relative`) and spread `activeRailTarget(isActive)` on every row:
+
+```tsx
+<div ref={listRef} className="relative flex-1 overflow-y-auto">
+  <ActiveRail containerRef={listRef} />
+  {rows.map((row) => <Row {...activeRailTarget(row.id === activeId)} />)}
+</div>
+```
+
+One rail per scroll container — a list separated by a divider (e.g. a pinned Trash footer) gets its own, because the line has nothing to travel across. `VaultItemListRow` and `SidebarMenuButton` already emit the target attribute; hosts only mount the rail.
+
+**Active rows drop their hover background.** Without a fill, a hover tint on the active row would read louder than selection itself.
+
+**Selection inside menus, dialogs, tables, and cards** keeps the tinted surface, because those have no list to hang a rail on:
 
 ```
 bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]
-```
-
-plus, on nav/list rows, the glowing indicator bar:
-
-```html
-<span aria-hidden class="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]" />
 ```
 
 **Hover** — always neutral: `hover:bg-accent` (or `hover:bg-foreground/4` on plain rows, `hover:bg-sidebar-accent` in the sidebar, `hover:bg-overlay` inside popovers). Never purple.
@@ -109,6 +122,8 @@ Do not add new ambient purple without explicit user sign-off.
 ## Motion
 
 Light touch: 100–150ms ease transitions on background/color/opacity; popovers ~130ms with slight scale/translate; hover-revealed actions fade via `opacity-0 group-hover:opacity-100`. No springy or attention-seeking animation.
+
+The one positional move is `ActiveRail`: 200ms on `cubic-bezier(0.32,0.72,0,1)`, honouring `motion-reduce`. It travels further than a colour fade, so it gets more time; it never slides in from an edge when nothing was selected before.
 
 ## Process rules for agents
 

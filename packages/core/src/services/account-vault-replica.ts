@@ -1123,6 +1123,8 @@ export class AccountVaultReplica {
 					);
 				}
 
+				const pageItems: CachedEncryptedItem[] = [];
+				const pageVaults: CachedVaultMetadata[] = [];
 				for (const rawItem of travelMode.filterItems(this.accountId, [
 					...page.items,
 				])) {
@@ -1135,15 +1137,19 @@ export class AccountVaultReplica {
 					// A staged bootstrap record always carries the field, so a promoted
 					// generation never mixes "no attachments" with "not loaded".
 					cachedItem.attachments ??= [];
-					await staging.upsertCachedItem(cachedItem);
+					pageItems.push(cachedItem);
 
-					await staging.upsertCachedVault({
+					pageVaults.push({
 						...toCachedVaultFields(rawItem.vault),
 						accountId: this.accountId,
 						accountEmail: this.accountEmail,
 						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					});
 				}
+				// One write per page, not per item: on desktop each staged record would
+				// otherwise cost its own fsync.
+				await staging.upsertCachedItems(pageItems);
+				await staging.upsertCachedVaults(pageVaults);
 
 				if (!page.hasMore || !page.nextCursor) {
 					break;

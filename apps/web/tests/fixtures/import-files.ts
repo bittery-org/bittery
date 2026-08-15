@@ -2,7 +2,7 @@
  * The export files the import specs feed to the import dialog.
  *
  * Everything a provider's own unit tests already pin byte-for-byte is reused
- * from `packages/shared/src/__tests__/fixtures` rather than copied: those files
+ * from `src/lib/import/__tests__/fixtures` rather than copied: those files
  * are real sanitized exports, their SHA-256 is asserted in the unit suite, and
  * `biome.json` excludes that directory from formatting so the bytes stay put. A
  * second copy under `apps/web` would drift the moment one of them is refreshed.
@@ -25,7 +25,7 @@ const testsDir = path.resolve(
 /** Where the provider suites keep their pinned exports. */
 const sharedFixturesDir = path.resolve(
 	testsDir,
-	"../../../packages/shared/src/__tests__/fixtures",
+	"../src/lib/import/__tests__/fixtures",
 );
 
 /** Files authored for this suite, because no provider suite commits one. */

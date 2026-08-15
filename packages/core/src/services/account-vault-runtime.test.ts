@@ -185,6 +185,31 @@ describe("AccountVaultRuntime", () => {
 		expect(Object.keys(opened[0] ?? {})).not.toContain("authToken");
 	});
 
+	it("keeps hydrated cached items visible when account state is unchanged", async () => {
+		const source = new Source();
+		source.active = "a";
+		source.accounts = [account("a")];
+		source.unlocked = ["a"];
+		let cacheOpenings = 0;
+		const repository = {
+			setLocalActiveAccounts: () => {},
+			hydrateLocalAccounts: async () => {
+				cacheOpenings++;
+			},
+		} as unknown as VaultRepository;
+		const runtime = startRuntime(source, repository);
+		await runtime.retry();
+		await Promise.resolve();
+		await Promise.resolve();
+		const settledCacheOpenings = cacheOpenings;
+
+		source.emit();
+
+		expect(runtime.getSnapshot().isLoading).toBe(false);
+		await Promise.resolve();
+		expect(cacheOpenings).toBe(settledCacheOpenings);
+	});
+
 	it("exposes failures and clears them on retry", async () => {
 		const source = new Source();
 		source.active = "a";

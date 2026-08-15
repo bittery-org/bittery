@@ -1,7 +1,7 @@
 import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
-import { useSyncClientId, useWebSync } from "../hooks/use-web-sync";
+import { useWebSync } from "../hooks/use-web-sync";
 import { useAccountRuntime } from "./account-runtime-provider";
 
 /** Web adds nothing to what `useSync` publishes; the shape lives in `@bittery/sync`. */
@@ -19,8 +19,8 @@ export function SyncProvider({
 	queryClient: QueryClient;
 	enabled?: boolean;
 }) {
-	const { manager, vaultRuntime } = useAccountRuntime();
-	const syncState = useWebSync(queryClient, manager, vaultRuntime, enabled);
+	const { manager } = useAccountRuntime();
+	const syncState = useWebSync(queryClient, manager, enabled);
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>
@@ -36,14 +36,6 @@ export function useSyncContext() {
 		throw new Error("useSyncContext must be used within a SyncProvider");
 	}
 	return context;
-}
-
-/**
- * Hook to get client ID without needing the full context
- * Useful for mutations that need to pass clientId
- */
-export function useClientId(): string {
-	return useSyncClientId();
 }
 
 /**

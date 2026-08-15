@@ -19,6 +19,7 @@ import android.view.autofill.AutofillId
 import androidx.annotation.RequiresApi
 import androidx.autofill.inline.UiVersions
 import expo.modules.credentialprovider.activity.AutofillAuthActivity
+import expo.modules.credentialprovider.domain.DomainMatch
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -358,19 +359,8 @@ class BitteryAutofillService : AutofillService() {
         return null
     }
 
-    private fun extractDomain(origin: String?): String? {
-        if (origin.isNullOrBlank()) return null
-        return try {
-            if (origin.startsWith("http")) {
-                val url = java.net.URL(origin)
-                url.host.removePrefix("www.")
-            } else {
-                origin.removePrefix("www.")
-            }
-        } catch (e: Exception) {
-            origin
-        }
-    }
+    private fun extractDomain(origin: String?): String? =
+        DomainMatch.normalizeHost(origin).takeIf { it.isNotEmpty() }
 
     private fun createAttributionIntent(): PendingIntent {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: Intent()

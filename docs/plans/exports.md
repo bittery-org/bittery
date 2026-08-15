@@ -4,12 +4,17 @@
 
 The export feature has been fully implemented. The plan below is preserved for reference.
 
+> **Path note (2026-08-14):** the import subsystem and `export-types.ts` moved from
+> `packages/shared` into `apps/web/src/lib/` — they had no consumer outside the web app
+> and were pulling `jszip` into every other app's dependency graph. Paths below are
+> updated; `getDecryptedVaultKey` in `packages/shared/src/vault-key-crypto.ts` did not move.
+
 **Implemented files:**
 
-- `packages/shared/src/export-types.ts` — flat `ExportedVault`, `ExportedItem`, `ExportedAttachment`, `VaultExportPayload` types
+- `apps/web/src/lib/export-types.ts` — flat `ExportedVault`, `ExportedItem`, `ExportedAttachment`, `VaultExportPayload` types
 - `apps/web/src/hooks/use-vault-export.ts` — export orchestration hook
 - `apps/web/src/components/export/vault-export-dialog.tsx` — export dialog component
-- `packages/shared/src/import/providers/bittery-bttrx.ts` — round-trip `.bttrx` import provider
+- `apps/web/src/lib/import/providers/bittery-bttrx.ts` — round-trip `.bttrx` import provider
 - `apps/web/src/routes/_app/settings/index.tsx` — export card and dialog mount
 - `packages/i18n/messages/en.json` — i18n keys for export UI
 
@@ -20,7 +25,7 @@ What already exists that the export feature can build on:
 - `getDecryptedVaultKey` utility in `packages/shared/src/vault-key-crypto.ts` — already used by the import hook
 - `buildItemEncryptionContext`, `buildAttachmentBlobEncryptionContext`, `buildAttachmentNameEncryptionContext` in `packages/core/src/services/encryption-context.ts`
 - JSZip is already a dependency (used by the 1Password `.1pux` import provider)
-- The import provider architecture in `packages/shared/src/import/` — registry, contract, and 1Password provider — can be extended with a `.bttrx` round-trip provider
+- The import provider architecture in `apps/web/src/lib/import/` — registry, contract, and 1Password provider — can be extended with a `.bttrx` round-trip provider
 
 ### Archive format: .bttrx
 
@@ -81,21 +86,21 @@ Items are stored flat with a `vaultId` property rather than nested under each va
 |---|---|
 | `apps/web/src/hooks/use-vault-export.ts` | Export orchestration hook |
 | `apps/web/src/components/export/vault-export-dialog.tsx` | Export dialog component |
-| `packages/shared/src/import/providers/bittery-bttrx.ts` | Round-trip import provider |
+| `apps/web/src/lib/import/providers/bittery-bttrx.ts` | Round-trip import provider |
 
 ### Files to modify
 
 | File | Change |
 |---|---|
-| `packages/shared/src/export-types.ts` | Update types to flat structure (see Phase 1) |
-| `packages/shared/src/import/types.ts` | Extend `ImportProviderId` union |
-| `packages/shared/src/import/provider-registry.ts` | Register `.bttrx` provider |
+| `apps/web/src/lib/export-types.ts` | Update types to flat structure (see Phase 1) |
+| `apps/web/src/lib/import/types.ts` | Extend `ImportProviderId` union |
+| `apps/web/src/lib/import/provider-registry.ts` | Register `.bttrx` provider |
 | `apps/web/src/routes/_app/settings/index.tsx` | Add export card + dialog mount |
 | `packages/i18n/messages/en.json` | Add i18n keys |
 
 ### Phase 1: Update shared types
 
-**`packages/shared/src/export-types.ts`**
+**`apps/web/src/lib/export-types.ts`**
 
 - Remove `items: ExportedItem[]` from `ExportedVault` — vaults become metadata-only
 - Add `vaultId: string` to `ExportedItem`
@@ -103,7 +108,7 @@ Items are stored flat with a `vaultId` property rather than nested under each va
 - Add `attachments?: ExportedAttachment[]` to `ExportedItem`
 - Change `VaultExportPayload` to have a top-level flat `items: ExportedItem[]` instead of items nested under each vault
 
-**`packages/shared/src/import/types.ts`**
+**`apps/web/src/lib/import/types.ts`**
 
 - Extend `ImportProviderId` from `"1password-1pux"` to `"1password-1pux" | "bittery-bttrx"`
 
@@ -179,7 +184,7 @@ View states:
 
 ### Phase 6: .bttrx import provider (round-trip)
 
-**`packages/shared/src/import/providers/bittery-bttrx.ts`** (new file)
+**`apps/web/src/lib/import/providers/bittery-bttrx.ts`** (new file)
 
 ```
 id: "bittery-bttrx"
@@ -198,7 +203,7 @@ fileTypeLabel: ".bttrx"
 5. Items with `attachments` in the export emit an `attachments-skipped` warning — attachment re-upload is out of scope for v1
 6. Return `ImportPreview`
 
-**`packages/shared/src/import/provider-registry.ts`**: import `bitteryBttrxImportProvider` and add it to the `providers` array.
+**`apps/web/src/lib/import/provider-registry.ts`**: import `bitteryBttrxImportProvider` and add it to the `providers` array.
 
 ### Verification checklist
 

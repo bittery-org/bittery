@@ -3,9 +3,9 @@ import {
 	stripToDecryptedData,
 	toEncryptedPayload,
 } from "@bittery/shared/item-mapping";
-import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import type { ItemSyncCommand } from "@bittery/types";
+import { applyPasswordHistoryOnPasswordChange } from "./password-history";
 
 export type CreateItemIntent = {
 	type: "create";

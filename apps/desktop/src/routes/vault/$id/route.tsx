@@ -1,6 +1,7 @@
 import { useItemListFilters, useVaultItems } from "@bittery/core/hooks";
-import { VaultItemListControls } from "@bittery/ui";
+import { ActiveRail, VaultItemListControls } from "@bittery/ui";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
+import { useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/vault/$id")({
 
 function RouteComponent() {
 	const { m } = useI18n();
+	const listScrollRef = useRef<HTMLDivElement>(null);
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
@@ -54,7 +56,8 @@ function RouteComponent() {
 					sortDirection={sortDirection}
 					onSortDirectionChange={setSortDirection}
 				/>
-				<div className="flex-1 overflow-y-auto">
+				<div ref={listScrollRef} className="relative flex-1 overflow-y-auto">
+					<ActiveRail containerRef={listScrollRef} />
 					{items.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">

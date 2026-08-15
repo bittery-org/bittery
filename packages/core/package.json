@@ -36,7 +36,8 @@
 		"./services/unlock": "./src/services/unlock.ts",
 		"./services/vault-crypto": "./src/services/vault-crypto.ts",
 		"./services/vault-key-rotation": "./src/services/vault-key-rotation.ts",
-		"./services/vault-repository": "./src/services/vault-repository.ts"
+		"./services/vault-repository": "./src/services/vault-repository.ts",
+		"./services/vault-runtime": "./src/services/vault-runtime.ts"
 	},
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",

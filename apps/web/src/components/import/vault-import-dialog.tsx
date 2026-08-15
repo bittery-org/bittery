@@ -1,12 +1,4 @@
 import {
-	getImportProvider,
-	getImportProviders,
-	type ImportMessageParams,
-	type ImportProvider,
-	type ImportProviderId,
-	type ImportWarning,
-} from "@bittery/shared/import";
-import {
 	Badge,
 	Button,
 	cn,
@@ -47,6 +39,14 @@ import {
 	useVaultImport,
 	type VaultImportErrorCode,
 } from "@/hooks/use-vault-import";
+import {
+	getImportProvider,
+	getImportProviders,
+	type ImportMessageParams,
+	type ImportProvider,
+	type ImportProviderId,
+	type ImportWarning,
+} from "@/lib/import";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ImportDialogStep = "manager" | "upload";

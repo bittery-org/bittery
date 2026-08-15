@@ -97,6 +97,26 @@ export function createIndexedDbRecordPort(): RecordPort {
 			await transactionDone(transaction);
 		},
 
+		recordPutMany: async (collection, records) => {
+			if (records.length === 0) {
+				return;
+			}
+			const transaction = (await database()).transaction(
+				STORE_NAME,
+				"readwrite",
+			);
+			const store = transaction.objectStore(STORE_NAME);
+			for (const record of records) {
+				store.put({
+					key: rowKey(collection, record.id),
+					collection,
+					id: record.id,
+					value: record.value,
+				} satisfies RecordRow);
+			}
+			await transactionDone(transaction);
+		},
+
 		recordGet: async (collection, id) => {
 			const transaction = (await database()).transaction(
 				STORE_NAME,

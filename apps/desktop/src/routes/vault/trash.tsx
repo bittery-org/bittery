@@ -3,6 +3,7 @@ import {
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/core/hooks";
+import { formatDate } from "@bittery/i18n/format/browser";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
 	Badge,
@@ -25,7 +26,6 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Favicon } from "../../components/vault/favicon";
-import { formatDate } from "../../lib/i18n-format";
 import { useI18n } from "../../providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/trash")({

@@ -344,7 +344,7 @@ export function LoginDetail({
 						<AlertDialogAction
 							onClick={handleConfirmRemovePasskey}
 							disabled={Boolean(removingCredentialId)}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							variant="destructive"
 						>
 							{removingCredentialId
 								? m.vaults_detail_items_detail_login_passkeys_remove_dialog_action_removing()

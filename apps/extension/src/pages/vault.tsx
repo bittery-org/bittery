@@ -1,5 +1,12 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { Button, cn, Skeleton, toast } from "@bittery/ui";
+import {
+	ActiveRail,
+	activeRailTarget,
+	Button,
+	cn,
+	Skeleton,
+	toast,
+} from "@bittery/ui";
 import {
 	IconGlobe,
 	IconLock,
@@ -12,7 +19,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
@@ -93,19 +100,13 @@ function VaultRow({
 			<button
 				type="button"
 				onClick={onSelect}
+				{...activeRailTarget(isSelected)}
 				className={cn(
 					"relative flex min-h-10 w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-colors",
-					isSelected
-						? "bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
-						: "hover:bg-sidebar-accent",
+					// Selection is the list rail plus the absence of hover.
+					!isSelected && "hover:bg-sidebar-accent",
 				)}
 			>
-				{isSelected && (
-					<span
-						aria-hidden
-						className="absolute top-[7px] bottom-[7px] left-[-4px] w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
-					/>
-				)}
 				<Favicon
 					item={item}
 					title={title}
@@ -168,6 +169,7 @@ export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
+	const listScrollRef = useRef<HTMLDivElement>(null);
 	const [isLocking, setIsLocking] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [manualSelectionByScope, setManualSelectionByScope] = useState<
@@ -516,7 +518,12 @@ export function VaultPage() {
 						</div>
 					</div>
 
-					<div className="relative flex-1 overflow-y-auto px-1.5 pb-2">
+					<div
+						ref={listScrollRef}
+						className="relative flex-1 overflow-y-auto px-1.5 pb-2"
+					>
+						{/* Matches where each row used to draw its own bar, inside the px-1.5. */}
+						<ActiveRail containerRef={listScrollRef} className="left-0.5" />
 						{isLoading ? (
 							<div className="flex flex-col gap-1 p-1">
 								{[1, 2, 3, 4, 5].map((i) => (

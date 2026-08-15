@@ -3,19 +3,12 @@ import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle"
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useState,
-	useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
@@ -94,7 +87,6 @@ const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 export function useDesktopSync(
 	queryClient: QueryClient,
 	manager: AccountSessionManager,
-	vaultRuntime: AccountVaultRuntime,
 	enabled = true,
 ) {
 	const { m } = useI18n();
@@ -114,10 +106,9 @@ export function useDesktopSync(
 				resolveClientId: getOrCreateDesktopSyncClientId,
 				getActiveAccountId: () => manager.getActiveAccount(),
 				subscribeAccountChanges: manager.subscribe,
-				subscribeVaultChanges: vaultRuntime.subscribe,
 				assemble: (input) => accountSync.assemble(input),
 			}),
-		[accountSync, manager, vaultRuntime],
+		[accountSync, manager],
 	);
 	useEffect(() => {
 		lifecycle.start();
@@ -258,17 +249,4 @@ export function useDesktopSync(
 		clientId,
 		isInitialized,
 	};
-}
-
-/**
- * Get the client ID for use in mutations
- */
-export function useDesktopClientId(): string {
-	const [clientId, setClientId] = useState<string>("");
-
-	useEffect(() => {
-		getOrCreateDesktopSyncClientId().then(setClientId);
-	}, []);
-
-	return clientId;
 }

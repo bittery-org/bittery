@@ -14,6 +14,7 @@ import androidx.autofill.inline.v1.InlineSuggestionUi
 import android.service.autofill.Dataset
 import android.service.autofill.InlinePresentation
 import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.domain.DomainMatch
 import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.ItemEntity
 
@@ -68,11 +69,13 @@ class AutofillDatasetBuilder(
     }
 
     private suspend fun getItemsForDomain(domain: String, userId: String): List<ItemEntity> {
-        val parentDomain = extractParentDomain(domain)
-        val items = if (parentDomain.isNotEmpty() && parentDomain != domain) {
-            database.itemDao().getLoginItemsByDomainAndParent(domain, parentDomain, userId)
-        } else {
-            database.itemDao().getLoginItemsByDomain(domain, userId)
+        // Items are indexed under DomainMatch.lookupKeys, so querying the same
+        // keys is DomainMatch.matches expressed in SQL.
+        val keys = DomainMatch.lookupKeys(domain)
+        val items: List<ItemEntity> = when (keys.size) {
+            0 -> emptyList()
+            1 -> database.itemDao().getLoginItemsByDomain(keys[0], userId)
+            else -> database.itemDao().getLoginItemsByDomainAndParent(keys[0], keys[1], userId)
         }
 
         if (items.isEmpty()) {
@@ -207,15 +210,6 @@ class AutofillDatasetBuilder(
 
         Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $title (${subtitle ?: "no subtitle"})")
         return InlinePresentation(slice, spec, false)
-    }
-
-    private fun extractParentDomain(domain: String): String {
-        val parts = domain.split(".")
-        return if (parts.size > 2) {
-            parts.drop(1).joinToString(".")
-        } else {
-            domain
-        }
     }
 
     /**

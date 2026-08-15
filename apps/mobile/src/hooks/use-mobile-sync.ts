@@ -1,19 +1,12 @@
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
-import type { AccountVaultRuntime } from "@bittery/core/services/account-vault-runtime";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useToast } from "heroui-native";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useState,
-	useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
 import {
@@ -97,7 +90,6 @@ class ReactNativeSyncStorage implements SyncStorage {
 export function useMobileSync(
 	queryClient: QueryClient,
 	manager: AccountSessionManager,
-	vaultRuntime: AccountVaultRuntime,
 	enabled = true,
 ) {
 	const { m } = useI18n();
@@ -119,10 +111,9 @@ export function useMobileSync(
 				resolveClientId: getOrCreateMobileSyncClientId,
 				getActiveAccountId: () => manager.getActiveAccount(),
 				subscribeAccountChanges: manager.subscribe,
-				subscribeVaultChanges: vaultRuntime.subscribe,
 				assemble: (input) => accountSync.assemble(input),
 			}),
-		[accountSync, manager, vaultRuntime],
+		[accountSync, manager],
 	);
 	useEffect(() => {
 		lifecycle.start();
@@ -191,17 +182,4 @@ export function useMobileSync(
 		clientId,
 		isInitialized,
 	};
-}
-
-/**
- * Get the client ID for use in mutations
- */
-export function useMobileClientId(): string {
-	const [clientId, setClientId] = useState<string>("");
-
-	useEffect(() => {
-		getOrCreateMobileSyncClientId().then(setClientId);
-	}, []);
-
-	return clientId;
 }

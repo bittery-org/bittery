@@ -14,6 +14,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.credentialprovider.crypto.MukEscrowManager
 import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.domain.DomainMatch
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.VaultKeyEntity
@@ -32,30 +33,6 @@ class CredentialProviderModule : Module() {
     companion object {
         private const val TAG = "CredentialProviderModule"
         private const val MIN_API_LEVEL = Build.VERSION_CODES.UPSIDE_DOWN_CAKE // API 34
-
-        /**
-         * Extract domain from URL for autofill matching.
-         * Examples:
-         *   - "https://www.example.com/login" -> "example.com"
-         *   - "https://login.example.com" -> "login.example.com"
-         *   - "example.com" -> "example.com"
-         */
-        private fun extractDomain(url: String): String? {
-            if (url.isBlank()) return null
-            return try {
-                val host = if (url.startsWith("http://") || url.startsWith("https://")) {
-                    java.net.URL(url).host
-                } else {
-                    // Assume it's already a domain
-                    url
-                }
-                // Remove www. prefix
-                host.removePrefix("www.")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to extract domain from: $url", e)
-                null
-            }
-        }
     }
 
     private val moduleScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -85,14 +62,12 @@ class CredentialProviderModule : Module() {
     private fun collectCandidateDomainsFromItemJson(itemDataJson: JSONObject): List<String> {
         val domains = LinkedHashSet<String>()
 
-        val primaryUrl = itemDataJson.optString("url")
-        extractDomain(primaryUrl)?.let { domains.add(it) }
+        domains.addAll(DomainMatch.lookupKeys(itemDataJson.optString("url")))
 
         val urlsJson = itemDataJson.optJSONArray("urls")
         if (urlsJson != null) {
             for (index in 0 until urlsJson.length()) {
-                val rawUrl = urlsJson.optString(index, "")
-                extractDomain(rawUrl)?.let { domains.add(it) }
+                domains.addAll(DomainMatch.lookupKeys(urlsJson.optString(index, "")))
             }
         }
 
@@ -100,8 +75,7 @@ class CredentialProviderModule : Module() {
         if (passkeysJson != null) {
             for (index in 0 until passkeysJson.length()) {
                 val passkey = passkeysJson.optJSONObject(index) ?: continue
-                val rpId = passkey.optString("rpId", "")
-                extractDomain(rpId)?.let { domains.add(it) }
+                domains.addAll(DomainMatch.lookupKeys(passkey.optString("rpId", "")))
             }
         }
 
@@ -677,7 +651,9 @@ class CredentialProviderModule : Module() {
 
                                 @Suppress("UNCHECKED_CAST")
                                 val urls = itemData["urls"] as? List<String> ?: emptyList()
-                                val primaryDomain = urls.firstOrNull()?.let { extractDomain(it) }
+                                val primaryDomain = urls.firstOrNull()
+                                    ?.let { DomainMatch.normalizeHost(it) }
+                                    ?.takeIf { it.isNotEmpty() }
 
                                 ItemEntity(
                                     id = itemId,
@@ -733,15 +709,19 @@ class CredentialProviderModule : Module() {
 	                                }
 
 	                                val domainsByValue = LinkedHashMap<String, ItemDomainEntity>()
+	                                // Both the host and its registrable domain are indexed, and a
+	                                // lookup queries both, so the SQL match is exactly
+	                                // DomainMatch.matches - see the lookupKeys vectors.
 	                                for (url in urls) {
-	                                    val domain = extractDomain(url) ?: continue
-	                                    if (!domainsByValue.containsKey(domain)) {
-	                                        domainsByValue[domain] = ItemDomainEntity(
-	                                            itemId = itemId,
-	                                            domain = domain,
-	                                            isPrimary = domainsByValue.isEmpty(),
-	                                            fullUrl = url
-	                                        )
+	                                    for (domain in DomainMatch.lookupKeys(url)) {
+	                                        if (!domainsByValue.containsKey(domain)) {
+	                                            domainsByValue[domain] = ItemDomainEntity(
+	                                                itemId = itemId,
+	                                                domain = domain,
+	                                                isPrimary = domainsByValue.isEmpty(),
+	                                                fullUrl = url
+	                                            )
+	                                        }
 	                                    }
 	                                }
 

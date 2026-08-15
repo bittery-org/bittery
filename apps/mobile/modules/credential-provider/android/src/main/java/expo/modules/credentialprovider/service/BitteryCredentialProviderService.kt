@@ -29,6 +29,7 @@ import androidx.credentials.provider.PublicKeyCredentialEntry
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import expo.modules.credentialprovider.activity.GetCredentialsActivity
 import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.domain.DomainMatch
 import expo.modules.credentialprovider.passkey.PasskeyUtils
 import expo.modules.credentialprovider.passkey.StoredPasskey
 import expo.modules.credentialprovider.state.VaultStateManager
@@ -139,21 +140,24 @@ class BitteryCredentialProviderService : CredentialProviderService() {
 
                         Log.d(TAG, "Password request for origin: $origin")
 
-                        // Query credentials matching the origin/domain
+                        // Query credentials matching the origin/domain. Items are
+                        // indexed under DomainMatch.lookupKeys, so querying the same
+                        // keys is DomainMatch.matches expressed in SQL.
                         val domain = extractDomain(origin)
-                        val parentDomain = extractParentDomain(domain)
+                        val domainKeys = DomainMatch.lookupKeys(domain)
                         val isValidWebDomain = isLikelyWebDomain(domain)
-                        Log.d(TAG, "Extracted domain: $domain, parent: $parentDomain, isValidWebDomain: $isValidWebDomain")
+                        Log.d(TAG, "Extracted domain: $domain, keys: $domainKeys, isValidWebDomain: $isValidWebDomain")
 
                         // Only return credentials if vault is unlocked
                         // Decryption happens in GetCredentialsActivity using MUK
                         if (isVaultUnlocked) {
                             val items = mutableListOf<ItemEntity>()
                             for (userId in unlockedUserIds) {
-                                val userItems = if (isValidWebDomain && domain.isNotEmpty() && parentDomain.isNotEmpty()) {
-                                    database.itemDao().getLoginItemsByDomainAndParent(domain, parentDomain, userId)
-                                } else if (isValidWebDomain && domain.isNotEmpty()) {
-                                    database.itemDao().getLoginItemsByDomain(domain, userId)
+                                val userItems = if (isValidWebDomain && domainKeys.size > 1) {
+                                    database.itemDao()
+                                        .getLoginItemsByDomainAndParent(domainKeys[0], domainKeys[1], userId)
+                                } else if (isValidWebDomain && domainKeys.isNotEmpty()) {
+                                    database.itemDao().getLoginItemsByDomain(domainKeys[0], userId)
                                 } else {
                                     Log.w(
                                         TAG,
@@ -341,11 +345,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         if (normalizedRpId.isBlank()) return emptyList()
 
         val allowedCredentialIds = PasskeyUtils.parseAllowCredentialIdsFromGetRequestJson(option.requestJson)
-        val parentDomain = extractParentDomain(normalizedRpId).takeIf { it.isNotBlank() }
-        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
-        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId, parentDomain)
-            .filterNotNull()
-            .filter { it.isNotBlank() }
+        val domainsToQuery = DomainMatch.lookupKeys(normalizedRpId)
         val candidateByGroup = LinkedHashMap<String, PasskeyCandidate>()
         val seen = mutableSetOf<String>()
 
@@ -508,37 +508,18 @@ class BitteryCredentialProviderService : CredentialProviderService() {
     }
 
     /**
-     * Extract domain from origin URL or package name.
+     * Extract domain from origin URL or package name. An Android signature
+     * origin identifies no host at all, so it yields nothing rather than a
+     * string that could accidentally match an indexed domain.
      */
     private fun extractDomain(origin: String): String {
-        return try {
-            if (origin.startsWith("http")) {
-                // It's a URL, extract the host
-                val url = java.net.URL(origin)
-                url.host.removePrefix("www.")
-            } else if (origin.startsWith("android:apk-key-hash:")) {
-                // It's an Android app signature, extract package name from calling app
-                ""
-            } else {
-                // Assume it's already a domain or package name
-                origin.removePrefix("www.")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to extract domain from: $origin", e)
-            ""
-        }
+        if (origin.startsWith("android:apk-key-hash:")) return ""
+        return DomainMatch.normalizeHost(origin)
     }
 
     private fun extractPasskeyRpIdFromOrigin(origin: String): String {
-        return try {
-            if (!origin.startsWith("http")) {
-                ""
-            } else {
-                java.net.URI(origin).host?.lowercase()?.trimEnd('.') ?: ""
-            }
-        } catch (_: Exception) {
-            ""
-        }
+        if (!origin.startsWith("http")) return ""
+        return DomainMatch.normalizeHost(origin)
     }
 
     private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
@@ -647,21 +628,6 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         return lastPart.length in 2..6
     }
 
-    /**
-     * Extract parent domain from a subdomain.
-     * e.g., "login.example.com" -> "example.com"
-     */
-    private fun extractParentDomain(domain: String): String {
-        val parts = domain.split(".")
-        return if (parts.size > 2) {
-            // Remove first subdomain part
-            parts.drop(1).joinToString(".")
-        } else {
-            // Already a base domain
-            domain
-        }
-    }
-
     private fun resolvePasskeyEntryUsername(passkey: StoredPasskey, item: ItemEntity): String {
         return passkey.userName
             .takeIf { it.isNotBlank() }
@@ -715,11 +681,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         }
     }
 
-    private fun canonicalDomainForLookup(domain: String): String {
-        return PasskeyUtils.normalizeHost(domain).removePrefix("www.")
-    }
-
-    private fun domainsEquivalent(left: String, right: String): Boolean {
-        return canonicalDomainForLookup(left) == canonicalDomainForLookup(right)
-    }
+    /** Passkey rpId identity, not the wider password-matching rule. */
+    private fun domainsEquivalent(left: String, right: String): Boolean =
+        DomainMatch.sameRelyingParty(left, right)
 }

@@ -1,24 +1,16 @@
 import type { TeamMember } from "@bittery/api-contract";
+import { formatDate } from "@bittery/i18n/format/browser";
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
 	Avatar,
 	AvatarFallback,
 	Badge,
 	Button,
+	ConfirmDialog,
 	toast,
 } from "@bittery/ui";
 import { IconUser as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
-import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
@@ -194,8 +186,8 @@ export function MemberList({
 
 							{canRemove && (
 								<div className="flex items-center gap-1">
-									<AlertDialog>
-										<AlertDialogTrigger asChild>
+									<ConfirmDialog
+										trigger={
 											<Button
 												variant="ghost"
 												size="sm"
@@ -205,33 +197,20 @@ export function MemberList({
 												<UserMinus className="h-3.5 w-3.5" />
 												{m.team_members_action_remove()}
 											</Button>
-										</AlertDialogTrigger>
-										<AlertDialogContent>
-											<AlertDialogHeader>
-												<AlertDialogTitle>
-													{m.team_members_remove_dialog_title()}
-												</AlertDialogTitle>
-												<AlertDialogDescription>
-													{m.team_members_remove_dialog_description({
-														name: member.name,
-													})}
-												</AlertDialogDescription>
-											</AlertDialogHeader>
-											<AlertDialogFooter>
-												<AlertDialogCancel disabled={isBusy}>
-													{m.team_common_action_cancel()}
-												</AlertDialogCancel>
-												<AlertDialogAction
-													disabled={isBusy}
-													onClick={() => handleRemoveMember(member.userId)}
-												>
-													{removingUserId === member.userId
-														? m.team_members_remove_dialog_action_removing()
-														: m.team_members_remove_dialog_action_confirm()}
-												</AlertDialogAction>
-											</AlertDialogFooter>
-										</AlertDialogContent>
-									</AlertDialog>
+										}
+										title={m.team_members_remove_dialog_title()}
+										description={m.team_members_remove_dialog_description({
+											name: member.name,
+										})}
+										cancelLabel={m.team_common_action_cancel()}
+										confirmLabel={
+											removingUserId === member.userId
+												? m.team_members_remove_dialog_action_removing()
+												: m.team_members_remove_dialog_action_confirm()
+										}
+										onConfirm={() => handleRemoveMember(member.userId)}
+										busy={isBusy}
+									/>
 								</div>
 							)}
 						</div>

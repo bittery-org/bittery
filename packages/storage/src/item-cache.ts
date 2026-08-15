@@ -133,6 +133,13 @@ export interface ItemCache {
 export interface ItemCacheStagingGeneration {
 	upsertCachedItem(item: CachedEncryptedItem): Promise<boolean>;
 	upsertCachedVault(vault: CachedVaultMetadata): Promise<void>;
+	/**
+	 * The same as calling the single-record upsert for each entry, in one write. A
+	 * bootstrap stages a whole page at a time, and on desktop the per-record form costs
+	 * one fsync each.
+	 */
+	upsertCachedItems(items: readonly CachedEncryptedItem[]): Promise<void>;
+	upsertCachedVaults(vaults: readonly CachedVaultMetadata[]): Promise<void>;
 	/** Atomically makes this complete generation visible to cache readers. */
 	promote(metadata: Omit<ItemCacheMetadata, "itemCount">): Promise<void>;
 	/** Discards an unpublished generation after a failed bootstrap. */
@@ -359,28 +366,74 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		values: T[],
 	): Promise<void> {
 		await port.recordClear(collection);
-		for (const value of values) {
-			await port.recordPut(collection, value.id, JSON.stringify(value));
+		await port.recordPutMany(
+			collection,
+			values.map((value) => ({ id: value.id, value: JSON.stringify(value) })),
+		);
+	}
+
+	/** A whole collection as id -> value, in one read. */
+	async function valuesOf(collection: string): Promise<Map<string, string>> {
+		return new Map(
+			(await port.recordList(collection)).map((record) => [
+				record.id,
+				record.value,
+			]),
+		);
+	}
+
+	/** A stored record wins only when it is a parseable item of a strictly newer version. */
+	function storedIsNewer(
+		existing: string | null,
+		item: CachedEncryptedItem,
+	): boolean {
+		if (existing === null) {
+			return false;
 		}
+		const parsed = parseRecord<CachedEncryptedItem>(
+			{ id: item.id, value: existing },
+			"item",
+		);
+		return parsed !== null && parsed.version > item.version;
 	}
 
 	async function writeNewerItem(
 		collection: string,
 		item: CachedEncryptedItem,
 	): Promise<boolean> {
-		const existing = await port.recordGet(collection, item.id);
-		if (existing !== null) {
-			const parsed = parseRecord<CachedEncryptedItem>(
-				{ id: item.id, value: existing },
-				"item",
-			);
-			if (parsed !== null && parsed.version > item.version) {
-				return false;
-			}
+		if (storedIsNewer(await port.recordGet(collection, item.id), item)) {
+			return false;
 		}
 
 		await port.recordPut(collection, item.id, JSON.stringify(item));
 		return true;
+	}
+
+	/**
+	 * `writeNewerItem` for a whole batch, in one write. Items already accepted by this
+	 * batch count as stored, so a repeated id resolves exactly as sequential calls would.
+	 */
+	async function writeNewerItems(
+		collection: string,
+		items: readonly CachedEncryptedItem[],
+	): Promise<void> {
+		if (items.length === 0) {
+			return;
+		}
+		// One read of the collection, not one per item: the per-item form is a round trip
+		// each, which is what made a bootstrap thousands of them.
+		const stored = await valuesOf(collection);
+		const accepted = new Map<string, string>();
+		for (const item of items) {
+			const existing = accepted.get(item.id) ?? stored.get(item.id) ?? null;
+			if (!storedIsNewer(existing, item)) {
+				accepted.set(item.id, JSON.stringify(item));
+			}
+		}
+		await port.recordPutMany(
+			collection,
+			[...accepted].map(([id, value]) => ({ id, value })),
+		);
 	}
 
 	// ==================================================================
@@ -559,12 +612,8 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 					port.recordClear(itemBaseline),
 					port.recordClear(vaultBaseline),
 				]);
-				for (const record of activeItems) {
-					await port.recordPut(itemBaseline, record.id, record.value);
-				}
-				for (const record of activeVaults) {
-					await port.recordPut(vaultBaseline, record.id, record.value);
-				}
+				await port.recordPutMany(itemBaseline, activeItems);
+				await port.recordPutMany(vaultBaseline, activeVaults);
 			});
 
 			function assertPending(): void {
@@ -580,9 +629,30 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 					assertPending();
 					return writeNewerItem(items, item);
 				},
+				async upsertCachedItems(
+					batch: readonly CachedEncryptedItem[],
+				): Promise<void> {
+					assertPending();
+					await writeNewerItems(items, batch);
+				},
 				async upsertCachedVault(vault: CachedVaultMetadata): Promise<void> {
 					assertPending();
 					await port.recordPut(vaults, vault.id, JSON.stringify(vault));
+				},
+				async upsertCachedVaults(
+					batch: readonly CachedVaultMetadata[],
+				): Promise<void> {
+					assertPending();
+					// A bootstrap page repeats a vault once per item it carries; the last
+					// copy is the one that lands, as with sequential upserts.
+					const byId = new Map(batch.map((vault) => [vault.id, vault]));
+					await port.recordPutMany(
+						vaults,
+						[...byId.values()].map((vault) => ({
+							id: vault.id,
+							value: JSON.stringify(vault),
+						})),
+					);
 				},
 				async promote(
 					metadata: Omit<ItemCacheMetadata, "itemCount">,
@@ -599,15 +669,28 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 							previous.activeGeneration,
 						);
 
-						for (const record of await port.recordList(itemBaseline)) {
-							if ((await port.recordGet(previousItems, record.id)) === null) {
-								await port.recordDelete(items, record.id);
+						// Each collection is read once into a map. Reconciling record by
+						// record cost three round trips per cached item, which on desktop
+						// is the difference between a refresh you notice and one you don't.
+						const itemBaselineValues = await valuesOf(itemBaseline);
+						const previousItemRecords = await port.recordList(previousItems);
+						const previousItemValues = new Map(
+							previousItemRecords.map((record) => [record.id, record.value]),
+						);
+						const stagedItemValues = await valuesOf(items);
+
+						// An item deleted locally while the bootstrap ran must stay deleted.
+						for (const id of itemBaselineValues.keys()) {
+							if (!previousItemValues.has(id)) {
+								await port.recordDelete(items, id);
+								stagedItemValues.delete(id);
 							}
 						}
 
-						for (const record of await port.recordList(previousItems)) {
-							const baseline = await port.recordGet(itemBaseline, record.id);
-							const staged = await port.recordGet(items, record.id);
+						const keptItems: Array<{ id: string; value: string }> = [];
+						for (const record of previousItemRecords) {
+							const baseline = itemBaselineValues.get(record.id) ?? null;
+							const staged = stagedItemValues.get(record.id) ?? null;
 							const activeItem = parseRecord<CachedEncryptedItem>(
 								record,
 								"item",
@@ -625,40 +708,50 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 									(stagedItem !== null &&
 										activeItem.version > stagedItem.version))
 							) {
-								await port.recordPut(items, record.id, record.value);
+								keptItems.push({ id: record.id, value: record.value });
+								stagedItemValues.set(record.id, record.value);
 							}
 						}
+						await port.recordPutMany(items, keptItems);
+
+						const vaultBaselineValues = await valuesOf(vaultBaseline);
+						const previousVaultRecords = await port.recordList(previousVaults);
+						const previousVaultValues = new Map(
+							previousVaultRecords.map((record) => [record.id, record.value]),
+						);
 
 						const deletedVaultIds = new Set<string>();
-						for (const record of await port.recordList(vaultBaseline)) {
-							if ((await port.recordGet(previousVaults, record.id)) === null) {
-								deletedVaultIds.add(record.id);
-								await port.recordDelete(vaults, record.id);
+						for (const id of vaultBaselineValues.keys()) {
+							if (!previousVaultValues.has(id)) {
+								deletedVaultIds.add(id);
+								await port.recordDelete(vaults, id);
 							}
 						}
 						if (deletedVaultIds.size > 0) {
-							for (const record of await port.recordList(items)) {
+							for (const [id, value] of stagedItemValues) {
 								const stagedItem = parseRecord<CachedEncryptedItem>(
-									record,
+									{ id, value },
 									"item",
 								);
 								if (
 									stagedItem !== null &&
 									deletedVaultIds.has(stagedItem.vaultId)
 								) {
-									await port.recordDelete(items, record.id);
+									await port.recordDelete(items, id);
+									stagedItemValues.delete(id);
 								}
 							}
 						}
 
-						for (const record of await port.recordList(previousVaults)) {
-							const baseline = await port.recordGet(vaultBaseline, record.id);
-							if (baseline !== record.value) {
-								await port.recordPut(vaults, record.id, record.value);
+						const keptVaults: Array<{ id: string; value: string }> = [];
+						for (const record of previousVaultRecords) {
+							if (vaultBaselineValues.get(record.id) !== record.value) {
+								keptVaults.push({ id: record.id, value: record.value });
 							}
 						}
+						await port.recordPutMany(vaults, keptVaults);
 
-						const itemCount = (await port.recordList(items)).length;
+						const itemCount = stagedItemValues.size;
 						await writeState(accountId, {
 							v: ITEM_CACHE_STATE_VERSION,
 							itemsPrimed: true,

@@ -2,6 +2,17 @@
 
 This directory contains end-to-end tests for the Bittery browser extension using Playwright.
 
+## When this runs
+
+CI runs this suite in the `extension-e2e-run` job, gated exactly like the web
+suite: scheduled runs, manual `workflow_dispatch`, and pull requests from a
+`release/v*` branch. It builds the server from source and boots two dev servers,
+which is not ordinary-PR cost. It is **not** part of `turbo run test`.
+
+To run it locally you need a built extension (`pnpm --filter extension run
+build:release`) and a running database (`pnpm run db:start`); Playwright starts
+the API server and the web app itself.
+
 ## Test Coverage
 
 ### Save Login Prompt Feature (`save-login-prompt.spec.ts`)

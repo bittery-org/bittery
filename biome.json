@@ -48,7 +48,7 @@
 			"!**/playwright-report",
 			"!**/paraglide",
 			"!**/project.inlang",
-			"!packages/shared/src/__tests__/fixtures"
+			"!apps/web/src/lib/import/__tests__/fixtures"
 		]
 	},
 	"formatter": {
