@@ -7,7 +7,7 @@ use super::{
     cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
     prune_rate_limit_state, prune_sync_events,
 };
-use crate::services::vault_key_rotation::cleanup_rotation_plans;
+use crate::domains::vaults::rotation::plans::cleanup_rotation_plans;
 use crate::test_support::{
     seed_item, seed_team, seed_user, seed_vault, with_api_test_app, RecordingObjectStorage,
 };

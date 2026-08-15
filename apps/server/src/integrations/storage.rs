@@ -1,9 +1,7 @@
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use rand::random;
-use regex::Regex;
 use reqwest::{
     header::{CONTENT_LENGTH, CONTENT_TYPE, HOST},
     Method,
@@ -14,15 +12,9 @@ use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
 
-const ATTACHMENT_UPLOAD_KEY_TTL_MS: i64 = 15 * 60 * 1000;
 const AWS_ALGORITHM: &str = "AWS4-HMAC-SHA256";
 const S3_SERVICE: &str = "s3";
 const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
-
-static ATTACHMENT_UPLOAD_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^attachments/([^/]+)/([^/]+)/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$")
-		.expect("attachment upload key regex should compile")
-});
 
 #[derive(Clone)]
 pub struct S3StorageConfig {
@@ -141,70 +133,6 @@ pub fn create_vault_image_key(user_id: &str, vault_id: Option<&str>, file_name: 
     format!(
         "vaults/{user_id}/{vault_segment}/{:016x}-{safe_name}",
         random::<u64>()
-    )
-}
-
-pub fn create_attachment_key(
-    signing_secret: &str,
-    user_id: &str,
-    item_id: &str,
-    file_name: &str,
-) -> Result<String, StorageError> {
-    let safe_name = sanitize_file_name(file_name);
-    let upload_id = random_uuid_like();
-    let expires_at_ms = chrono::Utc::now().timestamp_millis() + ATTACHMENT_UPLOAD_KEY_TTL_MS;
-    let signature = sign_attachment_upload_intent(
-        signing_secret,
-        &format!("{user_id}:{item_id}:{upload_id}:{expires_at_ms}"),
-    )?;
-    Ok(format!(
-        "attachments/{user_id}/{item_id}/{expires_at_ms}-{upload_id}-{signature}-{safe_name}"
-    ))
-}
-
-pub fn is_valid_attachment_upload_key(
-    signing_secret: &str,
-    key: &str,
-    user_id: &str,
-    item_id: &str,
-    now_ms: Option<i64>,
-) -> Result<bool, StorageError> {
-    let pattern = &*ATTACHMENT_UPLOAD_KEY_PATTERN;
-    let Some(captures) = pattern.captures(key) else {
-        return Ok(false);
-    };
-    let key_user_id = captures
-        .get(1)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    let key_item_id = captures
-        .get(2)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    if key_user_id != user_id || key_item_id != item_id {
-        return Ok(false);
-    }
-    let Some(expires_at_ms) = captures
-        .get(3)
-        .and_then(|value| value.as_str().parse::<i64>().ok())
-    else {
-        return Ok(false);
-    };
-    if expires_at_ms < now_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()) {
-        return Ok(false);
-    }
-    let upload_id = captures
-        .get(4)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    let signature = captures
-        .get(5)
-        .map(|value| value.as_str())
-        .unwrap_or_default();
-    verify_attachment_upload_intent(
-        signing_secret,
-        &format!("{key_user_id}:{key_item_id}:{upload_id}:{expires_at_ms}"),
-        signature,
     )
 }
 
@@ -568,7 +496,7 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
-fn sanitize_file_name(file_name: &str) -> String {
+pub(crate) fn sanitize_file_name(file_name: &str) -> String {
     let trimmed = file_name.trim();
     let base = if trimmed.is_empty() { "image" } else { trimmed };
     let safe: String = base
@@ -584,48 +512,6 @@ fn sanitize_file_name(file_name: &str) -> String {
     } else {
         safe
     }
-}
-
-fn attachment_upload_mac(signing_secret: &str, payload: &str) -> Result<HmacSha256, StorageError> {
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
-        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
-    mac.update(payload.as_bytes());
-    Ok(mac)
-}
-
-fn sign_attachment_upload_intent(
-    signing_secret: &str,
-    payload: &str,
-) -> Result<String, StorageError> {
-    let mac = attachment_upload_mac(signing_secret, payload)?;
-    Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
-}
-
-fn verify_attachment_upload_intent(
-    signing_secret: &str,
-    payload: &str,
-    signature: &str,
-) -> Result<bool, StorageError> {
-    let mac = attachment_upload_mac(signing_secret, payload)?;
-    // An undecodable signature is treated exactly like a wrong one.
-    let Ok(tag) = URL_SAFE_NO_PAD.decode(signature) else {
-        return Ok(false);
-    };
-    // `verify_slice` compares the tag in constant time, so validation timing does not depend on how
-    // many leading bytes of a supplied signature happen to be correct.
-    Ok(mac.verify_slice(&tag).is_ok())
-}
-
-fn random_uuid_like() -> String {
-    let bytes = random::<[u8; 16]>();
-    format!(
-		"{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-		bytes[0], bytes[1], bytes[2], bytes[3],
-		bytes[4], bytes[5],
-		bytes[6], bytes[7],
-		bytes[8], bytes[9],
-		bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-	)
 }
 
 #[derive(Debug, Clone)]
@@ -666,9 +552,8 @@ mod tests {
     };
 
     use super::{
-        create_attachment_key, create_team_image_key, create_vault_image_key,
-        is_valid_attachment_upload_key, object_storage_from_config, sign_attachment_upload_intent,
-        ObjectStorage, StorageError, UnavailableObjectStorage,
+        create_team_image_key, create_vault_image_key, object_storage_from_config, ObjectStorage,
+        StorageError, UnavailableObjectStorage,
     };
     use crate::config::{S3Config, StorageConfig};
 
@@ -810,98 +695,6 @@ mod tests {
             object_storage_from_config(&settings),
             Err(StorageError::InvalidConfig(_))
         ));
-    }
-
-    #[test]
-    fn attachment_upload_key_validation_round_trips() {
-        let key = create_attachment_key(
-            ATTACHMENT_TEST_SECRET,
-            "user_123",
-            "item_456",
-            "secret file.enc",
-        )
-        .expect("attachment key should be created");
-
-        assert!(is_valid_attachment_upload_key(
-            ATTACHMENT_TEST_SECRET,
-            &key,
-            "user_123",
-            "item_456",
-            None,
-        )
-        .expect("validation should succeed"));
-        assert!(!is_valid_attachment_upload_key(
-            ATTACHMENT_TEST_SECRET,
-            &key,
-            "user_123",
-            "other_item",
-            None,
-        )
-        .expect("validation should succeed"));
-    }
-
-    #[test]
-    fn attachment_upload_key_signature_checks_accept_only_the_expected_tag() {
-        const UPLOAD_ID: &str = "00000000-0000-0000-0000-000000000000";
-
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        let expires_at_ms = now_ms + 60_000;
-        let build_key = |signature: &str| {
-            format!(
-                "attachments/user_123/item_456/{expires_at_ms}-{UPLOAD_ID}-{signature}-file.enc"
-            )
-        };
-
-        let valid_signature = sign_attachment_upload_intent(
-            ATTACHMENT_TEST_SECRET,
-            &format!("user_123:item_456:{UPLOAD_ID}:{expires_at_ms}"),
-        )
-        .expect("signature should be created");
-        assert!(is_valid_attachment_upload_key(
-            ATTACHMENT_TEST_SECRET,
-            &build_key(&valid_signature),
-            "user_123",
-            "item_456",
-            Some(now_ms),
-        )
-        .expect("validation should succeed"));
-
-        let foreign_signature = sign_attachment_upload_intent(
-            ATTACHMENT_TEST_SECRET,
-            &format!("user_123:other_item:{UPLOAD_ID}:{expires_at_ms}"),
-        )
-        .expect("signature should be created");
-        assert!(!is_valid_attachment_upload_key(
-            ATTACHMENT_TEST_SECRET,
-            &build_key(&foreign_signature),
-            "user_123",
-            "item_456",
-            Some(now_ms),
-        )
-        .expect("validation should succeed"));
-
-        // Set the discarded trailing bits of the final base64url symbol: the tag bytes would be
-        // unchanged, so this only fails validation because decoding rejects it.
-        const URL_SAFE_ALPHABET: &[u8] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let last_symbol = valid_signature.as_bytes()[valid_signature.len() - 1];
-        let last_index = URL_SAFE_ALPHABET
-            .iter()
-            .position(|symbol| *symbol == last_symbol)
-            .expect("signature should be base64url");
-        let malformed_signature = format!(
-            "{}{}",
-            &valid_signature[..valid_signature.len() - 1],
-            URL_SAFE_ALPHABET[last_index + 1] as char,
-        );
-        assert!(!is_valid_attachment_upload_key(
-            ATTACHMENT_TEST_SECRET,
-            &build_key(&malformed_signature),
-            "user_123",
-            "item_456",
-            Some(now_ms),
-        )
-        .expect("malformed signatures should not error"));
     }
 
     #[tokio::test]

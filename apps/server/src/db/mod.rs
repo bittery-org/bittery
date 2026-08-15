@@ -9,6 +9,7 @@ use sqlx::{
 use crate::config::DatabaseConfig;
 
 pub mod enums;
+pub(crate) mod events;
 pub mod models;
 
 const DEFAULT_MAX_CONNECTIONS: u32 = 5;

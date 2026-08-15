@@ -263,7 +263,7 @@ impl ApiTestApp {
     pub(crate) async fn issue_session(
         &self,
         user_id: &str,
-    ) -> crate::services::session::VerifiedSession {
+    ) -> crate::domains::sessions::service::VerifiedSession {
         let client_id = format!("integration-test-{}", next_test_client_id());
         self.state
             .sessions
@@ -353,7 +353,7 @@ fn validate_openapi_response(method: &Method, uri: &str, response: &ApiTestRespo
             .parse::<u32>()
             .expect("Retry-After should use delta-seconds");
         assert!(
-            (1..=crate::http::api::error::MAX_RETRY_AFTER_SECONDS).contains(&retry_after),
+            (1..=crate::http::error::MAX_RETRY_AFTER_SECONDS).contains(&retry_after),
             "{method} {path_template} status {status} Retry-After must be bounded"
         );
     }

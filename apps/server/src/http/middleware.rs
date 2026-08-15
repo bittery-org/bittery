@@ -21,7 +21,7 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use tracing::Span;
 use url::Url;
 
-use super::api::error::ApiError;
+use super::error::ApiError;
 
 type HttpTraceClassifier =
     tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;

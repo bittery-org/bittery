@@ -1,31 +1,27 @@
-mod app;
+pub(crate) mod app;
 pub(crate) mod config;
 pub mod db;
-pub mod error;
+pub(crate) mod domains;
 pub(crate) mod http;
 pub(crate) mod integrations;
 mod jobs;
-pub(crate) mod repo;
-mod runtime;
-pub(crate) mod services;
-pub(crate) mod shapes;
+pub(crate) mod shared;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use sqlx::PgPool;
+pub(crate) mod shapes {
+    pub(crate) use crate::domains::auth::shape::*;
+    pub(crate) use crate::domains::shares::shape::*;
+    pub(crate) use crate::domains::sync::shape::*;
+    pub(crate) use crate::domains::vaults::shapes::*;
+    pub(crate) use crate::shared::shapes::*;
+}
 
-use std::sync::Arc;
-
-use config::Config;
-use fred::prelude::Pool as RedisPool;
-use integrations::favicon::{RemoteDocumentFetcher, ReqwestRemoteDocumentFetcher};
-use integrations::storage::{ObjectStorage, UnavailableObjectStorage};
-use integrations::stripe::BillingGateway;
-use services::rate_limit::PostgresRateLimiter;
-
-pub use app::create_app;
-pub(crate) use http::api::create_api_router;
-pub use http::api::dto::{
+pub use app::{create_app, AppState, ServerRuntime};
+pub(crate) use domains::auth::request_context_middleware;
+pub use domains::sessions::service::{SeededSession, SessionService};
+pub use domains::sync::pubsub::SyncPubSub;
+pub use http::dto::{
     ApiLimits, ApiMetadata, ApiVersionMetadata, CursorPage, DecimalString, DecimalStringError,
     PageCursor, PageRequest, PatchField, ProblemDetails, ProblemFieldError, RegistrationMetadata,
     SyncCursor, API_MAJOR, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_AUDIT_EVENTS,
@@ -33,120 +29,21 @@ pub use http::api::dto::{
     MAX_AUDIT_SEARCH_BYTES, MAX_BATCH_ITEMS, MAX_CAPABILITIES, MAX_PAGE_SIZE, NAME_MAX_CHARS,
     SUPPORTED_MAJORS,
 };
-pub use http::api::openapi_json;
-pub(crate) use http::api::response_headers as api_response_headers;
 #[cfg(test)]
 pub use http::middleware::load_edge_http_config;
 pub use http::middleware::{
     catch_panic_layer, edge_http_middleware, http_trace_layer, EdgeHttpConfig,
 };
+pub(crate) use http::openapi::create_api_router;
+pub use http::openapi::openapi_json;
+pub(crate) use http::openapi::response_headers as api_response_headers;
 pub use http::public::create_public_http_router;
 pub use jobs::JobRunner;
-pub use runtime::ServerRuntime;
-pub use services::auth::request_context_middleware;
-pub use services::connection_registry::ConnectionRegistry;
-pub use services::rate_limit::{build_rate_limiter, RateLimiter};
-pub use services::redis::{init_redis, validate_sync_fanout_requirement};
-pub use services::session::{SeededSession, SessionService};
-pub use services::sync_pubsub::SyncPubSub;
+pub use shared::connection_registry::ConnectionRegistry;
+pub use shared::rate_limit::{build_rate_limiter, RateLimiter};
+pub use shared::redis::{init_redis, validate_sync_fanout_requirement};
 
-#[derive(Clone)]
-pub struct AppState {
-    pub(crate) config: Arc<Config>,
-    pub db_pool: PgPool,
-    pub redis: Option<RedisPool>,
-    pub sessions: SessionService,
-    pub connection_registry: ConnectionRegistry,
-    pub sync_pubsub: SyncPubSub,
-    pub instance_id: String,
-    pub rate_limiter: Arc<dyn RateLimiter>,
-    pub object_storage: Arc<dyn ObjectStorage>,
-    pub remote_documents: Arc<dyn RemoteDocumentFetcher>,
-    pub billing_gateway: Option<Arc<dyn BillingGateway>>,
-}
-
-impl AppState {
-    pub(crate) fn from_pool_with_config(pool: PgPool, config: Arc<Config>) -> Self {
-        Self {
-            config,
-            db_pool: pool.clone(),
-            redis: None,
-            sessions: SessionService::from_pool(pool.clone()),
-            connection_registry: ConnectionRegistry::none(),
-            sync_pubsub: SyncPubSub::new(),
-            instance_id: uuid::Uuid::new_v4().to_string(),
-            rate_limiter: Arc::new(PostgresRateLimiter::new(pool)),
-            object_storage: Arc::new(UnavailableObjectStorage::new(None)),
-            remote_documents: Arc::new(ReqwestRemoteDocumentFetcher::new()),
-            billing_gateway: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_pool(pool: PgPool) -> Self {
-        Self::from_pool_with_config(pool, Arc::new(Config::for_test()))
-    }
-
-    pub fn with_rate_limiter(mut self, rate_limiter: Arc<dyn RateLimiter>) -> Self {
-        self.rate_limiter = rate_limiter;
-        self
-    }
-
-    pub fn with_redis(mut self, redis: Option<RedisPool>) -> Self {
-        if let Some(ref pool) = redis {
-            self.connection_registry = ConnectionRegistry::new(pool.clone());
-        }
-        self.redis = redis;
-        self
-    }
-
-    pub fn with_sync_pubsub(mut self, pubsub: SyncPubSub) -> Self {
-        self.sync_pubsub = pubsub;
-        self
-    }
-
-    pub fn with_object_storage(mut self, storage: Arc<dyn ObjectStorage>) -> Self {
-        self.object_storage = storage;
-        self
-    }
-
-    pub fn with_remote_documents(mut self, fetcher: Arc<dyn RemoteDocumentFetcher>) -> Self {
-        self.remote_documents = fetcher;
-        self
-    }
-
-    pub fn with_billing_gateway(mut self, gateway: Arc<dyn BillingGateway>) -> Self {
-        self.billing_gateway = Some(gateway);
-        self
-    }
-
-    /// Wake all SSE sync connections so they check for new events.
-    pub fn notify_sync(&self) {
-        self.sync_pubsub.notify_sync();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn database_free_test() -> Self {
-        use services::rate_limit::NoopRateLimiter;
-        use sqlx::postgres::PgPoolOptions;
-
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://test:test@127.0.0.1:1/bittery_router_shape")
-            .expect("fixed database-free test URL should parse");
-        Self::from_pool(pool).with_rate_limiter(Arc::new(NoopRateLimiter))
-    }
-}
-
-/// Extension trait: on `Ok`, wake SSE sync connections.
-pub(crate) trait NotifySyncExt<T> {
-    fn notify_sync(self, state: &AppState) -> Self;
-}
-
-impl<T> NotifySyncExt<T> for Result<T, error::AppError> {
-    fn notify_sync(self, state: &AppState) -> Self {
-        if self.is_ok() {
-            state.notify_sync();
-        }
-        self
-    }
+/// Stable public path for the crate's shared application error.
+pub mod error {
+    pub use crate::shared::error::*;
 }

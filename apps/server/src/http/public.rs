@@ -16,11 +16,11 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
+    domains::billing::{
+        is_stripe_webhook_configured, process_stripe_webhook_event, StripeWebhookError,
+    },
     integrations::favicon::{
         fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain,
-    },
-    services::billing::{
-        is_stripe_webhook_configured, process_stripe_webhook_event, StripeWebhookError,
     },
     AppState,
 };
@@ -61,11 +61,11 @@ fn json_error(status: StatusCode, message: &str) -> Response {
 
 async fn join_waitlist(
     State(app_state): State<AppState>,
-    Json(input): Json<crate::services::waitlist::WaitlistSignupInput>,
+    Json(input): Json<crate::domains::waitlist::WaitlistSignupInput>,
 ) -> Response {
     let pool = &app_state.db_pool;
 
-    match crate::services::waitlist::join_beta_waitlist(pool, input).await {
+    match crate::domains::waitlist::join_beta_waitlist(pool, input).await {
         Ok(response) => Json(response).into_response(),
         Err(error) => {
             let status = match error.code {
