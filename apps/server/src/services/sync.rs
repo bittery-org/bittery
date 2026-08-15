@@ -1,10 +1,8 @@
 use axum::response::sse::Event;
 use rand::random;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::query_as;
 use sqlx::PgPool;
-use std::sync::LazyLock;
 use time::OffsetDateTime;
 
 use crate::{
@@ -16,7 +14,10 @@ use crate::{
         fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
         fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
-    services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+    services::{
+        team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+        validate_resource_id,
+    },
     shapes::{
         attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
         sync_changes_shape, sync_cursor_shape, sync_event_shape,
@@ -286,19 +287,6 @@ pub(crate) async fn bootstrap_items(
 
 pub(crate) fn timestamp_millis(value: OffsetDateTime) -> i64 {
     (value.unix_timestamp_nanos() / 1_000_000) as i64
-}
-
-fn validate_resource_id(value: &str) -> Result<(), AppError> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-		r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{10,64})$",
-	).expect("resource id regex should be valid")
-    });
-    if value.len() <= 64 && RE.is_match(value) {
-        Ok(())
-    } else {
-        Err(AppError::bad_request("Invalid resource ID"))
-    }
 }
 
 pub(crate) fn generate_sync_connection_id() -> String {

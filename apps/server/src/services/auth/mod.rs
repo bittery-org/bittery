@@ -1,16 +1,17 @@
 #[cfg(test)]
 use bittery_crypto_core::normalize_email;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::LazyLock;
 use time::OffsetDateTime;
 
 use crate::{
     db::enums::{TeamRole, TeamType, VaultRole, VaultType},
     error::AppError,
-    services::rate_limit::{self, rate_limited_error, RateLimiter, WindowLimit},
-    services::session::{format_rfc3339, RequestMetadata},
+    services::{
+        rate_limit::{self, rate_limited_error, RateLimiter, WindowLimit},
+        session::{format_rfc3339, RequestMetadata},
+        validate_resource_id,
+    },
 };
 
 const JWT_ISSUER: &str = "bittery";
@@ -519,19 +520,6 @@ pub(crate) fn is_dev_auth_stub_enabled() -> bool {
         std::env::var("NODE_ENV").ok().as_deref(),
         Some("production")
     )
-}
-
-fn validate_resource_id(value: &str) -> Result<(), AppError> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-		r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{10,64})$",
-	).expect("resource id regex should be valid")
-    });
-    if value.len() <= 64 && RE.is_match(value) {
-        Ok(())
-    } else {
-        Err(bad_request_handler_error("Invalid resource ID"))
-    }
 }
 
 fn validate_hex_string(value: &str, message: &str) -> Result<(), AppError> {

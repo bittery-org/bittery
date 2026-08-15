@@ -24,3 +24,24 @@ pub(crate) mod vault_key_rotation;
 pub(crate) mod vault_membership;
 pub(crate) mod verification_code;
 pub(crate) mod waitlist;
+
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+use crate::error::AppError;
+
+pub(crate) fn validate_resource_id(value: &str) -> Result<(), AppError> {
+    static RESOURCE_ID: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{10,64})$",
+        )
+        .expect("resource id regex should be valid")
+    });
+
+    if value.len() <= 64 && RESOURCE_ID.is_match(value) {
+        Ok(())
+    } else {
+        Err(AppError::bad_request("Invalid resource ID"))
+    }
+}
