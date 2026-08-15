@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-retrieve-escrowed-muk"
+description = "Enables the retrieve_escrowed_muk command without any pre-configured scope."
+commands.allow = ["retrieve_escrowed_muk"]
+
+[[permission]]
+identifier = "deny-retrieve-escrowed-muk"
+description = "Denies the retrieve_escrowed_muk command without any pre-configured scope."
+commands.deny = ["retrieve_escrowed_muk"]

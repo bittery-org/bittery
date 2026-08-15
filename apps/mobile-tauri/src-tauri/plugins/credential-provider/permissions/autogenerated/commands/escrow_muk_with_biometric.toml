@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-escrow-muk-with-biometric"
+description = "Enables the escrow_muk_with_biometric command without any pre-configured scope."
+commands.allow = ["escrow_muk_with_biometric"]
+
+[[permission]]
+identifier = "deny-escrow-muk-with-biometric"
+description = "Denies the escrow_muk_with_biometric command without any pre-configured scope."
+commands.deny = ["escrow_muk_with_biometric"]

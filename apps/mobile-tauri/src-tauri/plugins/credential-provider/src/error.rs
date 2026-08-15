@@ -2,13 +2,14 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    // `tauri::plugin::mobile` is `#[cfg(mobile)]`, so the variant has to be too.
-    #[cfg(mobile)]
+    // `tauri::plugin::mobile` is `#[cfg(mobile)]`, and this arm is only reachable on
+    // Android, which is a subset of it.
+    #[cfg(target_os = "android")]
     #[error(transparent)]
     PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
     /// The credential provider is an Android system service. There is nothing on
-    /// desktop to fall back to, so the command says so instead of pretending.
-    #[cfg(not(mobile))]
+    /// desktop or iOS to fall back to, so the command says so instead of pretending.
+    #[cfg(not(target_os = "android"))]
     #[error(
         "bittery-credential-provider is Android-only; this platform has no CredentialProviderService"
     )]

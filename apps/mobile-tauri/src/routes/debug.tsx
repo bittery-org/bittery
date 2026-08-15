@@ -22,6 +22,10 @@ import {
 import { Button } from "@bittery/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import {
+	credentialProvider,
+	credentialProviderUnavailableReason,
+} from "../lib/credential-provider";
 import { initializeStorage } from "../lib/storage";
 
 export const Route = createFileRoute("/debug")({
@@ -214,6 +218,28 @@ async function runSelfTest(): Promise<SelfTestReport> {
 				type: await platformPort.biometric.getType(),
 			}),
 		),
+	);
+
+	// M2-C2. Read-only, side-effect-free commands only. Nothing here may touch MUK
+	// state, the escrow or the database: this runs against a live signed-in session,
+	// and a stray `clearAllMasterUnlockKeys` would lock the user out mid-run.
+	steps.push(
+		await step("credential provider (read-only surface)", async () => ({
+			isAvailable: await credentialProvider.isAvailable(),
+			isBiometricAvailable: await credentialProvider.isBiometricAvailable(),
+			isVaultUnlocked: await credentialProvider.isVaultUnlocked(),
+			hasValidEscrow: await credentialProvider.hasValidEscrow(),
+			getEscrowRemainingTime: await credentialProvider.getEscrowRemainingTime(),
+			isMasterPasswordReentryRequired:
+				await credentialProvider.isMasterPasswordReentryRequired(),
+			canUseBiometricUnlock: await credentialProvider.canUseBiometricUnlock(),
+			getLastMasterPasswordEntry:
+				await credentialProvider.getLastMasterPasswordEntry(),
+			getPendingPasskeyMutations:
+				await credentialProvider.getPendingPasskeyMutations(),
+			isSupported: await credentialProvider.isSupported(),
+			unavailableReason: credentialProviderUnavailableReason(),
+		})),
 	);
 
 	const report: SelfTestReport = {

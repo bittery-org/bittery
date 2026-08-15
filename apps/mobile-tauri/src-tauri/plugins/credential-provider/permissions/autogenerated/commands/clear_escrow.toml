@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-clear-escrow"
+description = "Enables the clear_escrow command without any pre-configured scope."
+commands.allow = ["clear_escrow"]
+
+[[permission]]
+identifier = "deny-clear-escrow"
+description = "Denies the clear_escrow command without any pre-configured scope."
+commands.deny = ["clear_escrow"]

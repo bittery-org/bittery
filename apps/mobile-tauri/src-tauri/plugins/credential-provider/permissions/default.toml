@@ -2,8 +2,36 @@
 
 [default]
 description = """
-Allows the credential provider support probe. Nothing sensitive sits behind it:
-it reports the device API level, whether the user has enabled Bittery as a
-provider, and whether the service reached the merged manifest.
+Allows every bittery-credential-provider command. The set is the bridge the Expo
+module used to expose to React Native: vault state, MUK escrow, vault sync, the
+pending passkey mutation queue, the 30-day master password clock, and the
+capability probes. The app is the only caller — the *system* reaches the
+credential provider and autofill services by intent, not through this ACL — so
+splitting the set would gate the app against itself and gate nothing else.
 """
-permissions = ["allow-is-supported"]
+permissions = [
+	"allow-set-master-unlock-key",
+	"allow-set-muk-auto-lock-timeout",
+	"allow-clear-master-unlock-key",
+	"allow-clear-all-master-unlock-keys",
+	"allow-is-vault-unlocked",
+	"allow-get-master-unlock-key-base64",
+	"allow-escrow-muk-with-biometric",
+	"allow-retrieve-escrowed-muk",
+	"allow-has-valid-escrow",
+	"allow-has-valid-escrow-for-email",
+	"allow-get-escrow-remaining-time",
+	"allow-clear-escrow",
+	"allow-sync-vault-data",
+	"allow-get-pending-passkey-mutations",
+	"allow-mark-pending-passkey-mutations-applied",
+	"allow-mark-pending-passkey-mutations-failed",
+	"allow-is-master-password-reentry-required",
+	"allow-can-use-biometric-unlock",
+	"allow-update-last-master-password-entry",
+	"allow-get-last-master-password-entry",
+	"allow-is-available",
+	"allow-is-biometric-available",
+	"allow-open-credential-provider-settings",
+	"allow-is-supported",
+]
