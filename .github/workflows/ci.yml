@@ -519,6 +519,200 @@ jobs:
         working-directory: apps/mobile
         run: npx expo-doctor
 
+  # apps/mobile-tauri (the Tauri rewrite, mid-migration - see
+  # docs/mobile-migration-state.md) had no job at all: nothing type-checked, linted or built it
+  # on a push. Frontend-only, like js-types / js-static: the generated crypto WASM it imports
+  # (D6 in docs/mobile-migration-decisions.md) is gitignored and vite build cannot resolve it
+  # without the artifact crypto-bindings already produced, so this reuses that artifact exactly
+  # like js-types does rather than rebuilding it.
+  #
+  # `check-types` also runs the app's own `lint:promises` scan (see package.json) - that is
+  # this app's only noMisusedPromises enforcement (gap 10 in mobile-migration-state.md), so it
+  # rides along with typecheck rather than needing its own step.
+  mobile-tauri:
+    if: github.event_name != 'schedule'
+    needs: crypto-bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # packages/i18n/src/paraglide is generated, and mobile-tauri imports it
+      # (src/providers/i18n-provider.tsx).
+      - name: Generate i18n
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run i18n:generate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Typecheck (+ lint:promises)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm exec turbo -F mobile-tauri check-types
+          elapsed="$(( $(date +%s) - start ))"
+          echo "mobile-tauri typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Web-app-shaped build (tsc + vite), no Tauri/Android toolchain involved -
+      # proves the renderer bundles, independent of whether the native shell does.
+      - name: Vite build
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm --filter mobile-tauri exec vite build
+          elapsed="$(( $(date +%s) - start ))"
+          echo "mobile-tauri vite build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Biome
+        run: pnpm exec biome check apps/mobile-tauri
+
+  # Detects changes under apps/mobile-tauri or the crypto packages it embeds, so
+  # mobile-tauri-android (below) can skip the heavy Android/NDK toolchain on PRs that cannot
+  # have broken it. See D11 in docs/mobile-migration-decisions.md for what this trades off.
+  # Runs unconditionally (including on schedule) so the boolean is always available; the
+  # schedule/release/dispatch cases are handled by mobile-tauri-android's own `if`.
+  mobile-tauri-android-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            changed:
+              - 'apps/mobile-tauri/**'
+              - 'packages/crypto/**'
+
+  # The full `pnpm tauri android build` needs the Android SDK, the NDK, a JDK, all four Rust
+  # Android targets, and pnpm build:crypto-android for the UniFFI .so files the credential
+  # provider loads (D4b) - on top of build:crypto-wasm for the renderer bundle (D6). That is
+  # slow and heavy, so it does not run on every push (see D11 in
+  # docs/mobile-migration-decisions.md for the alternatives considered and what this misses).
+  #
+  # GitHub's ubuntu-latest image ships the Android SDK and several NDK versions preinstalled
+  # (android-unit and crypto-bindings' android leg already rely on this, with no explicit SDK
+  # setup step), so only the JDK and the Rust targets are added here.
+  #
+  # No signing secret is read anywhere in this job - the build is `--debug`, unsigned, exactly
+  # what a developer runs locally. If a signing step is ever added here, it must check
+  # `secrets.<NAME> != ''` first so a missing secret degrades that one step, not the job.
+  mobile-tauri-android:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')) ||
+      needs.mobile-tauri-android-changed.outputs.changed == 'true'
+    needs: mobile-tauri-android-changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/crypto/core
+            apps/mobile-tauri/src-tauri
+          key: mobile-tauri-android
+
+      # Pinned exactly like crypto-bindings' android leg - a security gate must not itself be
+      # an unpinned download, and the two jobs should build the same artifact the same way.
+      - name: Install pinned Android Rust tooling
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run i18n:generate
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # NDK_HOME is not exported by default; pick the highest installed version, matching the
+      # export in docs/mobile-migration-state.md's own prerequisites.
+      - name: Locate NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "NDK_HOME=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
+
+      - name: Build crypto WASM
+        run: pnpm run build:crypto-wasm
+
+      - name: Build crypto Android bindings (UniFFI .so)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run build:crypto-android
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto android bindings: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Same command a developer runs locally (docs/mobile-migration-state.md), one arch only -
+      # this is a breakage check, not a release artifact.
+      - name: Tauri Android build (debug, aarch64)
+        working-directory: apps/mobile-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run android:build
+          elapsed="$(( $(date +%s) - start ))"
+          echo "tauri android build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobile-tauri-debug-apk
+          path: apps/mobile-tauri/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+          retention-days: 7
+          if-no-files-found: error
+
   # The Android credential provider is the only place DomainMatch runs, and its
   # vectors are the seam pinning it to apps/extension/src/lib/hostname.ts - so
   # without this job the Kotlin half of a user-visible matching bug is unguarded.

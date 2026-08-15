@@ -283,3 +283,68 @@ around it.
 
 **Consequence.** The app boots to a placeholder before it boots to anything useful. That is
 intended.
+
+---
+
+## D11 — CI type-checks, lints and builds `apps/mobile-tauri` on every push; the full Android
+build is paths-gated
+
+> Numbered D11, not D10: `docs/mobile-migration-state.md`'s "Reaching a local server from the
+> emulator" section already cites an unwritten "D10" for the `CORS_ORIGIN`/`tauri.localhost`
+> server change. That reference predates this entry and is not this decision — left as found,
+> not fixed here, to avoid colliding with whatever it was meant to point at.
+
+**Choice.** `.github/workflows/ci.yml` gets a `mobile-tauri` job — install, `pnpm
+build:crypto-wasm` (reusing the artifact `crypto-bindings` already produces, exactly like
+`js-static`/`js-types`/`js-tests`), `pnpm exec turbo -F mobile-tauri check-types` (which also
+runs the app's `lint:promises` scan), `pnpm --filter mobile-tauri exec vite build`, `pnpm exec
+biome check apps/mobile-tauri`. Runs on every push and PR, like `js-types`.
+
+The full `pnpm tauri android build` — Android SDK, NDK, JDK, all four Rust Android targets, `pnpm
+build:crypto-android` for the UniFFI `.so` files, then Gradle — is a second job,
+`mobile-tauri-android`, gated to run only when `apps/mobile-tauri/**` or `packages/crypto/**`
+changed (`dorny/paths-filter@v3`, evaluated in its own small job so the boolean exists
+unconditionally), plus unconditionally on the weekly schedule, on `workflow_dispatch`, and on
+`release/v*` PRs — the same three conditions `web-e2e-run` and `extension-e2e-run` already use for
+their own heavy, infrequently-necessary jobs.
+
+**Why not the other two options.**
+
+- **Full Android build on every push.** Rejected. It is the slowest job in the workflow by a wide
+  margin — SDK + NDK + JDK + four Rust targets + a cold Gradle build — for a payoff (catching an
+  Android-only break) that a paths filter already gets for the pushes that can cause one. Every
+  PR that touches only, say, `apps/server` or `apps/web` would pay that cost for zero chance of
+  catching anything.
+- **Frontend + type-check only, Android build on schedule/release only, dropping the paths
+  filter.** Close, and defensible. Rejected only because the paths filter is nearly free (one
+  `actions/checkout` plus a diff) and buys something the pure schedule/release gate does not: a
+  PR that changes `apps/mobile-tauri/src-tauri` (Rust) or `packages/crypto` gets the Android build
+  *before* merge, not a week later on the cron or only on a release branch.
+
+**What this still misses.** A push that changes neither `apps/mobile-tauri/**` nor
+`packages/crypto/**` but still breaks the Android build — a Tauri CLI bump, a Gradle plugin
+version drift, an AGP/Kotlin update reached through the root lockfile, exactly the class of
+"environment moved under an untouched file" break `docker-build`'s own no-schedule-guard comment
+calls out — will not be caught until the next scheduled run (weekly) or the next `release/v*` PR.
+That is the trade this makes deliberately: those breaks are real but rare, and the weekly cron is
+the same answer already accepted for Docker base-image drift and `cargo-deny` advisories elsewhere
+in this file.
+
+**No signing secret is read anywhere in `mobile-tauri-android`.** The build is `--debug`,
+unsigned — the same command a developer runs locally, per `docs/mobile-migration-state.md`. There
+is nothing to guard against a missing secret yet; the workflow comment on that job says so
+explicitly and records the rule (`secrets.<NAME> != ''` before any future signing step) for when
+one is added.
+
+**Not verified against a real GitHub Actions run.** The frontend `mobile-tauri` job's steps were
+each run locally against the real repo (`turbo -F mobile-tauri check-types`, `vite build`, `biome
+check apps/mobile-tauri`) and pass. `mobile-tauri-android` could not be — this sandbox has no way
+to execute a GitHub-hosted runner. Its risk surface is entirely ordinary CI risk (exact NDK path
+under `$ANDROID_HOME/ndk`, whether `ubuntu-latest` still preinstalls the SDK the way `android-unit`
+and `crypto-bindings`' android leg already assume, Gradle first-run time inside the 45-minute
+timeout) rather than anything specific to this decision.
+
+**Revisit when.** The Android build job's own timing shows up in a run — if it is consistently
+much slower than `web-e2e-run`'s 60-minute budget allows for comfortably, or if the paths filter
+ever misses a break that should have been caught, tighten or loosen the filter rather than
+changing the overall shape.
