@@ -90,6 +90,9 @@ Override the maximum request counts below. The time windows are fixed in code; o
 | `RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX` | `5` | Failed share-link email verification attempts before lockout |
 | `RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES` | `15` | Share-link email verification lockout duration in minutes |
 | `RATE_LIMIT_AUTH_IP` | `30` | Requests per 15 minutes per IP for other auth endpoints |
+| `RATE_LIMIT_ACCOUNT_MUTATION` | `5` | Attempts per hour per user and operation for email, password, secret-key, and account-deletion mutations |
+| `RATE_LIMIT_DEVICE_REVOKE` | `10` | Session revocations per 15 minutes per authenticated device |
+| `RATE_LIMIT_DEVICE_RENAME` | `30` | Session renames per 15 minutes per authenticated device |
 
 <Callout type="info">
 `RATE_LIMIT_SIGNUP_VERIFY_MAX` counts failed guesses against the email address, not against a single code, and **requesting a new verification code does not reset it**. That is deliberate: the per-code counter in the database does reset with every new code, so without this an attacker could buy a fresh set of guesses just by asking for another email. The count clears only on a successful verification or once the `RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES` lockout has elapsed — a locked-out user has to wait the window out, and sending themselves another code will not help.

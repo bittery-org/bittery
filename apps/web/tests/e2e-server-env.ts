@@ -40,6 +40,9 @@ export const E2E_SERVER_RATE_LIMITS: Record<string, string> = {
 	RATE_LIMIT_LOGIN_IP: "2000", // default 20 per 15 min
 	RATE_LIMIT_SIGNUP_IP: "2000", // default 10 per hour
 	RATE_LIMIT_AUTH_IP: "2000", // default 30 per 15 min (generic auth endpoints)
+	RATE_LIMIT_ACCOUNT_MUTATION: "2000", // default 5 per hour per user and operation
+	RATE_LIMIT_DEVICE_REVOKE: "2000", // default 10 per 15 min per authenticated device
+	RATE_LIMIT_DEVICE_RENAME: "2000", // default 30 per 15 min per authenticated device
 
 	// Signup verification code requests: 5/hour per email *and* per IP by
 	// default; the per-IP half is what breaks the suite first.

@@ -624,7 +624,7 @@ async fn list_sessions(
     )?))
 }
 
-#[utoipa::path(post, path = "/users/me/email-changes", operation_id = "updateEmail", request_body = EmailChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/users/me/email-changes", operation_id = "updateEmail", request_body = EmailChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn update_email(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -648,7 +648,7 @@ async fn update_email(
     }))
 }
 
-#[utoipa::path(post, path = "/users/me/password-changes", operation_id = "changePassword", request_body = PasswordChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/users/me/password-changes", operation_id = "changePassword", request_body = PasswordChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying"))), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn change_password(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -671,7 +671,7 @@ async fn change_password(
     }))
 }
 
-#[utoipa::path(post, path = "/users/me/secret-key-rotations", operation_id = "regenerateSecretKey", request_body = SecretKeyRotationRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/users/me/secret-key-rotations", operation_id = "regenerateSecretKey", request_body = SecretKeyRotationRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn regenerate_secret_key(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -715,7 +715,7 @@ async fn store_recovery_key(
     }))
 }
 
-#[utoipa::path(delete, path = "/users/me", operation_id = "deleteAccount", request_body = DeleteAccountRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(delete, path = "/users/me", operation_id = "deleteAccount", request_body = DeleteAccountRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn delete_account(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -734,7 +734,7 @@ async fn delete_account(
     }))
 }
 
-#[utoipa::path(delete, path = "/sessions/{sessionId}", operation_id = "revokeSession", params(("sessionId" = String, Path)), responses((status = 200, body = SuccessResponse), (status = 400, description = "The current session cannot revoke itself", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(delete, path = "/sessions/{sessionId}", operation_id = "revokeSession", params(("sessionId" = String, Path)), responses((status = 200, body = SuccessResponse), (status = 400, description = "The current session cannot revoke itself", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn revoke_session(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -747,7 +747,7 @@ async fn revoke_session(
     }))
 }
 
-#[utoipa::path(patch, path = "/sessions/{sessionId}", operation_id = "renameSession", params(("sessionId" = String, Path)), request_body(content = RenameSessionRequest, content_type = "application/merge-patch+json"), responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 415, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(patch, path = "/sessions/{sessionId}", operation_id = "renameSession", params(("sessionId" = String, Path)), request_body(content = RenameSessionRequest, content_type = "application/merge-patch+json"), responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 415, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn rename_session(
     State(state): State<AppState>,
     request: AuthenticatedRequest,

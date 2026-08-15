@@ -1,4 +1,4 @@
-use super::{LogoutResponse, MeResponse};
+use super::{enforce_window_limit, LogoutResponse, MeResponse};
 use sqlx::query_as;
 use time::OffsetDateTime;
 
@@ -7,6 +7,10 @@ use crate::{
     error::AppError,
     repo::common::{hash_token, insert_audit_event},
     services::{
+        rate_limit::{
+            device_rename_limit, device_revoke_limit, SCOPE_RENAME_SESSION_ACTOR,
+            SCOPE_REVOKE_SESSION_ACTOR,
+        },
         session::{
             format_rfc3339, generate_opaque_session_token, is_grouped_client_session,
             DeviceSessionResponse, RefreshSessionResponse, RenameDeviceInput, SessionIdInput,
@@ -66,6 +70,14 @@ pub(crate) async fn revoke_device(
     session: &VerifiedSession,
     input: SessionIdInput,
 ) -> Result<LogoutResponse, AppError> {
+    let rate_limit_key = device_rate_limit_key(session);
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_REVOKE_SESSION_ACTOR,
+        &rate_limit_key,
+        device_revoke_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     if input.session_id == session.session_id {
         return Err(AppError::bad_request(
             "Cannot revoke current session. Use logout instead.",
@@ -141,6 +153,14 @@ pub(crate) async fn rename_device(
     session: &VerifiedSession,
     input: RenameDeviceInput,
 ) -> Result<LogoutResponse, AppError> {
+    let rate_limit_key = device_rate_limit_key(session);
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_RENAME_SESSION_ACTOR,
+        &rate_limit_key,
+        device_rename_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     if input.device_name.trim().is_empty() || input.device_name.len() > 100 {
         return Err(AppError::bad_request(
             "Device name must be between 1 and 100 characters",
@@ -163,6 +183,31 @@ pub(crate) async fn do_refresh_session(
     session: &VerifiedSession,
 ) -> Result<RefreshSessionResponse, AppError> {
     app_state.sessions.refresh_session(session).await
+}
+
+pub(super) fn device_rate_limit_key(session: &VerifiedSession) -> String {
+    let actor = session.client_id.as_deref().map_or_else(
+        || {
+            format!(
+                "session|{}:{}",
+                session.session_id.len(),
+                session.session_id
+            )
+        },
+        |client_id| {
+            format!(
+                "device|{}:{}|{}:{client_id}",
+                session.platform.len(),
+                session.platform,
+                client_id.len(),
+            )
+        },
+    );
+    hash_token(&format!(
+        "{}:{}|{actor}",
+        session.user_id.len(),
+        session.user_id
+    ))
 }
 #[derive(Debug, sqlx::FromRow)]
 struct DbMeRow {

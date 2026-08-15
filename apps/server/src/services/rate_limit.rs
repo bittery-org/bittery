@@ -44,6 +44,12 @@ pub const SCOPE_RECOVERY_VERIFY: &str = "auth_recovery_verify";
 pub const SCOPE_SHARE_EMAIL_VERIFY: &str = "share_email_verify";
 pub const SCOPE_GENERIC_IP: &str = "auth_generic_ip";
 pub const SCOPE_SHARE_CREATE_DAILY: &str = "share_create_daily";
+pub const SCOPE_UPDATE_EMAIL_USER: &str = "auth_update_email_user";
+pub const SCOPE_CHANGE_PASSWORD_USER: &str = "auth_change_password_user";
+pub const SCOPE_REGENERATE_SECRET_KEY_USER: &str = "auth_regenerate_secret_key_user";
+pub const SCOPE_DELETE_ACCOUNT_USER: &str = "auth_delete_account_user";
+pub const SCOPE_REVOKE_SESSION_ACTOR: &str = "auth_revoke_session_actor";
+pub const SCOPE_RENAME_SESSION_ACTOR: &str = "auth_rename_session_actor";
 
 /// Sentinel key used when a per-IP scope has no client IP available, so
 /// unproxied deployments still get a shared global backstop rather than no limit.
@@ -129,6 +135,27 @@ pub fn share_create_daily_limit(config: &RateLimitConfig) -> WindowLimit {
     WindowLimit {
         max: config.share_link_daily,
         window: ONE_DAY,
+    }
+}
+
+pub fn account_mutation_limit(config: &RateLimitConfig) -> WindowLimit {
+    WindowLimit {
+        max: config.account_mutation,
+        window: ONE_HOUR,
+    }
+}
+
+pub fn device_revoke_limit(config: &RateLimitConfig) -> WindowLimit {
+    WindowLimit {
+        max: config.device_revoke,
+        window: FIFTEEN_MINUTES,
+    }
+}
+
+pub fn device_rename_limit(config: &RateLimitConfig) -> WindowLimit {
+    WindowLimit {
+        max: config.device_rename,
+        window: FIFTEEN_MINUTES,
     }
 }
 

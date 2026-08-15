@@ -1,7 +1,7 @@
 use super::{
-    bad_request_handler_error, validate_hex_string, validate_resource_id, ChangePasswordInput,
-    DeleteAccountInput, EncryptedVaultKeyInput, LogoutResponse, RegenerateSecretKeyInput,
-    StoreRecoveryKeyInput, UpdateEmailInput, ValidatedKdfProfile,
+    bad_request_handler_error, enforce_window_limit, validate_hex_string, validate_resource_id,
+    ChangePasswordInput, DeleteAccountInput, EncryptedVaultKeyInput, LogoutResponse,
+    RegenerateSecretKeyInput, StoreRecoveryKeyInput, UpdateEmailInput, ValidatedKdfProfile,
 };
 use bittery_crypto_core::normalize_email;
 use serde_json::json;
@@ -12,8 +12,14 @@ use crate::{
     error::AppError,
     repo::common::{generate_resource_id, insert_audit_event},
     services::{
-        session::VerifiedSession, session_control::record_session_revocations,
-        transaction::database_error, vault_key::validate_encrypted_vault_key,
+        rate_limit::{
+            account_mutation_limit, SCOPE_CHANGE_PASSWORD_USER, SCOPE_DELETE_ACCOUNT_USER,
+            SCOPE_REGENERATE_SECRET_KEY_USER, SCOPE_UPDATE_EMAIL_USER,
+        },
+        session::VerifiedSession,
+        session_control::record_session_revocations,
+        transaction::database_error,
+        vault_key::validate_encrypted_vault_key,
     },
     AppState,
 };
@@ -22,6 +28,13 @@ pub(crate) async fn update_email(
     session: &VerifiedSession,
     input: UpdateEmailInput,
 ) -> Result<LogoutResponse, AppError> {
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_UPDATE_EMAIL_USER,
+        &session.user_id,
+        account_mutation_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
@@ -84,6 +97,13 @@ pub(crate) async fn change_password(
     session: &VerifiedSession,
     input: ChangePasswordInput,
 ) -> Result<LogoutResponse, AppError> {
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_CHANGE_PASSWORD_USER,
+        &session.user_id,
+        account_mutation_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
@@ -126,6 +146,13 @@ pub(crate) async fn regenerate_secret_key(
     session: &VerifiedSession,
     input: RegenerateSecretKeyInput,
 ) -> Result<LogoutResponse, AppError> {
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_REGENERATE_SECRET_KEY_USER,
+        &session.user_id,
+        account_mutation_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
@@ -207,6 +234,13 @@ pub(crate) async fn delete_account(
     session: &VerifiedSession,
     input: DeleteAccountInput,
 ) -> Result<LogoutResponse, AppError> {
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        SCOPE_DELETE_ACCOUNT_USER,
+        &session.user_id,
+        account_mutation_limit(&app_state.config.rate_limit),
+    )
+    .await?;
     let pool = &app_state.db_pool;
     let user = query_as::<_, DbAccountMutationUserRow>(
 		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",

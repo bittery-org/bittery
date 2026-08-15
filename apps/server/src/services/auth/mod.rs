@@ -505,3 +505,7 @@ fn bad_request_handler_error(message: &str) -> AppError {
 #[cfg(test)]
 #[path = "../auth_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../post_auth_rate_limit_tests.rs"]
+mod post_auth_rate_limit_tests;
