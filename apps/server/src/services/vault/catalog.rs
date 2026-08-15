@@ -318,12 +318,11 @@ pub(crate) async fn create_vault(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
+    insert_vault_created_audit_log(&mut *transaction, &vault_id, user_id).await?;
     transaction
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit vault transaction"))?;
-
-    insert_vault_created_audit_log(pool, &vault_id, user_id).await?;
 
     Ok(CreateVaultResponse { vault_id })
 }
@@ -388,12 +387,11 @@ pub(crate) async fn update_vault(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
+    insert_vault_updated_audit_log(&mut *transaction, &input.vault_id, user_id).await?;
     transaction
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit vault update"))?;
-
-    insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(old_image_key) = old_image_key {
         if Some(old_image_key.as_str()) != updated_image_key.as_deref() {
             let _ = object_storage.delete(&old_image_key).await;
@@ -532,12 +530,11 @@ pub(crate) async fn convert_vault_type(
         input.client_id.as_deref().or(request_client_id),
     )
     .await?;
+    insert_vault_updated_audit_log(&mut *transaction, &input.vault_id, user_id).await?;
     transaction
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit vault conversion"))?;
-
-    insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
 
     Ok(ConvertVaultTypeResponse {
         success: true,
@@ -622,12 +619,11 @@ pub(crate) async fn delete_vault(
         .execute(&mut *transaction)
         .await
         .map_err(|error| database_error(error, "Failed to delete vault"))?;
+    insert_vault_deleted_audit_log(&mut *transaction, &input.vault_id, user_id).await?;
     transaction
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit vault deletion"))?;
-
-    insert_vault_deleted_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(image_key) = vault.image_key {
         let _ = object_storage.delete(&image_key).await;
     }
@@ -861,18 +857,18 @@ mod member_handlers {
             json!({ "addedUserId": input.user_id, "role": role }),
         )
         .await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| database_error(error, "Failed to commit vault member add"))?;
         insert_vault_audit_log_with_metadata(
-            pool,
+            &mut *transaction,
             "vault_member_added",
             &input.vault_id,
             user_id,
             json!({ "addedUserId": input.user_id, "role": role }),
         )
         .await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Failed to commit vault member add"))?;
         Ok(SuccessResponse { success: true })
     }
 
@@ -1137,13 +1133,13 @@ async fn insert_vault_created_sync_event(
     .await
 }
 
-async fn insert_vault_created_audit_log(
-    pool: &PgPool,
+async fn insert_vault_created_audit_log<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     vault_id: &str,
     user_id: &str,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         "vault_created",
@@ -1174,13 +1170,13 @@ async fn insert_vault_updated_sync_event(
     .await
 }
 
-async fn insert_vault_updated_audit_log(
-    pool: &PgPool,
+async fn insert_vault_updated_audit_log<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     vault_id: &str,
     user_id: &str,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         "vault_updated",
@@ -1191,15 +1187,15 @@ async fn insert_vault_updated_audit_log(
     .await
 }
 
-pub(crate) async fn insert_vault_audit_log_with_metadata(
-    pool: &PgPool,
+pub(crate) async fn insert_vault_audit_log_with_metadata<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     action: &str,
     vault_id: &str,
     user_id: &str,
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         action,
@@ -1273,13 +1269,13 @@ async fn insert_vault_access_revoked_sync_event(
     .await
 }
 
-async fn insert_vault_deleted_audit_log(
-    pool: &PgPool,
+async fn insert_vault_deleted_audit_log<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     vault_id: &str,
     user_id: &str,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         "vault_deleted",

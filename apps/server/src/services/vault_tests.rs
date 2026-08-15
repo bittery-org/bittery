@@ -462,6 +462,25 @@ async fn build_vault_router_fixture(pool: &PgPool) -> VaultRouterFixture {
     fixture
 }
 
+async fn install_required_audit_failure_trigger(pool: &PgPool, action: &str) {
+    query(
+        r#"CREATE FUNCTION reject_required_audit_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'required audit insert rejected by test';
+        END;
+        $$"#,
+    )
+    .execute(pool)
+    .await
+    .expect("audit failure function should install");
+    query(&format!(
+        "CREATE TRIGGER reject_required_audit_insert BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action = '{action}') EXECUTE FUNCTION reject_required_audit_insert()"
+    ))
+    .execute(pool)
+    .await
+    .expect("audit failure trigger should install");
+}
+
 async fn seed_attachment(
     pool: &PgPool,
     attachment_id: &str,
@@ -1145,6 +1164,101 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
             assert_handler_error(&outsider_item_response.body, "FORBIDDEN", "Access denied");
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn vault_create_audit_failure_rolls_back_mutation() {
+    with_api_test_app("vault_create_audit_atomicity", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        install_required_audit_failure_trigger(&app.pool, "vault_created").await;
+        let session = app.issue_session(&fixture.solo_user_id).await;
+        let vault_id = "vault_rejected_audit";
+
+        let response = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{vault_id}"),
+                Some(json!({
+                    "name": "Atomic Audit Vault",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "atomic-audit-key"
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+
+        response.assert_contract_status();
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        let vault_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
+            .bind(vault_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("vault count should load");
+        assert_eq!(
+            vault_count, 0,
+            "vault mutation must roll back with its audit"
+        );
+        let sync_event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'vault_created'::sync_event_type",
+        )
+        .bind(vault_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("vault sync event count should load");
+        assert_eq!(
+            sync_event_count, 0,
+            "vault sync event must roll back with its audit"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn item_create_audit_failure_rolls_back_mutation() {
+    with_api_test_app("item_create_audit_atomicity", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        install_required_audit_failure_trigger(&app.pool, "item_created").await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let item_id = "item_rejected_audit";
+
+        let response = app
+            .api_json(
+                Method::PUT,
+                &format!(
+                    "/api/v1/vaults/{}/items/{item_id}",
+                    fixture.owner_personal_vault_id
+                ),
+                Some(json!({
+                    "category": "login",
+                    "encryptedData": "atomic-audit-data",
+                    "encryptionIv": "atomic-audit-iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+
+        response.assert_contract_status();
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("item count should load");
+        assert_eq!(item_count, 0, "item mutation must roll back with its audit");
+        let sync_event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_created'::sync_event_type",
+        )
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("item sync event count should load");
+        assert_eq!(
+            sync_event_count, 0,
+            "item sync event must roll back with its audit"
+        );
+    })
     .await;
 }
 

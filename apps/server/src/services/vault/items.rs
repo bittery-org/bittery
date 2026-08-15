@@ -360,18 +360,18 @@ pub(crate) async fn create_vault_item(
         version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item creation"))?;
     insert_item_audit_log(
-        pool,
+        &mut *transaction,
         "item_created",
         &item_id,
         user_id,
         Some(json!({ "vaultId": input.vault_id, "category": input.category })),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item creation"))?;
 
     Ok(CreateItemResponse {
         item_id: item_id.clone(),
@@ -440,18 +440,18 @@ pub(crate) async fn bulk_import_vault_items(
         json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit bulk import"))?;
     insert_bulk_import_audit_event(
-        pool,
+        &mut *transaction,
         "vault_updated",
         &input.vault_id,
         user_id,
         json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit bulk import"))?;
 
     Ok(BulkImportItemsResponse {
         success: true,
@@ -596,18 +596,18 @@ pub(crate) async fn delete_vault_item(
         new_version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item delete"))?;
     insert_item_audit_log(
-        pool,
+        &mut *transaction,
         "item_deleted",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item delete"))?;
 
     Ok(SuccessResponse { success: true })
 }
@@ -714,18 +714,18 @@ pub(crate) async fn restore_vault_item(
         new_version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item restore"))?;
     insert_item_audit_log(
-        pool,
+        &mut *transaction,
         "item_restored",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item restore"))?;
 
     Ok(SuccessResponse { success: true })
 }
@@ -785,12 +785,8 @@ pub(crate) async fn move_vault_item(
         json!({ "sourceVaultId": input.source_vault_id }),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item move"))?;
     insert_item_audit_log(
-        pool,
+        &mut *transaction,
         "item_moved",
         &input.item_id,
         user_id,
@@ -801,6 +797,10 @@ pub(crate) async fn move_vault_item(
         })),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit item move"))?;
 
     Ok(UpdateItemResponse {
         success: true,
@@ -846,18 +846,18 @@ pub(crate) async fn permanently_delete_vault_item(
         deleted_version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit permanent delete"))?;
     insert_item_audit_log(
-        pool,
+        &mut *transaction,
         "item_permanently_deleted",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": deleted_version })),
     )
     .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit permanent delete"))?;
 
     Ok(SuccessResponse { success: true })
 }
@@ -883,15 +883,15 @@ async fn insert_bulk_import_sync_event(
     .await
 }
 
-async fn insert_bulk_import_audit_event(
-    pool: &PgPool,
+async fn insert_bulk_import_audit_event<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     action: &str,
     vault_id: &str,
     user_id: &str,
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         action,
@@ -927,15 +927,15 @@ async fn insert_item_sync_event_with_metadata(
     .await
 }
 
-async fn insert_item_audit_log(
-    pool: &PgPool,
+async fn insert_item_audit_log<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     action: &str,
     item_id: &str,
     user_id: &str,
     metadata: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
     insert_audit_event(
-        pool,
+        executor,
         &generate_resource_id("audit"),
         user_id,
         action,
