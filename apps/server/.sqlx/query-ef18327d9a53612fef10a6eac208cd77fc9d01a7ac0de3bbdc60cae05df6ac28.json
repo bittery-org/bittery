@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE item i\n           SET encrypted_data = s.payload::jsonb->>'encryptedData',\n               encryption_iv = s.payload::jsonb->>'encryptionIv',\n               encryption_algorithm = s.payload::jsonb->>'encryptionAlgorithm',\n               version = i.version + 1,\n               updated_at = now()\n           FROM vault_key_rotation_plan_staged_output s\n           WHERE s.plan_id = $1\n             AND s.kind = 'item'\n             AND i.vault_id = $2\n             AND i.id = s.entity_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef18327d9a53612fef10a6eac208cd77fc9d01a7ac0de3bbdc60cae05df6ac28"
+}

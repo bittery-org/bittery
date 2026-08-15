@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT entity_id AS id, expected_version, payload\n           FROM vault_key_rotation_plan_manifest\n           WHERE plan_id = $1\n             AND kind = $2::vault_key_rotation_manifest_kind\n             AND entity_id > $3\n           ORDER BY entity_id\n           LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "expected_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "vault_key_rotation_manifest_kind",
+            "kind": {
+              "Enum": [
+                "member",
+                "item",
+                "attachment"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d5cde8ad36a62ac6fea543671e7b91ec55434d664978234db92955414f0b1f7d"
+}

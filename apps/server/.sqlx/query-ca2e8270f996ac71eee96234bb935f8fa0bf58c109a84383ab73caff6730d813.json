@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vault_key_rotation_plan SET state = 'completed', completed_at = now() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca2e8270f996ac71eee96234bb935f8fa0bf58c109a84383ab73caff6730d813"
+}

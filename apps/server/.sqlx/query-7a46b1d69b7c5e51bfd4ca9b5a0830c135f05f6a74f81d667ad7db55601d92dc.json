@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH doomed AS (\n               SELECT id\n               FROM vault_key_rotation_plan\n               WHERE state IN ('completed', 'stale', 'failed', 'abandoned', 'expired')\n                  OR absolute_expires_at <= now()\n                  OR idle_expires_at <= now()\n               ORDER BY absolute_expires_at, id\n               LIMIT $1\n               FOR UPDATE SKIP LOCKED\n           )\n           DELETE FROM vault_key_rotation_plan p\n           USING doomed\n           WHERE p.id = doomed.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7a46b1d69b7c5e51bfd4ca9b5a0830c135f05f6a74f81d667ad7db55601d92dc"
+}
