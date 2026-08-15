@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../../../packages/ui/src/tokens.css";
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+html {
+	color-scheme: light dark;
+}
+
+body {
+	overscroll-behavior: none;
+	-webkit-tap-highlight-color: transparent;
+	user-select: none;
+}
+
+input,
+textarea {
+	user-select: text;
+}
+
+/* Mobile-specific tokens: real values once `viewport-fit=cover` is set in index.html. */
+:root {
+	--safe-top: env(safe-area-inset-top, 0px);
+	--safe-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-left: env(safe-area-inset-left, 0px);
+	--safe-right: env(safe-area-inset-right, 0px);
+}

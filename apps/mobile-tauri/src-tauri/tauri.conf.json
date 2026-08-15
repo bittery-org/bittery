@@ -1,0 +1,35 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "bittery",
+	"version": "0.5.2",
+	"identifier": "com.bittery.mobile",
+	"build": {
+		"beforeDevCommand": "pnpm dev:vite",
+		"devUrl": "http://localhost:3040",
+		"beforeBuildCommand": "tsc && vite build",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "bittery",
+				"width": 420,
+				"height": 900
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		]
+	}
+}

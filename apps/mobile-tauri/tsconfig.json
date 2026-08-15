@@ -1,0 +1,20 @@
+{
+	"extends": "@bittery/config/tsconfig.base.json",
+	"compilerOptions": {
+		/* Tauri's webview floor; keeps the emitted syntax below the base's ESNext. */
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"useDefineForClassFields": true,
+		"jsx": "react-jsx",
+		"types": ["vite/client"],
+		"noEmit": true,
+
+		/* Path aliases */
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["src/*"]
+		}
+	},
+	"include": ["src"],
+	"references": [{ "path": "./tsconfig.node.json" }]
+}
