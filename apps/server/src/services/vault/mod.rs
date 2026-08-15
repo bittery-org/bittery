@@ -13,6 +13,7 @@ use crate::{
 
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
 
+mod access;
 mod attachments;
 mod catalog;
 mod items;
@@ -36,12 +37,12 @@ pub(crate) use items::{
 pub(crate) use pagination::ByteBoundedPage;
 
 #[cfg(test)]
+use access::assert_item_write_access;
+#[cfg(test)]
 use attachments::{
     attachment_quota_lock_key, base64_encoded_length, encrypted_attachment_storage_size,
     pending_attachment_upload_expiry,
 };
-#[cfg(test)]
-use items::assert_item_write_access;
 
 #[cfg(test)]
 #[path = "../vault_tests.rs"]

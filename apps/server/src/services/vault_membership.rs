@@ -27,20 +27,82 @@ pub(crate) struct VaultMemberRemovalResult {
     pub rotation: RotationResult,
 }
 
-fn authorize(actor: VaultRole, target: VaultRole, self_removal: bool) -> Result<(), AppError> {
-    if self_removal {
-        return Err(AppError::bad_request("Cannot remove yourself"));
-    }
+#[derive(Clone, Copy)]
+enum MemberManagementViolation {
+    SelfAction,
+    InsufficientPermissions,
+    TargetIsOwner,
+    AdminManagingAdmin,
+}
+
+fn member_management_violation(
+    actor: VaultRole,
+    target: VaultRole,
+    self_action: bool,
+) -> Option<MemberManagementViolation> {
+    self_action_violation(self_action).or_else(|| member_role_violation(actor, target))
+}
+
+fn self_action_violation(self_action: bool) -> Option<MemberManagementViolation> {
+    self_action.then_some(MemberManagementViolation::SelfAction)
+}
+
+fn member_role_violation(actor: VaultRole, target: VaultRole) -> Option<MemberManagementViolation> {
     if !actor.can_manage() {
-        return Err(AppError::forbidden("Insufficient permissions"));
+        Some(MemberManagementViolation::InsufficientPermissions)
+    } else if target == VaultRole::Owner {
+        Some(MemberManagementViolation::TargetIsOwner)
+    } else if actor == VaultRole::Admin && target == VaultRole::Admin {
+        Some(MemberManagementViolation::AdminManagingAdmin)
+    } else {
+        None
     }
-    if target == VaultRole::Owner {
-        return Err(AppError::forbidden("Cannot remove vault owner"));
+}
+
+fn authorize(actor: VaultRole, target: VaultRole, self_removal: bool) -> Result<(), AppError> {
+    match member_management_violation(actor, target, self_removal) {
+        None => Ok(()),
+        Some(MemberManagementViolation::SelfAction) => {
+            Err(AppError::bad_request("Cannot remove yourself"))
+        }
+        Some(MemberManagementViolation::InsufficientPermissions) => {
+            Err(AppError::forbidden("Insufficient permissions"))
+        }
+        Some(MemberManagementViolation::TargetIsOwner) => {
+            Err(AppError::forbidden("Cannot remove vault owner"))
+        }
+        Some(MemberManagementViolation::AdminManagingAdmin) => {
+            Err(AppError::forbidden("Admins cannot remove other admins"))
+        }
     }
-    if actor == VaultRole::Admin && target == VaultRole::Admin {
-        return Err(AppError::forbidden("Admins cannot remove other admins"));
+}
+
+pub(crate) fn assert_role_change_not_self(self_change: bool) -> Result<(), AppError> {
+    match self_action_violation(self_change) {
+        None => Ok(()),
+        Some(MemberManagementViolation::SelfAction) => {
+            Err(AppError::bad_request("Cannot change your own role"))
+        }
+        Some(_) => unreachable!("self-action policy returns only self-action violations"),
     }
-    Ok(())
+}
+
+pub(crate) fn authorize_role_change(actor: VaultRole, target: VaultRole) -> Result<(), AppError> {
+    match member_role_violation(actor, target) {
+        None => Ok(()),
+        Some(MemberManagementViolation::InsufficientPermissions) => Err(AppError::forbidden(
+            "Only vault owner or admin can manage members",
+        )),
+        Some(MemberManagementViolation::TargetIsOwner) => {
+            Err(AppError::forbidden("Cannot change vault owner's role"))
+        }
+        Some(MemberManagementViolation::AdminManagingAdmin) => {
+            Err(AppError::forbidden("Admins cannot change other admins"))
+        }
+        Some(MemberManagementViolation::SelfAction) => {
+            unreachable!("role policy does not evaluate self actions")
+        }
+    }
 }
 
 fn authorize_vault_policy(
@@ -231,6 +293,23 @@ mod tests {
         assert!(authorize(VaultRole::Member, VaultRole::ReadOnly, false).is_err());
         assert!(authorize(VaultRole::Owner, VaultRole::Owner, false).is_err());
         assert!(authorize(VaultRole::Owner, VaultRole::Member, true).is_err());
+    }
+
+    #[test]
+    fn role_change_policy_preserves_action_specific_errors() {
+        assert!(authorize_role_change(VaultRole::Owner, VaultRole::Admin).is_ok());
+
+        let self_change = assert_role_change_not_self(true).unwrap_err();
+        assert_eq!(self_change.code, crate::error::AppErrorCode::BadRequest);
+        assert_eq!(self_change.message, "Cannot change your own role");
+
+        let owner_target = authorize_role_change(VaultRole::Owner, VaultRole::Owner).unwrap_err();
+        assert_eq!(owner_target.code, crate::error::AppErrorCode::Forbidden);
+        assert_eq!(owner_target.message, "Cannot change vault owner's role");
+
+        let admin_target = authorize_role_change(VaultRole::Admin, VaultRole::Admin).unwrap_err();
+        assert_eq!(admin_target.code, crate::error::AppErrorCode::Forbidden);
+        assert_eq!(admin_target.message, "Admins cannot change other admins");
     }
 
     #[tokio::test]

@@ -5,6 +5,10 @@ use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 
 use super::{
+    access::{
+        assert_item_read_access, assert_item_write_access, insert_item_sync_event, load_item_row,
+        load_vault_access,
+    },
     attachments::{attachments_enabled_for_user, load_item_attachments},
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
@@ -16,18 +20,13 @@ use super::{
 };
 use crate::{
     db::{
-        enums::{SyncEntityType, SyncEventType, VaultRole},
+        enums::{SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
     },
     error::AppError,
     integrations::storage,
     repo::common::{generate_resource_id, insert_audit_event, insert_sync_event},
 };
-
-#[derive(Debug, sqlx::FromRow)]
-struct DbItemVaultAccessRow {
-    role: VaultRole,
-}
 
 pub(crate) async fn list_vault_items_page(
     pool: &PgPool,
@@ -36,20 +35,7 @@ pub(crate) async fn list_vault_items_page(
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
 ) -> Result<ByteBoundedPage<VaultItemDetailsResponse>, AppError> {
-    let vault_access = query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(&input.vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        AppError::internal("Failed to verify vault access")
-    })?;
-    if vault_access.is_none() {
-        return Err(AppError::forbidden("Access denied to this vault"));
-    }
+    let _access = load_vault_access(pool, &input.vault_id, user_id).await?;
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
     let weights = query_as::<_, ItemPageWeight>(
@@ -337,20 +323,7 @@ pub(crate) async fn get_vault_item(
         AppError::internal("Failed to load item")
     })?
     .ok_or_else(|| AppError::not_found("Item not found"))?;
-    let vault_access = query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(&item_row.vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify item access");
-        AppError::internal("Failed to verify item access")
-    })?;
-    if vault_access.is_none() {
-        return Err(AppError::forbidden("Access denied"));
-    }
+    assert_item_read_access(pool, &item_row.vault_id, user_id).await?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, std::slice::from_ref(&item_row)).await?
@@ -398,7 +371,7 @@ pub(crate) async fn create_vault_item(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to create item"); AppError::internal("Failed to create item") })?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemCreated,
         &item_id,
         &input.vault_id,
@@ -540,7 +513,7 @@ pub(crate) async fn update_vault_item(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to update item"); AppError::internal("Failed to update item") })?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -593,7 +566,7 @@ pub(crate) async fn toggle_vault_favorite(
         })?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -640,7 +613,7 @@ pub(crate) async fn delete_vault_item(
         })?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -767,7 +740,7 @@ pub(crate) async fn restore_vault_item(
     })?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemRestored,
         &input.item_id,
         &existing_item.vault_id,
@@ -902,7 +875,7 @@ pub(crate) async fn permanently_delete_vault_item(
     })?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemPermanentlyDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -925,14 +898,6 @@ pub(crate) async fn permanently_delete_vault_item(
     .await?;
 
     Ok(SuccessResponse { success: true })
-}
-
-pub(super) fn assert_item_write_access(role: VaultRole, message: &str) -> Result<(), AppError> {
-    if role.can_write() {
-        Ok(())
-    } else {
-        Err(AppError::forbidden(message))
-    }
 }
 
 async fn insert_bulk_import_sync_event(
@@ -971,29 +936,6 @@ async fn insert_bulk_import_audit_event(
         "vault",
         vault_id,
         Some(metadata),
-    )
-    .await
-}
-
-async fn insert_item_sync_event(
-    transaction: &mut Transaction<'_, Postgres>,
-    event_type: SyncEventType,
-    item_id: &str,
-    vault_id: &str,
-    user_id: &str,
-    client_id: Option<&str>,
-    version: i32,
-) -> Result<(), AppError> {
-    insert_sync_event(
-        &mut **transaction,
-        event_type,
-        item_id,
-        SyncEntityType::Item,
-        vault_id,
-        user_id,
-        version,
-        client_id,
-        None,
     )
     .await
 }
@@ -1074,39 +1016,6 @@ fn build_vault_summary_map(
             )
         })
         .collect()
-}
-
-async fn load_item_row(pool: &PgPool, item_id: &str) -> Result<DbBootstrapItemRow, AppError> {
-    query_as::<_, DbBootstrapItemRow>(&format!(
-        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = $1 LIMIT 1"
-    ))
-    .bind(item_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item");
-        AppError::internal("Failed to load item")
-    })?
-    .ok_or_else(|| AppError::not_found("Item not found"))
-}
-
-async fn load_vault_access(
-    pool: &PgPool,
-    vault_id: &str,
-    user_id: &str,
-) -> Result<DbItemVaultAccessRow, AppError> {
-    query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        AppError::internal("Failed to verify vault access")
-    })?
-    .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }
 
 async fn load_user_vault_summaries(

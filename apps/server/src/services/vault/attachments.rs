@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
+use sqlx::{query, query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 
 use super::{
+    access::{assert_item_write_access, insert_item_sync_event, load_item_row, load_vault_access},
     AttachmentDownloadResponse, AttachmentIdInput, CreateAttachmentInput, CreateAttachmentResponse,
     CreateAttachmentUploadInput, CreateAttachmentUploadResponse, ItemIdInput, SuccessResponse,
     UpdateAttachmentInput, VaultAttachmentResponse,
@@ -11,12 +12,12 @@ use super::{
 use crate::{
     config::bittery_mode,
     db::{
-        enums::{SyncEntityType, SyncEventType, VaultRole},
+        enums::{SyncEventType, VaultRole},
         models::{DbBootstrapAttachmentRow, DbBootstrapItemRow},
     },
     error::AppError,
     integrations::storage,
-    repo::common::{generate_resource_id, insert_sync_event},
+    repo::common::generate_resource_id,
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
 };
 
@@ -49,11 +50,6 @@ struct AttachmentActor {
     team_id: String,
     attachment_max_file_size_bytes: Option<i64>,
     attachment_storage_bytes: Option<i64>,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct AttachmentVaultAccess {
-    role: VaultRole,
 }
 
 pub(crate) async fn create_vault_attachment_upload(
@@ -266,7 +262,7 @@ pub(crate) async fn create_vault_attachment(
             AppError::internal("Failed to consume attachment reservation")
         })?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &scoped_item.vault_id,
@@ -363,7 +359,7 @@ pub(crate) async fn update_vault_attachment(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to update attachment"); AppError::internal("Failed to update attachment") })?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
@@ -419,7 +415,7 @@ pub(crate) async fn delete_vault_attachment(
             AppError::internal("Failed to delete attachment")
         })?;
     insert_item_sync_event(
-        &mut transaction,
+        &mut *transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
@@ -587,69 +583,4 @@ async fn load_attachment_access(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment"); AppError::internal("Failed to load attachment") })?
 	.ok_or_else(|| AppError::not_found("Attachment not found"))
-}
-
-fn assert_item_write_access(role: VaultRole, message: &str) -> Result<(), AppError> {
-    if role.can_write() {
-        Ok(())
-    } else {
-        Err(AppError::forbidden(message))
-    }
-}
-
-async fn insert_item_sync_event(
-    transaction: &mut Transaction<'_, Postgres>,
-    event_type: SyncEventType,
-    item_id: &str,
-    vault_id: &str,
-    user_id: &str,
-    client_id: Option<&str>,
-    version: i32,
-) -> Result<(), AppError> {
-    insert_sync_event(
-        &mut **transaction,
-        event_type,
-        item_id,
-        SyncEntityType::Item,
-        vault_id,
-        user_id,
-        version,
-        client_id,
-        None,
-    )
-    .await
-}
-
-async fn load_item_row(pool: &PgPool, item_id: &str) -> Result<DbBootstrapItemRow, AppError> {
-    query_as::<_, DbBootstrapItemRow>(&format!(
-        "SELECT {columns} FROM item WHERE id = $1 LIMIT 1",
-        columns = crate::db::models::BOOTSTRAP_ITEM_COLUMNS,
-    ))
-    .bind(item_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load item");
-        AppError::internal("Failed to load item")
-    })?
-    .ok_or_else(|| AppError::not_found("Item not found"))
-}
-
-async fn load_vault_access(
-    pool: &PgPool,
-    vault_id: &str,
-    user_id: &str,
-) -> Result<AttachmentVaultAccess, AppError> {
-    query_as::<_, AttachmentVaultAccess>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        AppError::internal("Failed to verify vault access")
-    })?
-    .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }

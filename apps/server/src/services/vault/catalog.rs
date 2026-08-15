@@ -4,10 +4,10 @@ use time::OffsetDateTime;
 
 use super::pagination::{bounded_page_ids, ItemPageWeight, VAULT_PAGE_QUERY_BYTES};
 use super::{
-    ByteBoundedPage, ConvertVaultTypeInput, ConvertVaultTypeResponse, CreateVaultImageUploadInput,
-    CreateVaultInput, CreateVaultResponse, SuccessResponse, UpdateVaultInput, UpdateVaultResponse,
-    VaultDetailsResponse, VaultIdInput, VaultListEntryResponse, VaultStatsResponse,
-    VAULT_NAME_MAX_CHARS,
+    access::load_vault_access, ByteBoundedPage, ConvertVaultTypeInput, ConvertVaultTypeResponse,
+    CreateVaultImageUploadInput, CreateVaultInput, CreateVaultResponse, SuccessResponse,
+    UpdateVaultInput, UpdateVaultResponse, VaultDetailsResponse, VaultIdInput,
+    VaultListEntryResponse, VaultStatsResponse, VAULT_NAME_MAX_CHARS,
 };
 use crate::{
     config::{bittery_mode, format_timestamp},
@@ -74,11 +74,6 @@ struct DbVaultDeleteRow {
 struct DbVaultMemberAccessRow {
     user_id: String,
 }
-#[derive(Debug, sqlx::FromRow)]
-struct DbItemVaultAccessRow {
-    role: VaultRole,
-}
-
 pub(crate) async fn list_vaults_page(
     pool: &PgPool,
     object_storage: &dyn storage::ObjectStorage,
@@ -768,7 +763,9 @@ mod member_handlers {
         error::{AppError, AppErrorCode},
         repo::common::generate_resource_id,
         services::{
-            team_billing::load_team_billing_entitlement, vault_key::validate_encrypted_vault_key,
+            team_billing::load_team_billing_entitlement,
+            vault_key::validate_encrypted_vault_key,
+            vault_membership::{assert_role_change_not_self, authorize_role_change},
         },
     };
 
@@ -860,9 +857,7 @@ mod member_handlers {
     ) -> Result<SuccessResponse, AppError> {
         let role = validate_vault_member_role(input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        if input.user_id == user_id {
-            return Err(AppError::bad_request("Cannot change your own role"));
-        }
+        assert_role_change_not_self(input.user_id == user_id)?;
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
             .await
             .map_err(|error| {
@@ -872,12 +867,7 @@ mod member_handlers {
                     error
                 }
             })?;
-        if target_access.role == VaultRole::Owner {
-            return Err(AppError::forbidden("Cannot change vault owner's role"));
-        }
-        if actor.role == VaultRole::Admin && target_access.role == VaultRole::Admin {
-            return Err(AppError::forbidden("Admins cannot change other admins"));
-        }
+        authorize_role_change(actor.role, target_access.role)?;
         query("UPDATE vault_key SET role = $1::vault_role WHERE vault_id = $2 AND user_id = $3")
             .bind(role)
             .bind(&input.vault_id)
@@ -1390,23 +1380,4 @@ fn resolve_vault_sharing_entitlement(
     status: BillingStatus,
 ) -> VaultSharingEntitlement {
     shared_resolve_vault_sharing_entitlement(bittery_mode(), Some(plan), Some(status))
-}
-
-async fn load_vault_access(
-    pool: &PgPool,
-    vault_id: &str,
-    user_id: &str,
-) -> Result<DbItemVaultAccessRow, AppError> {
-    query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        AppError::internal("Failed to verify vault access")
-    })?
-    .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }
