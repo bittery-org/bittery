@@ -1,0 +1,19 @@
+[package]
+name = "tauri-plugin-bittery-keystore"
+version = "0.1.0"
+description = "First-party Tauri plugin backing the mobile `secret` tier with the Android Keystore"
+edition = "2021"
+# `links` is what makes this a Tauri *mobile* plugin rather than a plain crate: the
+# build script publishes `cargo:android_library_path`, and the Tauri CLI reads it back
+# as `DEP_TAURI_PLUGIN_BITTERY_KEYSTORE_ANDROID_LIBRARY_PATH` to write the Gradle
+# `include` into `gen/android/tauri.settings.gradle`. Without it the `android/`
+# directory is never seen and the Kotlin is never compiled.
+links = "tauri-plugin-bittery-keystore"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

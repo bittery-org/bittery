@@ -1,0 +1,4 @@
+// Only used when this module is opened on its own in Android Studio. In a real
+// build the root `gen/android/tauri.settings.gradle` includes both projects.
+include ':tauri-android'
+project(':tauri-android').projectDir = new File('./.tauri/tauri-api')

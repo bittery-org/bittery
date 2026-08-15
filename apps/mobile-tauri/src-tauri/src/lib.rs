@@ -5,6 +5,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // The `secret` tier's Android Keystore backing. Registering it is safe on every
+        // platform: off Android it answers `available: false` and `packages/storage`'s
+        // adapter keeps using `secrets.json`.
+        .plugin(tauri_plugin_bittery_keystore::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

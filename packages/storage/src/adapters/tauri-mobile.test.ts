@@ -58,7 +58,10 @@ type BiometryStillMatches = typeof BiometryPlugin extends TauriMobileBiometry
  * this.
  */
 async function makeMobilePorts() {
-	const doubles = createTauriMobileDoubles();
+	// `keystoreUnavailable`: these tests are about the `secrets.json` **fallback**, which is
+	// what runs on iOS and on any build without the Keystore plugin. The Keystore path has its
+	// own conformance run and its own describe block below.
+	const doubles = createTauriMobileDoubles({ keystoreUnavailable: true });
 	const platform = createTauriMobilePlatformPort(doubles.deps);
 	const record = createTauriMobileRecordPort(doubles.deps);
 	await platform.initialize();
@@ -83,7 +86,26 @@ async function makeCountingPorts() {
 	return { platform, record, doubles };
 }
 
-runPortConformance("tauri-mobile", makeMobilePorts);
+/**
+ * The same pair of ports with the Keystore plugin answering — the Android production path.
+ *
+ * Records still run on real SQLite; only the secret tier moves.
+ */
+async function makeKeystorePorts() {
+	const doubles = createTauriMobileDoubles();
+	const platform = createTauriMobilePlatformPort(doubles.deps);
+	const record = createTauriMobileRecordPort(doubles.deps);
+	await platform.initialize();
+	await record.initialize();
+
+	return { platform, record, doubles };
+}
+
+// The contract has to hold on **both** secret backings, because both ship: Android gets the
+// Keystore, everything else gets `secrets.json`. Running the suite once would prove it of
+// whichever one happened to be wired here.
+runPortConformance("tauri-mobile (secrets.json fallback)", makeMobilePorts);
+runPortConformance("tauri-mobile (Android Keystore)", makeKeystorePorts);
 
 /** A platform port over doubles whose biometry plugin is configured up front. */
 async function makeBiometricPort(
@@ -797,5 +819,358 @@ describe("tauri-mobile adapter — biometric", () => {
 		await platform.secretSet("bittery_device_key", "dk");
 
 		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
+	});
+});
+
+// ============================================================================
+// tauri-plugin-bittery-keystore
+// ============================================================================
+
+/**
+ * The secret tier's Android Keystore backing, and its fallback.
+ *
+ * Two things are being pinned here and they are different. One is *routing*: after the probe
+ * says yes, no secret may reach `secrets.json`, and after it says no, none may reach the plugin.
+ * The other is that neither answer may weaken the port contract — a Keystore that throws must
+ * still answer `null` for a missing key and still no-op a delete, because `AccountStore`
+ * `clearSession` aborts on a throw and leaves the vault unlocked with `vault_keys` on disk.
+ *
+ * The migration tests sit here rather than with the store tests because the thing at risk is the
+ * user's data, not a code path: someone with secrets in `secrets.json` who installs a
+ * Keystore-capable build must come out the other side signed in.
+ */
+describe("tauri-mobile adapter — Android Keystore secret backing", () => {
+	/** A platform port with the doubles reachable, configured before `initialize()` runs. */
+	async function makeKeystorePlatform(
+		options: Parameters<typeof createTauriMobileDoubles>[0] = {},
+		configure: (doubles: TauriMobileDoubles) => void = () => {},
+	) {
+		const doubles = createTauriMobileDoubles(options);
+		configure(doubles);
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
+		return { platform, doubles };
+	}
+
+	// ------------------------------------------------------------------
+	// The probe, and what it routes
+	// ------------------------------------------------------------------
+
+	test("a probe that says yes routes every secret to the Keystore and none to secrets.json", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+
+		await platform.secretSet("bittery_vault_keys", "vk");
+
+		expect(await platform.secretGet("bittery_vault_keys")).toBe("vk");
+		expect(doubles.keystore.contents.get("secret:bittery_vault_keys")).toBe(
+			"vk",
+		);
+		// The whole point of M1-C9: key material stops landing in the plain JSON file.
+		expect(doubles.secrets.contents.size).toBe(0);
+		expect(doubles.secrets.sets).toEqual([]);
+	});
+
+	test("a probe that says no keeps every secret in secrets.json and never calls the plugin", async () => {
+		const { platform, doubles } = await makeKeystorePlatform({
+			keystoreUnavailable: true,
+		});
+		doubles.keystore.resetCallLog();
+
+		await platform.secretSet("bittery_vault_keys", "vk");
+
+		expect(await platform.secretGet("bittery_vault_keys")).toBe("vk");
+		expect(doubles.secrets.contents.get("secret:bittery_vault_keys")).toBe(
+			"vk",
+		);
+		expect(doubles.keystore.contents.size).toBe(0);
+		expect(doubles.keystore.calls).toEqual([]);
+	});
+
+	/**
+	 * The harshest unavailability: no plugin registered at all, so the *loader* rejects rather
+	 * than the probe answering. An APK built before M1-C9, or any iOS build.
+	 */
+	test("a build with no keystore plugin falls back instead of failing to initialize", async () => {
+		const { platform, doubles } = await makeKeystorePlatform({
+			keystoreModuleMissing: true,
+		});
+
+		await platform.secretSet("bittery_device_key", "dk");
+
+		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
+		expect(doubles.secrets.contents.get("secret:bittery_device_key")).toBe(
+			"dk",
+		);
+	});
+
+	/** A plugin that is registered but whose probe *rejects* is the same fact: fall back. */
+	test("a probe that rejects falls back rather than propagating", async () => {
+		const { platform, doubles } = await makeKeystorePlatform({}, (d) => {
+			d.keystore.probeFailure = new Error("plugin bittery-keystore not found");
+		});
+
+		await platform.secretSet("bittery_device_key", "dk");
+
+		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
+		expect(doubles.secrets.contents.get("secret:bittery_device_key")).toBe(
+			"dk",
+		);
+	});
+
+	/** One probe per port, not one per secret read. `jwt_token` is read on every request. */
+	test("the probe runs once, in initialize, not on every secret call", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+
+		await platform.secretSet("a", "1");
+		await platform.secretGet("a");
+		await platform.secretGet("a");
+		await platform.secretDelete("a");
+
+		expect(
+			doubles.keystore.calls.filter(
+				(call) => call.cmd === "plugin:bittery-keystore|secret_available",
+			),
+		).toHaveLength(1);
+	});
+
+	// ------------------------------------------------------------------
+	// secretBacking — the security-review answer, in all three states
+	// ------------------------------------------------------------------
+
+	/**
+	 * Before `initialize()` the fallback is the truth: nothing has yet established that a
+	 * Keystore exists, so claiming one would be claiming something unobserved.
+	 */
+	test("secretBacking reports the fallback before initialize has probed", () => {
+		const doubles = createTauriMobileDoubles();
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+
+		expect(platform.secretBacking).toContain("secrets.json");
+		expect(platform.secretBacking).toContain(
+			"NO at-rest separation from the plain tier",
+		);
+		expect(platform.secretBacking).not.toMatch(/keystore/iu);
+	});
+
+	/**
+	 * After a successful probe it names the plugin and repeats the plugin's own words — which
+	 * are built in `KeystorePlugin.kt` from what `KeyInfo` actually reported. Rewriting them
+	 * here would be the one way to turn an observation into a claim.
+	 */
+	test("secretBacking names the plugin and passes its observation through verbatim", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+
+		expect(platform.secretBacking).toContain("tauri-plugin-bittery-keystore");
+		expect(platform.secretBacking).toContain(doubles.keystore.backing);
+		expect(platform.secretBacking).not.toContain("secrets.json");
+	});
+
+	/** A software-backed key must read as software-backed, not as "the Keystore, so hardware". */
+	test("secretBacking does not upgrade a software-backed key into a hardware claim", async () => {
+		const { platform } = await makeKeystorePlatform({}, (d) => {
+			d.keystore.backing =
+				"Android Keystore AES-256-GCM, alias bittery_secret_v1, no user-auth required — NOT hardware-backed (software, KeyInfo.securityLevel)";
+		});
+
+		expect(platform.secretBacking).toContain("NOT hardware-backed");
+	});
+
+	test("secretBacking reports the fallback after a probe that declined", async () => {
+		const { platform } = await makeKeystorePlatform({
+			keystoreUnavailable: true,
+		});
+
+		expect(platform.secretBacking).toContain("@tauri-apps/plugin-store");
+		expect(platform.secretBacking).toContain("secrets.json");
+		expect(platform.secretBacking).not.toMatch(/keystore/iu);
+	});
+
+	// ------------------------------------------------------------------
+	// The contract survives a plugin that throws
+	// ------------------------------------------------------------------
+
+	test("a Keystore that throws on get answers null rather than propagating", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+		await platform.secretSet("bittery_jwt_token", "jwt");
+		doubles.keystore.getFailure = new Error("keystore read failed");
+
+		expect(await platform.secretGet("bittery_jwt_token")).toBeNull();
+	});
+
+	/**
+	 * The review finding this exists to prevent: a throw out of `secretDelete` aborts
+	 * `AccountStore.clearSession`, leaving the vault unlocked with `vault_keys` on disk.
+	 */
+	test("a Keystore that throws on delete is a no-op, never a throw", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+		await platform.secretSet("bittery_vault_keys", "vk");
+		doubles.keystore.deleteFailure = new Error("keystore delete failed");
+
+		expect(await platform.secretDelete("bittery_vault_keys")).toBeUndefined();
+	});
+
+	test("deleting an absent key through the Keystore is a no-op", async () => {
+		const { platform } = await makeKeystorePlatform();
+
+		expect(await platform.secretDelete("never_written")).toBeUndefined();
+	});
+
+	test("a missing key answers null through the Keystore", async () => {
+		const { platform } = await makeKeystorePlatform();
+
+		expect(await platform.secretGet("never_written")).toBeNull();
+	});
+
+	/**
+	 * `secretSet` stays unwrapped on both backings. A store that cannot accept key material is
+	 * fatal, and there is no second copy to fall back on — silently dropping it would leave the
+	 * caller believing a key was persisted when it was not.
+	 */
+	test("a failing Keystore write propagates rather than silently dropping key material", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+		doubles.keystore.setFailure = new Error("keystore write failed");
+
+		await expect(
+			platform.secretSet("bittery_vault_keys", "vk"),
+		).rejects.toThrow("keystore write failed");
+	});
+
+	test("secretSet overwrites through the Keystore", async () => {
+		const { platform } = await makeKeystorePlatform();
+
+		await platform.secretSet("bittery_jwt_token", "first");
+		await platform.secretSet("bittery_jwt_token", "second");
+
+		expect(await platform.secretGet("bittery_jwt_token")).toBe("second");
+	});
+
+	// ------------------------------------------------------------------
+	// secrets.json -> Keystore migration
+	// ------------------------------------------------------------------
+
+	/** Everything an existing install already holds, keyed as the adapter stores it. */
+	function seedExistingSecrets(doubles: TauriMobileDoubles): void {
+		doubles.secrets.contents.set("secret:bittery_vault_keys", "vk");
+		doubles.secrets.contents.set("secret:bittery_device_key", "dk");
+		doubles.secrets.contents.set("secret:bittery_jwt_token", "jwt");
+	}
+
+	test("an existing secrets.json is drained into the Keystore on first Keystore-capable launch", async () => {
+		const { platform, doubles } = await makeKeystorePlatform(
+			{},
+			seedExistingSecrets,
+		);
+
+		expect(doubles.keystore.contents.get("secret:bittery_vault_keys")).toBe(
+			"vk",
+		);
+		expect(doubles.keystore.contents.get("secret:bittery_device_key")).toBe(
+			"dk",
+		);
+		expect(doubles.keystore.contents.get("secret:bittery_jwt_token")).toBe(
+			"jwt",
+		);
+		// The originals are gone, which is the whole point: they were the exposure.
+		expect(doubles.secrets.contents.size).toBe(0);
+		// And the user is still signed in — reads answer from the new backing.
+		expect(await platform.secretGet("bittery_vault_keys")).toBe("vk");
+	});
+
+	/** A plain-tier value in the same file is not a secret and must be left exactly alone. */
+	test("the drain touches only secret:-prefixed keys", async () => {
+		const { doubles } = await makeKeystorePlatform({}, (d) => {
+			seedExistingSecrets(d);
+			d.secrets.contents.set("not_a_secret", "leave me");
+		});
+
+		expect(doubles.secrets.contents.get("not_a_secret")).toBe("leave me");
+		expect(doubles.keystore.contents.has("not_a_secret")).toBe(false);
+	});
+
+	/** Second launch: nothing left to move, and nothing written twice. */
+	test("the drain is idempotent — a second launch moves nothing", async () => {
+		const doubles = createTauriMobileDoubles();
+		seedExistingSecrets(doubles);
+		await createTauriMobilePlatformPort(doubles.deps).initialize();
+		doubles.keystore.resetCallLog();
+		doubles.secrets.resetCallLog();
+
+		const second = createTauriMobilePlatformPort(doubles.deps);
+		await second.initialize();
+
+		expect(
+			doubles.keystore.calls.filter(
+				(call) => call.cmd === "plugin:bittery-keystore|secret_set",
+			),
+		).toEqual([]);
+		expect(doubles.secrets.deletes).toEqual([]);
+		expect(await second.secretGet("bittery_vault_keys")).toBe("vk");
+	});
+
+	/**
+	 * The crash-safety claim, tested where it hurts: the write of the second value fails, so
+	 * the drain never reaches its delete phase.
+	 *
+	 * Nothing may be missing afterwards. The port stays on `secrets.json` — where every value
+	 * still is — and the next launch retries the whole drain.
+	 */
+	test("an interrupted drain loses nothing and leaves the port on secrets.json", async () => {
+		const { platform, doubles } = await makeKeystorePlatform({}, (d) => {
+			seedExistingSecrets(d);
+			d.keystore.setFailAfter = 1;
+		});
+
+		expect(doubles.secrets.contents.size).toBe(3);
+		expect(doubles.secrets.deletes).toEqual([]);
+		expect(platform.secretBacking).toContain("secrets.json");
+		expect(await platform.secretGet("bittery_vault_keys")).toBe("vk");
+		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
+		expect(await platform.secretGet("bittery_jwt_token")).toBe("jwt");
+	});
+
+	/** And the retry on the next launch completes, so an interruption is a delay, not a loss. */
+	test("the launch after an interrupted drain completes the migration", async () => {
+		const doubles = createTauriMobileDoubles();
+		seedExistingSecrets(doubles);
+		doubles.keystore.setFailAfter = 1;
+		await createTauriMobilePlatformPort(doubles.deps).initialize();
+
+		doubles.keystore.setFailAfter = null;
+		const second = createTauriMobilePlatformPort(doubles.deps);
+		await second.initialize();
+
+		expect(doubles.secrets.contents.size).toBe(0);
+		expect(second.secretBacking).toContain("tauri-plugin-bittery-keystore");
+		expect(await second.secretGet("bittery_vault_keys")).toBe("vk");
+		expect(await second.secretGet("bittery_device_key")).toBe("dk");
+		expect(await second.secretGet("bittery_jwt_token")).toBe("jwt");
+	});
+
+	/**
+	 * A write that reports success but does not land is why the drain reads back at all. One
+	 * unverified value is enough to abandon the whole migration and keep every original.
+	 */
+	test("a drain whose read-back disagrees deletes nothing", async () => {
+		const { platform, doubles } = await makeKeystorePlatform({}, (d) => {
+			seedExistingSecrets(d);
+			d.keystore.corruptReadBack.add("secret:bittery_device_key");
+		});
+
+		expect(doubles.secrets.contents.size).toBe(3);
+		expect(doubles.secrets.deletes).toEqual([]);
+		expect(platform.secretBacking).toContain("secrets.json");
+		expect(await platform.secretGet("bittery_device_key")).toBe("dk");
+	});
+
+	/** Nothing to move is the common case, and it must not cost a write either. */
+	test("a fresh install adopts the Keystore with no drain at all", async () => {
+		const { platform, doubles } = await makeKeystorePlatform();
+
+		expect(
+			doubles.keystore.calls.filter(
+				(call) => call.cmd === "plugin:bittery-keystore|secret_set",
+			),
+		).toEqual([]);
+		expect(platform.secretBacking).toContain("tauri-plugin-bittery-keystore");
 	});
 });

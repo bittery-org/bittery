@@ -9,14 +9,17 @@
  *
  * | primitive              | backing store                                                    |
  * |------------------------|------------------------------------------------------------------|
- * | `secret*`              | `@tauri-apps/plugin-store`, `secrets.json`, key under `secret:`  |
+ * | `secret*`              | `tauri-plugin-bittery-keystore` (Android Keystore) when available, else `@tauri-apps/plugin-store`, `secrets.json`, key under `secret:` |
  * | `kv*` scope `device`   | `@tauri-apps/plugin-store`, `store.json`, key as given           |
  * | `kv*` scope `session`  | `store.json`, key under the `session:` namespace                 |
  * | records                | `@tauri-apps/plugin-sql` — a SQLite table, one row per record    |
  * | biometric              | `@choochmeque/tauri-plugin-biometry-api` `checkStatus`/`authenticate` |
  *
- * The secret tier is a **recorded security downgrade** on this platform, not a secure store.
- * See `SECRET_BACKING` below and `docs/mobile-migration-decisions.md` D4a.
+ * The secret tier prefers the Android Keystore, through the first-party
+ * `apps/mobile-tauri/src-tauri/plugins/keystore` plugin, and falls back to `secrets.json` when
+ * that plugin is not there to answer — iOS, an old Android, a build without it. The fallback is
+ * a **recorded security downgrade**, not a secure store. See `SECRET_BACKING_FALLBACK` below and
+ * `docs/mobile-migration-decisions.md` D4a.
  *
  * `sessionSurvivesRestart` is `true`, for the same reason as the react-native adapter: killing
  * and relaunching a mobile app does not end the user's session. So `deriveScope` never asks
@@ -51,18 +54,33 @@ import type { RecordPort } from "../record-port";
 import type { StorageScope } from "../tiers";
 
 /**
- * The security-review answer to "is `vault_keys` hardware-backed on mobile?". **No.**
+ * The security-review answer to "is `vault_keys` hardware-backed on mobile?" when the Keystore
+ * plugin is **not** there to answer. **No.**
  *
- * The secret tier on this platform is a plugin-store JSON file in the app's private directory.
- * It is a different *file* from the plain tier, and nothing more than that: same directory,
- * same permissions, same encryption at rest, no key material held anywhere the OS protects
+ * The secret tier is then a plugin-store JSON file in the app's private directory. It is a
+ * different *file* from the plain tier, and nothing more than that: same directory, same
+ * permissions, same encryption at rest, no key material held anywhere the OS protects
  * separately. This string says so in the same register `web.ts` uses for `localStorage`,
  * because an auditor will hold us to it.
  *
- * `docs/mobile-migration-decisions.md` D4a records what it costs and how it gets fixed.
+ * This is also the answer *before* `initialize()`, because before the probe has run it is the
+ * truth: nothing has established that a Keystore exists.
+ *
+ * `docs/mobile-migration-decisions.md` D4a records what it costs.
  */
-const SECRET_BACKING =
+const SECRET_BACKING_FALLBACK =
 	"@tauri-apps/plugin-store secrets.json — NO at-rest separation from the plain tier; the app's private directory is the trust boundary";
+
+/**
+ * The Keystore plugin's own words, prefixed with who is speaking.
+ *
+ * The suffix is `secret_available`'s `backing` field, built in `KeystorePlugin.kt` from what it
+ * actually observed — including whether `KeyInfo` reported the key as hardware-backed. It is
+ * **not** rewritten here, because the only value of this string is that it is not aspirational.
+ */
+function keystoreBacking(reported: string): string {
+	return `tauri-plugin-bittery-keystore — ${reported}`;
+}
 
 /** The same store file the desktop adapter uses; mobile has its own app sandbox for it. */
 const STORE_PATH = "store.json";
@@ -176,8 +194,52 @@ export interface TauriMobileBiometry {
 	authenticate(reason: string): Promise<void>;
 }
 
+// ============================================================================
+// tauri-plugin-bittery-keystore
+// ============================================================================
+
+/** `secret_available`'s answer. See `SecretAvailability` in the plugin's `models.rs`. */
+export interface TauriKeystoreAvailability {
+	available: boolean;
+	/** Surfaced verbatim through `secretBacking`; built from what the Kotlin observed. */
+	backing: string;
+}
+
+/** `secret_get`'s answer. `null` for both "never written" and "no longer decryptable". */
+export interface TauriKeystoreSecretValue {
+	value: string | null;
+}
+
 /**
- * How the three optional Tauri modules are obtained.
+ * The four commands of `apps/mobile-tauri/src-tauri/plugins/keystore`, as invoke calls.
+ *
+ * Declared structurally, exactly as `tauri.ts` declares `TauriInvoke`, and reached through
+ * `@tauri-apps/api/core`'s `invoke`. There is deliberately **no guest-JS npm package**: the
+ * plugin lives in this repo and this app is its only consumer, so a published binding would add
+ * a build step and a version to keep in sync without adding a guarantee. The command strings
+ * below are the contract, and they must match `build.rs`'s `COMMANDS` and `lib.rs`'s
+ * `Builder::new("bittery-keystore")`.
+ */
+export interface TauriKeystoreInvoke {
+	(
+		cmd: "plugin:bittery-keystore|secret_available",
+	): Promise<TauriKeystoreAvailability>;
+	(
+		cmd: "plugin:bittery-keystore|secret_get",
+		args: { key: string },
+	): Promise<TauriKeystoreSecretValue>;
+	(
+		cmd: "plugin:bittery-keystore|secret_set",
+		args: { key: string; value: string },
+	): Promise<void>;
+	(
+		cmd: "plugin:bittery-keystore|secret_delete",
+		args: { key: string },
+	): Promise<void>;
+}
+
+/**
+ * How the four optional Tauri modules are obtained.
  *
  * This is a seam, not a test hook: the modules are optional peer dependencies that must stay
  * behind a dynamic `import()` so a web, extension or desktop bundle never pulls them in, and
@@ -188,6 +250,14 @@ export interface TauriMobileDeps {
 	loadStore(path: string): Promise<TauriStore>;
 	loadDatabase(url: string): Promise<TauriSqlDatabase>;
 	loadBiometry(): Promise<TauriMobileBiometry>;
+	/**
+	 * `@tauri-apps/api/core`'s `invoke`, narrowed to this plugin's commands.
+	 *
+	 * Loading it cannot fail on a Tauri build — `@tauri-apps/api` is not optional — but
+	 * *calling* it will reject when the plugin is not registered, and that rejection is the
+	 * probe's "unavailable" answer. Both paths are handled.
+	 */
+	loadKeystore(): Promise<TauriKeystoreInvoke>;
 }
 
 const defaultDeps: TauriMobileDeps = {
@@ -206,6 +276,10 @@ const defaultDeps: TauriMobileDeps = {
 	// the slice a drift guard rather than a comment.
 	loadBiometry: async () =>
 		await import("@choochmeque/tauri-plugin-biometry-api"),
+	loadKeystore: async () => {
+		const module = await import("@tauri-apps/api/core");
+		return module.invoke as unknown as TauriKeystoreInvoke;
+	},
 };
 
 /** One load per port instance, shared by every call. A rejection is cached too. */
@@ -367,11 +441,96 @@ export function createTauriMobilePlatformPort(
 	const secrets = memoise(() => deps.loadStore(SECRETS_STORE_PATH));
 	const biometry = memoise(() => deps.loadBiometry());
 
+	/**
+	 * The live secret backend, decided once by `initialize()`.
+	 *
+	 * `null` means `secrets.json` — before the probe has run, and forever after on any build
+	 * where the Keystore plugin did not answer. That is the M1 behaviour, unchanged.
+	 */
+	let keystore: TauriKeystoreInvoke | null = null;
+	let backing = SECRET_BACKING_FALLBACK;
+
+	/**
+	 * Drain `secrets.json` into the Keystore, in two phases, so no instant of it loses data.
+	 *
+	 * Phase 1 writes every secret into the Keystore and **reads it back**; phase 2 deletes the
+	 * originals, and only runs if phase 1 verified all of them. So:
+	 *
+	 *   - a failure or crash inside phase 1 deletes nothing — every value is still in
+	 *     `secrets.json`, the caller does not adopt the Keystore, and the next launch retries;
+	 *   - a failure or crash inside phase 2 leaves a value in *both* stores, which is harmless
+	 *     because they hold the same bytes, and the next launch re-copies and re-deletes.
+	 *
+	 * Idempotent by construction: a second run over an already-drained store finds no
+	 * `secret:`-prefixed keys and does nothing.
+	 *
+	 * Returns whether the Keystore may now be adopted.
+	 */
+	const drainSecretsIntoKeystore = async (
+		invoke: TauriKeystoreInvoke,
+	): Promise<boolean> => {
+		const handle = await secrets();
+		const stored = (await handle.keys()).filter((key) =>
+			key.startsWith(SECRET_PREFIX),
+		);
+		const verified: string[] = [];
+		for (const key of stored) {
+			const value = await readString(handle, key);
+			if (value === null) {
+				// Not a string, so `secretGet` would already answer `null` for it. Nothing to
+				// carry over, and nothing to delete either.
+				continue;
+			}
+			await invoke("plugin:bittery-keystore|secret_set", { key, value });
+			const readBack = await invoke("plugin:bittery-keystore|secret_get", {
+				key,
+			});
+			if (readBack.value !== value) {
+				// Unverified. Phase 2 never runs, so the store keeps every original.
+				return false;
+			}
+			verified.push(key);
+		}
+		for (const key of verified) {
+			await commit(handle, () => handle.delete(key));
+		}
+		return true;
+	};
+
+	/**
+	 * The probe, run exactly once. Every failure mode lands on the fallback.
+	 *
+	 * A rejection from `invoke` is the normal shape of "this build has no such plugin" — an
+	 * unregistered command rejects rather than returning — so it is a `false`, not an error.
+	 */
+	const adoptKeystore = async (): Promise<void> => {
+		try {
+			const invoke = await deps.loadKeystore();
+			const probe = await invoke("plugin:bittery-keystore|secret_available");
+			if (probe.available !== true) {
+				return;
+			}
+			if (!(await drainSecretsIntoKeystore(invoke))) {
+				return;
+			}
+			keystore = invoke;
+			backing = keystoreBacking(probe.backing);
+		} catch {
+			// Stay on `secrets.json`. A failure of the new path must degrade to the status
+			// quo, never to a broken app.
+		}
+	};
+
 	return {
 		platform: "mobile",
 		sessionSurvivesRestart: true,
 		tiers: ["secret", "plain"],
-		secretBacking: SECRET_BACKING,
+		// A getter, because the answer is only known after `initialize()` has probed. Before
+		// then it reports the fallback, which is the truth at that moment: nothing has yet
+		// established that a Keystore exists. `readonly` on the port is satisfied by a getter.
+		get secretBacking() {
+			return backing;
+		},
 		// Records live in their own SQLite table, which no native host reads. The empty
 		// string is the honest answer, and `AccountStore` concatenates it unconditionally.
 		recordKeyPrefix: "",
@@ -384,28 +543,44 @@ export function createTauriMobilePlatformPort(
 		 */
 		initialize: async () => {
 			await Promise.all([store(), secrets()]);
+			await adoptKeystore();
 		},
 
 		/*
-		 * The `secret` tier is `secrets.json`, and that is a recorded downgrade.
+		 * The `secret` tier is the Android Keystore when the first-party plugin answers, and
+		 * `secrets.json` when it does not.
 		 *
 		 * A keychain backing was built first, on `@choochmeque/tauri-plugin-biometry-api`'s
 		 * secure data, and rejected: its `getData` raises a system biometric prompt on every
 		 * read, and `AccountStore` reads `jwt_token` on every API request. A fingerprint
-		 * prompt per HTTP call is not a rough edge — the app would be unusable. The one
-		 * alternative, `impierce/tauri-plugin-keystore`, is a single 18-month-stale alpha
-		 * with no companion package on npm, which is worse supply chain rather than better.
+		 * prompt per HTTP call is not a rough edge — the app would be unusable. The other
+		 * candidate, `impierce/tauri-plugin-keystore`, is a single 18-month-stale alpha with
+		 * no companion package on npm, which is worse supply chain rather than better.
 		 *
-		 * So these three functions are `@tauri-apps/plugin-store`, exactly like `kv*` below,
-		 * and `SECRET_BACKING` says so to anyone who asks. The real fix is a first-party
-		 * Tauri command in `apps/mobile-tauri/src-tauri` that calls the Android Keystore
-		 * *without* `setUserAuthenticationRequired`, mirroring
-		 * `apps/desktop/src-tauri/src/keychain.rs`; it drops in behind `TauriMobileDeps` with
-		 * nothing above `PlatformPort` changing. `docs/mobile-migration-decisions.md` D4a
-		 * holds the long form, including what the gap costs.
+		 * So `apps/mobile-tauri/src-tauri/plugins/keystore` is first-party: one AES-256-GCM
+		 * key in the `AndroidKeyStore` provider *without* `setUserAuthenticationRequired`, so
+		 * a read costs nothing. `docs/mobile-migration-decisions.md` D4a holds the long form,
+		 * including what the fallback costs when the plugin is absent.
+		 *
+		 * The two backends obey the same three rules — missing key answers `null`, deleting
+		 * an absent key is a no-op, `secretSet` overwrites — and `secretSet` is the one call
+		 * left unwrapped on both, because a store that cannot accept key material is fatal
+		 * and there is no second copy to fall back on (CONTEXT.md §4.4).
 		 */
 
 		secretGet: async (key) => {
+			if (keystore !== null) {
+				try {
+					const result = await keystore("plugin:bittery-keystore|secret_get", {
+						key: secretKey(key),
+					});
+					return result.value ?? null;
+				} catch {
+					// Same rule as the store path below: "absent" must never reach the caller
+					// as a throw.
+					return null;
+				}
+			}
 			try {
 				return await readString(await secrets(), secretKey(key));
 			} catch {
@@ -417,6 +592,14 @@ export function createTauriMobilePlatformPort(
 		},
 
 		secretSet: async (key, value) => {
+			if (keystore !== null) {
+				// Not wrapped, for the same reason as the store path.
+				await keystore("plugin:bittery-keystore|secret_set", {
+					key: secretKey(key),
+					value,
+				});
+				return;
+			}
 			// Not wrapped: a store that cannot accept key material is fatal, and there is no
 			// second copy to fall back on (CONTEXT.md §4.4).
 			const handle = await secrets();
@@ -424,6 +607,19 @@ export function createTauriMobilePlatformPort(
 		},
 
 		secretDelete: async (key) => {
+			if (keystore !== null) {
+				try {
+					await keystore("plugin:bittery-keystore|secret_delete", {
+						key: secretKey(key),
+					});
+				} catch {
+					// A throw here would abort `AccountStore.clearSession` mid-way and leave
+					// the vault unlocked with `vault_keys` still on disk. That was a real
+					// review finding on the store path; the Keystore path must not
+					// reintroduce it.
+				}
+				return;
+			}
 			try {
 				const handle = await secrets();
 				// `delete` of an absent key answers `false` rather than throwing, but the

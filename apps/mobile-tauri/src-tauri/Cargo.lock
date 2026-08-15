@@ -192,6 +192,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-biometry",
+ "tauri-plugin-bittery-keystore",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-sql",
  "tauri-plugin-store",
@@ -4241,6 +4242,16 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.20",
  "windows",
+]
+
+[[package]]
+name = "tauri-plugin-bittery-keystore"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

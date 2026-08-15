@@ -9,6 +9,7 @@
 		"store:default",
 		"sql:default",
 		"sql:allow-execute",
-		"clipboard-manager:allow-write-text"
+		"clipboard-manager:allow-write-text",
+		"bittery-keystore:default"
 	]
 }

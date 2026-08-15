@@ -11,7 +11,8 @@
  *
  * Runs automatically on mount (so `adb`, which cannot tap a button, still exercises it) and
  * also from the button, and logs the full JSON result to the console — Tauri's Android WebView
- * forwards `console.log`/`console.error` to logcat under the `chromium` tag.
+ * forwards `console.log`/`console.error` to logcat under the **`Tauri/Console`** tag, not
+ * `chromium`. Grep for the wrong one and the run looks silent.
  */
 
 import {
@@ -91,6 +92,25 @@ async function runSelfTest(): Promise<SelfTestReport> {
 			tiers: platformPort.tiers,
 			secretBacking: platformPort.secretBacking,
 			recordKeyPrefix: platformPort.recordKeyPrefix,
+		})),
+	);
+
+	// M1-C9. The Keystore plugin is asked directly, not through the port, so the probe's own
+	// answer is on the record next to the port's `secretBacking` — a port that quietly fell
+	// back would otherwise look identical to one that was never offered a Keystore.
+	steps.push(
+		await step("bittery-keystore secret_available (raw probe)", async () => {
+			const { invoke } = await import("@tauri-apps/api/core");
+			return await invoke("plugin:bittery-keystore|secret_available");
+		}),
+	);
+
+	steps.push(
+		await step("live secretBacking (which backend won)", async () => ({
+			secretBacking: platformPort.secretBacking,
+			keystoreInUse: platformPort.secretBacking.includes(
+				"tauri-plugin-bittery-keystore",
+			),
 		})),
 	);
 

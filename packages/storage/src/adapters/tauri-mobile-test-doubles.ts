@@ -36,6 +36,9 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import type {
 	TauriBiometryStatus,
+	TauriKeystoreAvailability,
+	TauriKeystoreInvoke,
+	TauriKeystoreSecretValue,
 	TauriMobileBiometry,
 	TauriMobileDeps,
 	TauriSqlDatabase,
@@ -424,6 +427,135 @@ export class BiometryDouble implements TauriMobileBiometry {
 }
 
 // ============================================================================
+// tauri-plugin-bittery-keystore
+// ============================================================================
+
+/**
+ * `apps/mobile-tauri/src-tauri/plugins/keystore`, in memory, at the invoke boundary.
+ *
+ * The double sits where the real seam is — `@tauri-apps/api/core`'s `invoke` — rather than at a
+ * hand-shaped facade, because every failure the adapter must survive is an invoke *rejection*:
+ * an unregistered plugin rejects, and so does a Keystore that broke mid-call. Modelling them as
+ * anything else would let the adapter's `catch` blocks go untested.
+ *
+ * Its stored values are plaintext. Encryption is `KeystorePlugin.kt`'s business and no test in
+ * this process can observe it; what a test can observe is *which* backend a value reached, and
+ * that is what `contents` answers.
+ */
+export class KeystoreDouble {
+	/** Key -> value, keyed exactly as the adapter sends it (so `secret:`-prefixed). */
+	readonly contents = new Map<string, string>();
+	/** What `secret_available` answers. */
+	available = true;
+	/** The `backing` the probe reports — the Kotlin's own words, as the adapter surfaces them. */
+	backing =
+		"Android Keystore AES-256-GCM, alias bittery_secret_v1, no user-auth required — hardware-backed (TEE, KeyInfo.securityLevel)";
+	/** When set, the probe rejects: the shape of "this build has no such plugin". */
+	probeFailure: unknown = null;
+	/** When set, every `secret_get` rejects. */
+	getFailure: unknown = null;
+	/** When set, every `secret_set` rejects. */
+	setFailure: unknown = null;
+	/** When set, every `secret_delete` rejects. */
+	deleteFailure: unknown = null;
+	/**
+	 * Reject the `secret_set` after this many have succeeded.
+	 *
+	 * This is the interrupted-migration case: some keys are in the Keystore, the rest are not,
+	 * and the adapter must not have deleted anything from `secrets.json` yet.
+	 */
+	setFailAfter: number | null = null;
+	/**
+	 * Keys whose `secret_get` answers a *different* value than was written.
+	 *
+	 * A write that silently did not land is the reason the migration reads back at all.
+	 */
+	readonly corruptReadBack = new Set<string>();
+	/** Every command, in order, with the key it named. */
+	readonly calls: Array<{ cmd: string; key?: string }> = [];
+
+	private sets = 0;
+
+	/**
+	 * The one cast in this file.
+	 *
+	 * `TauriKeystoreInvoke` is four overloads with four different return types; a single
+	 * implementation cannot be checked against it, in this double or in `defaultDeps`, which
+	 * casts `invoke` the same way for the same reason.
+	 */
+	readonly invoke = ((cmd: string, args?: { key?: string; value?: string }) =>
+		this.dispatch(cmd, args)) as unknown as TauriKeystoreInvoke;
+
+	/**
+	 * `undefined` rather than `void` in the return union: `secret_set` and `secret_delete`
+	 * resolve with nothing, and a `void` sitting beside two real types reads as "returns
+	 * nothing at all", which is what biome's `noConfusingVoidType` objects to.
+	 */
+	private async dispatch(
+		cmd: string,
+		args?: { key?: string; value?: string },
+	): Promise<TauriKeystoreAvailability | TauriKeystoreSecretValue | undefined> {
+		this.calls.push({ cmd, key: args?.key });
+		switch (cmd) {
+			case "plugin:bittery-keystore|secret_available": {
+				if (this.probeFailure !== null) {
+					throw this.probeFailure;
+				}
+				return { available: this.available, backing: this.backing };
+			}
+			case "plugin:bittery-keystore|secret_get": {
+				if (this.getFailure !== null) {
+					throw this.getFailure;
+				}
+				const key = requireKey(args);
+				if (this.corruptReadBack.has(key)) {
+					return { value: "not-what-was-written" };
+				}
+				// The plugin answers `null` for a key it never held and for one it can no
+				// longer decrypt; both are "gone", and neither is a throw.
+				return { value: this.contents.get(key) ?? null };
+			}
+			case "plugin:bittery-keystore|secret_set": {
+				if (this.setFailure !== null) {
+					throw this.setFailure;
+				}
+				if (this.setFailAfter !== null && this.sets >= this.setFailAfter) {
+					throw new Error("keystore write interrupted");
+				}
+				const key = requireKey(args);
+				if (args?.value === undefined) {
+					throw new Error(`secret_set without a value for ${key}`);
+				}
+				this.sets += 1;
+				this.contents.set(key, args.value);
+				return;
+			}
+			case "plugin:bittery-keystore|secret_delete": {
+				if (this.deleteFailure !== null) {
+					throw this.deleteFailure;
+				}
+				this.contents.delete(requireKey(args));
+				return;
+			}
+			default:
+				throw new Error(`KeystoreDouble cannot handle: ${cmd}`);
+		}
+	}
+
+	/** Forget the recorded calls without touching the stored data. */
+	resetCallLog(): void {
+		this.calls.length = 0;
+	}
+}
+
+function requireKey(args?: { key?: string }): string {
+	if (args?.key === undefined) {
+		throw new Error("keystore command called without a key");
+	}
+	return args.key;
+}
+
+// ============================================================================
 // Wiring them into TauriMobileDeps
 // ============================================================================
 
@@ -437,6 +569,8 @@ interface TauriMobileDoublesOf<TDatabase extends TauriSqlDatabase> {
 	secrets: TauriMobileStoreDouble;
 	database: TDatabase;
 	biometry: BiometryDouble;
+	/** `tauri-plugin-bittery-keystore` — the secret tier when the probe says yes. */
+	keystore: KeystoreDouble;
 }
 
 /** Records on real SQLite. The default, and what every behavioural test uses. */
@@ -456,6 +590,16 @@ export interface TauriMobileDoublesOptions {
 	 * port can tell, a `store.json` that will not open at all.
 	 */
 	storeModuleMissing?: boolean;
+	/**
+	 * Simulate a build with no Keystore plugin registered at all — iOS, or an APK built before
+	 * M1-C9. `loadKeystore` itself rejects, which is the harshest version of "unavailable".
+	 */
+	keystoreModuleMissing?: boolean;
+	/**
+	 * Simulate the plugin being present but answering `available: false` — the probe ran and
+	 * said no. Distinct from `keystoreModuleMissing`, and the adapter must fall back on both.
+	 */
+	keystoreUnavailable?: boolean;
 }
 
 /**
@@ -481,6 +625,12 @@ function buildDoubles<TDatabase extends TauriSqlDatabase>(
 	databases.set("sqlite:bittery-records.db", database);
 
 	const biometry = new BiometryDouble();
+
+	const keystore = new KeystoreDouble();
+	if (options.keystoreUnavailable === true) {
+		keystore.available = false;
+		keystore.backing = "Android Keystore unavailable — probe declined";
+	}
 
 	const deps: TauriMobileDeps = {
 		loadStore: async (path) => {
@@ -513,9 +663,15 @@ function buildDoubles<TDatabase extends TauriSqlDatabase>(
 			}
 			return biometry;
 		},
+		loadKeystore: async () => {
+			if (options.keystoreModuleMissing === true) {
+				throw new Error("Cannot find module '@tauri-apps/api/core'");
+			}
+			return keystore.invoke;
+		},
 	};
 
-	return { deps, store, secrets, database, biometry };
+	return { deps, store, secrets, database, biometry, keystore };
 }
 
 /**
