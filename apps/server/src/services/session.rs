@@ -17,7 +17,7 @@ use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use std::sync::LazyLock;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::{db, error::AppError, repo::common::hash_token};
+use crate::{db, error::AppError, repo::common::hash_token, services::transaction::database_error};
 
 #[derive(Clone, Debug, Default)]
 pub struct RequestMetadata {
@@ -402,10 +402,11 @@ impl PostgresSessionStore {
         let token = generate_opaque_session_token();
         let session_id = hash_token(&token);
 
-        let mut transaction = self.pool.begin().await.map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         if client_id.is_some() {
             query("DELETE FROM session WHERE user_id = $1 AND platform = $2 AND client_id = $3")
@@ -414,10 +415,7 @@ impl PostgresSessionStore {
                 .bind(client_id.as_deref())
                 .execute(transaction.as_mut())
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Session store is unavailable");
-                    AppError::internal("Session store is unavailable")
-                })?;
+                .map_err(|error| database_error(error, "Session store is unavailable"))?;
         }
 
         let device_info = request
@@ -468,15 +466,12 @@ impl PostgresSessionStore {
         .bind(user_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
-        transaction.commit().await.map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         Ok(CreatedSession {
             token,
@@ -529,10 +524,11 @@ impl PostgresSessionStore {
         &self,
         current_session: &VerifiedSession,
     ) -> Result<RefreshSessionResponse, AppError> {
-        let mut transaction = self.pool.begin().await.map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         let current = sqlx::query_as::<_, DbSessionRecord>(
             r#"
@@ -561,10 +557,7 @@ impl PostgresSessionStore {
         .bind(&current_session.session_id)
         .fetch_optional(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?
+        .map_err(|error| database_error(error, "Session store is unavailable"))?
         .ok_or_else(|| handler_unauthorized_error("Session expired"))?;
 
         let platform = normalize_session_platform(current.platform.as_deref());
@@ -604,10 +597,7 @@ impl PostgresSessionStore {
             .bind(client_id.as_deref())
             .fetch_all(transaction.as_mut())
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
             grouped
                 .into_iter()
@@ -626,19 +616,13 @@ impl PostgresSessionStore {
             .bind(client_id.as_deref())
             .execute(transaction.as_mut())
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
         } else {
             sqlx::query(r#"DELETE FROM session WHERE id = $1"#)
                 .bind(&current.id)
                 .execute(transaction.as_mut())
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Session store is unavailable");
-                    AppError::internal("Session store is unavailable")
-                })?;
+                .map_err(|error| database_error(error, "Session store is unavailable"))?;
         }
 
         sqlx::query(
@@ -681,15 +665,12 @@ impl PostgresSessionStore {
         .bind(&current.user_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
-        transaction.commit().await.map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         Ok(RefreshSessionResponse {
             token: next_token,
@@ -703,10 +684,7 @@ impl PostgresSessionStore {
             .bind(session_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })
+            .map_err(|error| database_error(error, "Session store is unavailable"))
     }
 
     async fn delete_all_user_sessions(&self, user_id: &str) -> Result<Vec<String>, AppError> {
@@ -714,10 +692,7 @@ impl PostgresSessionStore {
             .bind(user_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })
+            .map_err(|error| database_error(error, "Session store is unavailable"))
     }
 
     async fn delete_other_user_sessions(
@@ -732,10 +707,7 @@ impl PostgresSessionStore {
         .bind(current_session_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })
+        .map_err(|error| database_error(error, "Session store is unavailable"))
     }
 
     async fn list_devices(
@@ -769,10 +741,7 @@ impl PostgresSessionStore {
         .bind(user_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         let sessions = rows
             .into_iter()
@@ -813,10 +782,7 @@ impl PostgresSessionStore {
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Session store is unavailable");
-            AppError::internal("Session store is unavailable")
-        })?;
+        .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         Ok(row.map(snapshot_from_db_session))
     }
@@ -839,10 +805,7 @@ impl PostgresSessionStore {
             .bind(existing_session.client_id.as_deref())
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
             query("DELETE FROM session WHERE user_id = $1 AND platform = $2 AND client_id = $3")
                 .bind(user_id)
@@ -850,10 +813,7 @@ impl PostgresSessionStore {
                 .bind(existing_session.client_id.as_deref())
                 .execute(&self.pool)
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Session store is unavailable");
-                    AppError::internal("Session store is unavailable")
-                })?;
+                .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
             return Ok(grouped_sessions);
         }
@@ -863,10 +823,7 @@ impl PostgresSessionStore {
             .bind(user_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
         Ok(vec![existing_session.id])
     }
@@ -891,7 +848,7 @@ impl PostgresSessionStore {
 			.bind(existing_session.client_id.as_deref())
 			.execute(&self.pool)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Session store is unavailable"); AppError::internal("Session store is unavailable") })?;
+			.map_err(|error| database_error(error, "Session store is unavailable"))?;
             return Ok(());
         }
 
@@ -901,10 +858,7 @@ impl PostgresSessionStore {
             .bind(user_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
         Ok(())
     }
 
@@ -914,10 +868,7 @@ impl PostgresSessionStore {
             .bind(session_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Session store is unavailable");
-                AppError::internal("Session store is unavailable")
-            })?;
+            .map_err(|error| database_error(error, "Session store is unavailable"))?;
         Ok(())
     }
 }

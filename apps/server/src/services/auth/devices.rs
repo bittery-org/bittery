@@ -13,6 +13,7 @@ use crate::{
             VerifiedSession,
         },
         session_control::record_session_revocations,
+        transaction::database_error,
     },
     AppState,
 };
@@ -27,7 +28,7 @@ pub(crate) async fn get_me(
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
+	.map_err(|error| database_error(error, "Failed to load user"))?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
 
     Ok(MeResponse {
@@ -112,10 +113,7 @@ pub(crate) async fn revoke_device(
             "device_revoked",
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to record session revocations");
-            AppError::internal("Failed to record session revocations")
-        })?;
+        .map_err(|error| database_error(error, "Failed to record session revocations"))?;
         insert_audit_event(
             &app_state.db_pool,
             &format!(
@@ -129,8 +127,8 @@ pub(crate) async fn revoke_device(
             None,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to record device revoke audit event");
+        .map_err(|error| {
+            tracing::error!(error = %error, "Failed to record device revoke audit event");
             AppError::internal("Failed to record device revoke audit event")
         })?;
     }

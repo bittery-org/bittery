@@ -24,6 +24,7 @@ use crate::{
         rate_limit::{self, generic_ip_limit, rate_limited_error, recovery_request_limit},
         session::{format_rfc3339, now_utc, RequestMetadata},
         session_control::record_session_revocations,
+        transaction::database_error,
         vault_key::validate_encrypted_vault_key,
         verification_code::{
             LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
@@ -68,7 +69,7 @@ pub(crate) async fn request_recovery_verification(
 	.bind(&normalized_email)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load recovery account"); AppError::internal("Failed to load recovery account") })?;
+	.map_err(|error| database_error(error, "Failed to load recovery account"))?;
 
     if existing_user
         .as_ref()
@@ -163,10 +164,7 @@ async fn load_user_id_by_email(
         .bind(normalized_email)
         .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load user for recovery lockout");
-            AppError::internal("Failed to load user for recovery lockout")
-        })
+        .map_err(|error| database_error(error, "Failed to load user for recovery lockout"))
 }
 
 pub(crate) async fn get_recovery_data(
@@ -240,10 +238,7 @@ pub(crate) async fn reset_password(
         "password_reset_via_recovery",
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record session revocations");
-        AppError::internal("Failed to record session revocations")
-    })?;
+    .map_err(|error| database_error(error, "Failed to record session revocations"))?;
     let session = app_state.sessions.create_session(&user_id, request).await?;
 
     insert_audit_event(
@@ -256,8 +251,8 @@ pub(crate) async fn reset_password(
         Some(json!({ "vaultKeysUpdated": input.encrypted_vault_keys.len() })),
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record recovery audit event");
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record recovery audit event");
         AppError::internal("Failed to record recovery audit event")
     })?;
 
@@ -282,10 +277,7 @@ async fn load_recovery_data(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery account");
-        AppError::internal("Failed to load recovery account")
-    })
+    .map_err(|error| database_error(error, "Failed to load recovery account"))
 }
 
 async fn load_recovery_vault_keys(
@@ -298,10 +290,7 @@ async fn load_recovery_vault_keys(
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery vault keys");
-        AppError::internal("Failed to load recovery vault keys")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load recovery vault keys"))?;
 
     Ok(rows
         .into_iter()
@@ -321,10 +310,10 @@ async fn reset_user_password_with_recovery(
     kdf_profile: ValidatedKdfProfile,
 ) -> Result<(String, Vec<String>), AppError> {
     let now = OffsetDateTime::now_utc();
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start recovery reset transaction");
-        AppError::internal("Failed to start recovery reset transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start recovery reset transaction"))?;
 
     let verification = query_as::<_, DbRecoveryVerificationRow>(
         "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE id = $1 AND expires_at > $2 AND used_at IS NOT NULL AND attempts < max_attempts FOR UPDATE",
@@ -333,10 +322,7 @@ async fn reset_user_password_with_recovery(
     .bind(now)
     .fetch_optional(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery verification");
-        AppError::internal("Failed to load recovery verification")
-    })?
+    .map_err(|error| database_error(error, "Failed to load recovery verification"))?
     .ok_or_else(|| AppError::unauthorized("Invalid recovery session"))?;
 
     let user_id = query_scalar::<_, String>(
@@ -346,20 +332,14 @@ async fn reset_user_password_with_recovery(
     .bind(&verification.email)
     .fetch_optional(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery account");
-        AppError::internal("Failed to load recovery account")
-    })?
+    .map_err(|error| database_error(error, "Failed to load recovery account"))?
     .ok_or_else(|| AppError::unauthorized("Invalid recovery session"))?;
     let revoked_session_ids =
         query_scalar::<_, String>("SELECT id FROM session WHERE user_id = $1 FOR UPDATE")
             .bind(&user_id)
             .fetch_all(transaction.as_mut())
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to load recovery sessions");
-                AppError::internal("Failed to load recovery sessions")
-            })?;
+            .map_err(|error| database_error(error, "Failed to load recovery sessions"))?;
 
     query(
         "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = $4, recovery_key_hint = $5, secret_key_hint = COALESCE($6, secret_key_hint), kdf_algorithm = $7, kdf_iterations = $8, kdf_schema_version = $9 WHERE id = $10",
@@ -376,10 +356,7 @@ async fn reset_user_password_with_recovery(
     .bind(&user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to update recovery credentials");
-        AppError::internal("Failed to update recovery credentials")
-    })?;
+    .map_err(|error| database_error(error, "Failed to update recovery credentials"))?;
 
     for vault_key in &input.encrypted_vault_keys {
         validate_encrypted_vault_key(&vault_key.encrypted_vault_key)?;
@@ -389,20 +366,14 @@ async fn reset_user_password_with_recovery(
             .bind(&user_id)
             .execute(transaction.as_mut())
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update recovery vault keys");
-                AppError::internal("Failed to update recovery vault keys")
-            })?;
+            .map_err(|error| database_error(error, "Failed to update recovery vault keys"))?;
     }
 
     query("DELETE FROM session WHERE user_id = $1")
         .bind(&user_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to revoke sessions after recovery");
-            AppError::internal("Failed to revoke sessions after recovery")
-        })?;
+        .map_err(|error| database_error(error, "Failed to revoke sessions after recovery"))?;
     if !VerificationCodeService::new(pool)
         .consume_recovery_session(&mut transaction, &verification.id)
         .await?
@@ -410,10 +381,10 @@ async fn reset_user_password_with_recovery(
         return Err(AppError::unauthorized("Invalid recovery session"));
     }
 
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit recovery reset");
-        AppError::internal("Failed to commit recovery reset")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit recovery reset"))?;
 
     Ok((user_id, revoked_session_ids))
 }

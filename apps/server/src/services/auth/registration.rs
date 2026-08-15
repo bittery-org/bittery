@@ -36,6 +36,7 @@ use crate::{
         session::{format_rfc3339, now_utc, RequestMetadata},
         team::{assert_invitation_pending_vault_keys_are_authorized, parse_pending_vault_keys},
         team_billing::team_management_enabled,
+        transaction::database_error,
         vault_key::validate_encrypted_vault_key,
         verification_code::{
             LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
@@ -266,10 +267,10 @@ pub(crate) async fn signup(
         .clone()
         .unwrap_or_else(|| generate_resource_id("vault"));
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start signup transaction");
-        AppError::internal("Failed to start signup transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start signup transaction"))?;
 
     insert_user_account(
         &mut transaction,
@@ -305,10 +306,7 @@ pub(crate) async fn signup(
         .bind(&user_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to link user to team");
-            AppError::internal("Failed to link user to team")
-        })?;
+        .map_err(|error| database_error(error, "Failed to link user to team"))?;
     insert_personal_vault(
         &mut transaction,
         &vault_id,
@@ -317,10 +315,10 @@ pub(crate) async fn signup(
     )
     .await?;
 
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit signup");
-        AppError::internal("Failed to commit signup")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit signup"))?;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys =
@@ -385,10 +383,7 @@ pub(crate) async fn signup_with_invitation(
                 .bind(&invitation.team_id)
                 .fetch_one(pool)
                 .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to load team members");
-                    AppError::internal("Failed to load team members")
-                })?;
+                .map_err(|error| database_error(error, "Failed to load team members"))?;
         if current_members >= i64::from(member_limit) {
             return Err(AppError::bad_request("Team has reached member limit"));
         }
@@ -413,10 +408,10 @@ pub(crate) async fn signup_with_invitation(
         .unwrap_or_else(|| generate_resource_id("vault"));
     let vault_role = invitation.role.vault_role();
 
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start invited signup transaction");
-        AppError::internal("Failed to start invited signup transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start invited signup transaction"))?;
 
     insert_user_account(
         &mut transaction,
@@ -442,10 +437,7 @@ pub(crate) async fn signup_with_invitation(
         .bind(&user_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to link invited user to team");
-            AppError::internal("Failed to link invited user to team")
-        })?;
+        .map_err(|error| database_error(error, "Failed to link invited user to team"))?;
     insert_personal_vault(
         &mut transaction,
         &personal_vault_id,
@@ -466,7 +458,7 @@ pub(crate) async fn signup_with_invitation(
 		.bind(vault_role)
 		.execute(transaction.as_mut())
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to provision invited vault access"); AppError::internal("Failed to provision invited vault access") })?;
+		.map_err(|error| database_error(error, "Failed to provision invited vault access"))?;
     }
 
     query("UPDATE team_invitation SET status = 'accepted', accepted_at = $1 WHERE id = $2")
@@ -474,15 +466,12 @@ pub(crate) async fn signup_with_invitation(
         .bind(&invitation.id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to accept invitation");
-            AppError::internal("Failed to accept invitation")
-        })?;
+        .map_err(|error| database_error(error, "Failed to accept invitation"))?;
 
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit invited signup");
-        AppError::internal("Failed to commit invited signup")
-    })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit invited signup"))?;
 
     sync_team_seats_best_effort(
         pool,
@@ -567,10 +556,7 @@ pub(crate) async fn check_email(
     .bind(&normalized_email)
     .fetch_optional(&app_state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load account");
-        AppError::internal("Failed to load account")
-    })?
+    .map_err(|error| database_error(error, "Failed to load account"))?
     .and_then(|row| row.secret_key_hint)
     .unwrap_or_else(|| deterministic_fake_hint(&normalized_email));
 
@@ -590,10 +576,7 @@ async fn get_pending_invitation_for_signup(
     .bind(hash_token(invitation_token))
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load invitation");
-        AppError::internal("Failed to load invitation")
-    })?
+    .map_err(|error| database_error(error, "Failed to load invitation"))?
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
@@ -638,10 +621,7 @@ async fn ensure_user_does_not_exist(pool: &PgPool, email: &str) -> Result<(), Ap
             .bind(email)
             .fetch_optional(pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to check account");
-                AppError::internal("Failed to check account")
-            })?;
+            .map_err(|error| database_error(error, "Failed to check account"))?;
     if existing.is_some() {
         return Err(AppError::bad_request("Unable to create account"));
     }
@@ -659,10 +639,7 @@ async fn get_pending_signup_invitation(
     .bind(hash_token(invitation_token))
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load invitation");
-        AppError::internal("Failed to load invitation")
-    })?
+    .map_err(|error| database_error(error, "Failed to load invitation"))?
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
     if !team_management_enabled(
@@ -754,10 +731,7 @@ async fn insert_team(
     .bind(billing_status)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create team");
-        AppError::internal("Failed to create team")
-    })?;
+    .map_err(|error| database_error(error, "Failed to create team"))?;
 
     Ok(())
 }
@@ -776,10 +750,7 @@ async fn insert_personal_vault(
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create personal vault");
-        AppError::internal("Failed to create personal vault")
-    })?;
+    .map_err(|error| database_error(error, "Failed to create personal vault"))?;
     query(
         "INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role) VALUES ($1, $2, $3, $4, 'owner')",
     )
@@ -789,10 +760,7 @@ async fn insert_personal_vault(
     .bind(encrypted_vault_key)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create personal vault key");
-        AppError::internal("Failed to create personal vault key")
-    })?;
+    .map_err(|error| database_error(error, "Failed to create personal vault key"))?;
 
     Ok(())
 }
@@ -879,10 +847,7 @@ async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {
     let user_id = query_scalar::<_, String>("SELECT id FROM \"user\" LIMIT 1")
         .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load registration status");
-            AppError::internal("Failed to load registration status")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load registration status"))?;
     Ok(user_id.is_some())
 }
 

@@ -12,6 +12,7 @@ use crate::{
         self, recovery_verify_lock_duration, recovery_verify_max_attempts,
         signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter,
     },
+    services::transaction::database_error,
 };
 
 const VERIFICATION_CODE_TTL: Duration = Duration::minutes(15);
@@ -98,10 +99,7 @@ impl<'a> VerificationCodeService<'a> {
                         .bind(invitation_token_hash)
                         .execute(self.pool)
                         .await
-                        .map_err(|error| {
-                            tracing::error!(error = %error, "Failed to invalidate signup verification");
-                            AppError::internal("Failed to create signup verification")
-                        })?;
+                        .map_err(|error| database_error(error, "Failed to invalidate signup verification"))?;
                     }
                     None => {
                         query(
@@ -111,10 +109,7 @@ impl<'a> VerificationCodeService<'a> {
                         .bind(email)
                         .execute(self.pool)
                         .await
-                        .map_err(|error| {
-                            tracing::error!(error = %error, "Failed to invalidate signup verification");
-                            AppError::internal("Failed to create signup verification")
-                        })?;
+                        .map_err(|error| database_error(error, "Failed to invalidate signup verification"))?;
                     }
                 }
 
@@ -128,10 +123,7 @@ impl<'a> VerificationCodeService<'a> {
                 .bind(expires_at)
                 .execute(self.pool)
                 .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "Failed to create signup verification");
-                    AppError::internal("Failed to create signup verification")
-                })?;
+                .map_err(|error| database_error(error, "Failed to create signup verification"))?;
             }
             VerificationPurpose::Recovery => {
                 query("UPDATE recovery_verification SET used_at = $1 WHERE email = $2 AND used_at IS NULL")
@@ -139,10 +131,7 @@ impl<'a> VerificationCodeService<'a> {
                     .bind(email)
                     .execute(self.pool)
                     .await
-                    .map_err(|error| {
-                        tracing::error!(error = %error, "Failed to invalidate recovery verification");
-                        AppError::internal("Failed to create recovery verification")
-                    })?;
+                    .map_err(|error| database_error(error, "Failed to invalidate recovery verification"))?;
 
                 query(
                     "INSERT INTO recovery_verification (id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4)",
@@ -153,10 +142,7 @@ impl<'a> VerificationCodeService<'a> {
                 .bind(expires_at)
                 .execute(self.pool)
                 .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "Failed to create recovery verification");
-                    AppError::internal("Failed to create recovery verification")
-                })?;
+                .map_err(|error| database_error(error, "Failed to create recovery verification"))?;
             }
             VerificationPurpose::ShareEmail { share_link_id } => {
                 query(
@@ -169,10 +155,7 @@ impl<'a> VerificationCodeService<'a> {
                 .bind(expires_at)
                 .execute(self.pool)
                 .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "Failed to create share email verification");
-                    AppError::internal("Failed to create share email verification")
-                })?;
+                .map_err(|error| database_error(error, "Failed to create share email verification"))?;
             }
         }
 
@@ -293,10 +276,7 @@ impl<'a> VerificationCodeService<'a> {
             .bind(verification_id)
             .execute(self.pool)
             .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "Failed to consume signup verification");
-                AppError::internal("Failed to consume signup verification")
-            })?
+            .map_err(|error| database_error(error, "Failed to consume signup verification"))?
             .rows_affected(),
             VerificationPurpose::Recovery => query(
                 "UPDATE recovery_verification SET used_at = $1 WHERE id = $2 AND expires_at > $1 AND used_at IS NULL",
@@ -305,10 +285,7 @@ impl<'a> VerificationCodeService<'a> {
             .bind(verification_id)
             .execute(self.pool)
             .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "Failed to consume recovery verification");
-                AppError::internal("Failed to consume recovery verification")
-            })?
+            .map_err(|error| database_error(error, "Failed to consume recovery verification"))?
             .rows_affected(),
             VerificationPurpose::ShareEmail { share_link_id } => query(
                 "UPDATE share_email_verification SET used_at = $1 WHERE id = $2 AND share_link_id = $3 AND expires_at > $1 AND used_at IS NULL",
@@ -318,10 +295,7 @@ impl<'a> VerificationCodeService<'a> {
             .bind(share_link_id)
             .execute(self.pool)
             .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "Failed to consume share email verification");
-                AppError::internal("Failed to consume share email verification")
-            })?
+            .map_err(|error| database_error(error, "Failed to consume share email verification"))?
             .rows_affected(),
         };
 
@@ -339,10 +313,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(verification_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to consume recovery session");
-            AppError::internal("Failed to consume recovery session")
-        })?
+        .map_err(|error| database_error(error, "Failed to consume recovery session"))?
         .rows_affected();
 
         Ok(rows_affected == 1)
@@ -376,10 +347,7 @@ impl<'a> VerificationCodeService<'a> {
             .fetch_optional(self.pool)
             .await,
         }
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load signup verification");
-            AppError::internal("Failed to load signup verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load signup verification"))?;
 
         if let Some(verification) = valid {
             if verification.attempts >= verification.max_attempts {
@@ -407,10 +375,7 @@ impl<'a> VerificationCodeService<'a> {
             .fetch_optional(self.pool)
             .await,
         }
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load active signup verification");
-            AppError::internal("Failed to load active signup verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load active signup verification"))?;
 
         if let Some(verification) = active {
             self.record_failed_signup_attempt(verification, now).await?;
@@ -433,10 +398,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(now)
         .fetch_optional(self.pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load recovery verification");
-            AppError::internal("Failed to load recovery verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load recovery verification"))?;
 
         if let Some(verification) = valid {
             if verification.attempts >= verification.max_attempts {
@@ -454,10 +416,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(now)
         .fetch_optional(self.pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load active recovery verification");
-            AppError::internal("Failed to load active recovery verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load active recovery verification"))?;
 
         if let Some(verification) = active {
             self.record_failed_recovery_attempt(verification, now)
@@ -483,10 +442,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(now)
         .fetch_optional(self.pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load share email verification");
-            AppError::internal("Failed to load share email verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load share email verification"))?;
 
         if let Some(verification) = valid {
             if verification.attempts >= verification.max_attempts {
@@ -505,10 +461,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(now)
         .fetch_optional(self.pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load active share email verification");
-            AppError::internal("Failed to load active share email verification")
-        })?;
+        .map_err(|error| database_error(error, "Failed to load active share email verification"))?;
 
         if let Some(verification) = active {
             self.record_failed_share_email_attempt(verification, now)
@@ -534,10 +487,7 @@ impl<'a> VerificationCodeService<'a> {
         .bind(verification.id)
         .execute(self.pool)
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to update signup verification attempts");
-            AppError::internal("Failed to update signup verification attempts")
-        })?;
+        .map_err(|error| database_error(error, "Failed to update signup verification attempts"))?;
         Ok(())
     }
 
@@ -555,8 +505,7 @@ impl<'a> VerificationCodeService<'a> {
             .execute(self.pool)
             .await
             .map_err(|error| {
-                tracing::error!(error = %error, "Failed to update recovery verification attempts");
-                AppError::internal("Failed to update recovery verification attempts")
+                database_error(error, "Failed to update recovery verification attempts")
             })?;
         Ok(())
     }
@@ -575,8 +524,7 @@ impl<'a> VerificationCodeService<'a> {
             .execute(self.pool)
             .await
             .map_err(|error| {
-                tracing::error!(error = %error, "Failed to update share email verification attempts");
-                AppError::internal("Failed to update share email verification attempts")
+                database_error(error, "Failed to update share email verification attempts")
             })?;
         Ok(())
     }
@@ -611,10 +559,7 @@ impl<'a> VerificationCodeService<'a> {
             .fetch_one(self.pool)
             .await,
         }
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to check active verification code");
-            AppError::internal("Failed to check active verification code")
-        })?;
+        .map_err(|error| database_error(error, "Failed to check active verification code"))?;
         Ok(exists)
     }
 
@@ -648,10 +593,7 @@ impl<'a> VerificationCodeService<'a> {
             .execute(self.pool)
             .await,
         }
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to invalidate verification codes");
-            AppError::internal("Failed to invalidate verification codes")
-        })?;
+        .map_err(|error| database_error(error, "Failed to invalidate verification codes"))?;
         Ok(())
     }
 }

@@ -13,7 +13,7 @@ use crate::{
     repo::common::{generate_resource_id, insert_audit_event},
     services::{
         session::VerifiedSession, session_control::record_session_revocations,
-        vault_key::validate_encrypted_vault_key,
+        transaction::database_error, vault_key::validate_encrypted_vault_key,
     },
     AppState,
 };
@@ -33,10 +33,7 @@ pub(crate) async fn update_email(
             .bind(&normalized_new_email)
             .fetch_optional(pool)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to check email");
-                AppError::internal("Failed to check email")
-            })?;
+            .map_err(|error| database_error(error, "Failed to check email"))?;
     if existing_user_id
         .as_deref()
         .is_some_and(|value| value != session.user_id)
@@ -63,10 +60,7 @@ pub(crate) async fn update_email(
         "email_changed",
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record session revocations");
-        AppError::internal("Failed to record session revocations")
-    })?;
+    .map_err(|error| database_error(error, "Failed to record session revocations"))?;
     insert_audit_event(
         pool,
         &generate_resource_id("audit"),
@@ -77,7 +71,10 @@ pub(crate) async fn update_email(
         Some(json!({ "newEmail": normalized_new_email, "vaultKeysUpdated": input.encrypted_vault_keys.len() })),
     )
     .await
-    .map_err(|e| { tracing::error!(error = %e, "Failed to record email change audit event"); AppError::internal("Failed to record email change audit event") })?;
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record email change audit event");
+        AppError::internal("Failed to record email change audit event")
+    })?;
 
     Ok(LogoutResponse { success: true })
 }
@@ -105,10 +102,7 @@ pub(crate) async fn change_password(
         "password_changed",
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record session revocations");
-        AppError::internal("Failed to record session revocations")
-    })?;
+    .map_err(|error| database_error(error, "Failed to record session revocations"))?;
     insert_audit_event(
         pool,
         &generate_resource_id("audit"),
@@ -119,8 +113,8 @@ pub(crate) async fn change_password(
         Some(json!({ "vaultKeysUpdated": input.encrypted_vault_keys.len() })),
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record password change audit event");
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record password change audit event");
         AppError::internal("Failed to record password change audit event")
     })?;
 
@@ -150,10 +144,7 @@ pub(crate) async fn regenerate_secret_key(
         "secret_key_regenerated",
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record session revocations");
-        AppError::internal("Failed to record session revocations")
-    })?;
+    .map_err(|error| database_error(error, "Failed to record session revocations"))?;
     insert_audit_event(
         pool,
         &generate_resource_id("audit"),
@@ -164,8 +155,8 @@ pub(crate) async fn regenerate_secret_key(
         Some(json!({ "vaultKeysUpdated": input.encrypted_vault_keys.len() })),
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record secret key regeneration audit event");
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record secret key regeneration audit event");
         AppError::internal("Failed to record secret key regeneration audit event")
     })?;
 
@@ -184,7 +175,7 @@ pub(crate) async fn store_recovery_key(
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
+	.map_err(|error| database_error(error, "Failed to load user"))?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
     let had_recovery_key = user.encrypted_master_key.is_some();
 
@@ -203,8 +194,8 @@ pub(crate) async fn store_recovery_key(
         None,
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record recovery key audit event");
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record recovery key audit event");
         AppError::internal("Failed to record recovery key audit event")
     })?;
 
@@ -223,7 +214,7 @@ pub(crate) async fn delete_account(
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
+	.map_err(|error| database_error(error, "Failed to load user"))?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
 
     if normalize_email(&user.email) != normalize_email(&input.confirm_email) {
@@ -238,19 +229,13 @@ pub(crate) async fn delete_account(
                     .bind(team_id)
                     .fetch_one(pool)
                     .await
-                    .map_err(|e| {
-                        tracing::error!(error = %e, "Failed to load team members");
-                        AppError::internal("Failed to load team members")
-                    })?;
+                    .map_err(|error| database_error(error, "Failed to load team members"))?;
             let remaining_vaults =
                 query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1")
                     .bind(team_id)
                     .fetch_one(pool)
                     .await
-                    .map_err(|e| {
-                        tracing::error!(error = %e, "Failed to load team vaults");
-                        AppError::internal("Failed to load team vaults")
-                    })?;
+                    .map_err(|error| database_error(error, "Failed to load team vaults"))?;
             if remaining_members > 1 || remaining_vaults > 0 {
                 return Err(bad_request_handler_error(
 					"You cannot delete your account while you still own a non-personal team with members or team vaults. Dismantle the team or transfer ownership first.",
@@ -269,8 +254,8 @@ pub(crate) async fn delete_account(
         None,
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to record account deletion audit event");
+    .map_err(|error| {
+        tracing::error!(error = %error, "Failed to record account deletion audit event");
         AppError::internal("Failed to record account deletion audit event")
     })?;
 
@@ -295,10 +280,10 @@ async fn update_user_email_data(
     input: &UpdateEmailInput,
     kdf_profile: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start email update transaction");
-        AppError::internal("Failed to start email update transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start email update transaction"))?;
     query(
         "UPDATE \"user\" SET email = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $5, kdf_iterations = $6, kdf_schema_version = $7 WHERE id = $8",
     )
@@ -312,16 +297,13 @@ async fn update_user_email_data(
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to update email");
-        AppError::internal("Failed to update email")
-    })?;
+    .map_err(|error| database_error(error, "Failed to update email"))?;
     apply_encrypted_vault_key_updates(&mut transaction, user_id, &input.encrypted_vault_keys)
         .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit email update");
-        AppError::internal("Failed to commit email update")
-    })
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit email update"))
 }
 
 async fn update_user_password_data(
@@ -330,10 +312,10 @@ async fn update_user_password_data(
     input: &ChangePasswordInput,
     kdf_profile: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start password update transaction");
-        AppError::internal("Failed to start password update transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start password update transaction"))?;
     query(
         "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $4, kdf_iterations = $5, kdf_schema_version = $6 WHERE id = $7",
     )
@@ -346,16 +328,13 @@ async fn update_user_password_data(
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to update password");
-        AppError::internal("Failed to update password")
-    })?;
+    .map_err(|error| database_error(error, "Failed to update password"))?;
     apply_encrypted_vault_key_updates(&mut transaction, user_id, &input.encrypted_vault_keys)
         .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit password update");
-        AppError::internal("Failed to commit password update")
-    })
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit password update"))
 }
 
 async fn update_user_secret_key_data(
@@ -364,10 +343,10 @@ async fn update_user_secret_key_data(
     input: &RegenerateSecretKeyInput,
     kdf_profile: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
-    let mut transaction = pool.begin().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to start secret key transaction");
-        AppError::internal("Failed to start secret key transaction")
-    })?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start secret key transaction"))?;
     query(
         "UPDATE \"user\" SET secret_key_hint = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $5, kdf_iterations = $6, kdf_schema_version = $7 WHERE id = $8",
     )
@@ -381,16 +360,13 @@ async fn update_user_secret_key_data(
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to regenerate secret key");
-        AppError::internal("Failed to regenerate secret key")
-    })?;
+    .map_err(|error| database_error(error, "Failed to regenerate secret key"))?;
     apply_encrypted_vault_key_updates(&mut transaction, user_id, &input.encrypted_vault_keys)
         .await?;
-    transaction.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to commit secret key update");
-        AppError::internal("Failed to commit secret key update")
-    })
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit secret key update"))
 }
 
 async fn store_recovery_key_data(
@@ -404,10 +380,7 @@ async fn store_recovery_key_data(
         .bind(user_id)
         .execute(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to store recovery key");
-            AppError::internal("Failed to store recovery key")
-        })?;
+        .map_err(|error| database_error(error, "Failed to store recovery key"))?;
     Ok(())
 }
 
@@ -416,10 +389,7 @@ async fn delete_user_account_data(pool: &PgPool, user_id: &str) -> Result<(), Ap
         .bind(user_id)
         .execute(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to delete account");
-            AppError::internal("Failed to delete account")
-        })?;
+        .map_err(|error| database_error(error, "Failed to delete account"))?;
     Ok(())
 }
 
@@ -436,10 +406,7 @@ async fn apply_encrypted_vault_key_updates(
             .bind(user_id)
             .execute(&mut **transaction)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update vault keys");
-                AppError::internal("Failed to update vault keys")
-            })?;
+            .map_err(|error| database_error(error, "Failed to update vault keys"))?;
     }
     Ok(())
 }

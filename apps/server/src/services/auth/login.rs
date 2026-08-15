@@ -30,6 +30,7 @@ use crate::{
     services::{
         rate_limit::{self, generic_ip_limit, login_email_limit, login_ip_limit},
         session::{now_utc, RequestMetadata},
+        transaction::database_error,
     },
     AppState,
 };
@@ -93,10 +94,7 @@ pub(crate) async fn start_login(
         .bind(now)
         .execute(pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to prune login attempts");
-            AppError::internal("Failed to prune login attempts")
-        })?;
+        .map_err(|error| database_error(error, "Failed to prune login attempts"))?;
 
     let user = query_as::<_, DbLoginUserRow>(
 		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
@@ -104,7 +102,7 @@ pub(crate) async fn start_login(
 	.bind(&normalized_email)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); AppError::internal("Failed to load login account") })?;
+	.map_err(|error| database_error(error, "Failed to load login account"))?;
 
     let salt = user
         .as_ref()
@@ -114,8 +112,8 @@ pub(crate) async fn start_login(
         .as_ref()
         .map(|existing| existing.srp_verifier.clone())
         .unwrap_or_else(|| FAKE_SRP_VERIFIER.to_string());
-    let ephemeral = server.generate_ephemeral(&verifier).map_err(|e| {
-        tracing::error!(error = %e, "Failed to create login challenge");
+    let ephemeral = server.generate_ephemeral(&verifier).map_err(|error| {
+        tracing::error!(error = %error, "Failed to create login challenge");
         AppError::internal("Failed to create login challenge")
     })?;
     let attempt_id = build_login_attempt_id(&normalized_email_hash);
@@ -131,7 +129,7 @@ pub(crate) async fn start_login(
 	.bind(now + Duration::seconds(LOGIN_ATTEMPT_TTL_SECONDS))
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create login attempt"); AppError::internal("Failed to create login attempt") })?;
+	.map_err(|error| database_error(error, "Failed to create login attempt"))?;
 
     // The database constraint and verifier-write validation guarantee that a
     // real account uses the same profile as this decoy. Do not introduce a
@@ -176,7 +174,7 @@ async fn verify_login_proof_and_get_user(
 	.bind(&input.attempt_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to consume login attempt"); AppError::internal("Failed to consume login attempt") })?
+	.map_err(|error| database_error(error, "Failed to consume login attempt"))?
 	.ok_or_else(|| AppError::unauthorized("Invalid credentials"))?;
 
     if attempt.expires_at <= now_utc() || attempt.client_public_key != input.client_public_key {
@@ -192,7 +190,7 @@ async fn verify_login_proof_and_get_user(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); AppError::internal("Failed to load login account") })?
+	.map_err(|error| database_error(error, "Failed to load login account"))?
 	.ok_or_else(|| AppError::unauthorized("Invalid credentials"))?;
 
     let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
@@ -311,10 +309,7 @@ pub(crate) async fn load_auth_vault_keys_page(
     .bind(PAGE_BYTES)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to size vault key page");
-        AppError::internal("Failed to load vault keys")
-    })?;
+    .map_err(|error| database_error(error, "Failed to size vault key page"))?;
     let Some(first) = weights.first() else {
         return Ok(AuthVaultKeyPage {
             items: Vec::new(),
@@ -337,10 +332,7 @@ pub(crate) async fn load_auth_vault_keys_page(
     .bind(&vault_ids)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load vault keys");
-        AppError::internal("Failed to load vault keys")
-    })?;
+    .map_err(|error| database_error(error, "Failed to load vault keys"))?;
 
     let items = rows
         .into_iter()
