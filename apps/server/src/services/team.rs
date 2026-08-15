@@ -1188,7 +1188,7 @@ fn validate_token(token: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn normalize_pending_vault_keys(
+pub(crate) fn normalize_pending_vault_keys(
     pending_vault_keys: Option<Vec<PendingVaultKeyEntry>>,
 ) -> Result<Vec<PendingVaultKeyEntry>, AppError> {
     let Some(entries) = pending_vault_keys else {
@@ -1224,7 +1224,7 @@ fn normalize_pending_vault_keys(
     Ok(normalized)
 }
 
-fn parse_pending_vault_keys(
+pub(crate) fn parse_pending_vault_keys(
     raw_pending_vault_keys: Option<&str>,
 ) -> Result<Vec<PendingVaultKeyEntry>, AppError> {
     let Some(raw_value) = raw_pending_vault_keys else {
@@ -1239,7 +1239,7 @@ fn parse_pending_vault_keys(
     normalize_pending_vault_keys(Some(parsed))
 }
 
-async fn assert_invitation_pending_vault_keys_are_authorized(
+pub(crate) async fn assert_invitation_pending_vault_keys_are_authorized(
     pool: &PgPool,
     team_id: &str,
     inviter_id: &str,

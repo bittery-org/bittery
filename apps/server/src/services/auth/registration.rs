@@ -2,10 +2,9 @@ use super::{
     bad_request_handler_error, enforce_window_limit, hash_normalized_email,
     is_dev_auth_stub_enabled, jwt_signing_secret, request_ip_key, validate_hex_string,
     validate_resource_id, AuthSessionUserResponse, CheckEmailInput, CheckEmailResponse,
-    LogoutResponse, PendingVaultKeyEntry, RegistrationStatusResponse,
-    RequestSignupVerificationInput, SignupInput, SignupResponse, SignupWithInvitationInput,
-    ValidatedKdfProfile, VerifySignupVerificationInput, VerifySignupVerificationResponse,
-    JWT_ISSUER,
+    LogoutResponse, RegistrationStatusResponse, RequestSignupVerificationInput, SignupInput,
+    SignupResponse, SignupWithInvitationInput, ValidatedKdfProfile, VerifySignupVerificationInput,
+    VerifySignupVerificationResponse, JWT_ISSUER,
 };
 use bittery_crypto_core::normalize_email;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
@@ -24,7 +23,7 @@ use crate::{
     config::{bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled},
     db::{
         enums::{BillingPlan, BillingStatus, TeamRole, TeamType},
-        models::{DbTeamInvitationAcceptRow, DbVaultRoleRow},
+        models::DbTeamInvitationAcceptRow,
     },
     error::AppError,
     repo::common::{generate_resource_id, hash_token},
@@ -35,6 +34,7 @@ use crate::{
             signup_verification_request_limit,
         },
         session::{format_rfc3339, now_utc, RequestMetadata},
+        team::{assert_invitation_pending_vault_keys_are_authorized, parse_pending_vault_keys},
         team_billing::team_management_enabled,
         vault_key::validate_encrypted_vault_key,
         verification_code::{
@@ -395,7 +395,7 @@ pub(crate) async fn signup_with_invitation(
     }
 
     let pending_keys = parse_pending_vault_keys(invitation.pending_vault_keys.as_deref())?;
-    assert_pending_vault_keys_authorized(
+    assert_invitation_pending_vault_keys_are_authorized(
         pool,
         &invitation.team_id,
         &invitation.invited_by_id,
@@ -873,94 +873,6 @@ fn validate_signup_with_invitation_input(
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     validate_encrypted_vault_key(&input.encrypted_vault_key)?;
     ValidatedKdfProfile::try_from(&input.kdf_params)
-}
-
-pub(super) fn parse_pending_vault_keys(
-    raw_pending_vault_keys: Option<&str>,
-) -> Result<Vec<PendingVaultKeyEntry>, AppError> {
-    let Some(raw_value) = raw_pending_vault_keys else {
-        return Ok(Vec::new());
-    };
-    if raw_value.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let parsed = serde_json::from_str::<Vec<PendingVaultKeyEntry>>(raw_value)
-        .map_err(|_| bad_request_handler_error("Invalid pendingVaultKeys payload"))?;
-    let mut seen_vault_ids = std::collections::HashSet::with_capacity(parsed.len());
-    for (index, entry) in parsed.iter().enumerate() {
-        if entry.vault_id.trim().is_empty()
-            || validate_encrypted_vault_key(&entry.encrypted_vault_key).is_err()
-        {
-            return Err(bad_request_handler_error(&format!(
-                "Invalid pendingVaultKeys entry at index {index}",
-            )));
-        }
-        if !seen_vault_ids.insert(entry.vault_id.trim().to_string()) {
-            return Err(bad_request_handler_error(
-                "Duplicate vault IDs are not allowed in pendingVaultKeys",
-            ));
-        }
-    }
-    Ok(parsed
-        .into_iter()
-        .map(|entry| PendingVaultKeyEntry {
-            vault_id: entry.vault_id.trim().to_string(),
-            encrypted_vault_key: entry.encrypted_vault_key.trim().to_string(),
-        })
-        .collect())
-}
-
-async fn assert_pending_vault_keys_authorized(
-    pool: &PgPool,
-    team_id: &str,
-    inviter_id: &str,
-    pending_vault_keys: &[PendingVaultKeyEntry],
-) -> Result<(), AppError> {
-    if pending_vault_keys.is_empty() {
-        return Ok(());
-    }
-    let vault_ids: Vec<String> = pending_vault_keys
-        .iter()
-        .map(|entry| entry.vault_id.clone())
-        .collect();
-    let team_vault_count = query_scalar::<_, i64>(
-        "SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND id = ANY($2)",
-    )
-    .bind(team_id)
-    .bind(&vault_ids)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to validate pendingVaultKeys vaults");
-        AppError::internal("Failed to validate pendingVaultKeys vaults")
-    })?;
-    if team_vault_count != vault_ids.len() as i64 {
-        return Err(AppError::bad_request(
-            "pendingVaultKeys contains vaults outside the invited team",
-        ));
-    }
-    let authorized_roles = query_as::<_, DbVaultRoleRow>(
-        "SELECT vault_id, role::text AS role FROM vault_key WHERE user_id = $1 AND vault_id = ANY($2)",
-    )
-    .bind(inviter_id)
-    .bind(&vault_ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to validate inviter vault access");
-        AppError::internal("Failed to validate inviter vault access")
-    })?;
-    let authorized_vault_ids: std::collections::HashSet<String> = authorized_roles
-        .into_iter()
-        .filter(|record| record.role.can_manage())
-        .map(|record| record.vault_id)
-        .collect();
-    if authorized_vault_ids.len() != vault_ids.len() {
-        return Err(AppError::forbidden(
-            "You do not have permission to grant access for one or more vaults",
-        ));
-    }
-    Ok(())
 }
 
 async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {

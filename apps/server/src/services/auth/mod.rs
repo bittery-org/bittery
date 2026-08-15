@@ -417,14 +417,6 @@ pub struct DeleteAccountInput {
     pub confirm_email: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PendingVaultKeyEntry {
-    #[serde(rename = "vaultId")]
-    pub(crate) vault_id: String,
-    #[serde(rename = "encryptedVaultKey")]
-    pub(crate) encrypted_vault_key: String,
-}
-
 mod credentials;
 mod devices;
 mod login;
@@ -432,6 +424,8 @@ mod recovery;
 mod registration;
 mod request_context;
 
+#[cfg(test)]
+use crate::services::team::parse_pending_vault_keys;
 #[cfg(test)]
 use bittery_crypto_core::srp6a::{HashAlgorithm, PrimeGroup};
 #[cfg(test)]
@@ -454,8 +448,8 @@ pub(crate) use registration::{
 };
 #[cfg(test)]
 use registration::{
-    deterministic_fake_hint, map_plan_to_team_type, normalize_signup_plan,
-    parse_pending_vault_keys, plan_member_limit, signup_team_name, validate_token,
+    deterministic_fake_hint, map_plan_to_team_type, normalize_signup_plan, plan_member_limit,
+    signup_team_name, validate_token,
 };
 pub use request_context::request_context_middleware;
 #[cfg(test)]
