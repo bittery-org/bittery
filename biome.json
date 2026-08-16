@@ -24,6 +24,7 @@
 			"!**/build",
 			"!packages/crypto/react-native",
 			"!packages/crypto/wasm",
+			"!spikes/*/plugins/*/permissions",
 			"!packages/ui/src/components",
 			"!docs/design-explorations",
 			"!**/target",

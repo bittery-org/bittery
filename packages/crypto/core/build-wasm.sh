@@ -13,6 +13,16 @@ fi
 pnpm exec ubrn build web --config ../core/ubrn.config.yaml --release
 
 WASM_FILE="$PWD/generated/wasm-bindgen/index_bg.wasm"
+
+# `std::time::SystemTime::now()` compiles for wasm32-unknown-unknown and then
+# traps at runtime, taking the whole instance down. The panic message is the
+# only trace it leaves, so fail the build if anything reintroduces it.
+if grep -qa "time not implemented on this platform" "$WASM_FILE"; then
+	echo "error: the wasm build calls std::time::SystemTime::now(), which traps in browsers." >&2
+	echo "       Read the clock through js_sys::Date::now() instead (see totp.rs)." >&2
+	exit 1
+fi
+
 OPTIMIZED_WASM="$(mktemp "${TMPDIR:-/tmp}/bittery-crypto-wasm.XXXXXX")"
 trap 'rm -f "$OPTIMIZED_WASM"' EXIT
 pnpm exec wasm-opt -Oz "$WASM_FILE" -o "$OPTIMIZED_WASM"

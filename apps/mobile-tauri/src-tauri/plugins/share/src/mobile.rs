@@ -26,4 +26,10 @@ impl<R: Runtime> BitteryShare<R> {
             .run_mobile_plugin("shareText", args)
             .map_err(Into::into)
     }
+
+    pub fn share_file(&self, args: ShareFileArgs) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("shareFile", args)
+            .map_err(Into::into)
+    }
 }

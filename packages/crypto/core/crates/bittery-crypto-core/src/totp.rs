@@ -4,9 +4,39 @@
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::CryptoError;
+
+/// Seconds since the Unix epoch.
+///
+/// `std::time::SystemTime::now()` has no implementation on
+/// `wasm32-unknown-unknown`: it compiles, then traps at runtime with
+/// "time not implemented on this platform", which kills the whole wasm
+/// instance. Browsers therefore have to read the clock through JS instead.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn now_unix_seconds() -> Result<u64, CryptoError> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| CryptoError::InvalidInput(format!("System time error: {}", e)))?
+        .as_secs())
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn now_unix_seconds() -> Result<u64, CryptoError> {
+    let millis = js_sys::Date::now();
+
+    // `as u64` saturates rather than wrapping, so a bogus clock would silently
+    // become 0 or u64::MAX instead of an error. Reject it up front.
+    if !millis.is_finite() || millis < 0.0 {
+        return Err(CryptoError::InvalidInput(format!(
+            "System time error: Date.now() returned {millis}"
+        )));
+    }
+
+    Ok((millis / 1000.0) as u64)
+}
 
 // Base32 alphabet (RFC 4648)
 const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -150,10 +180,7 @@ pub fn generate_totp(
 
     let secret_bytes = base32_decode(secret)?;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| CryptoError::InvalidInput(format!("System time error: {}", e)))?
-        .as_secs();
+    let now = now_unix_seconds()?;
 
     let counter = now / period;
     let code = hotp(&secret_bytes, counter, algorithm, digits)?;

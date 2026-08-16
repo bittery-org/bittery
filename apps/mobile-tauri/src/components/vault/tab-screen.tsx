@@ -1,46 +1,62 @@
 import type { ReactNode } from "react";
+import { AccountSwitcher } from "@/components/account-switcher";
+import { AppBar, Screen, ScreenScroll } from "@/components/ui";
 import { BottomTabBar, type TabKey } from "./bottom-tab-bar";
 
 interface TabScreenProps {
 	title: ReactNode;
-	headerEnd?: ReactNode;
+	subtitle?: ReactNode;
+	/** App-bar trailing actions. The account avatar is added automatically as the last one. */
+	actions?: ReactNode;
+	/** Sits between the app bar and the scroll region: segmented controls, chips, a search field. */
+	toolbar?: ReactNode;
 	activeTab: TabKey;
+	/** The sanctioned top wash. Items and Browse only — Settings stays neutral. */
+	aurora?: boolean;
+	/** A FAB or any other overlay pinned to the screen rather than to the scroller. */
+	overlay?: ReactNode;
 	children: ReactNode;
 }
 
 /**
- * Shared shell for the five tab-root screens (D12). Same sticky-header-over-bounded-scroll shape
- * as `MobileScreen`, minus the back button, plus `BottomTabBar` pinned below the scroll region.
- * Height math mirrors `MobileScreen`'s doc comment: `__root.tsx` already pads by `--safe-top` /
- * `--safe-bottom`, so this element is sized to exactly the visible area and the tab bar and
- * content split it, rather than either one pushing the other off-screen.
+ * Shell for the three tab-root screens: large title + account avatar over a bounded scroll
+ * region, with the tab bar pinned below.
+ *
+ * The account avatar lives here rather than on each screen so the switcher is reachable
+ * from every tab, which is how it works on `apps/mobile` — before this the Tauri app had no
+ * switcher at all and the header carried a bare email string and a loose Lock button.
  */
 export function TabScreen({
 	title,
-	headerEnd,
+	subtitle,
+	actions,
+	toolbar,
 	activeTab,
+	aurora = false,
+	overlay,
 	children,
 }: TabScreenProps) {
 	return (
-		<div
-			className="flex w-full flex-col overflow-hidden"
-			style={{
-				height: "calc(100dvh - var(--safe-top) - var(--safe-bottom))",
-			}}
-		>
-			<header className="sticky top-0 z-10 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2">
-				<h1 className="min-w-0 truncate font-semibold text-base">{title}</h1>
-				{headerEnd}
-			</header>
+		<Screen aurora={aurora}>
+			<AppBar
+				largeTitle={title}
+				subtitle={subtitle}
+				bordered={false}
+				actions={
+					<>
+						{actions}
+						<AccountSwitcher />
+					</>
+				}
+			/>
+			{toolbar ? (
+				<div className="relative z-10 shrink-0 px-4 pb-3">{toolbar}</div>
+			) : null}
 
-			<div
-				className="flex-1 overflow-y-auto"
-				style={{ overscrollBehavior: "contain" }}
-			>
-				{children}
-			</div>
+			<ScreenScroll inset="tabBar">{children}</ScreenScroll>
 
+			{overlay}
 			<BottomTabBar active={activeTab} />
-		</div>
+		</Screen>
 	);
 }

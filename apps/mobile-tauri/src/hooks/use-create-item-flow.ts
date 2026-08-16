@@ -20,14 +20,27 @@ import { useI18n } from "@/providers/i18n-provider";
  * `scanTotpQr` is the second entry point these same screens offer, next to "+": scan a TOTP
  * `otpauth://` QR (`apps/mobile`'s equivalent lived inside its `TotpForm`, see
  * `src/lib/barcode-scanner.ts` for why it lands on the clipboard instead of a form field here),
- * then open this same sheet so the shared `TotpForm`'s existing clipboard auto-paste picks it up
- * once the user taps "Authenticator".
+ * then open the sheet on the Authenticator form so the shared `TotpForm`'s clipboard auto-paste
+ * picks the scan up immediately.
+ *
+ * Render the returned state with `@/components/vault/create-item-sheet`, not `@bittery/ui`'s
+ * `CreateItemSheet` — the local one is the mobile-shaped twin and is what `initialCategory`
+ * below is for.
  */
 export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const [isOpen, setIsOpen] = useState(false);
+	const [initialCategory, setInitialCategory] = useState<
+		ItemCategory | undefined
+	>(undefined);
 	const createItem = useCreateItem();
+
+	/** Clears the QR scan's category preselection so the next plain "+" opens the picker. */
+	const setSheetOpen = (open: boolean) => {
+		if (!open) setInitialCategory(undefined);
+		setIsOpen(open);
+	};
 
 	const vaultOptions: VaultOption[] = vaultKeys.map((v) => ({
 		id: v.vaultId,
@@ -56,7 +69,7 @@ export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 				data,
 				accountId,
 			});
-			setIsOpen(false);
+			setSheetOpen(false);
 			toast.success(m.mob_create_item_toast_success());
 			navigate({
 				to: "/vault/$id/$itemId",
@@ -74,14 +87,14 @@ export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 
 	/**
 	 * Scans a TOTP QR, validates it, writes it to the clipboard, and opens the create-item
-	 * sheet. There is no prop to jump straight to the Authenticator step (`CreateItemSheet`
-	 * has none to give — see the module doc), so this gets the user as close as the sheet
-	 * allows: one tap on "Authenticator" away from a filled-in form.
+	 * sheet straight on the Authenticator form, where `TotpForm`'s clipboard auto-paste
+	 * fills the secret in.
 	 */
 	const scanTotpQr = async () => {
 		try {
 			await scanTotpSetupToClipboard();
 			toast.success(m.mob_form_totp_toast_imported());
+			setInitialCategory("totp");
 			setIsOpen(true);
 		} catch (error) {
 			if (error instanceof NotAnOtpAuthUriError) {
@@ -101,7 +114,8 @@ export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 
 	return {
 		isOpen,
-		setIsOpen,
+		setIsOpen: setSheetOpen,
+		initialCategory,
 		vaultOptions,
 		handleCreateItem,
 		scanTotpQr,

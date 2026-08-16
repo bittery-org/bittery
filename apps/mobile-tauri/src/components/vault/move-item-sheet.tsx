@@ -1,18 +1,16 @@
 import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
-import {
-	Button,
-	Sheet,
-	SheetContent,
-	SheetHeader,
-	SheetTitle,
-	Skeleton,
-	toast,
-	VaultAvatar,
-} from "@bittery/ui";
-import { IconCheck } from "@bittery/ui/icons";
-import { cn } from "@bittery/ui/lib/utils";
+import { Skeleton, toast, VaultAvatar } from "@bittery/ui";
+import { IconCheck, IconTriangleAlert } from "@bittery/ui/icons";
 import { useState } from "react";
+import {
+	BrandButton,
+	iconClass,
+	ListCard,
+	ListRow,
+	MobileSheet,
+	Pressable,
+} from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface MoveItemSheetProps {
@@ -33,7 +31,7 @@ interface MoveItemSheetProps {
  * (`MoveItemDialogProps`) is exported from `@bittery/ui`, not the component itself — so per the
  * "do not force a bad seam" rule this is a small mobile-only presentation instead of an import.
  * Same two data hooks as desktop (`useMoveTargetVaults`, `useMoveItem`), same cross-account
- * transfer warning copy.
+ * transfer warning copy — the presentation is the mobile kit's `MobileSheet` + `ListCard`.
  */
 export function MoveItemSheet({
 	open,
@@ -108,105 +106,101 @@ export function MoveItemSheet({
 	};
 
 	return (
-		<Sheet open={open} onOpenChange={handleOpenChange}>
-			<SheetContent
-				side="bottom"
-				className="flex max-h-[80vh] flex-col gap-0 overflow-hidden p-0"
-			>
-				<SheetHeader className="border-b px-5 pt-5 pb-4 text-left">
-					<SheetTitle className="truncate">
-						{m.vaults_detail_items_move_dialog_title({ title: item.title })}
-					</SheetTitle>
-				</SheetHeader>
-
-				<div className="flex-1 overflow-y-auto px-3 py-2">
+		<MobileSheet
+			open={open}
+			onOpenChange={handleOpenChange}
+			title={m.vaults_detail_items_move_dialog_title({ title: item.title })}
+		>
+			<div className="flex min-h-0 flex-col">
+				<div className="native-scroll min-h-0 flex-1 px-4 pb-2">
 					{isLoading ? (
-						<div className="flex flex-col gap-1 p-2">
+						<div className="flex flex-col gap-2">
 							{[0, 1, 2].map((row) => (
-								<Skeleton key={row} className="h-14 rounded-lg" />
+								<Skeleton key={row} className="h-14 rounded-2xl" />
 							))}
 						</div>
 					) : otherVaults.length === 0 ? (
-						<div className="py-10 text-center text-muted-foreground text-sm">
+						<p className="py-10 text-center text-muted-foreground text-sm">
 							{m.vaults_detail_items_move_dialog_empty_no_other_vaults()}
-						</div>
+						</p>
 					) : (
-						otherVaults.map((vaultKey) => {
-							const isReadOnly = vaultKey.role === "read-only";
-							const isSelected = vaultKey.vaultId === selectedVaultId;
-							return (
-								<button
-									key={vaultKey.vaultId}
-									type="button"
-									disabled={isReadOnly}
-									onClick={() => setSelectedVaultId(vaultKey.vaultId)}
-									className={cn(
-										"flex min-h-14 w-full items-center gap-3 rounded-lg px-3 py-2 text-left disabled:opacity-40",
-										isSelected ? "bg-selected" : "active:bg-foreground/5",
-									)}
-								>
-									<VaultAvatar
-										name={vaultKey.vaultName}
-										icon={vaultKey.vaultIcon}
-										imageUrl={vaultKey.vaultImageUrl}
-										size="sm"
+						<ListCard>
+							{otherVaults.map((vaultKey) => {
+								const isReadOnly = vaultKey.role === "read-only";
+								const isSelected = vaultKey.vaultId === selectedVaultId;
+								return (
+									<ListRow
+										key={vaultKey.vaultId}
+										title={vaultKey.vaultName}
+										subtitle={
+											vaultKey.accountId !== currentVaultAccountId
+												? (vaultKey.accountEmail ??
+													vaultKey.accountName ??
+													undefined)
+												: undefined
+										}
+										leading={
+											<VaultAvatar
+												name={vaultKey.vaultName}
+												icon={vaultKey.vaultIcon}
+												imageUrl={vaultKey.vaultImageUrl}
+												size="sm"
+											/>
+										}
+										value={
+											isReadOnly ? m.vaults_common_role_read_only() : undefined
+										}
+										trailing={
+											isSelected ? (
+												<IconCheck
+													className={`${iconClass.row} text-primary`}
+												/>
+											) : undefined
+										}
+										isDisabled={isReadOnly}
+										isSelected={isSelected}
+										onPress={() => setSelectedVaultId(vaultKey.vaultId)}
 									/>
-									<div className="min-w-0 flex-1">
-										<p className="truncate font-medium text-sm">
-											{vaultKey.vaultName}
-										</p>
-										{vaultKey.accountId !== currentVaultAccountId && (
-											<p className="truncate text-muted-foreground text-xs">
-												{vaultKey.accountEmail ?? vaultKey.accountName ?? ""}
-											</p>
-										)}
-									</div>
-									{isReadOnly && (
-										<span className="shrink-0 rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-											{m.vaults_common_role_read_only()}
-										</span>
-									)}
-									{isSelected && (
-										<IconCheck className="size-4 shrink-0 text-primary" />
-									)}
-								</button>
-							);
-						})
+								);
+							})}
+						</ListCard>
 					)}
 				</div>
 
-				{isCrossAccount && selectedVault && (
-					<div className="mx-4 mb-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-amber-600 text-xs dark:text-amber-400">
-						{m.vaults_detail_items_move_dialog_warning_cross_account()}
+				{isCrossAccount && selectedVault ? (
+					<div className="mx-4 mt-3 flex items-start gap-2 rounded-xl bg-warning-soft px-3 py-2.5 text-warning text-xs">
+						<IconTriangleAlert className="mt-px size-3.5 shrink-0" />
+						<span>
+							{m.vaults_detail_items_move_dialog_warning_cross_account()}
+						</span>
 					</div>
-				)}
+				) : null}
 
-				<div className="flex gap-2 border-t p-3">
-					<Button
-						type="button"
-						variant="outline"
-						className="h-11 flex-1"
+				<div className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-6">
+					<BrandButton
+						label={
+							moveItem.isPending
+								? isCrossAccount
+									? m.vaults_detail_items_move_dialog_action_transferring()
+									: m.vaults_detail_items_move_dialog_action_moving()
+								: isCrossAccount
+									? m.vaults_detail_items_move_dialog_action_transfer()
+									: m.vaults_detail_items_move_dialog_action_move()
+						}
+						onClick={() => void handleMove()}
+						disabled={!selectedVaultId}
+						isLoading={moveItem.isPending}
+					/>
+					<Pressable
 						onClick={() => handleOpenChange(false)}
 						disabled={moveItem.isPending}
+						surface="sheet"
+						className="flex h-11 w-full items-center justify-center rounded-xl bg-surface-tertiary font-medium text-base text-foreground"
 					>
 						{m.vaults_detail_items_detail_action_cancel()}
-					</Button>
-					<Button
-						type="button"
-						className="h-11 flex-1"
-						onClick={() => void handleMove()}
-						disabled={!selectedVaultId || moveItem.isPending}
-					>
-						{moveItem.isPending
-							? isCrossAccount
-								? m.vaults_detail_items_move_dialog_action_transferring()
-								: m.vaults_detail_items_move_dialog_action_moving()
-							: isCrossAccount
-								? m.vaults_detail_items_move_dialog_action_transfer()
-								: m.vaults_detail_items_move_dialog_action_move()}
-					</Button>
+					</Pressable>
 				</div>
-			</SheetContent>
-		</Sheet>
+			</div>
+		</MobileSheet>
 	);
 }

@@ -5,6 +5,7 @@ packages:
   - packages/crypto/wasm
   - packages/crypto/port
   - packages/crypto/react-native
+  - spikes/*
 
 catalog:
   '@types/react': ~19.2.18

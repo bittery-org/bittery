@@ -1,7 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Empty on purpose. ACTION_SEND needs no declared permission or component: it is a
-    plain implicit intent handed to the system, which shows its own chooser UI.
+    ACTION_SEND itself needs no declared permission or component: it is a plain implicit
+    intent handed to the system, which shows its own chooser UI. `shareText` therefore
+    declares nothing.
+
+    `shareFile` does need one thing. Handing another app a `file://` URI has thrown
+    FileUriExposedException since Android 7, so a decrypted attachment travels as a
+    `content://` URI backed by this FileProvider, with a per-URI read grant that Android
+    revokes when the receiving activity finishes.
+
+    `android:exported="false"` plus `grantUriPermissions="true"` is the whole security
+    story: no app can query this provider on its own, only follow a URI we handed it.
+    The authority is namespaced under `${applicationId}` so it stays unique if the app id
+    ever changes, and it is duplicated as a string in `SharePlugin.kt` — the two must
+    agree or `getUriForFile` throws at runtime.
+
+    `android:name` is the `BitteryShareFileProvider` subclass, fully qualified, and both of
+    those matter. The subclass keeps the manifest merger from fusing this element with the
+    app's own `androidx.core.content.FileProvider` (see that class's KDoc), and the full
+    package is spelled out because a relative `.Name` in a *library* manifest resolves
+    against the application id, not this module's namespace.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<application>
+		<provider
+			android:name="com.bittery.mobile.share.BitteryShareFileProvider"
+			android:authorities="${applicationId}.bitteryshare.fileprovider"
+			android:exported="false"
+			android:grantUriPermissions="true">
+			<meta-data
+				android:name="android.support.FILE_PROVIDER_PATHS"
+				android:resource="@xml/bittery_share_paths" />
+		</provider>
+	</application>
 </manifest>

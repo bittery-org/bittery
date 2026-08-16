@@ -6,25 +6,243 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-html {
-	color-scheme: light dark;
+/*
+ * Bittery mobile (Tauri) — the WebView translation of apps/mobile/DESIGN-NATIVE.md.
+ *
+ * `packages/ui/src/tokens.css` stays the single source of colour truth. This file only does
+ * three things on top of it: retune the type scale for touch density, name the elevation
+ * ladder the way the native design doc does, and add the WebView-only behaviour that makes a
+ * web view stop feeling like a web view.
+ *
+ * Colour naming note: the native doc calls purple `accent`, but in the shared token file
+ * `--accent` is already a *neutral* surface (it is shadcn's hover grey). Purple here is
+ * `primary` / `primary-deep`, as everywhere else in this repo. Do not add an `accent` alias.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Scale                                                                       */
+/* -------------------------------------------------------------------------- */
+
+@theme {
+	/*
+	 * Desktop's 13px base is too tight for a thumb. This is the native scale from
+	 * apps/mobile/global.css, verbatim, so both mobile apps size type identically.
+	 */
+	--text-2xs: 10px;
+	--text-2xs--line-height: 13px;
+	--text-xs: 11px;
+	--text-xs--line-height: 15px;
+	--text-sm: 13px;
+	--text-sm--line-height: 18px;
+	--text-base: 15px;
+	--text-base--line-height: 21px;
+	--text-lg: 17px;
+	--text-lg--line-height: 23px;
+	--text-xl: 20px;
+	--text-xl--line-height: 26px;
+	--text-2xl: 24px;
+	--text-2xl--line-height: 30px;
+	--text-3xl: 28px;
+	--text-3xl--line-height: 34px;
+	--text-4xl: 34px;
+	--text-4xl--line-height: 40px;
+
+	/* Native easing — everything in the app moves on this curve. */
+	--ease-native: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-body {
-	overscroll-behavior: none;
-	-webkit-tap-highlight-color: transparent;
-	user-select: none;
-}
+/* -------------------------------------------------------------------------- */
+/* Elevation ladder + brand extras                                             */
+/* -------------------------------------------------------------------------- */
 
-input,
-textarea {
-	user-select: text;
-}
-
-/* Mobile-specific tokens: real values once `viewport-fit=cover` is set in index.html. */
 :root {
 	--safe-top: env(safe-area-inset-top, 0px);
 	--safe-bottom: env(safe-area-inset-bottom, 0px);
 	--safe-left: env(safe-area-inset-left, 0px);
 	--safe-right: env(safe-area-inset-right, 0px);
+
+	/* Chrome heights the kit and the scroll padding both read. */
+	--app-bar-height: 52px;
+	--tab-bar-height: 54px;
+
+	--shadow-surface:
+		0 1px 2px 0 rgb(16 12 28 / 0.05), 0 4px 12px 0 rgb(16 12 28 / 0.04);
+	--shadow-overlay:
+		0 2px 8px 0 rgb(16 12 28 / 0.06), 0 16px 40px 0 rgb(16 12 28 / 0.1);
+	/* Dark mode earns the purple halo under primary actions; light mode does not. */
+	--shadow-glow: 0 6px 14px -4px oklch(0.5 0.2 292 / 0.28);
+	--shadow-glow-lg: 0 10px 24px -6px oklch(0.5 0.2 292 / 0.32);
+}
+
+.dark {
+	--shadow-surface: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+	--shadow-overlay:
+		0 2px 10px 0 rgb(0 0 0 / 0.4), 0 20px 48px 0 rgb(0 0 0 / 0.5);
+	--shadow-glow: 0 6px 18px -2px oklch(0.58 0.185 292 / 0.5);
+	--shadow-glow-lg: 0 12px 30px -4px oklch(0.58 0.185 292 / 0.55);
+}
+
+@theme inline {
+	/*
+	 * Elevation ladder, named as DESIGN-NATIVE.md names it:
+	 *   0 background · 1 field · 2 surface (cards) · 3 surface-secondary (sheets)
+	 *   · 4 surface-tertiary (pressed state inside a sheet)
+	 */
+	--color-surface: var(--card);
+	--color-surface-secondary: var(--popover);
+	--color-surface-tertiary: var(--overlay);
+	--color-field: var(--card);
+	--color-separator: var(--border);
+	--color-danger: var(--destructive);
+
+	/* Status tints — text/icon in the status colour over a soft wash, never a solid fill. */
+	--color-danger-soft: color-mix(in oklab, var(--destructive) 13%, transparent);
+	--color-success-soft: color-mix(in oklab, var(--success) 15%, transparent);
+	--color-warning-soft: color-mix(in oklab, var(--warning) 15%, transparent);
+	--color-info-soft: color-mix(in oklab, var(--info) 15%, transparent);
+	--color-primary-soft: color-mix(in oklab, var(--primary) 14%, transparent);
+
+	--shadow-surface: var(--shadow-surface);
+	--shadow-overlay: var(--shadow-overlay);
+	--shadow-glow: var(--shadow-glow);
+	--shadow-glow-lg: var(--shadow-glow-lg);
+}
+
+/* -------------------------------------------------------------------------- */
+/* WebView behaviour                                                           */
+/* -------------------------------------------------------------------------- */
+
+html {
+	color-scheme: light dark;
+	/* A pinch-zoomable password manager reads as a website. */
+	touch-action: manipulation;
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	overscroll-behavior: none;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-touch-callout: none;
+	user-select: none;
+	/* The nav-bar area behind a translucent tab bar should never flash white. */
+	background-color: var(--background);
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+	user-select: text;
+	-webkit-touch-callout: default;
+}
+
+img,
+svg {
+	-webkit-user-drag: none;
+}
+
+/* Scrollbars are a desktop affordance; a phone shows the content, not the track. */
+* {
+	scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+	display: none;
+}
+
+@layer utilities {
+	/* Every bounded scroll region in the app: momentum, contained bounce, snappy stop. */
+	.native-scroll {
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+	}
+
+	/*
+	 * Text that must stay selectable inside a `user-select: none` shell — secrets the
+	 * user may want to drag-select instead of using the copy button.
+	 */
+	.selectable {
+		user-select: text;
+		-webkit-touch-callout: default;
+	}
+}
+
+/* -------------------------------------------------------------------------- */
+/* Motion                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Route transitions. TanStack Router drives these through `document.startViewTransition`
+ * (`defaultViewTransition` in main.tsx); a WebView without the API simply cuts, which is the
+ * correct fallback — nothing here is load-bearing.
+ *
+ * A cross-fade with a small rise, not a directional slide: the router does not tell us
+ * whether a navigation is a push or a pop, and a slide that goes the wrong way on Back is
+ * far more jarring than no slide at all.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation-duration: 220ms;
+	animation-timing-function: var(--ease-native);
+	/* Both layers paint at once; without this the outgoing screen flashes white. */
+	mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+	animation-name: route-out;
+}
+
+::view-transition-new(root) {
+	animation-name: route-in;
+}
+
+@keyframes route-out {
+	to {
+		opacity: 0;
+		transform: scale(0.99);
+	}
+}
+
+@keyframes route-in {
+	from {
+		opacity: 0;
+		transform: scale(1.012) translateY(6px);
+	}
+}
+
+@keyframes sheet-in {
+	from {
+		transform: translateY(100%);
+	}
+	to {
+		transform: translateY(0);
+	}
+}
+
+@keyframes scrim-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/*
+ * `!important` is load-bearing here: Tailwind's animation and transition utilities are
+ * authored at the same specificity, so an honest override cannot win. This is the standard
+ * reduced-motion reset, and it is the one place in the app allowed to use it.
+ */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		/* biome-ignore lint/complexity/noImportantStyles: must beat Tailwind's own utilities */
+		animation-duration: 0.01ms !important;
+		/* biome-ignore lint/complexity/noImportantStyles: must beat Tailwind's own utilities */
+		animation-iteration-count: 1 !important;
+		/* biome-ignore lint/complexity/noImportantStyles: must beat Tailwind's own utilities */
+		transition-duration: 0.01ms !important;
+	}
 }

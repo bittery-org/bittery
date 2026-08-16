@@ -22,4 +22,8 @@ impl<R: Runtime> BitteryShare<R> {
     pub fn share_text(&self, _args: ShareTextArgs) -> crate::Result<()> {
         Err(crate::Error::Unsupported)
     }
+
+    pub fn share_file(&self, _args: ShareFileArgs) -> crate::Result<()> {
+        Err(crate::Error::Unsupported)
+    }
 }

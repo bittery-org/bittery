@@ -45,7 +45,10 @@ this machine set up for the mobile work):
 "$ANDROID_HOME/platform-tools/adb" shell monkey -p com.bittery.mobile -c android.intent.category.LAUNCHER 1
 ```
 
-`pnpm android:dev` runs `tauri android dev` against a running emulator or a USB-attached device.
+`pnpm dev` (alias `pnpm android:dev`) runs `tauri android dev` against a running emulator or a
+USB-attached device. It is also what the workspace's `pnpm dev:all` and `pnpm dev:mobile` start —
+plain `pnpm dev` at the root leaves the phone app out. For UI-only work without a handset,
+`pnpm dev:desktop` runs the same frontend in a desktop Tauri window.
 
 **Four things to not get wrong:**
 

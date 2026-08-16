@@ -1,9 +1,10 @@
 /**
- * M3-C2 — "Trash" tab (D12). Deleted items across every unlocked vault, restore and permanent
- * delete. Mirrors desktop's `/vault/trash` (`apps/desktop/src/routes/vault/trash.tsx`) — same
- * two mutations, `ConfirmDialog` instead of a hand-assembled `AlertDialog` for the permanent
- * delete confirmation (`ConfirmDialog` did not exist yet when desktop's trash screen was
- * written).
+ * Trash — deleted items across every unlocked vault, with restore and permanent delete. No longer
+ * a tab (DESIGN-NATIVE.md § Information architecture): it is a rare, reversible place, reached
+ * from the account sheet and from Settings, so it is a pushed screen.
+ *
+ * Same two mutations as desktop's `/vault/trash`, with `ConfirmSheet` — the phone answer to a
+ * desktop alert dialog — in place of `ConfirmDialog`.
  */
 
 import {
@@ -14,12 +15,26 @@ import {
 } from "@bittery/core/hooks";
 import { formatDate } from "@bittery/i18n/format/browser";
 import { maskCardNumber } from "@bittery/shared/credit-card";
-import { ConfirmDialog, Skeleton, toast, VaultAvatar } from "@bittery/ui";
+import { toast } from "@bittery/ui";
 import { IconArchiveRestore, IconTrash } from "@bittery/ui/icons";
-import { createFileRoute } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	useNavigate,
+	useRouter,
+} from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { MobileScreen } from "@/components/mobile-screen";
+import {
+	BarButton,
+	ConfirmSheet,
+	EmptyState,
+	iconClass,
+	ListCard,
+	ListRow,
+} from "@/components/ui";
 import { Favicon } from "@/components/vault/favicon";
-import { TabScreen } from "@/components/vault/tab-screen";
+import { ItemsSkeleton } from "@/components/vault/items-skeleton";
+import { VaultTile } from "@/components/vault/vault-tile";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/trash")({
@@ -36,18 +51,10 @@ function formatDeletedDate(
 	return formatDate(date, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function TrashSkeleton() {
-	return (
-		<div className="flex flex-col gap-2 p-3">
-			{[0, 1, 2].map((row) => (
-				<Skeleton key={row} className="h-16 rounded-lg" />
-			))}
-		</div>
-	);
-}
-
 function TrashScreen() {
 	const { m } = useI18n();
+	const navigate = useNavigate();
+	const router = useRouter();
 	const { items: deletedItems, isLoading } = useDeletedItems();
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
@@ -94,79 +101,98 @@ function TrashScreen() {
 		}
 	};
 
-	return (
-		<TabScreen title={m.mob_tab_trash()} activeTab="trash">
-			{isLoading ? (
-				<TrashSkeleton />
-			) : sortedItems.length === 0 ? (
-				<div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-					<h2 className="font-semibold text-lg">{m.mob_trash_empty_title()}</h2>
-					<p className="text-muted-foreground text-sm">
-						{m.mob_trash_empty_description()}
-					</p>
-				</div>
-			) : (
-				<div className="flex flex-col gap-1 p-2">
-					{sortedItems.map((item) => {
-						const maskedCardNumber = item.cardNumber
-							? maskCardNumber(item.cardNumber)
-							: undefined;
-						const title = item.title || m.vaults_trash_item_untitled();
-						const secondary =
-							item.username || item.email || maskedCardNumber || item.url;
+	// Trash is reached from the account sheet on any tab and from Settings, so there is no single
+	// screen to return to — go back where the user came from, and fall back to Settings for a
+	// cold start straight into this route.
+	const handleBack = () => {
+		if (router.history.canGoBack()) {
+			router.history.back();
+			return;
+		}
+		void navigate({ to: "/vault/settings" });
+	};
 
-						return (
-							<div
-								key={item.id}
-								className="flex items-center gap-2.5 rounded-lg px-2 py-2"
-							>
-								<Favicon item={item} title={title} size="sm" />
-								<div className="min-w-0 flex-1">
-									<p className="truncate font-medium text-sm">{title}</p>
-									<div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-										<VaultAvatar
-											name={item.vault.name}
-											icon={item.vault.icon}
-											imageUrl={item.vault.imageUrl}
-											size="xs"
-										/>
-										<span className="truncate">
-											{secondary
-												? secondary
-												: m.vaults_trash_item_deleted_at({
-														date: formatDeletedDate(
-															item.deletedAt,
-															m.vaults_trash_item_deleted_recently(),
-														),
-													})}
+	return (
+		<MobileScreen
+			title={m.mob_tab_trash()}
+			backLabel={m.mob_common_go_back()}
+			onBack={handleBack}
+		>
+			{isLoading ? (
+				<ItemsSkeleton count={4} />
+			) : sortedItems.length === 0 ? (
+				<EmptyState
+					className="min-h-full"
+					icon={IconTrash}
+					title={m.mob_trash_empty_title()}
+					description={m.mob_trash_empty_description()}
+				/>
+			) : (
+				<div className="px-4 pt-4">
+					<ListCard>
+						{sortedItems.map((item) => {
+							const maskedCardNumber = item.cardNumber
+								? maskCardNumber(item.cardNumber)
+								: undefined;
+							const title = item.title || m.vaults_trash_item_untitled();
+							const secondary =
+								item.username || item.email || maskedCardNumber || item.url;
+
+							return (
+								// Not pressable: a trashed item has no detail route, so the row's only
+								// actions are the two trailing buttons.
+								<ListRow
+									key={item.id}
+									leading={<Favicon item={item} title={title} />}
+									title={title}
+									subtitle={
+										<span className="flex min-w-0 items-center gap-1.5">
+											<VaultTile
+												name={item.vault.name}
+												icon={item.vault.icon}
+												imageUrl={item.vault.imageUrl}
+												size={16}
+												radius={5}
+											/>
+											<span className="truncate">
+												{secondary
+													? secondary
+													: m.vaults_trash_item_deleted_at({
+															date: formatDeletedDate(
+																item.deletedAt,
+																m.vaults_trash_item_deleted_recently(),
+															),
+														})}
+											</span>
 										</span>
-									</div>
-								</div>
-								<button
-									type="button"
-									onClick={() => void handleRestore(item)}
-									disabled={restoreItem.isPending}
-									aria-label={m.mob_trash_action_restore()}
-									className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
-								>
-									<IconArchiveRestore className="size-4.5" />
-								</button>
-								<button
-									type="button"
-									onClick={() => setItemToDelete(item)}
-									disabled={permanentDeleteItem.isPending}
-									aria-label={m.mob_trash_action_delete_forever()}
-									className="flex size-11 shrink-0 items-center justify-center rounded-md text-destructive active:bg-destructive/10"
-								>
-									<IconTrash className="size-4.5" />
-								</button>
-							</div>
-						);
-					})}
+									}
+									trailing={
+										<span className="flex items-center">
+											<BarButton
+												onClick={() => void handleRestore(item)}
+												disabled={restoreItem.isPending}
+												aria-label={m.mob_trash_action_restore()}
+											>
+												<IconArchiveRestore className={iconClass.row} />
+											</BarButton>
+											<BarButton
+												onClick={() => setItemToDelete(item)}
+												disabled={permanentDeleteItem.isPending}
+												aria-label={m.mob_trash_action_delete_forever()}
+												className="text-danger"
+											>
+												<IconTrash className={iconClass.row} />
+											</BarButton>
+										</span>
+									}
+								/>
+							);
+						})}
+					</ListCard>
 				</div>
 			)}
 
-			<ConfirmDialog
+			<ConfirmSheet
 				open={itemToDelete !== null}
 				onOpenChange={(open) => !open && setItemToDelete(null)}
 				title={m.mob_trash_alert_delete_title()}
@@ -178,9 +204,8 @@ function TrashScreen() {
 				cancelLabel={m.mob_trash_alert_cancel()}
 				confirmLabel={m.mob_trash_alert_delete_confirm()}
 				onConfirm={() => void handleConfirmPermanentDelete()}
-				busy={permanentDeleteItem.isPending}
-				destructive
+				isPending={permanentDeleteItem.isPending}
 			/>
-		</TabScreen>
+		</MobileScreen>
 	);
 }

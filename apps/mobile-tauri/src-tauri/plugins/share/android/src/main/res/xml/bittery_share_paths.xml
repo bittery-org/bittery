@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Exactly one directory is shareable: `cacheDir/bittery-share`, where `SharePlugin.shareFile`
+    writes the decrypted attachment just before handing out a URI for it.
+
+    Deliberately not `<cache-path path="." />` or a `<root-path>`: a FileProvider grants access
+    to anything under a declared path, and the app cache also holds the WebView's own store.
+    `path` must stay in step with `SharePlugin.SHARE_DIRECTORY`.
+-->
+<paths>
+	<cache-path
+		name="bittery-share"
+		path="bittery-share/" />
+</paths>

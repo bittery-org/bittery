@@ -38,5 +38,10 @@ subtle.workspace = true
 zeroize.workspace = true
 unicode-normalization.workspace = true
 
+# `std::time::SystemTime::now()` traps on wasm32-unknown-unknown, so `totp.rs`
+# reads the clock through `Date.now()` there. See `now_unix_seconds`.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys.workspace = true
+
 [dev-dependencies]
 tokio = { version = "1.0", features = ["rt", "macros"] }

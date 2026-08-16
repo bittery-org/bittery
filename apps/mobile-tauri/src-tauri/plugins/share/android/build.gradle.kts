@@ -27,5 +27,11 @@ android {
 }
 
 dependencies {
+	// `androidx.core.content.FileProvider`, which `shareFile` needs to hand a decrypted
+	// attachment out as a `content://` URI. Declared rather than inherited: `:tauri-android`
+	// exposes its own dependencies as `implementation`, so none of them are on this
+	// module's compile classpath.
+	implementation("androidx.core:core-ktx:1.13.1")
+
 	implementation(project(":tauri-android"))
 }

@@ -1,21 +1,27 @@
 import { useLogin } from "@bittery/core/hooks";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { toast } from "@bittery/ui";
 import {
-	Button,
-	Checkbox,
-	Input,
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-	Label,
-	toast,
-} from "@bittery/ui";
-import { IconEye, IconEyeOff, IconFingerprint } from "@bittery/ui/icons";
+	IconFingerprint,
+	IconKey,
+	IconLock,
+	IconMail,
+	IconTriangleAlert,
+} from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+	AuthField,
+	AuthFooterNote,
+	AuthToggle,
+	BrandLockup,
+	InlineNotice,
+	PasswordField,
+	submitForm,
+} from "@/components/auth-kit";
+import { BrandButton, Screen, ScreenScroll } from "@/components/ui";
 import {
 	resolveActiveAuthServerUrl,
 	setActiveAuthServerUrl,
@@ -85,13 +91,13 @@ export function LoginPage() {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
-	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
 	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
 		useState(false);
 	const [isPrefilled, setIsPrefilled] = useState(false);
 	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	// See `submitForm`: the gradient button is not a native submit control.
+	const formRef = useRef<HTMLFormElement>(null);
 
 	const { data: biometricAvailable } = useQuery({
 		queryKey: ["biometry-available"],
@@ -236,177 +242,112 @@ export function LoginPage() {
 	};
 
 	return (
-		<div className="flex min-h-dvh flex-col overflow-y-auto px-6 py-10">
-			<div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-8">
-				<div className="text-center">
-					<h1 className="font-semibold text-3xl tracking-tight">Bittery</h1>
-				</div>
+		<Screen aurora>
+			<ScreenScroll inset="plain">
+				{/* `min-h-full` + `justify-center` centres the form on a tall phone but lets it
+				    grow past the fold once the keyboard is up. */}
+				<div className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-7 px-4 py-8">
+					<BrandLockup
+						title={m.auth_signin_title_default()}
+						subtitle={m.auth_signin_description_default()}
+					/>
 
-				{isPrefilled && (
-					<div className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-950/20">
-						<p className="font-medium text-amber-900 text-sm dark:text-amber-200">
-							{m.auth_signin_session_expired_title()}
-						</p>
-						<p className="mt-0.5 text-amber-800/70 text-xs dark:text-amber-300/70">
-							{m.auth_signin_session_expired_desktop_description()}
-						</p>
-					</div>
-				)}
+					{isPrefilled && (
+						<InlineNotice
+							tone="warning"
+							icon={IconTriangleAlert}
+							title={m.auth_signin_session_expired_title()}
+							description={m.auth_signin_session_expired_desktop_description()}
+						/>
+					)}
 
-				<div>
-					<h2 className="font-semibold text-xl tracking-tight">
-						{m.auth_signin_title_default()}
-					</h2>
-					<p className="mt-1 text-muted-foreground text-sm">
-						{m.auth_signin_description_default()}
-					</p>
-				</div>
-
-				<form onSubmit={handleLogin} className="space-y-5">
-					<div className="grid gap-1.5">
-						<Label htmlFor="email">{m.auth_signin_label_email()}</Label>
-						<Input
+					<form
+						ref={formRef}
+						onSubmit={handleLogin}
+						className="flex flex-col gap-4"
+					>
+						<AuthField
 							id="email"
+							label={m.auth_signin_label_email()}
+							icon={IconMail}
 							type="email"
 							value={email}
 							onChange={(e) => setEmail(e.target.value)}
 							required
 							placeholder={m.auth_signin_placeholder_email()}
 							disabled={isPrefilled}
-							className="h-12 text-base"
 							inputMode="email"
 							autoComplete="username"
 							autoCapitalize="none"
 							autoCorrect="off"
 						/>
-					</div>
 
-					<div className="grid gap-1.5">
-						<Label htmlFor="secretKey">
-							{m.auth_signin_label_secret_key()}
-						</Label>
-						<InputGroup className="h-12">
-							<InputGroupInput
-								id="secretKey"
-								type={showSecretKey ? "text" : "password"}
-								value={secretKey}
-								onChange={(e) => setSecretKey(e.target.value)}
-								required
-								placeholder={m.auth_signin_placeholder_secret_key()}
-								className="font-mono text-base"
-								autoComplete="off"
-								autoCapitalize="characters"
-								autoCorrect="off"
+						<PasswordField
+							id="secretKey"
+							label={m.auth_signin_label_secret_key()}
+							icon={IconKey}
+							description={m.auth_signin_secret_key_help()}
+							value={secretKey}
+							onChange={(e) => setSecretKey(e.target.value)}
+							required
+							placeholder={m.auth_signin_placeholder_secret_key()}
+							// A 34-character key does not fit a phone field at 15px. Mono at 13px
+							// with tight tracking shows the whole format hint without wrapping.
+							inputClassName="font-mono text-sm tracking-tighter"
+							autoComplete="off"
+							autoCapitalize="characters"
+							autoCorrect="off"
+						/>
+
+						<PasswordField
+							id="password"
+							label={m.auth_signin_label_password()}
+							icon={IconLock}
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							required
+							placeholder={m.auth_signin_placeholder_password()}
+							autoComplete="current-password"
+							autoCapitalize="none"
+							autoCorrect="off"
+						/>
+
+						{biometricAvailable && (
+							<AuthToggle
+								icon={IconFingerprint}
+								label={m.auth_signin_biometric_enable()}
+								isSelected={enableBiometric}
+								onSelectedChange={setEnableBiometric}
 							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupButton
-									type="button"
-									size="icon-sm"
-									onClick={() => setShowSecretKey(!showSecretKey)}
-									aria-label={
-										showSecretKey
-											? m.vaults_detail_items_form_login_action_hide_password()
-											: m.vaults_detail_items_form_login_action_show_password()
-									}
-								>
-									{showSecretKey ? (
-										<IconEyeOff className="h-4 w-4" />
-									) : (
-										<IconEye className="h-4 w-4" />
-									)}
-								</InputGroupButton>
-							</InputGroupAddon>
-						</InputGroup>
-						<p className="text-muted-foreground text-xs">
-							{m.auth_signin_secret_key_help()}
-						</p>
-					</div>
+						)}
 
-					<div className="grid gap-1.5">
-						<Label htmlFor="password">{m.auth_signin_label_password()}</Label>
-						<InputGroup className="h-12">
-							<InputGroupInput
-								id="password"
-								type={showPassword ? "text" : "password"}
-								value={password}
-								onChange={(e) => setPassword(e.target.value)}
-								required
-								placeholder={m.auth_signin_placeholder_password()}
-								className="text-base"
-								autoComplete="current-password"
-								autoCapitalize="none"
-								autoCorrect="off"
+						{requiresInsecureTransportConfirmation ? (
+							<AuthToggle
+								tone="warning"
+								icon={IconTriangleAlert}
+								label={m.auth_insecure_http_confirmation_label()}
+								description={m.auth_insecure_http_confirmation_description()}
+								isSelected={insecureTransportConfirmed}
+								onSelectedChange={setInsecureTransportConfirmed}
 							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupButton
-									type="button"
-									size="icon-sm"
-									onClick={() => setShowPassword(!showPassword)}
-									aria-label={
-										showPassword
-											? m.vaults_detail_items_form_login_action_hide_password()
-											: m.vaults_detail_items_form_login_action_show_password()
-									}
-								>
-									{showPassword ? (
-										<IconEyeOff className="h-4 w-4" />
-									) : (
-										<IconEye className="h-4 w-4" />
-									)}
-								</InputGroupButton>
-							</InputGroupAddon>
-						</InputGroup>
-					</div>
+						) : null}
 
-					{biometricAvailable && (
-						<Label
-							htmlFor="biometric"
-							className="flex min-h-11 cursor-pointer items-center gap-2 font-normal"
-						>
-							<Checkbox
-								id="biometric"
-								checked={enableBiometric}
-								onCheckedChange={(checked) =>
-									setEnableBiometric(checked === true)
-								}
-							/>
-							<IconFingerprint className="h-4 w-4 text-muted-foreground" />
-							{m.auth_signin_biometric_enable()}
-						</Label>
-					)}
+						<BrandButton
+							size="lg"
+							className="mt-1"
+							onClick={() => submitForm(formRef.current)}
+							isLoading={loginMutation.isPending}
+							label={
+								loginMutation.isPending
+									? m.auth_signin_button_signing_in()
+									: m.auth_signin_button_sign_in()
+							}
+						/>
+					</form>
 
-					{requiresInsecureTransportConfirmation ? (
-						<Label
-							htmlFor="insecure-http-confirmation"
-							className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
-						>
-							<Checkbox
-								id="insecure-http-confirmation"
-								checked={insecureTransportConfirmed}
-								onCheckedChange={(checked) =>
-									setInsecureTransportConfirmed(checked === true)
-								}
-							/>
-							<span className="grid gap-0.5">
-								<span>{m.auth_insecure_http_confirmation_label()}</span>
-								<span className="text-muted-foreground text-xs">
-									{m.auth_insecure_http_confirmation_description()}
-								</span>
-							</span>
-						</Label>
-					) : null}
-
-					<Button
-						type="submit"
-						className="h-12 w-full text-base"
-						disabled={loginMutation.isPending}
-					>
-						{loginMutation.isPending
-							? m.auth_signin_button_signing_in()
-							: m.auth_signin_button_sign_in()}
-					</Button>
-				</form>
-			</div>
-		</div>
+					<AuthFooterNote label={m.mob_auth_encrypted_note()} />
+				</div>
+			</ScreenScroll>
+		</Screen>
 	);
 }

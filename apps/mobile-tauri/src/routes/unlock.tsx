@@ -1,25 +1,35 @@
 import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
 import { getBiometricUnlockAvailability } from "@bittery/core/services/auth-service";
 import { unlockAllWithBiometric } from "@bittery/core/services/unlock";
+import { toast } from "@bittery/ui";
 import {
-	AccountAvatarGroup as AvatarGroup,
-	Button,
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-	toast,
-} from "@bittery/ui";
-import {
-	IconEye,
-	IconEyeOff,
 	IconFingerprint,
 	IconKey,
-	IconLoaderCircle,
+	IconLock,
+	IconUser,
 } from "@bittery/ui/icons";
+import { cn } from "@bittery/ui/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	AuthDivider,
+	AuthTextAction,
+	BrandSplash,
+	InlineNotice,
+	PasswordField,
+	submitForm,
+	UnlockLockup,
+} from "@/components/auth-kit";
+import {
+	AccountAvatar,
+	BrandButton,
+	getAccountLabel,
+	iconClass,
+	Pressable,
+	Screen,
+	ScreenScroll,
+} from "@/components/ui";
 import { useMobileAccountRuntime } from "@/contexts/account-context";
 import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "@/lib/lifecycle";
@@ -51,8 +61,9 @@ export function UnlockPage() {
 	const queryClient = useQueryClient();
 	const { manager } = useMobileAccountRuntime();
 	const [password, setPassword] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
+	// See `submitForm`: the gradient button is not a native submit control.
+	const formRef = useRef<HTMLFormElement>(null);
 	const lastAutoTriggerId = useRef<string | undefined>(undefined);
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
@@ -248,11 +259,9 @@ export function UnlockPage() {
 	// Show loading state while accounts are being fetched
 	if (!isInitialized) {
 		return (
-			<div className="flex min-h-dvh items-center justify-center">
-				<div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
-					<IconLoaderCircle className="size-7 animate-spin text-primary" />
-				</div>
-			</div>
+			<Screen aurora>
+				<BrandSplash />
+			</Screen>
 		);
 	}
 
@@ -262,115 +271,141 @@ export function UnlockPage() {
 		return null;
 	}
 
+	const isSingleAccount = allAccounts.length === 1;
+	const singleAccount = allAccounts[0];
+	const accountFallback = m.mob_settings_account_fallback();
+
 	return (
-		<div className="flex min-h-dvh flex-col overflow-y-auto px-6 py-10">
-			<div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-2">
-				<div className="mb-5 flex justify-center">
-					<AvatarGroup accounts={allAccounts} maxVisible={3} size="lg" />
-				</div>
+		<Screen aurora>
+			<ScreenScroll inset="plain">
+				{/* `min-h-full` + `justify-center` centres the form on a tall phone but lets it
+				    grow past the fold once the keyboard is up. */}
+				<div className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-6 px-4 py-8">
+					<UnlockLockup
+						title={m.auth_signin_title_quick_unlock()}
+						subtitle={
+							isSingleAccount
+								? m.auth_unlock_description_single()
+								: m.auth_unlock_description_multiple({
+										count: allAccounts.length,
+									})
+						}
+					/>
 
-				<h1 className="text-center font-semibold text-lg tracking-tight">
-					{m.auth_signin_title_quick_unlock()}
-				</h1>
-				<p className="mb-6 text-center text-muted-foreground text-sm">
-					{allAccounts.length === 1
-						? m.auth_unlock_description_single()
-						: m.auth_unlock_description_multiple({
-								count: allAccounts.length,
-							})}
-				</p>
-
-				{requiresPasswordReentry && (
-					<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200/60 bg-amber-50/50 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
-						<IconKey className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-						<div>
-							<p className="font-medium text-amber-900 text-sm dark:text-amber-200">
-								{m.auth_unlock_password_required_title()}
+					{/* Whose vault this is. One password unlocks every account, so several accounts
+					    stack their avatars into the same card rather than each getting a row. */}
+					<div className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-3 shadow-surface">
+						{isSingleAccount ? (
+							<AccountAvatar account={singleAccount} />
+						) : (
+							<div className="flex shrink-0 items-center">
+								{allAccounts.slice(0, 3).map((account, index) => (
+									<AccountAvatar
+										key={account.accountId}
+										account={account}
+										size={40}
+										className={cn("ring-2 ring-surface", index > 0 && "-ml-4")}
+									/>
+								))}
+							</div>
+						)}
+						<div className="min-w-0 flex-1">
+							<p className="truncate font-medium text-base text-foreground">
+								{isSingleAccount && singleAccount
+									? getAccountLabel(singleAccount, accountFallback)
+									: m.mob_unlock_all_accounts()}
 							</p>
-							<p className="mt-0.5 text-amber-800/70 text-xs dark:text-amber-300/70">
-								{m.auth_unlock_password_required_description()}
+							<p className="truncate text-muted-foreground text-sm">
+								{isSingleAccount && singleAccount
+									? singleAccount.email
+									: m.mob_unlock_accounts_count({
+											count: String(allAccounts.length),
+										})}
 							</p>
 						</div>
 					</div>
-				)}
 
-				{/* Biometric is the primary path on a phone — large, first, and prominent.
-				    On desktop it is the secondary "or" option under the password field. */}
-				{canUseBiometric && (
-					<div className="mb-6 flex flex-col items-center gap-3">
-						<Button
-							type="button"
-							variant="outline"
-							className="h-20 w-20 rounded-full p-0"
-							onClick={handleBiometricUnlockAll}
-							disabled={loading}
-							aria-label={m.auth_unlock_action_biometric()}
-						>
-							<IconFingerprint className="size-9 text-primary dark:drop-shadow-[0_0_5px_color-mix(in_oklab,var(--color-primary)_45%,transparent)]" />
-						</Button>
-						<p className="font-medium text-sm">
-							{m.auth_unlock_action_biometric()}
-						</p>
-					</div>
-				)}
-
-				{canUseBiometric && (
-					<div className="my-2 flex items-center gap-2.5">
-						<span aria-hidden className="h-px flex-1 bg-border" />
-						<span className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
-							{m.auth_unlock_divider_or()}
-						</span>
-						<span aria-hidden className="h-px flex-1 bg-border" />
-					</div>
-				)}
-
-				<form onSubmit={handlePasswordUnlock} className="w-full">
-					<InputGroup className="h-12">
-						<InputGroupInput
-							id="password"
-							type={showPassword ? "text" : "password"}
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							required
-							placeholder={m.auth_signin_placeholder_password()}
-							autoFocus={!canUseBiometric}
-							disabled={loading}
-							className="text-base"
-							autoComplete="current-password"
-							autoCapitalize="none"
-							autoCorrect="off"
+					{requiresPasswordReentry && (
+						<InlineNotice
+							tone="warning"
+							icon={IconKey}
+							title={m.auth_unlock_password_required_title()}
+							description={m.auth_unlock_password_required_description()}
 						/>
-						<InputGroupAddon align="inline-end">
-							<InputGroupButton
-								type="button"
-								size="icon-sm"
-								onClick={() => setShowPassword(!showPassword)}
-								disabled={loading}
-								aria-label={
-									showPassword
-										? m.vaults_detail_items_form_login_action_hide_password()
-										: m.vaults_detail_items_form_login_action_show_password()
-								}
-							>
-								{showPassword ? (
-									<IconEyeOff className="h-4 w-4" strokeWidth={1} />
-								) : (
-									<IconEye className="h-4 w-4" strokeWidth={1} />
-								)}
-							</InputGroupButton>
-						</InputGroupAddon>
-					</InputGroup>
+					)}
 
-					<Button
-						type="submit"
-						className="mt-3 h-12 w-full text-base"
-						disabled={loading}
-					>
-						{loading && <IconLoaderCircle className="size-4 animate-spin" />}
-						{m.auth_unlock_action_unlock()}
-					</Button>
-				</form>
-			</div>
-		</div>
+					{/* The two ways in, on one rhythm. Biometric is the primary path on a phone —
+					    first, and the one purple thing on the screen. On desktop it is the
+					    secondary "or" option under the field. */}
+					<div className="flex flex-col gap-4">
+						{canUseBiometric && (
+							<>
+								<BrandButton
+									size="lg"
+									label={m.auth_unlock_action_biometric()}
+									leading={<IconFingerprint className={iconClass.bar} />}
+									onClick={handleBiometricUnlockAll}
+									disabled={loading}
+								/>
+								<AuthDivider label={m.auth_unlock_divider_or()} />
+							</>
+						)}
+
+						<form
+							ref={formRef}
+							onSubmit={handlePasswordUnlock}
+							className="flex flex-col gap-4"
+						>
+							<PasswordField
+								id="password"
+								label={m.auth_signin_label_password()}
+								icon={IconLock}
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+								required
+								placeholder={m.auth_signin_placeholder_password()}
+								autoFocus={!canUseBiometric}
+								disabled={loading}
+								autoComplete="current-password"
+								autoCapitalize="none"
+								autoCorrect="off"
+							/>
+
+							{/* One primary action per screen: when biometric owns the gradient, the
+							    password submit steps down to a neutral card button. */}
+							{canUseBiometric ? (
+								<Pressable
+									onClick={() => submitForm(formRef.current)}
+									disabled={loading}
+									scale
+									className="flex h-13 w-full items-center justify-center rounded-xl border border-border bg-surface font-semibold text-base text-foreground shadow-surface"
+								>
+									{m.auth_unlock_action_unlock()}
+								</Pressable>
+							) : (
+								<BrandButton
+									size="lg"
+									label={m.auth_unlock_action_unlock()}
+									onClick={() => submitForm(formRef.current)}
+									isLoading={loading}
+								/>
+							)}
+						</form>
+					</div>
+
+					{/*
+					 * The way out. Without it a locked device with a stored account can only ever
+					 * reach that account: `/login` is otherwise only reachable from the account
+					 * sheet, which lives behind the unlock this screen is asking for. Matches
+					 * `apps/mobile/app/(auth)/unlock.tsx`.
+					 */}
+					<AuthTextAction
+						icon={IconUser}
+						label={m.mob_unlock_different_account()}
+						onPress={() => navigate({ to: "/login" })}
+					/>
+				</div>
+			</ScreenScroll>
+		</Screen>
 	);
 }

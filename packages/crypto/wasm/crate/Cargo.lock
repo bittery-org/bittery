@@ -193,6 +193,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "js-sys",
  "num-bigint",
  "num-integer",
  "num-traits",

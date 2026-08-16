@@ -295,6 +295,18 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the share_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-share-file",
+          "markdownDescription": "Enables the share_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-share-file",
+          "markdownDescription": "Denies the share_file command without any pre-configured scope."
+        },
+        {
           "description": "Enables the share_text command without any pre-configured scope.",
           "type": "string",
           "const": "allow-share-text",
@@ -307,10 +319,10 @@
           "markdownDescription": "Denies the share_text command without any pre-configured scope."
         },
         {
-          "description": "Allows the bittery-share `share_text` command, which hands a string off to Android's\nACTION_SEND chooser.\n\n#### This default permission set includes:\n\n- `allow-share-text`",
+          "description": "Allows the bittery-share `share_text` and `share_file` commands, which hand a string or a\ndecrypted attachment off to Android's ACTION_SEND chooser.\n\n#### This default permission set includes:\n\n- `allow-share-text`\n- `allow-share-file`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows the bittery-share `share_text` command, which hands a string off to Android's\nACTION_SEND chooser.\n\n#### This default permission set includes:\n\n- `allow-share-text`"
+          "markdownDescription": "Allows the bittery-share `share_text` and `share_file` commands, which hand a string or a\ndecrypted attachment off to Android's ACTION_SEND chooser.\n\n#### This default permission set includes:\n\n- `allow-share-text`\n- `allow-share-file`"
         }
       ]
     }

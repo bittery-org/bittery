@@ -22,3 +22,32 @@ export interface ShareTextArgs {
 export function shareText({ text, title }: ShareTextArgs): Promise<void> {
 	return invoke("plugin:bittery-share|share_text", { text, title });
 }
+
+export interface ShareFileArgs {
+	/** Base64 of the decrypted bytes. Base64 and not a byte array because the IPC is JSON. */
+	base64Data: string;
+	fileName: string;
+	mimeType?: string;
+	title?: string;
+}
+
+/**
+ * The attachment-download path. Android has no "write this to the user's Downloads" API that
+ * does not need a storage permission or a `MediaStore` insert, so the plugin writes the
+ * plaintext to app-private cache and hands out a `content://` URI with a per-URI read grant —
+ * exactly what `expo-sharing`'s `shareAsync` did for `apps/mobile`. "Save to Files" and "Save
+ * to Drive" are entries in the chooser that opens.
+ */
+export function shareFile({
+	base64Data,
+	fileName,
+	mimeType,
+	title,
+}: ShareFileArgs): Promise<void> {
+	return invoke("plugin:bittery-share|share_file", {
+		base64Data,
+		fileName,
+		mimeType,
+		title,
+	});
+}

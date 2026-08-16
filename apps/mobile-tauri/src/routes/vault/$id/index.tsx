@@ -1,22 +1,43 @@
 /**
- * M1-C6 — item list for one vault. Pushed from `/vault`; each row navigates to
- * `/vault/$id/$itemId`. No virtualisation: the spike measured ~51ms to decrypt 2 000 items, so a
- * plain list is fine for M1.
+ * One vault's item list, pushed from Browse. Each row opens `/vault/$id/$itemId`.
  *
- * M3-C2 adds a "+" header action (`CreateItemSheet`, preselected to this vault) and a favorite
- * star on every row (`MobileItemRow`, `useFavoriteToggle`).
+ * No virtualisation: the spike measured ~51ms to decrypt 2 000 items, so a plain list is fine.
+ * Creating an item is the FAB, preselected to this vault; the app bar keeps the TOTP-QR scanner
+ * and carries the vault's own edit/delete actions behind an overflow sheet — this screen is the
+ * only place a single vault is the subject, so it is where those two verbs belong.
  */
 
 import {
 	useAllVaultKeys,
+	useDeleteVault,
 	useVaultInfo,
 	useVaultItems,
 } from "@bittery/core/hooks";
-import { CreateItemSheet, Skeleton } from "@bittery/ui";
-import { IconPlus, IconQrCode } from "@bittery/ui/icons";
+import { toast } from "@bittery/ui";
+import {
+	IconEllipsis,
+	IconKey,
+	IconPencil,
+	IconQrCode,
+	IconTrash,
+} from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { MobileScreen } from "@/components/mobile-screen";
+import {
+	BarButton,
+	ConfirmSheet,
+	EmptyState,
+	Fab,
+	iconClass,
+	ListCard,
+	MobileSheet,
+	SheetAction,
+} from "@/components/ui";
+import { CreateItemSheet } from "@/components/vault/create-item-sheet";
 import { MobileItemRow } from "@/components/vault/item-row";
+import { ItemsSkeleton } from "@/components/vault/items-skeleton";
+import { EditVaultSheet } from "@/components/vault/vault-form-sheet";
 import { useCreateItemFlow } from "@/hooks/use-create-item-flow";
 import { useFavoriteToggle } from "@/hooks/use-favorite-toggle";
 import { useI18n } from "@/providers/i18n-provider";
@@ -24,22 +45,6 @@ import { useI18n } from "@/providers/i18n-provider";
 export const Route = createFileRoute("/vault/$id/")({
 	component: VaultItemListScreen,
 });
-
-function ItemListSkeleton() {
-	return (
-		<div className="flex flex-col gap-px p-1.5">
-			{[0, 1, 2, 3].map((row) => (
-				<div key={row} className="flex items-center gap-2.5 px-2.5 py-2">
-					<Skeleton className="size-10 rounded-lg" />
-					<div className="flex-1 space-y-1.5">
-						<Skeleton className="h-3.5 w-40" />
-						<Skeleton className="h-3 w-24" />
-					</div>
-				</div>
-			))}
-		</div>
-	);
-}
 
 function VaultItemListScreen() {
 	const { m } = useI18n();
@@ -50,62 +55,165 @@ function VaultItemListScreen() {
 	const { vaultKeys } = useAllVaultKeys();
 	const createItemFlow = useCreateItemFlow(vaultKeys);
 	const { handleToggle } = useFavoriteToggle();
+	const deleteVault = useDeleteVault();
+
+	const [isActionsOpen, setIsActionsOpen] = useState(false);
+	const [isEditOpen, setIsEditOpen] = useState(false);
+	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
+	const isReadOnly = vaultInfo?.role === "read-only";
+
+	/**
+	 * Closes the overflow sheet, then runs the action once it has finished animating out.
+	 * Radix holds a scroll lock and `pointer-events: none` on the body for the length of the
+	 * exit transition, so opening the next sheet in the same tick leaves the app untappable.
+	 * Same reason and same 220ms as `ItemDetailScreen.runAction`.
+	 */
+	const runAction = (action: () => void) => {
+		setIsActionsOpen(false);
+		setTimeout(action, 220);
+	};
+
+	const handleDeleteVault = async () => {
+		if (!vaultInfo) return;
+		try {
+			await deleteVault.mutateAsync({
+				vaultId: vaultInfo.vaultId,
+				accountId: vaultInfo.accountId,
+			});
+			toast.success(m.mob_vault_toast_deleted());
+			setIsDeleteOpen(false);
+			// Back to Browse, not back in history: the screen behind this one may be the item
+			// detail of an item that no longer exists.
+			await navigate({ to: "/vault" });
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: m.mob_vault_toast_delete_failed(),
+			);
+		}
+	};
 
 	return (
 		<MobileScreen
 			title={vaultInfo?.vaultName ?? m.mob_vault_items_fallback_title()}
+			subtitle={
+				isLoading
+					? undefined
+					: items.length === 1
+						? m.mob_item_count_singular({ count: String(items.length) })
+						: m.mob_item_count_plural({ count: String(items.length) })
+			}
 			backLabel={m.mob_common_go_back()}
 			onBack={() => navigate({ to: "/vault" })}
 			headerEnd={
 				<>
-					{/* "Scan TOTP QR" has no existing i18n key — hard-coded English per the
-					    migration brief; see the chunk report for the full list. */}
-					<button
-						type="button"
+					<BarButton
 						onClick={() => void createItemFlow.scanTotpQr()}
-						aria-label="Scan TOTP QR code"
-						title="Scan TOTP QR code"
-						className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+						aria-label={m.mob_form_totp_scan_qr()}
 					>
-						<IconQrCode className="size-5" />
-					</button>
-					<button
-						type="button"
-						onClick={() => createItemFlow.setIsOpen(true)}
-						aria-label={m.mob_create_item_header()}
-						className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+						<IconQrCode className={iconClass.bar} />
+					</BarButton>
+					{/* Read-only members cannot rename or delete, so they get no overflow at all
+					    rather than a sheet of disabled rows. */}
+					{vaultInfo && !isReadOnly ? (
+						<BarButton
+							onClick={() => setIsActionsOpen(true)}
+							aria-label={m.mob_a11y_more_actions()}
+						>
+							<IconEllipsis className={iconClass.bar} />
+						</BarButton>
+					) : null}
+				</>
+			}
+			overlay={
+				<>
+					<Fab
+						onPress={() => createItemFlow.setIsOpen(true)}
+						ariaLabel={m.mob_create_item_header()}
+						aboveTabBar={false}
+					/>
+
+					<MobileSheet
+						open={isActionsOpen}
+						onOpenChange={setIsActionsOpen}
+						title={m.mob_vault_actions_sheet_title()}
+						hideTitle
 					>
-						<IconPlus className="size-5" />
-					</button>
+						<div className="flex flex-col gap-0.5 px-3 pt-1 pb-4">
+							<SheetAction
+								icon={IconPencil}
+								label={m.mob_vault_action_edit()}
+								onPress={() => runAction(() => setIsEditOpen(true))}
+							/>
+							<SheetAction
+								icon={IconTrash}
+								tone="danger"
+								label={m.mob_vault_action_delete()}
+								disabled={deleteVault.isPending}
+								onPress={() => runAction(() => setIsDeleteOpen(true))}
+							/>
+						</div>
+					</MobileSheet>
+
+					{/* Keyed on the vault so the form's initial state follows a vault switch —
+					    the sheet's fields are `useState` seeded from props, which React keeps
+					    across a re-render but not across a remount. */}
+					{vaultInfo ? (
+						<EditVaultSheet
+							key={vaultInfo.vaultId}
+							open={isEditOpen}
+							onOpenChange={setIsEditOpen}
+							vault={vaultInfo}
+						/>
+					) : null}
+
+					<ConfirmSheet
+						open={isDeleteOpen}
+						onOpenChange={setIsDeleteOpen}
+						title={m.mob_vault_delete_confirm_title({
+							name: vaultInfo?.vaultName ?? "",
+						})}
+						description={m.mob_vault_delete_confirm_description()}
+						confirmLabel={m.mob_vault_delete_confirm_confirm()}
+						cancelLabel={m.mob_settings_cancel()}
+						onConfirm={() => void handleDeleteVault()}
+						isPending={deleteVault.isPending}
+					/>
 				</>
 			}
 		>
 			{isLoading ? (
-				<ItemListSkeleton />
+				<ItemsSkeleton />
 			) : items.length === 0 ? (
-				<div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-					<h2 className="font-semibold text-lg">
-						{m.mob_vault_items_empty_no_items()}
-					</h2>
-					<p className="text-muted-foreground text-sm">
-						{m.mob_vault_items_empty_description()}
-					</p>
-				</div>
+				<EmptyState
+					className="min-h-full"
+					icon={IconKey}
+					title={m.mob_vault_items_empty_no_items()}
+					description={m.mob_vault_items_empty_description()}
+					action={{
+						label: m.mob_vault_items_empty_add_item(),
+						onPress: () => createItemFlow.setIsOpen(true),
+					}}
+				/>
 			) : (
-				<div className="flex flex-col gap-px p-1.5">
-					{items.map((item) => (
-						<MobileItemRow
-							key={item.id}
-							item={item}
-							onSelect={() =>
-								navigate({
-									to: "/vault/$id/$itemId",
-									params: { id, itemId: item.id },
-								})
-							}
-							onToggleFavorite={() => handleToggle(item)}
-						/>
-					))}
+				<div className="px-4 pt-4">
+					<ListCard>
+						{items.map((item) => (
+							<MobileItemRow
+								key={item.id}
+								item={item}
+								onSelect={() =>
+									navigate({
+										to: "/vault/$id/$itemId",
+										params: { id, itemId: item.id },
+									})
+								}
+								onToggleFavorite={() => handleToggle(item)}
+							/>
+						))}
+					</ListCard>
 				</div>
 			)}
 
@@ -114,7 +222,7 @@ function VaultItemListScreen() {
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
 				selectedVaultId={id}
-				side="bottom"
+				initialCategory={createItemFlow.initialCategory}
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 		</MobileScreen>

@@ -7,10 +7,11 @@
 		"check-types": "tsc --noEmit && pnpm run lint:promises",
 		"lint:promises": "biome lint --only=nursery/noMisusedPromises src",
 		"dev:vite": "vite",
-		"dev": "tauri dev",
+		"dev": "node scripts/android-dev.mjs",
+		"dev:desktop": "tauri dev",
 		"build": "tsc && vite build",
 		"tauri": "tauri",
-		"android:dev": "tauri android dev",
+		"android:dev": "pnpm run dev",
 		"android:build": "tauri android build --debug --target aarch64 --apk",
 		"ios:dev": "tauri ios dev"
 	},

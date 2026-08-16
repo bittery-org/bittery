@@ -237,6 +237,18 @@ QR scan (`tauri-plugin-barcode-scanner`), share, file picking, deep links, notif
 Clipboard is done. `opener`/`dialog`/`fs` are partial on mobile — verify each rather than
 trusting the support table.
 
+**Two attachment paths are wired but not yet proven on a device.** The parity work added
+them and both should be exercised the next time the app runs on real hardware:
+
+- **Attach** — `src/lib/file-picker.ts` calls `dialog.open()` then `fs.readFile()`. `/debug`
+  proved `dialog.open` + `fs.readTextFile` on a picked SAF URI; `readFile` is the binary
+  sibling on the same permission (`fs:allow-read-file`) and has not been run.
+- **Download** — `plugins/share`'s new `share_file` command writes the decrypted bytes to
+  `cacheDir/bittery-share` and hands them out through a `FileProvider` `content://` URI.
+  That provider, its `res/xml/bittery_share_paths.xml` and the `androidx.core` dependency
+  are all new. If `getUriForFile` throws, the authority in `SharePlugin.kt` and the one in
+  the plugin's `AndroidManifest.xml` have drifted apart — they are duplicated by necessity.
+
 ### 8. Self-hosting server picker has no mobile UI
 
 `src/lib/auth-server.ts` was ported whole so the logic is intact, but the login screen exposes no

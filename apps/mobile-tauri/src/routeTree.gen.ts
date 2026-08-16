@@ -16,6 +16,7 @@ import { Route as UnlockRouteImport } from './routes/unlock'
 import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
 import { Route as VaultSearchRouteImport } from './routes/vault/search'
+import { Route as VaultSettingsRouteImport } from './routes/vault/settings'
 import { Route as VaultTagsRouteImport } from './routes/vault/tags'
 import { Route as VaultTrashRouteImport } from './routes/vault/trash'
 import { Route as VaultIdIndexRouteImport } from './routes/vault/$id/index'
@@ -60,6 +61,11 @@ const VaultIndexRoute = VaultIndexRouteImport.update({
 const VaultSearchRoute = VaultSearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultSettingsRoute = VaultSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => VaultRouteRoute,
 } as any)
 const VaultTagsRoute = VaultTagsRouteImport.update({
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/search': typeof VaultSearchRoute
+  '/vault/settings': typeof VaultSettingsRoute
   '/vault/tags': typeof VaultTagsRoute
   '/vault/trash': typeof VaultTrashRoute
   '/vault/': typeof VaultIndexRoute
@@ -141,6 +148,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/search': typeof VaultSearchRoute
+  '/vault/settings': typeof VaultSettingsRoute
   '/vault/tags': typeof VaultTagsRoute
   '/vault/trash': typeof VaultTrashRoute
   '/vault': typeof VaultIndexRoute
@@ -161,6 +169,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/search': typeof VaultSearchRoute
+  '/vault/settings': typeof VaultSettingsRoute
   '/vault/tags': typeof VaultTagsRoute
   '/vault/trash': typeof VaultTrashRoute
   '/vault/': typeof VaultIndexRoute
@@ -182,6 +191,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/unlock'
     | '/vault/search'
+    | '/vault/settings'
     | '/vault/tags'
     | '/vault/trash'
     | '/vault/'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/unlock'
     | '/vault/search'
+    | '/vault/settings'
     | '/vault/tags'
     | '/vault/trash'
     | '/vault'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/unlock'
     | '/vault/search'
+    | '/vault/settings'
     | '/vault/tags'
     | '/vault/trash'
     | '/vault/'
@@ -289,6 +301,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/vault/search'
       preLoaderRoute: typeof VaultSearchRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/settings': {
+      id: '/vault/settings'
+      path: '/settings'
+      fullPath: '/vault/settings'
+      preLoaderRoute: typeof VaultSettingsRouteImport
       parentRoute: typeof VaultRouteRoute
     }
     '/vault/tags': {
@@ -366,6 +385,7 @@ declare module '@tanstack/react-router' {
 
 interface VaultRouteRouteChildren {
   VaultSearchRoute: typeof VaultSearchRoute
+  VaultSettingsRoute: typeof VaultSettingsRoute
   VaultTagsRoute: typeof VaultTagsRoute
   VaultTrashRoute: typeof VaultTrashRoute
   VaultIndexRoute: typeof VaultIndexRoute
@@ -381,6 +401,7 @@ interface VaultRouteRouteChildren {
 
 const VaultRouteRouteChildren: VaultRouteRouteChildren = {
   VaultSearchRoute: VaultSearchRoute,
+  VaultSettingsRoute: VaultSettingsRoute,
   VaultTagsRoute: VaultTagsRoute,
   VaultTrashRoute: VaultTrashRoute,
   VaultIndexRoute: VaultIndexRoute,

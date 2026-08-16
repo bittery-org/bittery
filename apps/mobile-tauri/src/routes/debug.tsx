@@ -13,19 +13,29 @@
  * also from the button, and logs the full JSON result to the console — Tauri's Android WebView
  * forwards `console.log`/`console.error` to logcat under the **`Tauri/Console`** tag, not
  * `chromium`. Grep for the wrong one and the run looks silent.
+ *
+ * The copy here stays untranslated English on purpose: it names step identifiers a developer
+ * greps for in logcat, and this route never ships.
  */
 
 import {
 	createTauriMobilePlatformPort,
 	createTauriMobileRecordPort,
 } from "@bittery/storage/adapters/tauri-mobile";
-import { Button } from "@bittery/ui";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { checkPermissions as checkCameraPermissions } from "@tauri-apps/plugin-barcode-scanner";
 import { getCurrent as getCurrentDeepLink } from "@tauri-apps/plugin-deep-link";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useState } from "react";
+import { MobileScreen } from "@/components/mobile-screen";
+import {
+	BrandButton,
+	ListCard,
+	Pressable,
+	SectionLabel,
+} from "@/components/ui";
+import { useI18n } from "@/providers/i18n-provider";
 import { scanTotpSetupToClipboard } from "../lib/barcode-scanner";
 import {
 	credentialProvider,
@@ -341,27 +351,66 @@ function PeripheralsPanel() {
 	};
 
 	return (
-		<div className="flex flex-col gap-2">
-			<h2 className="font-semibold text-lg">Peripherals (interactive)</h2>
-			<p className="text-muted-foreground text-sm">
-				These raise real UI (camera, share chooser, file picker) and cannot run
-				unattended — tap each and read the log below.
-			</p>
-			<div className="flex flex-wrap gap-2">
-				<Button onClick={() => void runScan()}>Scan QR</Button>
-				<Button onClick={() => void runShare()}>Share text</Button>
-				<Button onClick={() => void runFilePick()}>
-					Pick file (dialog+fs)
-				</Button>
-			</div>
-			<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
-				{log.length === 0 ? "no interactive test run yet" : log.join("\n")}
-			</pre>
+		<div>
+			<SectionLabel>Peripherals (interactive)</SectionLabel>
+			<ListCard className="p-4">
+				<p className="text-muted-foreground text-sm">
+					These raise real UI (camera, share chooser, file picker) and cannot
+					run unattended — tap each and read the log below.
+				</p>
+				<div className="mt-3 flex flex-wrap gap-2">
+					<DebugButton label="Scan QR" onPress={() => void runScan()} />
+					<DebugButton label="Share text" onPress={() => void runShare()} />
+					<DebugButton
+						label="Pick file (dialog+fs)"
+						onPress={() => void runFilePick()}
+					/>
+				</div>
+				<LogPane
+					className="mt-3 max-h-40"
+					text={
+						log.length === 0 ? "no interactive test run yet" : log.join("\n")
+					}
+				/>
+			</ListCard>
 		</div>
 	);
 }
 
+/** Neutral secondary button. The one purple button on this screen is "run the self-test". */
+function DebugButton({
+	label,
+	onPress,
+	disabled,
+}: {
+	label: string;
+	onPress: () => void;
+	disabled?: boolean;
+}) {
+	return (
+		<Pressable
+			onClick={onPress}
+			disabled={disabled}
+			className="flex h-11 items-center justify-center rounded-xl bg-surface-tertiary px-4 font-medium text-base text-foreground"
+		>
+			{label}
+		</Pressable>
+	);
+}
+
+function LogPane({ text, className }: { text: string; className?: string }) {
+	return (
+		<pre
+			className={`native-scroll selectable whitespace-pre-wrap break-words rounded-xl bg-field p-3 font-mono text-muted-foreground text-xs leading-relaxed ${className ?? ""}`}
+		>
+			{text}
+		</pre>
+	);
+}
+
 function DebugComponent() {
+	const { m } = useI18n();
+	const navigate = useNavigate();
 	const [report, setReport] = useState<SelfTestReport | null>(null);
 	const [running, setRunning] = useState(false);
 	const [fatal, setFatal] = useState<string | null>(null);
@@ -397,24 +446,35 @@ function DebugComponent() {
 	}, []);
 
 	return (
-		<div className="flex min-h-dvh flex-col gap-4 p-4">
-			<h1 className="font-semibold text-2xl">Storage self-test</h1>
-			<p className="text-muted-foreground text-sm">
-				Migration scaffold for M1-C4a — delete before release.
-			</p>
-			<Button onClick={() => void execute()} disabled={running}>
-				{running ? "Running…" : "Run storage self-test"}
-			</Button>
-			<pre className="max-h-[70dvh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
-				{fatal
-					? `FATAL\n${fatal}`
-					: report
-						? JSON.stringify(report, null, 2)
-						: running
-							? "running…"
-							: "idle"}
-			</pre>
-			<PeripheralsPanel />
-		</div>
+		<MobileScreen
+			title="Storage self-test"
+			subtitle="Migration scaffold for M1-C4a — delete before release."
+			backLabel={m.mob_common_go_back()}
+			onBack={() => navigate({ to: "/vault" })}
+		>
+			<div className="flex flex-col gap-6 px-4 py-4">
+				<BrandButton
+					label={running ? "Running…" : "Run storage self-test"}
+					onClick={() => void execute()}
+					disabled={running}
+					isLoading={running}
+				/>
+
+				<LogPane
+					className="max-h-[55dvh]"
+					text={
+						fatal
+							? `FATAL\n${fatal}`
+							: report
+								? JSON.stringify(report, null, 2)
+								: running
+									? "running…"
+									: "idle"
+					}
+				/>
+
+				<PeripheralsPanel />
+			</div>
+		</MobileScreen>
 	);
 }

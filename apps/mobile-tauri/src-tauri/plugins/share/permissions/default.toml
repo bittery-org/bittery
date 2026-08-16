@@ -2,7 +2,7 @@
 
 [default]
 description = """
-Allows the bittery-share `share_text` command, which hands a string off to Android's
-ACTION_SEND chooser.
+Allows the bittery-share `share_text` and `share_file` commands, which hand a string or a
+decrypted attachment off to Android's ACTION_SEND chooser.
 """
-permissions = ["allow-share-text"]
+permissions = ["allow-share-text", "allow-share-file"]

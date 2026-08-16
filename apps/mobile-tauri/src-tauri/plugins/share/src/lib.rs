@@ -50,7 +50,10 @@ impl<R: Runtime, T: Manager<R>> BitteryShareExt<R> for T {
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("bittery-share")
-        .invoke_handler(tauri::generate_handler![commands::share_text])
+        .invoke_handler(tauri::generate_handler![
+            commands::share_text,
+            commands::share_file
+        ])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
             let share = mobile::init(app, api)?;

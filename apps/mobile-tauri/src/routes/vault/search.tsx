@@ -1,21 +1,31 @@
 /**
- * M3-C2 — "Search" tab (D12). A full-screen search rather than desktop's `SearchCombobox`
- * popover (`apps/desktop/src/components/vault/search-combobox.tsx`) — that component is
- * app-level (assembles `Command`/`CommandInput` as an anchored dropdown sized for a desktop
- * header, and calls desktop's own `useNavigate`), so this is a small mobile-only screen built on
- * the same data hook, `useVaultSearch`, rather than a forced import. Custom header (a search
- * input, not a static title) instead of `TabScreen`'s generic one, same bounded-scroll-plus-tab-
- * bar shape.
+ * Search — a pushed screen reached from the Items app bar, not a tab (DESIGN-NATIVE.md §
+ * Information architecture). Desktop's `SearchCombobox` is an anchored dropdown sized for a
+ * desktop header, so this is a small mobile-only screen over the same data hook, `useVaultSearch`.
+ *
+ * It composes `Screen` / `ScreenScroll` by hand rather than using `MobileScreen`, because the one
+ * thing this screen needs is a focused field *where the title would be* — which is exactly what
+ * `AppBar` does not do. Everything else (chrome, blur, insets) still comes from the kit.
  */
 
 import { useVaultSearch } from "@bittery/core/hooks";
 import { getDomainFromUrl } from "@bittery/shared/favicon";
-import { getTagColorFromName, VaultAvatar } from "@bittery/ui";
-import { IconSearch, IconTag, IconX } from "@bittery/ui/icons";
+import { IconArrowLeft, IconSearch, IconX } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { BottomTabBar } from "@/components/vault/bottom-tab-bar";
+import {
+	BarButton,
+	EmptyState,
+	iconClass,
+	ListCard,
+	ListRow,
+	Screen,
+	ScreenScroll,
+	SectionLabel,
+} from "@/components/ui";
 import { Favicon } from "@/components/vault/favicon";
+import { TagListCard } from "@/components/vault/tag-list";
+import { VaultTile } from "@/components/vault/vault-tile";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/search")({
@@ -27,6 +37,7 @@ function SearchScreen() {
 	const navigate = useNavigate();
 	const [query, setQuery] = useState("");
 	const results = useVaultSearch(query);
+
 	const hasQuery = query.trim().length > 0;
 	const hasResults =
 		results.items.length > 0 ||
@@ -34,177 +45,140 @@ function SearchScreen() {
 		results.tags.length > 0;
 
 	return (
-		<div
-			className="flex w-full flex-col overflow-hidden"
-			style={{
-				height: "calc(100dvh - var(--safe-top) - var(--safe-bottom))",
-			}}
-		>
-			<header className="sticky top-0 z-10 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background px-3">
-				<IconSearch className="size-4 shrink-0 text-muted-foreground" />
-				{/* No `autoFocus`: biome's `noAutofocus` flags it, and on Android it would pop the
-				    keyboard immediately under every tab switch to this screen, covering half the
-				    result list before the user has typed anything. A tap-to-focus field costs one
-				    tap and does not fight the keyboard for layout space. */}
-				<input
-					value={query}
-					onChange={(event) => setQuery(event.target.value)}
-					placeholder={m.mob_search_placeholder()}
-					className="h-11 w-full min-w-0 bg-transparent text-base outline-none placeholder:text-muted-foreground"
-				/>
-				{query ? (
-					<button
-						type="button"
-						onClick={() => setQuery("")}
-						aria-label={m.mob_search_clear()}
-						className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-foreground/5"
-					>
-						<IconX className="size-4" />
-					</button>
-				) : null}
+		<Screen>
+			<header
+				className="relative z-20 flex shrink-0 items-center gap-1 border-border/80 border-b bg-background/80 px-2 py-2 supports-[backdrop-filter]:backdrop-blur-xl"
+				style={{ minHeight: "var(--app-bar-height)" }}
+			>
+				<BarButton
+					onClick={() => navigate({ to: "/vault/all-items" })}
+					aria-label={m.mob_common_go_back()}
+					className="-ml-1"
+				>
+					<IconArrowLeft className={iconClass.bar} />
+				</BarButton>
+
+				<div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-surface px-3">
+					<IconSearch className="size-4 shrink-0 text-muted-foreground" />
+					{/* No `autoFocus`: biome's `noAutofocus` flags it, and on Android it would pop the
+					    keyboard before the user has seen the screen, covering half the result list. */}
+					<input
+						value={query}
+						onChange={(event) => setQuery(event.target.value)}
+						placeholder={m.mob_search_placeholder()}
+						className="h-full w-full min-w-0 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+					/>
+					{query ? (
+						<BarButton
+							onClick={() => setQuery("")}
+							aria-label={m.mob_search_clear()}
+							className="-mr-2 size-8 text-muted-foreground"
+						>
+							<IconX className={iconClass.chip} />
+						</BarButton>
+					) : null}
+				</div>
 			</header>
 
-			<div
-				className="flex-1 overflow-y-auto"
-				style={{ overscrollBehavior: "contain" }}
-			>
+			<ScreenScroll inset="plain">
 				{!hasQuery ? (
-					<div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-						<h2 className="font-semibold text-lg">
-							{m.mob_search_empty_title()}
-						</h2>
-						<p className="text-muted-foreground text-sm">
-							{m.mob_search_empty_description()}
-						</p>
-					</div>
+					<EmptyState
+						className="min-h-full"
+						icon={IconSearch}
+						title={m.mob_search_empty_title()}
+						description={m.mob_search_empty_description()}
+					/>
 				) : !hasResults ? (
-					<div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-						<h2 className="font-semibold text-lg">
-							{m.mob_search_no_results()}
-						</h2>
-						<p className="text-muted-foreground text-sm">
-							{m.mob_search_no_results_description()}
-						</p>
-					</div>
+					<EmptyState
+						className="min-h-full"
+						icon={IconSearch}
+						title={m.mob_search_no_results()}
+						description={m.mob_search_no_results_description()}
+					/>
 				) : (
-					<div className="flex flex-col gap-4 p-3">
-						{results.items.length > 0 && (
+					<div className="flex flex-col gap-6 px-4 pt-4">
+						{results.items.length > 0 ? (
 							<section>
-								<h3 className="mb-1 px-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
-									{m.vaults_detail_tab_items()}
-								</h3>
-								<div className="flex flex-col gap-1">
+								<SectionLabel>{m.vaults_detail_tab_items()}</SectionLabel>
+								<ListCard>
 									{results.items.map((item) => {
 										const domain = item.url
 											? getDomainFromUrl(item.url)
 											: undefined;
+										const subtitle = [item.username, domain]
+											.filter(Boolean)
+											.join(" · ");
+
 										return (
-											<button
+											<ListRow
 												key={item.id}
-												type="button"
-												onClick={() =>
+												leading={
+													<Favicon
+														item={{ url: item.url, category: item.category }}
+														title={item.title}
+														cardBrand={item.cardBrand}
+													/>
+												}
+												title={item.title}
+												subtitle={subtitle || undefined}
+												onPress={() =>
 													navigate({
 														to: "/vault/all-items/$itemId",
 														params: { itemId: item.id },
 													})
 												}
-												className="flex min-h-14 w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-foreground/5"
-											>
-												<Favicon
-													item={{ url: item.url, category: item.category }}
-													title={item.title}
-													cardBrand={item.cardBrand}
-													size="sm"
-												/>
-												<div className="min-w-0 flex-1">
-													<p className="truncate font-medium text-sm">
-														{item.title}
-													</p>
-													{(item.username || domain) && (
-														<p className="truncate text-muted-foreground text-xs">
-															{[item.username, domain]
-																.filter(Boolean)
-																.join(" · ")}
-														</p>
-													)}
-												</div>
-											</button>
+											/>
 										);
 									})}
-								</div>
+								</ListCard>
 							</section>
-						)}
+						) : null}
 
-						{results.vaults.length > 0 && (
+						{results.vaults.length > 0 ? (
 							<section>
-								<h3 className="mb-1 px-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
-									{m.nav_item_vaults()}
-								</h3>
-								<div className="flex flex-col gap-1">
+								<SectionLabel>{m.nav_item_vaults()}</SectionLabel>
+								<ListCard>
 									{results.vaults.map((vault) => (
-										<button
+										<ListRow
 											key={vault.id}
-											type="button"
-											onClick={() =>
+											leading={
+												<VaultTile
+													name={vault.name}
+													icon={vault.icon}
+													imageUrl={vault.imageUrl}
+													type={vault.type}
+												/>
+											}
+											title={vault.name}
+											showChevron
+											onPress={() =>
 												navigate({ to: "/vault/$id", params: { id: vault.id } })
 											}
-											className="flex min-h-14 w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-foreground/5"
-										>
-											<VaultAvatar
-												name={vault.name}
-												icon={vault.icon}
-												imageUrl={vault.imageUrl}
-												size="sm"
-											/>
-											<span className="min-w-0 flex-1 truncate font-medium text-sm">
-												{vault.name}
-											</span>
-										</button>
+										/>
 									))}
-								</div>
+								</ListCard>
 							</section>
-						)}
+						) : null}
 
-						{results.tags.length > 0 && (
+						{results.tags.length > 0 ? (
 							<section>
-								<h3 className="mb-1 px-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+								<SectionLabel>
 									{m.vaults_detail_items_detail_tags_label()}
-								</h3>
-								<div className="flex flex-col gap-1">
-									{results.tags.map((tag) => {
-										const color = getTagColorFromName(tag);
-										return (
-											<button
-												key={tag}
-												type="button"
-												onClick={() =>
-													navigate({
-														to: "/vault/tag/$tagName",
-														params: { tagName: encodeURIComponent(tag) },
-													})
-												}
-												className="flex min-h-14 w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-foreground/5"
-											>
-												<span
-													className="flex size-9 shrink-0 items-center justify-center rounded-md"
-													style={{ backgroundColor: `${color}20`, color }}
-												>
-													<IconTag className="size-4" />
-												</span>
-												<span className="min-w-0 flex-1 truncate font-medium text-sm">
-													{tag}
-												</span>
-											</button>
-										);
-									})}
-								</div>
+								</SectionLabel>
+								<TagListCard
+									tags={results.tags.map((name) => ({ name }))}
+									onSelect={(name) =>
+										navigate({
+											to: "/vault/tag/$tagName",
+											params: { tagName: encodeURIComponent(name) },
+										})
+									}
+								/>
 							</section>
-						)}
+						) : null}
 					</div>
 				)}
-			</div>
-
-			<BottomTabBar active="search" />
-		</div>
+			</ScreenScroll>
+		</Screen>
 	);
 }

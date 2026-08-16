@@ -220,6 +220,7 @@ dependencies = [
  "hex",
  "hkdf 0.13.0",
  "hmac 0.13.0",
+ "js-sys",
  "num-bigint 0.5.1",
  "num-integer",
  "num-traits",

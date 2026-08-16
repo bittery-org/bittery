@@ -28,6 +28,10 @@ function createMobileRouter(apiClient: ApiClient, runtime: ClientRuntime) {
 		routeTree,
 		scrollRestoration: true,
 		defaultPreloadStaleTime: 0,
+		// Every navigation animates through `document.startViewTransition` — see the
+		// `::view-transition-*` rules in styles.css. A WebView without the API cuts instead,
+		// which is a correct fallback, so this is safe to leave on unconditionally.
+		defaultViewTransition: true,
 		context: { apiClient, queryClient, runtime },
 	});
 }

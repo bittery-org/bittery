@@ -1,168 +1,227 @@
 /**
- * M1-C6 — vault list, and the "Vaults" tab of the M3-C2 bottom tab bar (D12, see
- * `docs/mobile-migration-decisions.md`). The landing screen after unlock: the active account's
- * email plus a reachable Lock button (the M1 "lock" acceptance criterion), a "+" that opens
- * `CreateItemSheet`, then every vault the account has, each showing its item count. Tapping a
- * vault pushes `/vault/$id`.
+ * Browse — the second of the three tabs (DESIGN-NATIVE.md § Information architecture). A
+ * segmented control over two ways into the same items: by vault, or by tag. Ported from
+ * `apps/mobile/app/(tabs)/vaults.tsx`.
+ *
+ * This screen used to be the app's landing screen and carried the account email, a loose Lock
+ * button and a "+". Lock and the account now live in the account sheet, which `TabScreen` renders,
+ * and creating an item is the FAB.
+ *
+ * than in `src/components/vault/` only because this redesign's file scope did not include a new
+ * component module. Move it there when convenient.
  */
 
 import { useAllVaultKeys, useItemCounts, useItems } from "@bittery/core/hooks";
-import { Button, CreateItemSheet, Skeleton, VaultAvatar } from "@bittery/ui";
-import {
-	IconChevronRight,
-	IconLock,
-	IconPlus,
-	IconQrCode,
-} from "@bittery/ui/icons";
+import { IconPlus, IconQrCode, IconTag, IconVault } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { BottomTabBar } from "@/components/vault/bottom-tab-bar";
-import { useAccount } from "@/contexts/account-context";
+import { useMemo, useState } from "react";
+import {
+	BarButton,
+	EmptyState,
+	Fab,
+	iconClass,
+	ListCard,
+	ListRow,
+	SectionLabel,
+	Segmented,
+} from "@/components/ui";
+import { CreateItemSheet } from "@/components/vault/create-item-sheet";
+import { ItemsSkeleton } from "@/components/vault/items-skeleton";
+import { TabScreen } from "@/components/vault/tab-screen";
+import { TagListCard, type TagRow } from "@/components/vault/tag-list";
+import { CreateVaultSheet } from "@/components/vault/vault-form-sheet";
+import { VaultTile } from "@/components/vault/vault-tile";
 import { useCreateItemFlow } from "@/hooks/use-create-item-flow";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/")({
-	component: VaultListScreen,
+	component: BrowseScreen,
 });
 
-function VaultListSkeleton() {
-	return (
-		<div className="flex flex-col gap-1 p-2">
-			{[0, 1, 2].map((row) => (
-				<div key={row} className="flex min-h-14 items-center gap-3 px-3 py-2">
-					<Skeleton className="size-10 rounded-lg" />
-					<div className="flex-1 space-y-1.5">
-						<Skeleton className="h-3.5 w-32" />
-						<Skeleton className="h-3 w-16" />
-					</div>
-				</div>
-			))}
-		</div>
-	);
-}
+type BrowseSegment = "vaults" | "tags";
 
-function VaultListScreen() {
+function BrowseScreen() {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const { activeAccount, lockAllAccounts } = useAccount();
+	const [segment, setSegment] = useState<BrowseSegment>("vaults");
+	const [isCreateVaultOpen, setIsCreateVaultOpen] = useState(false);
+
 	const { vaultKeys, isLoading: isLoadingVaults } = useAllVaultKeys();
-	// One item subscription feeds every vault's count — same shape as desktop's sidebar
-	// (apps/desktop/src/routes/vault/route.tsx).
+	// One item subscription feeds every vault's count and the tag list — the same shape as
+	// desktop's sidebar (apps/desktop/src/routes/vault/route.tsx).
 	const { items, isLoading: isLoadingItems } = useItems();
 	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
 	const createItemFlow = useCreateItemFlow(vaultKeys);
 
-	const handleLock = async () => {
-		await lockAllAccounts();
-		navigate({ to: "/unlock" });
-	};
+	const vaultGroups = [
+		["personal", vaultKeys.filter((vault) => vault.vaultType === "personal")],
+		["team", vaultKeys.filter((vault) => vault.vaultType === "team")],
+	] as const;
+
+	const tagRows = useMemo<TagRow[]>(() => {
+		const counts = new Map<string, number>();
+		for (const item of items) {
+			for (const tag of item.tags ?? []) {
+				counts.set(tag, (counts.get(tag) ?? 0) + 1);
+			}
+		}
+		return Array.from(counts.entries())
+			.map(([name, count]) => ({ name, count }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	}, [items]);
 
 	return (
-		<div
-			className="flex w-full flex-col overflow-hidden"
-			style={{
-				height: "calc(100dvh - var(--safe-top) - var(--safe-bottom))",
-			}}
+		<TabScreen
+			title={m.mob_browse_title()}
+			activeTab="browse"
+			aurora
+			actions={
+				<>
+					{/* Vault creation lives in the bar, not the FAB: the FAB is "new item" on
+					    every tab, and a FAB that means two different things depending on a
+					    segmented control is the kind of thing you have to read twice. */}
+					{segment === "vaults" ? (
+						<BarButton
+							onClick={() => setIsCreateVaultOpen(true)}
+							aria-label={m.mob_vault_action_new()}
+						>
+							<IconPlus className={iconClass.bar} />
+						</BarButton>
+					) : null}
+					<BarButton
+						onClick={() => void createItemFlow.scanTotpQr()}
+						aria-label={m.mob_form_totp_scan_qr()}
+					>
+						<IconQrCode className={iconClass.bar} />
+					</BarButton>
+				</>
+			}
+			toolbar={
+				<Segmented
+					ariaLabel={m.mob_browse_title()}
+					value={segment}
+					onChange={setSegment}
+					options={[
+						{ key: "vaults", label: m.mob_tab_vaults() },
+						{ key: "tags", label: m.mob_tab_tags() },
+					]}
+				/>
+			}
+			overlay={
+				<Fab
+					onPress={() => createItemFlow.setIsOpen(true)}
+					ariaLabel={m.mob_create_item_header()}
+				/>
+			}
 		>
-			<header className="sticky top-0 z-10 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-4 py-2">
-				<p className="min-w-0 flex-1 truncate font-semibold text-base">
-					{activeAccount?.email ?? m.mob_settings_account_fallback()}
-				</p>
-				<button
-					type="button"
-					// "Scan TOTP QR" has no existing i18n key (apps/mobile's equivalent is a
-					// button inside its TotpForm, not a screen-header action) — hard-coded
-					// English per the migration brief; see the chunk report for the full list.
-					onClick={() => void createItemFlow.scanTotpQr()}
-					aria-label="Scan TOTP QR code"
-					title="Scan TOTP QR code"
-					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
-				>
-					<IconQrCode className="size-5" />
-				</button>
-				<button
-					type="button"
-					onClick={() => createItemFlow.setIsOpen(true)}
-					aria-label={m.mob_create_item_header()}
-					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
-				>
-					<IconPlus className="size-5" />
-				</button>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="h-11 shrink-0 gap-1.5 px-3"
-					onClick={() => void handleLock()}
-				>
-					<IconLock className="size-4" />
-					{m.mob_settings_lock_vault()}
-				</Button>
-			</header>
-
-			<div
-				className="flex-1 overflow-y-auto"
-				style={{ overscrollBehavior: "contain" }}
-			>
-				{isLoadingVaults ? (
-					<VaultListSkeleton />
+			{segment === "vaults" ? (
+				isLoadingVaults ? (
+					<ItemsSkeleton count={4} />
 				) : vaultKeys.length === 0 ? (
-					<div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-						<h2 className="font-semibold text-lg">
-							{m.mob_vaults_empty_title()}
-						</h2>
-						<p className="text-muted-foreground text-sm">
-							{m.mob_vaults_empty_description()}
-						</p>
-					</div>
+					<EmptyState
+						className="min-h-full"
+						icon={IconVault}
+						title={m.mob_vaults_empty_title()}
+						description={m.mob_vaults_empty_description()}
+						action={{
+							label: m.mob_vault_action_new(),
+							onPress: () => setIsCreateVaultOpen(true),
+						}}
+					/>
 				) : (
-					<div className="flex flex-col gap-1 p-2">
-						{vaultKeys.map((vault) => {
-							const count = itemCounts?.byVault[vault.vaultId] ?? 0;
-							return (
-								<button
-									key={vault.vaultId}
-									type="button"
-									onClick={() =>
-										navigate({
-											to: "/vault/$id",
-											params: { id: vault.vaultId },
-										})
-									}
-									className="flex min-h-14 w-full items-center gap-3 rounded-lg px-3 py-2 text-left active:bg-foreground/5"
-								>
-									<VaultAvatar
-										name={vault.vaultName}
-										icon={vault.vaultIcon}
-										imageUrl={vault.vaultImageUrl}
-										size="md"
-									/>
-									<div className="min-w-0 flex-1">
-										<p className="truncate font-medium text-sm">
-											{vault.vaultName}
-										</p>
-										<p className="truncate text-muted-foreground text-xs">
-											{count === 1
-												? m.mob_item_count_singular({ count: String(count) })
-												: m.mob_item_count_plural({ count: String(count) })}
-										</p>
-									</div>
-									<IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-								</button>
-							);
-						})}
+					<div className="flex flex-col gap-6 px-4 pt-4">
+						{vaultGroups.map(([kind, group]) =>
+							group.length === 0 ? null : (
+								<section key={kind}>
+									<SectionLabel
+										trailing={
+											<span className="font-semibold text-2xs text-muted-foreground">
+												{group.length}
+											</span>
+										}
+									>
+										{kind === "personal"
+											? m.mob_vaults_section_personal()
+											: m.mob_vaults_section_team()}
+									</SectionLabel>
+									<ListCard>
+										{group.map((vault) => {
+											const count = itemCounts?.byVault[vault.vaultId] ?? 0;
+											return (
+												<ListRow
+													key={vault.vaultId}
+													leading={
+														<VaultTile
+															name={vault.vaultName}
+															icon={vault.vaultIcon}
+															imageUrl={vault.vaultImageUrl}
+															type={vault.vaultType}
+														/>
+													}
+													title={vault.vaultName}
+													subtitle={
+														count === 1
+															? m.mob_item_count_singular({
+																	count: String(count),
+																})
+															: m.mob_item_count_plural({
+																	count: String(count),
+																})
+													}
+													showChevron
+													onPress={() =>
+														navigate({
+															to: "/vault/$id",
+															params: { id: vault.vaultId },
+														})
+													}
+												/>
+											);
+										})}
+									</ListCard>
+								</section>
+							),
+						)}
 					</div>
-				)}
-			</div>
-
-			<BottomTabBar active="vaults" />
+				)
+			) : isLoadingItems ? (
+				<ItemsSkeleton count={5} />
+			) : tagRows.length === 0 ? (
+				<EmptyState
+					className="min-h-full"
+					icon={IconTag}
+					title={m.mob_tags_empty_no_tags()}
+					description={m.mob_tags_empty_no_tags_description()}
+				/>
+			) : (
+				<div className="px-4 pt-4">
+					<TagListCard
+						tags={tagRows}
+						onSelect={(name) =>
+							navigate({
+								to: "/vault/tag/$tagName",
+								params: { tagName: encodeURIComponent(name) },
+							})
+						}
+					/>
+				</div>
+			)}
 
 			<CreateItemSheet
 				open={createItemFlow.isOpen}
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
-				side="bottom"
+				initialCategory={createItemFlow.initialCategory}
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
-		</div>
+
+			<CreateVaultSheet
+				open={isCreateVaultOpen}
+				onOpenChange={setIsCreateVaultOpen}
+				onCreated={(vaultId) =>
+					navigate({ to: "/vault/$id", params: { id: vaultId } })
+				}
+			/>
+		</TabScreen>
 	);
 }
