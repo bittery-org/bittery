@@ -8,7 +8,12 @@
 
 import { useAllVaultKeys, useItemCounts, useItems } from "@bittery/core/hooks";
 import { Button, CreateItemSheet, Skeleton, VaultAvatar } from "@bittery/ui";
-import { IconChevronRight, IconLock, IconPlus } from "@bittery/ui/icons";
+import {
+	IconChevronRight,
+	IconLock,
+	IconPlus,
+	IconQrCode,
+} from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { BottomTabBar } from "@/components/vault/bottom-tab-bar";
 import { useAccount } from "@/contexts/account-context";
@@ -62,6 +67,18 @@ function VaultListScreen() {
 				<p className="min-w-0 flex-1 truncate font-semibold text-base">
 					{activeAccount?.email ?? m.mob_settings_account_fallback()}
 				</p>
+				<button
+					type="button"
+					// "Scan TOTP QR" has no existing i18n key (apps/mobile's equivalent is a
+					// button inside its TotpForm, not a screen-header action) — hard-coded
+					// English per the migration brief; see the chunk report for the full list.
+					onClick={() => void createItemFlow.scanTotpQr()}
+					aria-label="Scan TOTP QR code"
+					title="Scan TOTP QR code"
+					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+				>
+					<IconQrCode className="size-5" />
+				</button>
 				<button
 					type="button"
 					onClick={() => createItemFlow.setIsOpen(true)}

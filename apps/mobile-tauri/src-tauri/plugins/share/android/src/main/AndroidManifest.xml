@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Empty on purpose. ACTION_SEND needs no declared permission or component: it is a
+    plain implicit intent handed to the system, which shows its own chooser UI.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>

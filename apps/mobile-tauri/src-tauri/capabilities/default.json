@@ -10,7 +10,16 @@
 		"sql:default",
 		"sql:allow-execute",
 		"clipboard-manager:allow-write-text",
+		"barcode-scanner:allow-scan",
+		"barcode-scanner:allow-cancel",
+		"barcode-scanner:allow-check-permissions",
+		"barcode-scanner:allow-request-permissions",
+		"deep-link:default",
+		"dialog:allow-open",
+		"fs:allow-read-file",
+		"fs:allow-read-text-file",
 		"bittery-keystore:default",
-		"bittery-credential-provider:default"
+		"bittery-credential-provider:default",
+		"bittery-share:default"
 	]
 }

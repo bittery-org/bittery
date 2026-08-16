@@ -12,7 +12,7 @@ import {
 	useItems,
 } from "@bittery/core/hooks";
 import { CreateItemSheet, Skeleton } from "@bittery/ui";
-import { IconChevronRight, IconPlus } from "@bittery/ui/icons";
+import { IconChevronRight, IconPlus, IconQrCode } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { MobileItemRow } from "@/components/vault/item-row";
 import { TabScreen } from "@/components/vault/tab-screen";
@@ -54,14 +54,27 @@ function AllItemsScreen() {
 			title={m.mob_tab_all_items()}
 			activeTab="all-items"
 			headerEnd={
-				<button
-					type="button"
-					onClick={() => createItemFlow.setIsOpen(true)}
-					aria-label={m.mob_create_item_header()}
-					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
-				>
-					<IconPlus className="size-5" />
-				</button>
+				<>
+					{/* "Scan TOTP QR" has no existing i18n key — hard-coded English per the
+					    migration brief; see the chunk report for the full list. */}
+					<button
+						type="button"
+						onClick={() => void createItemFlow.scanTotpQr()}
+						aria-label="Scan TOTP QR code"
+						title="Scan TOTP QR code"
+						className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+					>
+						<IconQrCode className="size-5" />
+					</button>
+					<button
+						type="button"
+						onClick={() => createItemFlow.setIsOpen(true)}
+						aria-label={m.mob_create_item_header()}
+						className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+					>
+						<IconPlus className="size-5" />
+					</button>
+				</>
 			}
 		>
 			{isLoading ? (

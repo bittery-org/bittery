@@ -64,6 +64,19 @@ this machine set up for the mobile work):
   `gen/android/app/build/intermediates`.** AGP repacks APKs incrementally and orphans old library
   bytes otherwise — a 30 MB APK measured 249 MB in the spike that found this.
 
+**`AndroidManifest.xml` gets a real diff on every build, and that's expected.** `tauri-plugin-deep-link`'s
+`build.rs` rewrites the `<activity>` block on every `cargo build`/`tauri android build` (not just
+`android init`) to keep the `bittery://` `<intent-filter>` in sync with `tauri.conf.json`'s
+`plugins.deep-link.mobile` config, wrapped in `<!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->`
+markers. It is idempotent and leaves `android:allowBackup="false"` and everything else alone — this is
+the same "config in `tauri.conf.json`, generated file in `gen/android` survives without `android init`"
+pattern as the Kotlin version pin above, just plugin-driven instead of hand-driven. The `bittery`
+scheme's `CAMERA`/`VIBRATE` permissions for `tauri-plugin-barcode-scanner` need no such generation at
+all: they come from that plugin's own Gradle module manifest via ordinary manifest merging, the same
+way the credential-provider plugin's `<service>` entries do — nothing to hand-patch there either.
+Verified by dumping the built APK's merged manifest (`aapt dump xmltree`/`aapt dump permissions`)
+rather than trusting either plugin's docs.
+
 ## iOS
 
 `pnpm tauri ios init` has been run and `src-tauri/gen/apple` is committed so the project exists and

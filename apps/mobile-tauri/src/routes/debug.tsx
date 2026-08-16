@@ -21,11 +21,17 @@ import {
 } from "@bittery/storage/adapters/tauri-mobile";
 import { Button } from "@bittery/ui";
 import { createFileRoute } from "@tanstack/react-router";
+import { checkPermissions as checkCameraPermissions } from "@tauri-apps/plugin-barcode-scanner";
+import { getCurrent as getCurrentDeepLink } from "@tauri-apps/plugin-deep-link";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useState } from "react";
+import { scanTotpSetupToClipboard } from "../lib/barcode-scanner";
 import {
 	credentialProvider,
 	credentialProviderUnavailableReason,
 } from "../lib/credential-provider";
+import { shareText } from "../lib/share";
 import { initializeStorage } from "../lib/storage";
 
 export const Route = createFileRoute("/debug")({
@@ -242,6 +248,27 @@ async function runSelfTest(): Promise<SelfTestReport> {
 		})),
 	);
 
+	// M3-C4. Non-interactive only: `barcode-scanner`'s `checkPermissions` and
+	// `deep-link`'s `getCurrent` answer without raising any UI, so they run
+	// automatically like everything else above. `share_text` (always opens the
+	// Android chooser) and the dialog/fs file-pick pair (always opens the SAF picker)
+	// cannot run unattended — they are the "Peripherals (interactive)" buttons below,
+	// and were exercised by hand on-device; see the chunk report for what that found.
+	steps.push(
+		await step("peripherals: barcode-scanner checkPermissions", async () => ({
+			cameraPermission: await checkCameraPermissions(),
+		})),
+	);
+
+	steps.push(
+		await step(
+			"peripherals: deep-link getCurrent (cold-start URL, if any)",
+			async () => ({
+				startUrls: await getCurrentDeepLink(),
+			}),
+		),
+	);
+
 	const report: SelfTestReport = {
 		startedAt,
 		finishedAt: new Date().toISOString(),
@@ -249,6 +276,89 @@ async function runSelfTest(): Promise<SelfTestReport> {
 		steps,
 	};
 	return report;
+}
+
+function PeripheralsPanel() {
+	const [log, setLog] = useState<string[]>([]);
+
+	const record = (label: string, detail: unknown) => {
+		setLog((prev) => [
+			...prev,
+			`${new Date().toISOString()} ${label}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`,
+		]);
+	};
+
+	const runScan = async () => {
+		try {
+			const result = await scanTotpSetupToClipboard();
+			record("scan ok", result);
+		} catch (error) {
+			record(
+				"scan failed/cancelled",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	};
+
+	const runShare = async () => {
+		try {
+			await shareText({
+				text: "https://example.com/s/debug-share-test",
+				title: "Bittery debug share test",
+			});
+			record("share_text resolved (chooser shown)", "ok");
+		} catch (error) {
+			record(
+				"share_text failed",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	};
+
+	const runFilePick = async () => {
+		try {
+			const path = await openFileDialog({ multiple: false, directory: false });
+			if (!path) {
+				record("dialog.open", "cancelled (null)");
+				return;
+			}
+			record("dialog.open picked path", path);
+			try {
+				const contents = await readTextFile(path);
+				record("fs.readTextFile ok, length", contents.length);
+			} catch (fsError) {
+				record(
+					"fs.readTextFile FAILED on dialog-picked path",
+					fsError instanceof Error ? fsError.message : String(fsError),
+				);
+			}
+		} catch (error) {
+			record(
+				"dialog.open failed",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	};
+
+	return (
+		<div className="flex flex-col gap-2">
+			<h2 className="font-semibold text-lg">Peripherals (interactive)</h2>
+			<p className="text-muted-foreground text-sm">
+				These raise real UI (camera, share chooser, file picker) and cannot run
+				unattended — tap each and read the log below.
+			</p>
+			<div className="flex flex-wrap gap-2">
+				<Button onClick={() => void runScan()}>Scan QR</Button>
+				<Button onClick={() => void runShare()}>Share text</Button>
+				<Button onClick={() => void runFilePick()}>
+					Pick file (dialog+fs)
+				</Button>
+			</div>
+			<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
+				{log.length === 0 ? "no interactive test run yet" : log.join("\n")}
+			</pre>
+		</div>
+	);
 }
 
 function DebugComponent() {
@@ -304,6 +414,7 @@ function DebugComponent() {
 							? "running…"
 							: "idle"}
 			</pre>
+			<PeripheralsPanel />
 		</div>
 	);
 }

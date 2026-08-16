@@ -1,0 +1,8 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Allows the bittery-share `share_text` command, which hands a string off to Android's
+ACTION_SEND chooser.
+"""
+permissions = ["allow-share-text"]

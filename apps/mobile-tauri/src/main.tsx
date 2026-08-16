@@ -13,6 +13,7 @@ import {
 	createMobileClientRuntime,
 } from "./contexts/account-context";
 import { installClipboardBridge } from "./lib/clipboard-bridge";
+import { installDeepLinkBridge } from "./lib/deep-link-bridge";
 import { createMobileApiClient, queryClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { I18nProvider } from "./providers/i18n-provider";
@@ -52,6 +53,13 @@ async function initializeApp() {
 	const runtime = createMobileClientRuntime(queryClient);
 	await runtime.accounts.initialize();
 	router = createMobileRouter(apiClient, runtime);
+
+	// `bittery://autofill-unlock` etc. — see deep-link-bridge.ts. Installed once the
+	// router exists (it navigates), before the app renders, so a cold start from a
+	// deep link is caught too, not just one that arrives while the app is open.
+	void installDeepLinkBridge(router.navigate).catch((error) => {
+		console.warn("[deep-link] failed to install listener", error);
+	});
 
 	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 		<React.StrictMode>
