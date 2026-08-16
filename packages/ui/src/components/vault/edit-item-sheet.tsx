@@ -1,5 +1,7 @@
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
+import type { ComponentProps } from "react";
+import { cn } from "../../lib/utils";
 import { DialogBrandAccent } from "../dialog";
 import {
 	Sheet,
@@ -23,6 +25,12 @@ interface EditItemSheetProps {
 	isSubmitting?: boolean;
 	description?: string;
 	dataTestId?: string;
+	/**
+	 * Which edge the sheet slides in from. Defaults to `"right"` — the desktop and web drawer.
+	 * Phones pass `"bottom"`, which also gives the sheet an explicit height (a bottom sheet has
+	 * no `h-full` to inherit) and a safe-area inset.
+	 */
+	side?: ComponentProps<typeof SheetContent>["side"];
 }
 
 export function EditItemSheet({
@@ -33,13 +41,19 @@ export function EditItemSheet({
 	isSubmitting,
 	description,
 	dataTestId = "edit-item-sheet",
+	side = "right",
 }: EditItemSheetProps) {
 	const { m } = useI18n();
 
 	return (
 		<Sheet open={open} onOpenChange={onOpenChange}>
 			<SheetContent
-				className="flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl"
+				side={side}
+				className={cn(
+					"flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl",
+					side === "bottom" &&
+						"h-[92dvh] rounded-t-xl pb-[var(--safe-bottom,0px)]",
+				)}
 				data-testid={dataTestId}
 			>
 				<DialogBrandAccent />

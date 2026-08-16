@@ -10,7 +10,8 @@ import {
 	IconKey,
 	IconSmartphone,
 } from "../../icons";
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
+import { cn } from "../../lib/utils";
 import { Button } from "../button";
 import { DialogBrandAccent } from "../dialog";
 import {
@@ -31,6 +32,12 @@ interface CreateItemSheetProps {
 	selectedVaultId?: string;
 	/** Pre-fills the website field of the login form (e.g. from the browser extension's active tab). */
 	initialUrl?: string;
+	/**
+	 * Which edge the sheet slides in from. Defaults to `"right"` — the desktop and web drawer.
+	 * Phones pass `"bottom"`, which also gives the sheet an explicit height (a bottom sheet has
+	 * no `h-full` to inherit) and a safe-area inset.
+	 */
+	side?: ComponentProps<typeof SheetContent>["side"];
 	onCreateItem: (
 		data: DecryptedItemData,
 		vaultId: string,
@@ -107,6 +114,7 @@ export function CreateItemSheet({
 	vaults,
 	selectedVaultId,
 	initialUrl,
+	side = "right",
 	onCreateItem,
 }: CreateItemSheetProps) {
 	const { m } = useI18n();
@@ -171,7 +179,12 @@ export function CreateItemSheet({
 			}}
 		>
 			<SheetContent
-				className="flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl"
+				side={side}
+				className={cn(
+					"flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl",
+					side === "bottom" &&
+						"h-[92dvh] rounded-t-xl pb-[var(--safe-bottom,0px)]",
+				)}
 				data-testid="create-item-sheet"
 			>
 				<DialogBrandAccent />

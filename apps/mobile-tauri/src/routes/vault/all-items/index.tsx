@@ -129,6 +129,7 @@ function AllItemsScreen() {
 				open={createItemFlow.isOpen}
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
+				side="bottom"
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 		</TabScreen>

@@ -101,6 +101,7 @@ function VaultItemListScreen() {
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
 				selectedVaultId={id}
+				side="bottom"
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 		</MobileScreen>

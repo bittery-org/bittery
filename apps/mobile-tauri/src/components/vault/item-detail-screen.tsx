@@ -346,6 +346,7 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 					}}
 					isSubmitting={updateItem.isPending}
 					dataTestId="edit-item-sheet"
+					side="bottom"
 				/>
 			)}
 

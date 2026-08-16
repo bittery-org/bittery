@@ -21,7 +21,8 @@ export function VaultSelector({
 }: VaultSelectorProps) {
 	return (
 		<Select value={selectedVault?.id} onValueChange={onVaultChange}>
-			<SelectTrigger className="h-auto w-auto min-w-52 gap-3 py-1.5 [&>span]:line-clamp-none!">
+			{/* `max-sm:` only: full width on its own footer row, with a 44px tap target. */}
+			<SelectTrigger className="h-auto w-auto min-w-52 gap-3 py-1.5 [&>span]:line-clamp-none! max-sm:min-h-11 max-sm:w-full max-sm:min-w-0">
 				<SelectValue placeholder="Select vault">
 					{selectedVault && (
 						<div className="flex items-center gap-2">
