@@ -2,15 +2,23 @@
  * M1-C6 — item list for one vault. Pushed from `/vault`; each row navigates to
  * `/vault/$id/$itemId`. No virtualisation: the spike measured ~51ms to decrypt 2 000 items, so a
  * plain list is fine for M1.
+ *
+ * M3-C2 adds a "+" header action (`CreateItemSheet`, preselected to this vault) and a favorite
+ * star on every row (`MobileItemRow`, `useFavoriteToggle`).
  */
 
-import { useVaultInfo, useVaultItems } from "@bittery/core/hooks";
-import { maskCardNumber } from "@bittery/shared/credit-card";
-import { Skeleton, VaultItemListRow } from "@bittery/ui";
-import { IconClock, IconPasskey } from "@bittery/ui/icons";
+import {
+	useAllVaultKeys,
+	useVaultInfo,
+	useVaultItems,
+} from "@bittery/core/hooks";
+import { CreateItemSheet, Skeleton } from "@bittery/ui";
+import { IconPlus } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { MobileScreen } from "@/components/mobile-screen";
-import { Favicon } from "@/components/vault/favicon";
+import { MobileItemRow } from "@/components/vault/item-row";
+import { useCreateItemFlow } from "@/hooks/use-create-item-flow";
+import { useFavoriteToggle } from "@/hooks/use-favorite-toggle";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/$id/")({
@@ -39,12 +47,25 @@ function VaultItemListScreen() {
 	const { id } = Route.useParams();
 	const { vaultInfo } = useVaultInfo(id);
 	const { items, isLoading } = useVaultItems(id);
+	const { vaultKeys } = useAllVaultKeys();
+	const createItemFlow = useCreateItemFlow(vaultKeys);
+	const { handleToggle } = useFavoriteToggle();
 
 	return (
 		<MobileScreen
 			title={vaultInfo?.vaultName ?? m.mob_vault_items_fallback_title()}
 			backLabel={m.mob_common_go_back()}
 			onBack={() => navigate({ to: "/vault" })}
+			headerEnd={
+				<button
+					type="button"
+					onClick={() => createItemFlow.setIsOpen(true)}
+					aria-label={m.mob_create_item_header()}
+					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+				>
+					<IconPlus className="size-5" />
+				</button>
+			}
 		>
 			{isLoading ? (
 				<ItemListSkeleton />
@@ -59,46 +80,29 @@ function VaultItemListScreen() {
 				</div>
 			) : (
 				<div className="flex flex-col gap-px p-1.5">
-					{items.map((item) => {
-						const maskedCardNumber = item.cardNumber
-							? maskCardNumber(item.cardNumber)
-							: undefined;
-						const hasPasskeys =
-							item.category === "login" && (item.passkeys?.length ?? 0) > 0;
-
-						return (
-							<VaultItemListRow
-								key={item.id}
-								itemTitle={item.title}
-								ariaLabel={m.vaults_detail_items_list_item_action_select({
-									title: item.title,
-								})}
-								leadingVisual={<Favicon item={item} size="sm" />}
-								indicators={
-									<>
-										{item.category === "login" && item.totpSecret && (
-											<IconClock className="size-3 shrink-0 text-muted-foreground" />
-										)}
-										{hasPasskeys && (
-											<IconPasskey className="size-3 shrink-0 text-muted-foreground" />
-										)}
-									</>
-								}
-								secondaryText={item.username}
-								tertiaryText={maskedCardNumber}
-								// Mobile has no side-by-side selected pane — the row navigates instead.
-								isSelected={false}
-								onPrimaryAction={() =>
-									navigate({
-										to: "/vault/$id/$itemId",
-										params: { id, itemId: item.id },
-									})
-								}
-							/>
-						);
-					})}
+					{items.map((item) => (
+						<MobileItemRow
+							key={item.id}
+							item={item}
+							onSelect={() =>
+								navigate({
+									to: "/vault/$id/$itemId",
+									params: { id, itemId: item.id },
+								})
+							}
+							onToggleFavorite={() => handleToggle(item)}
+						/>
+					))}
 				</div>
 			)}
+
+			<CreateItemSheet
+				open={createItemFlow.isOpen}
+				onOpenChange={createItemFlow.setIsOpen}
+				vaults={createItemFlow.vaultOptions}
+				selectedVaultId={id}
+				onCreateItem={createItemFlow.handleCreateItem}
+			/>
 		</MobileScreen>
 	);
 }

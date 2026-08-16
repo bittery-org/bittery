@@ -1,14 +1,18 @@
 /**
- * M1-C6 — vault list. The landing screen after unlock: the active account's email plus a
- * reachable Lock button (the M1 "lock" acceptance criterion), then every vault the account has,
- * each showing its item count. Tapping a vault pushes `/vault/$id`.
+ * M1-C6 — vault list, and the "Vaults" tab of the M3-C2 bottom tab bar (D12, see
+ * `docs/mobile-migration-decisions.md`). The landing screen after unlock: the active account's
+ * email plus a reachable Lock button (the M1 "lock" acceptance criterion), a "+" that opens
+ * `CreateItemSheet`, then every vault the account has, each showing its item count. Tapping a
+ * vault pushes `/vault/$id`.
  */
 
 import { useAllVaultKeys, useItemCounts, useItems } from "@bittery/core/hooks";
-import { Button, Skeleton, VaultAvatar } from "@bittery/ui";
-import { IconChevronRight, IconLock } from "@bittery/ui/icons";
+import { Button, CreateItemSheet, Skeleton, VaultAvatar } from "@bittery/ui";
+import { IconChevronRight, IconLock, IconPlus } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { BottomTabBar } from "@/components/vault/bottom-tab-bar";
 import { useAccount } from "@/contexts/account-context";
+import { useCreateItemFlow } from "@/hooks/use-create-item-flow";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/")({
@@ -40,6 +44,7 @@ function VaultListScreen() {
 	// (apps/desktop/src/routes/vault/route.tsx).
 	const { items, isLoading: isLoadingItems } = useItems();
 	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
+	const createItemFlow = useCreateItemFlow(vaultKeys);
 
 	const handleLock = async () => {
 		await lockAllAccounts();
@@ -53,10 +58,18 @@ function VaultListScreen() {
 				height: "calc(100dvh - var(--safe-top) - var(--safe-bottom))",
 			}}
 		>
-			<header className="sticky top-0 z-10 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2">
-				<p className="min-w-0 truncate font-semibold text-base">
+			<header className="sticky top-0 z-10 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-4 py-2">
+				<p className="min-w-0 flex-1 truncate font-semibold text-base">
 					{activeAccount?.email ?? m.mob_settings_account_fallback()}
 				</p>
+				<button
+					type="button"
+					onClick={() => createItemFlow.setIsOpen(true)}
+					aria-label={m.mob_create_item_header()}
+					className="flex size-11 shrink-0 items-center justify-center rounded-md text-foreground active:bg-foreground/5"
+				>
+					<IconPlus className="size-5" />
+				</button>
 				<Button
 					type="button"
 					variant="outline"
@@ -123,6 +136,15 @@ function VaultListScreen() {
 					</div>
 				)}
 			</div>
+
+			<BottomTabBar active="vaults" />
+
+			<CreateItemSheet
+				open={createItemFlow.isOpen}
+				onOpenChange={createItemFlow.setIsOpen}
+				vaults={createItemFlow.vaultOptions}
+				onCreateItem={createItemFlow.handleCreateItem}
+			/>
 		</div>
 	);
 }

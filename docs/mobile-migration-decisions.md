@@ -348,3 +348,48 @@ timeout) rather than anything specific to this decision.
 much slower than `web-e2e-run`'s 60-minute budget allows for comfortably, or if the paths filter
 ever misses a break that should have been caught, tighten or loosen the filter rather than
 changing the overall shape.
+
+---
+
+## D12 — Mobile navigation: a five-tab bottom bar, not desktop's sidebar
+
+**Choice.** M3-C2 closes the feature gap (create/edit/delete/move/favorite, trash, all-items,
+tags, search) and had to pick mobile's answer to desktop's resizable sidebar
+(`apps/desktop/src/components/vault/vault-sidebar.tsx`) first, per the chunk brief. Chose a fixed
+bottom tab bar (`apps/mobile-tauri/src/components/vault/bottom-tab-bar.tsx`) with five tabs:
+Vaults (`/vault`), All Items (`/vault/all-items`), Tags (`/vault/tags`), Trash (`/vault/trash`),
+Search (`/vault/search`).
+
+**Why these five, in this order.** `packages/i18n/messages/en.json` already carries
+`mob_tab_vaults`, `mob_tab_all_items`, `mob_tab_tags`, `mob_tab_trash` and `mob_tab_search` —
+survivors from the Expo app this migration replaces, and nothing else (there is no
+`mob_tab_favorites` or `mob_tab_settings`). That is direct evidence of the IA the predecessor
+app shipped and users already know, so reusing it costs nothing new to learn and needed no new
+translation keys. Favorites has no tab: it is reached from the "Favorites" section header on the
+All Items screen (`mob_items_section_favorites`, also a surviving key, evidently meant for
+exactly this split) and from the star toggle on any item row or the item detail screen. Settings
+is out of scope for this chunk per the brief, so it is not in the bar yet — see "Revisit when".
+
+**Over.** A filter row pinned to the top of the vault list (the brief's other suggested option).
+Rejected because the existing push stack already uses the *top* of the screen for
+`MobileScreen`'s sticky back-button header on every pushed screen (`/vault/$id`, every
+`$itemId` detail, `/vault/tag/$tagName`) — a filter row there would compete with that header for
+the same 44px band and would need to disappear and reappear as the stack pushes and pops. A
+bottom bar has no such conflict: it is rendered only by the five tab-root screens
+(`TabScreen`, `apps/mobile-tauri/src/components/vault/tab-screen.tsx`) and is simply absent
+everywhere else, so the push/back flow the brief requires stays untouched — pushing
+`/vault/$id/$itemId` from `/vault/$id` looks exactly like it did in M1.
+
+**Consequence.** Two screens exist only because the bar needs a landing page for them and the
+brief did not otherwise ask for one: `/vault/tags` (a searchable list of every cross-vault tag,
+landing for the Tags tab) and `/vault/search` (the brief's required full-screen search, given its
+own tab rather than a modal launched from elsewhere). Both dead-end into routes the brief did
+list — `/vault/tags` pushes `/vault/tag/$tagName`; `/vault/search` navigates to
+`/vault/tag/$tagName`, `/vault/$id` or `/vault/all-items/$itemId` depending on what was tapped.
+
+**Revisit when.** Settings (out of scope for M3-C2) lands — decide then whether it earns a sixth
+tab, folds into the account row already on the Vaults tab, or gets a `More` tab that absorbs it
+alongside Tags (the lowest-traffic of the five, on the evidence of it being the only one with no
+count badge anywhere in the surviving copy). If a sixth tab is ever needed, five is already a
+tight fit at 44px+ touch targets on a narrow phone in portrait — measure before adding, not
+after.
