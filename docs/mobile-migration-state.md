@@ -2,26 +2,32 @@
 
 One file, rewritten each checkpoint. Not a log.
 
-**Last updated:** 2026-08-16, after M3-C1 (autofill settled, CI landed).
+**Last updated:** 2026-08-16, end of the run. M1 and M2 complete; M3 complete except the Expo
+cleanup, which is deliberately not done — see decision D13.
 **Branch:** `t3code/tauri-mobile-spike-app`
 
 ---
 
 ## Where this stands
 
-**M1 and M2 are complete and verified on a device.**
+**M1 and M2 are complete and verified on a device. M3 is complete except the Expo cleanup.**
 
-The new app is `apps/mobile-tauri`. It signs in against a real Bittery server with the real KDF,
-lists vaults and items, opens an item, copies its password, locks and unlocks. Secrets are held
-in the Android Keystore. It is enabled as a system credential provider, and **Chrome has
-autofilled a real password from it and completed a passkey ceremony against it.**
+`apps/mobile-tauri` signs in against a real Bittery server with the real KDF, unlocks, and does
+the whole vault: vault list, item list, item detail, create, edit, delete, move, favorite, trash,
+tags, and search. Secrets live in the Android Keystore behind a first-party Tauri plugin. It is
+enabled as a system credential provider, and **Chrome has autofilled a real password from it and
+completed a passkey ceremony against it.** QR scanning, deep links, share, clipboard and file
+picking are wired.
 
-M3 is partly done: the sync and lifecycle rewiring landed as part of M2, idle auto-lock is fixed,
-and `apps/mobile-tauri` now type-checks, lints and builds in CI on every push, with a gated
-Android build for changes that can plausibly break it. What remains of M3 is the peripheral APIs,
-the remaining screens, release signing, and the Expo cleanup.
+`apps/mobile` (Expo) is untouched and still in the tree and in CI. **It is deliberately not
+deleted and `apps/mobile-tauri` is deliberately not renamed** — the replacement has never run on
+a physical device, iOS has never been built, biometric unlock has never succeeded, and the UniFFI
+bindings the credential provider needs live inside the package the cleanup would remove. The
+reasoning and the exact ordered plan to finish are decision **D13** in
+`docs/mobile-migration-decisions.md`.
 
-`apps/mobile` (Expo) is untouched and still in the tree and in CI.
+The whole repo is green: `pnpm check:ci` 17/17 type-checks and 13/13 test suites, and
+`pnpm check:ci:rust` clean with no generated-bindings drift.
 
 ---
 

@@ -393,3 +393,65 @@ alongside Tags (the lowest-traffic of the five, on the evidence of it being the 
 count badge anywhere in the surviving copy). If a sixth tab is ever needed, five is already a
 tight fit at 44px+ touch targets on a narrow phone in portrait — measure before adding, not
 after.
+
+---
+
+## D13 — `apps/mobile` (Expo) stays. The migration stops short of deleting it.
+
+**Choice.** `apps/mobile` is not deleted, `apps/mobile-tauri` is not renamed, and none of the
+React Native crypto scaffolding is removed. Everything else in the migration brief is done.
+
+**Why.** The brief says the Expo app "stays in the tree and in CI until the new app works". The
+new app works on an **arm64 emulator**. That is not the same claim.
+
+Four things are unproven, and each is a reason on its own:
+
+1. **No physical device, ever.** Every measurement, every screenshot and the whole autofill
+   acceptance test ran on a `Pixel_9` AVD. The spike said the same thing about its own numbers
+   and it is still true: an emulator answers "does it work", not "does it work on a phone".
+2. **iOS has never been built.** `tauri ios init` succeeded and `gen/apple` is committed, but
+   `pod install` and `xcodebuild` have never run. Whether the Xcode project compiles is unknown.
+   Deleting the Expo app would leave the repo with no working iOS client at all.
+3. **Biometric unlock has never succeeded.** It is the *primary* unlock affordance on a phone,
+   and on this AVD `unlockAllWithBiometric` fails inside the storage biometry layer before any
+   OS prompt appears. `MukEscrowManager` has therefore never run.
+4. **Deleting `packages/crypto/react-native` would break the new app.** The credential
+   provider's `NativeCrypto.kt` reaches the Rust core through the generated UniFFI Kotlin at
+   `packages/crypto/react-native/android/src/main/java/uniffi/bittery_crypto_api/`, and the
+   `.so` files come from `pnpm build:crypto-android`. The brief anticipates this — "do not
+   delete the Kotlin UniFFI bindings or the Rust mobile targets, Tauri needs them" — but those
+   bindings currently live *inside* the package the cleanup is supposed to remove. Untangling
+   that is its own piece of work, not a deletion.
+
+**Over.** Finishing the brief literally by deleting `apps/mobile` and renaming
+`apps/mobile-tauri` to `apps/mobile`.
+
+**The honest framing.** Deleting the only shipping mobile client is irreversible in practice and
+is the one step here that cannot be undone by reading a diff. Everything else this run did is
+additive. Stopping one step short leaves the decision with a person who can weigh a physical
+device against a release calendar, and costs nothing but a rename.
+
+**Revisit when** — the ordered plan, so this is a task and not a vibe:
+
+1. Install the debug APK on a real Android phone. Sign in, unlock, autofill into Chrome, and
+   confirm `secretBacking` finally reports `hardware-backed (TEE…)` rather than software.
+2. Get biometric unlock working and exercise `MukEscrowManager`.
+3. Build the iOS app and decide whether an iOS client without an autofill extension is
+   shippable. The extension is explicitly out of scope for this migration.
+4. **Move the UniFFI bindings.** Relocate the generated Kotlin and the `jniLibs` output under a
+   path Tauri owns, and delete the cross-app `srcDir` reach in
+   `apps/mobile-tauri/src-tauri/plugins/credential-provider/android/build.gradle.kts`. Keep it
+   generated, never hand-copied (ADR 0012). This is the step that unblocks everything after it.
+5. Then, and only then, the brief's cleanup list: `packages/crypto/react-native/`,
+   `packages/crypto/port/src/adapters/react-native.ts` and its test, the
+   `uniffi-bindgen-react-native@0.31.0-3` patch, the crypto mobile build scripts, the
+   `turboModule:` block in `ubrn.config.yaml`, the `android`/`ios` legs of the CI
+   `crypto-bindings` matrix, and finally `apps/mobile`.
+6. Rename `apps/mobile-tauri` to `apps/mobile`. Its `productName`, Cargo crate name, Android
+   `applicationId` (`com.bittery.mobile`) and the Kotlin package all already read as the real
+   app rather than as a migration artifact, so this is a directory move and a `package.json`
+   name.
+
+**Also delete before any release**, independent of the above: the `/debug` route
+(`apps/mobile-tauri/src/routes/debug.tsx`) and its `beforeLoad` reachability. It is migration
+scaffolding that exercises the storage ports and prints `secretBacking` to the console.
