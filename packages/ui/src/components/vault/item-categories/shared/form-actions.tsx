@@ -21,9 +21,8 @@ export function FormActions({
 		cancelLabel ?? m.vaults_detail_items_detail_action_cancel();
 
 	return (
-		// `max-sm:flex-none` undoes `flex-1` once the footer stacks — in a column `flex-1` would
-		// resolve to a zero-height row. `max-sm:h-11` keeps both actions at a 44px tap target.
-		<div className="flex flex-1 justify-end gap-2 max-sm:flex-none">
+		// `max-sm:h-11` keeps both actions at a 44px tap target once the footer stacks.
+		<div className="flex flex-1 justify-end gap-2">
 			<Button
 				type="button"
 				variant="outline"

@@ -50,9 +50,12 @@ export function EditItemSheet({
 			<SheetContent
 				side={side}
 				className={cn(
-					"flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl",
-					side === "bottom" &&
-						"h-[92dvh] rounded-t-xl pb-[var(--safe-bottom,0px)]",
+					"flex flex-col gap-0 overflow-hidden p-0",
+					side === "bottom"
+						? // A bottom sheet spans `inset-x-0`; an explicit width would anchor it to the
+							// left edge and leave a gap on the right in landscape or on a tablet.
+							"h-[92dvh] rounded-t-xl pb-[var(--safe-bottom,0px)]"
+						: "sm:w-[65vw] sm:max-w-2xl",
 				)}
 				data-testid={dataTestId}
 			>
