@@ -37,7 +37,7 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@tauri-apps/api": "^2.11.1",
-		"@types/chrome": "^0.2.5"
+		"@types/chrome": "^0.2.6"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
