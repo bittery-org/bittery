@@ -44,7 +44,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 sha2 = "0.11"
 hmac = "0.13"
 url = "2"
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 parking_lot = "0.12"
 bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto-core" }
 
