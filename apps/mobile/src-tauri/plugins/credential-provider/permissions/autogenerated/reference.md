@@ -31,6 +31,7 @@ splitting the set would gate the app against itself and gate nothing else.
 - `allow-get-last-master-password-entry`
 - `allow-is-available`
 - `allow-is-biometric-available`
+- `allow-authenticate`
 - `allow-open-credential-provider-settings`
 - `allow-is-supported`
 
@@ -42,6 +43,32 @@ splitting the set would gate the app against itself and gate nothing else.
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`bittery-credential-provider:allow-authenticate`
+
+</td>
+<td>
+
+Enables the authenticate command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`bittery-credential-provider:deny-authenticate`
+
+</td>
+<td>
+
+Denies the authenticate command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

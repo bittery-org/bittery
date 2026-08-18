@@ -1,9 +1,10 @@
 import { IconLayoutGrid, IconLibrary, IconSettings } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { TabBar } from "@/components/ui";
+import type { TabKey } from "@/lib/tab-route";
 import { useI18n } from "@/providers/i18n-provider";
 
-export type TabKey = "items" | "browse" | "settings";
+export type { TabKey };
 
 /**
  * Three tabs, matching `apps/mobile` (DESIGN-NATIVE.md § Information architecture):
@@ -21,8 +22,8 @@ export type TabKey = "items" | "browse" | "settings";
  * `/vault/tags`, `/vault/trash` and `/vault/search` all stay routable; Browse, the account
  * sheet and the Items app bar push into them.
  *
- * Rendered only on the three tab-root screens — pushed screens (`/vault/$id`, any `$itemId`
- * detail, `/vault/tag/$tagName`) render `MobileScreen` and have no tab bar.
+ * Mounted once on the `/vault` layout for the three tab roots. Pushed screens
+ * (`/vault/$id`, any `$itemId` detail, `/vault/tag/$tagName`) have no tab bar.
  */
 export function BottomTabBar({ active }: { active: TabKey }) {
 	const { m } = useI18n();

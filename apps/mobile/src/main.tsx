@@ -16,6 +16,7 @@ import { installClipboardBridge } from "./lib/clipboard-bridge";
 import { installDeepLinkBridge } from "./lib/deep-link-bridge";
 import { createMobileApiClient, queryClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
+import { routeTransitionTypes } from "./lib/tab-route";
 import { I18nProvider } from "./providers/i18n-provider";
 import { MobilePlatformProvider } from "./providers/platform-provider";
 import { MobileSyncProvider } from "./providers/sync-provider";
@@ -28,10 +29,12 @@ function createMobileRouter(apiClient: ApiClient, runtime: ClientRuntime) {
 		routeTree,
 		scrollRestoration: true,
 		defaultPreloadStaleTime: 0,
-		// Every navigation animates through `document.startViewTransition` — see the
-		// `::view-transition-*` rules in styles.css. A WebView without the API cuts instead,
-		// which is a correct fallback, so this is safe to leave on unconditionally.
-		defaultViewTransition: true,
+		// Typed View Transitions: `routeTransitionTypes` picks tab / push / pop / fade.
+		// A WebView without the API cuts. A WebView that has the API but not types
+		// falls back to the untyped root cross-fade in styles.css.
+		defaultViewTransition: {
+			types: routeTransitionTypes,
+		},
 		context: { apiClient, queryClient, runtime },
 	});
 }

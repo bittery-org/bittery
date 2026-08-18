@@ -10,7 +10,7 @@ import { cn } from "@bittery/ui/lib/utils";
 import type { ReactNode } from "react";
 import { Pressable, type PressableProps } from "./pressable";
 
-const HEIGHTS = { md: "h-11", lg: "h-13" } as const;
+const HEIGHTS = { md: "min-h-11", lg: "min-h-13" } as const;
 
 interface BrandButtonProps extends Omit<PressableProps, "children"> {
 	label: ReactNode;
@@ -40,9 +40,9 @@ export function BrandButton({
 			scale
 			haptic={false}
 			className={cn(
-				"flex items-center justify-center gap-2 overflow-hidden rounded-xl px-5",
+				"flex items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5",
 				"bg-gradient-to-b from-primary to-primary-deep text-primary-foreground",
-				"font-semibold text-base",
+				"text-center font-semibold text-base",
 				// The inset highlight is what stops a flat gradient reading as a coloured box.
 				"shadow-[inset_0_1px_0_0_rgb(255_255_255/0.22)]",
 				!inert && "dark:shadow-glow",
@@ -54,12 +54,12 @@ export function BrandButton({
 			{isLoading ? (
 				<span
 					aria-hidden
-					className="size-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"
+					className="size-4 shrink-0 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"
 				/>
-			) : (
-				leading
-			)}
-			{label}
+			) : leading ? (
+				<span className="shrink-0">{leading}</span>
+			) : null}
+			<span className="min-w-0 text-pretty">{label}</span>
 		</Pressable>
 	);
 }

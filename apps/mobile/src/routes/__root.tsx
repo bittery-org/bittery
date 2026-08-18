@@ -46,10 +46,14 @@ function RootComponent() {
 	// navigate to `/vault` directly on success.
 	return (
 		<div
-			className="min-h-dvh w-full overflow-hidden bg-background text-foreground"
+			className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground"
 			style={{
+				// Status bar / notch only. The tab bar, sheets and FAB own
+				// `--safe-bottom` so the chrome can paint into the nav-bar area
+				// instead of leaving a second empty band above it. Applying the
+				// bottom inset here *and* on `TabBar` is what produced the large
+				// gap above Samsung 3-button navigation.
 				paddingTop: "var(--safe-top)",
-				paddingBottom: "var(--safe-bottom)",
 			}}
 		>
 			<SystemBarsSync />

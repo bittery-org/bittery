@@ -207,6 +207,12 @@ pub(crate) fn is_biometric_available<R: Runtime>(app: AppHandle<R>) -> crate::Re
 }
 
 #[command]
+pub(crate) fn authenticate<R: Runtime>(app: AppHandle<R>, reason: String) -> crate::Result<bool> {
+    app.credential_provider()
+        .authenticate(AuthenticateArgs { reason })
+}
+
+#[command]
 pub(crate) fn open_credential_provider_settings<R: Runtime>(
     app: AppHandle<R>,
 ) -> crate::Result<bool> {

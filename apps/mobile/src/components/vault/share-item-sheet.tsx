@@ -46,6 +46,7 @@ import {
 	MobileSheet,
 	Pressable,
 	SectionLabel,
+	SHEET_EXIT_MS,
 	Switch,
 	TextField,
 } from "@/components/ui";
@@ -98,7 +99,7 @@ export function ShareItemSheet({
 			setAccessMode("anyone");
 			setAllowedEmails([]);
 			setEmailDraft("");
-		}, 220);
+		}, SHEET_EXIT_MS);
 	};
 
 	const openNativeShare = async (url: string) => {
@@ -218,7 +219,6 @@ export function ShareItemSheet({
 					? m.mob_share_close_confirm_description()
 					: m.mob_share_description({ title: item.title ?? "" })
 			}
-			brandAccent={!isConfirmingClose}
 		>
 			{isConfirmingClose ? (
 				<div className="flex flex-col gap-2 px-4 pt-1 pb-6">

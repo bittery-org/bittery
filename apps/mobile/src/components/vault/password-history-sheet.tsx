@@ -98,7 +98,6 @@ export function PasswordHistorySheet({
 					? m.vaults_detail_items_password_history_dialog_restore_dialog_description()
 					: m.vaults_detail_items_password_history_dialog_description()
 			}
-			brandAccent={!pendingRestore}
 		>
 			{pendingRestore ? (
 				<div className="flex flex-col gap-2 px-4 pt-1 pb-6">

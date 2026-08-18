@@ -38,7 +38,7 @@ export function Aurora({
 	);
 }
 
-/** The `primary-deep` wash + hairline that tops every sheet and dialog. */
+/** The `primary-deep` wash + hairline for a sheet or dialog. Parked on `MobileSheet`. */
 export function SheetBrandAccent({ height = 96 }: { height?: number }) {
 	return (
 		<div

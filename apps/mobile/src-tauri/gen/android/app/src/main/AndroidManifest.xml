@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Vault unlock hosts BiometricPrompt on MainActivity. Also merged from the
+         credential-provider plugin; declared here so a `tauri android init` regen
+         that drops the plugin merge still has the permission. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -15,6 +20,7 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:theme="@style/Theme.bittery_mobile"
         android:usesCleartextTraffic="${usesCleartextTraffic}">

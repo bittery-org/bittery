@@ -151,6 +151,10 @@ impl<R: Runtime> CredentialProvider<R> {
         self.call("isBiometricAvailable", ())
     }
 
+    pub fn authenticate(&self, args: AuthenticateArgs) -> crate::Result<bool> {
+        self.call("authenticate", args)
+    }
+
     pub fn open_credential_provider_settings(&self) -> crate::Result<bool> {
         self.call("openCredentialProviderSettings", ())
     }

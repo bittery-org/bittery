@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { AccountSwitcher } from "@/components/account-switcher";
 import { AppBar, Screen, ScreenScroll } from "@/components/ui";
-import { BottomTabBar, type TabKey } from "./bottom-tab-bar";
 
 interface TabScreenProps {
 	title: ReactNode;
@@ -10,7 +9,6 @@ interface TabScreenProps {
 	actions?: ReactNode;
 	/** Sits between the app bar and the scroll region: segmented controls, chips, a search field. */
 	toolbar?: ReactNode;
-	activeTab: TabKey;
 	/** The sanctioned top wash. Items and Browse only — Settings stays neutral. */
 	aurora?: boolean;
 	/** A FAB or any other overlay pinned to the screen rather than to the scroller. */
@@ -20,7 +18,8 @@ interface TabScreenProps {
 
 /**
  * Shell for the three tab-root screens: large title + account avatar over a bounded scroll
- * region, with the tab bar pinned below.
+ * region. The tab bar lives on the `/vault` layout so it stays mounted across tab switches
+ * and does not ride the page transition.
  *
  * The account avatar lives here rather than on each screen so the switcher is reachable
  * from every tab, which is how it works on `apps/mobile` — before this the Tauri app had no
@@ -31,7 +30,6 @@ export function TabScreen({
 	subtitle,
 	actions,
 	toolbar,
-	activeTab,
 	aurora = false,
 	overlay,
 	children,
@@ -50,13 +48,17 @@ export function TabScreen({
 				}
 			/>
 			{toolbar ? (
-				<div className="relative z-10 shrink-0 px-4 pb-3">{toolbar}</div>
+				// 16px above the chips / segmented control so they do not sit on the
+				// large title's bottom edge. Screens with no toolbar get the same
+				// gap on the scroller instead.
+				<div className="relative z-10 shrink-0 px-4 pt-4 pb-3">{toolbar}</div>
 			) : null}
 
-			<ScreenScroll inset="tabBar">{children}</ScreenScroll>
+			<ScreenScroll inset="tabBar" className={toolbar ? undefined : "pt-4"}>
+				{children}
+			</ScreenScroll>
 
 			{overlay}
-			<BottomTabBar active={activeTab} />
 		</Screen>
 	);
 }

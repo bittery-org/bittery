@@ -13,6 +13,7 @@ export * from "./fab";
 export * from "./list-card";
 export * from "./mobile-sheet";
 export * from "./pressable";
+export * from "./qr-scanner-overlay";
 export * from "./screen";
 export * from "./segmented";
 export * from "./switch";

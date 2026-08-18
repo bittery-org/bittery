@@ -137,6 +137,11 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		var error: String = ""
 	}
 
+	@InvokeArg
+	class AuthenticateArgs {
+		var reason: String = ""
+	}
+
 	// ------------------------------------------------------------------
 	// Wiring
 	// ------------------------------------------------------------------
@@ -292,6 +297,8 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 			!activity.isFinishing &&
 			!activity.supportFragmentManager.isStateSaved
 
+
+
 	private fun ensureVaultStateManagerInitialized() {
 		try {
 			VaultStateManager.initialize(context)
@@ -442,18 +449,14 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	// ------------------------------------------------------------------
 
 	/**
-	 * Escrow the MUK with biometric protection after a password unlock, so later unlocks
-	 * need no password.
+	 * Wrap the in-memory MUK so a later autofill unlock can unwrap it with
+	 * biometrics. Encrypt uses the RSA public key, so this does not show a
+	 * prompt. The command name is historical; the ACL identity stays.
 	 */
 	@Command
 	fun escrowMukWithBiometric(invoke: Invoke) {
 		val args = invoke.parseArgs(EscrowMukArgs::class.java)
 		ensureVaultStateManagerInitialized()
-		val activity = currentActivity
-		if (activity == null) {
-			invoke.reject("No activity available", "NO_ACTIVITY")
-			return
-		}
 
 		val email = args.email
 		val userId = args.userId
@@ -461,6 +464,11 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 
 		if (email.isEmpty()) {
 			invoke.reject("email is required", "INVALID_PARAMS")
+			return
+		}
+
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+			invoke.reject("MUK escrow requires Android 6.0 or higher", "UNSUPPORTED")
 			return
 		}
 
@@ -474,76 +482,14 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 			return
 		}
 
-		// Generate escrow key if needed
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-			mukEscrowManager.generateKey()
-		}
-
-		// Function to perform escrow after auth
-		fun performEscrow(cipher: javax.crypto.Cipher) {
-			pluginScope.launch {
-				try {
-					mukEscrowManager.escrowMuk(muk, cipher, email, timeoutMs, userId)
-					Log.d(TAG, "escrowMukWithBiometric: MUK escrowed successfully for $email")
-					resolveValue(invoke, true)
-				} catch (e: Exception) {
-					Log.e(TAG, "escrowMukWithBiometric: Failed to escrow MUK", e)
-					invoke.reject("Failed to escrow MUK: ${e.message}", "ESCROW_FAILED", e)
-				}
-			}
-		}
-
-		activity.runOnUiThread {
-			if (!canHostPrompt(activity)) {
-				Log.e(TAG, "escrowMukWithBiometric: host activity cannot show a prompt")
-				invoke.reject(
-					"No activity able to show the biometric prompt",
-					"NO_ACTIVITY",
-				)
-				return@runOnUiThread
-			}
+		pluginScope.launch {
 			try {
-				val cipher = mukEscrowManager.getEncryptCipher()
-				val executor = ContextCompat.getMainExecutor(context)
-
-				val biometricPrompt = BiometricPrompt(
-					activity,
-					executor,
-					object : BiometricPrompt.AuthenticationCallback() {
-						override fun onAuthenticationSucceeded(
-							result: BiometricPrompt.AuthenticationResult,
-						) {
-							result.cryptoObject?.cipher?.let { performEscrow(it) }
-								?: invoke.reject("No cipher after authentication", "AUTH_ERROR")
-						}
-
-						override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-							invoke.reject(errString.toString(), "AUTH_ERROR")
-						}
-
-						override fun onAuthenticationFailed() {
-							// Let user retry
-						}
-					},
-				)
-
-				val promptInfo = BiometricPrompt.PromptInfo.Builder()
-					.setTitle("Enable Quick Unlock")
-					.setSubtitle("Authenticate to enable biometric unlock")
-					.setAllowedAuthenticators(
-						BiometricManager.Authenticators.BIOMETRIC_STRONG or
-							BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-					)
-					.build()
-
-				biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+				mukEscrowManager.escrowMukUnattended(muk, email, timeoutMs, userId)
+				Log.d(TAG, "escrowMukWithBiometric: MUK escrowed silently for $email")
+				resolveValue(invoke, true)
 			} catch (e: Exception) {
-				Log.e(TAG, "Failed to show biometric prompt for escrow", e)
-				invoke.reject(
-					"Failed to show authentication prompt: ${e.message}",
-					"PROMPT_FAILED",
-					e,
-				)
+				Log.e(TAG, "escrowMukWithBiometric: Failed to escrow MUK", e)
+				invoke.reject("Failed to escrow MUK: ${e.message}", "ESCROW_FAILED", e)
 			}
 		}
 	}
@@ -763,6 +709,79 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val available = canAuthenticate == BiometricManager.BIOMETRIC_SUCCESS
 		Log.d(TAG, "isBiometricAvailable: $available (canAuthenticate result: $canAuthenticate)")
 		resolveValue(invoke, available)
+	}
+
+	/**
+	 * Presence-only biometric prompt on the live [MainActivity][boundActivity].
+	 *
+	 * The third-party biometry plugin starts a translucent `BiometryActivity` through
+	 * `startActivityForResult`. That path never shows a sheet here (Tauri 2.11 launcher,
+	 * floating theme). This command reuses the activity tracker and [canHostPrompt]
+	 * already required for MUK escrow.
+	 */
+	@Command
+	fun authenticate(invoke: Invoke) {
+		val args = invoke.parseArgs(AuthenticateArgs::class.java)
+		val activity = currentActivity
+		if (activity == null) {
+			invoke.reject("No activity available", "NO_ACTIVITY")
+			return
+		}
+		activity.runOnUiThread {
+			if (!canHostPrompt(activity)) {
+				Log.e(TAG, "authenticate: host activity cannot show a prompt")
+				invoke.reject(
+					"No activity able to show the biometric prompt",
+					"NO_ACTIVITY",
+				)
+				return@runOnUiThread
+			}
+			try {
+				val executor = ContextCompat.getMainExecutor(context)
+				val biometricPrompt = BiometricPrompt(
+					activity,
+					executor,
+					object : BiometricPrompt.AuthenticationCallback() {
+						override fun onAuthenticationSucceeded(
+							result: BiometricPrompt.AuthenticationResult,
+						) {
+							resolveValue(invoke, true)
+						}
+
+						override fun onAuthenticationError(
+							errorCode: Int,
+							errString: CharSequence,
+						) {
+							// Code is English so the JS classifier still matches a German
+							// OS string. Tauri flattens this to "[code] - message".
+							invoke.reject(
+								errString.toString(),
+								BiometricErrorCodes.fromPrompt(errorCode),
+							)
+						}
+
+						override fun onAuthenticationFailed() {
+							// Let the user retry.
+						}
+					},
+				)
+				val title = args.reason.ifBlank { "Unlock Bittery" }
+				val promptInfo = BiometricPrompt.PromptInfo.Builder()
+					.setTitle(title)
+					.setNegativeButtonText("Cancel")
+					.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+					.setConfirmationRequired(false)
+					.build()
+				biometricPrompt.authenticate(promptInfo)
+			} catch (e: Exception) {
+				Log.e(TAG, "Failed to show biometric prompt", e)
+				invoke.reject(
+					"Failed to show authentication prompt: ${e.message}",
+					"PROMPT_FAILED",
+					e,
+				)
+			}
+		}
 	}
 
 	/**

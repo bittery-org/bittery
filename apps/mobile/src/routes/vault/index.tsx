@@ -12,7 +12,7 @@
  */
 
 import { useAllVaultKeys, useItemCounts, useItems } from "@bittery/core/hooks";
-import { IconPlus, IconQrCode, IconTag, IconVault } from "@bittery/ui/icons";
+import { IconPlus, IconTag, IconVault } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
@@ -73,7 +73,6 @@ function BrowseScreen() {
 	return (
 		<TabScreen
 			title={m.mob_browse_title()}
-			activeTab="browse"
 			aurora
 			actions={
 				<>
@@ -88,12 +87,6 @@ function BrowseScreen() {
 							<IconPlus className={iconClass.bar} />
 						</BarButton>
 					) : null}
-					<BarButton
-						onClick={() => void createItemFlow.scanTotpQr()}
-						aria-label={m.mob_form_totp_scan_qr()}
-					>
-						<IconQrCode className={iconClass.bar} />
-					</BarButton>
 				</>
 			}
 			toolbar={
@@ -211,7 +204,6 @@ function BrowseScreen() {
 				open={createItemFlow.isOpen}
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
-				initialCategory={createItemFlow.initialCategory}
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 

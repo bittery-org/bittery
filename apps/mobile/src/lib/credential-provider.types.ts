@@ -10,7 +10,7 @@ export interface EscrowMukParams {
 	email: string;
 	/** Optional user ID for multi-account MUK storage */
 	userId?: string;
-	/** Optional escrow timeout in milliseconds (default 10 minutes) */
+	/** Optional escrow timeout in milliseconds (default: master-password re-entry period) */
 	timeoutMs?: number;
 }
 

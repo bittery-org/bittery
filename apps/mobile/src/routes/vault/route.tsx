@@ -1,5 +1,12 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	Outlet,
+	redirect,
+	useRouterState,
+} from "@tanstack/react-router";
+import { BottomTabBar } from "@/components/vault/bottom-tab-bar";
 import { storage } from "@/lib/storage";
+import { tabKeyForPath } from "@/lib/tab-route";
 import { resolveVaultRouteAccess } from "@/lib/vault-route-access";
 
 export const Route = createFileRoute("/vault")({
@@ -19,9 +26,15 @@ export const Route = createFileRoute("/vault")({
 });
 
 function VaultLayout() {
-	// `__root.tsx` already pads its wrapper by `--safe-top` / `--safe-bottom`, so only the
-	// horizontal insets (relevant in landscape, or on devices with curved/notched edges) are
-	// added here — see `MobileScreen`'s doc comment for why top/bottom aren't repeated.
+	// `__root.tsx` already pads `--safe-top`. `--safe-bottom` is owned by the tab bar /
+	// sheets / FAB (so the chrome can paint into the nav-bar area). Only the horizontal
+	// insets (landscape, curved/notched edges) are added here.
+	//
+	// The tab bar sits here, not on each `TabScreen`, so switching Items / Browse /
+	// Settings keeps the same DOM node. Pushed screens have no key and the bar unmounts.
+	const pathname = useRouterState({ select: (s) => s.location.pathname });
+	const activeTab = tabKeyForPath(pathname);
+
 	return (
 		<div
 			className="flex h-full min-h-0 w-full flex-1 flex-col"
@@ -30,7 +43,10 @@ function VaultLayout() {
 				paddingRight: "var(--safe-right)",
 			}}
 		>
-			<Outlet />
+			<div className="flex min-h-0 flex-1 flex-col">
+				<Outlet />
+			</div>
+			{activeTab ? <BottomTabBar active={activeTab} /> : null}
 		</div>
 	);
 }

@@ -730,21 +730,76 @@ describe("tauri-mobile adapter — biometric", () => {
 		});
 	});
 
-	test("a successful prompt reports success and passes the reason through", async () => {
+	/**
+	 * The production Android host. The third-party plugin launches a floating
+	 * `BiometryActivity` via `startActivityForResult`; on this app that path never
+	 * shows a sheet and `unlockAllWithBiometric` returns zero accounts. The first-party
+	 * command hosts `BiometricPrompt` on `MainActivity` instead.
+	 */
+	test("authenticate uses the first-party MainActivity host and never the third-party activity", async () => {
 		const { platform, doubles } = await makeBiometricPort(() => {});
 
 		expect(await platform.biometric.authenticate("Unlock your vault")).toEqual({
 			success: true,
 		});
+		expect(doubles.firstPartyAuthenticate.prompts).toEqual([
+			"Unlock your vault",
+		]);
+		expect(doubles.biometry.prompts).toEqual([]);
+	});
+
+	test("a cancelled first-party prompt is user_cancelled, not a fallthrough to the third-party plugin", async () => {
+		const { platform, doubles } = await makeBiometricPort((doubles) => {
+			doubles.firstPartyAuthenticate.authFailure = new Error(
+				"[userCancel] - Authentifizierung abgebrochen",
+			);
+		});
+
+		expect(await platform.biometric.authenticate("unlock")).toEqual({
+			success: false,
+			error: "user_cancelled",
+			message: "[userCancel] - Authentifizierung abgebrochen",
+		});
+		expect(doubles.biometry.prompts).toEqual([]);
+	});
+
+	test("a first-party lockout is reported as a lockout", async () => {
+		const { platform } = await makeBiometricPort((doubles) => {
+			doubles.firstPartyAuthenticate.authFailure = new Error(
+				"[biometryLockout] - Too many attempts",
+			);
+		});
+
+		expect(await platform.biometric.authenticate("unlock")).toEqual({
+			success: false,
+			error: "lockout",
+			message: "[biometryLockout] - Too many attempts",
+		});
+	});
+
+	test("falls back to the third-party plugin when the first-party host is absent", async () => {
+		const doubles = createTauriMobileDoubles({
+			firstPartyAuthenticateUnavailable: true,
+		});
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
+
+		expect(await platform.biometric.authenticate("Unlock your vault")).toEqual({
+			success: true,
+		});
+		expect(doubles.firstPartyAuthenticate.prompts).toEqual([]);
 		expect(doubles.biometry.prompts).toEqual(["Unlock your vault"]);
 	});
 
-	test("a cancelled prompt is user_cancelled, not a generic failure", async () => {
-		const { platform } = await makeBiometricPort((doubles) => {
-			doubles.biometry.authFailure = new Error(
-				"Authentication was cancelled by the user",
-			);
+	test("a cancelled third-party fallback is user_cancelled, not a generic failure", async () => {
+		const doubles = createTauriMobileDoubles({
+			firstPartyAuthenticateUnavailable: true,
 		});
+		doubles.biometry.authFailure = new Error(
+			"Authentication was cancelled by the user",
+		);
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
 
 		expect(await platform.biometric.authenticate("unlock")).toEqual({
 			success: false,
@@ -753,10 +808,13 @@ describe("tauri-mobile adapter — biometric", () => {
 		});
 	});
 
-	test("a lockout is reported as a lockout", async () => {
-		const { platform } = await makeBiometricPort((doubles) => {
-			doubles.biometry.authFailure = "biometryLockout";
+	test("a third-party fallback lockout is reported as a lockout", async () => {
+		const doubles = createTauriMobileDoubles({
+			firstPartyAuthenticateUnavailable: true,
 		});
+		doubles.biometry.authFailure = "biometryLockout";
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
 
 		expect(await platform.biometric.authenticate("unlock")).toEqual({
 			success: false,
@@ -765,10 +823,13 @@ describe("tauri-mobile adapter — biometric", () => {
 		});
 	});
 
-	test("absent enrolment is reported as not_enrolled", async () => {
-		const { platform } = await makeBiometricPort((doubles) => {
-			doubles.biometry.authFailure = new Error("biometryNotEnrolled");
+	test("absent enrolment on the third-party fallback is not_enrolled", async () => {
+		const doubles = createTauriMobileDoubles({
+			firstPartyAuthenticateUnavailable: true,
 		});
+		doubles.biometry.authFailure = new Error("biometryNotEnrolled");
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
 
 		expect(await platform.biometric.authenticate("unlock")).toEqual({
 			success: false,
@@ -777,10 +838,13 @@ describe("tauri-mobile adapter — biometric", () => {
 		});
 	});
 
-	test("anything else is a plain failure, carrying the native message", async () => {
-		const { platform } = await makeBiometricPort((doubles) => {
-			doubles.biometry.authFailure = new Error("Fingerprint not recognised");
+	test("anything else on the third-party fallback is a plain failure", async () => {
+		const doubles = createTauriMobileDoubles({
+			firstPartyAuthenticateUnavailable: true,
 		});
+		doubles.biometry.authFailure = new Error("Fingerprint not recognised");
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
 
 		expect(await platform.biometric.authenticate("unlock")).toEqual({
 			success: false,
@@ -790,11 +854,10 @@ describe("tauri-mobile adapter — biometric", () => {
 	});
 
 	/**
-	 * A build without the plugin must still expose a *total* biometric port. It is loaded
-	 * lazily for exactly that reason, so `initialize()` succeeds and every method answers
-	 * "no" rather than raising.
+	 * A build without the third-party plugin must still expose a *total* biometric port
+	 * for status. Authenticate can still succeed through the first-party host.
 	 */
-	test("an uninstalled biometry plugin is honestly unavailable, never a throw", async () => {
+	test("an uninstalled third-party plugin is honestly unavailable for status, never a throw", async () => {
 		const doubles = createTauriMobileDoubles({ biometryModuleMissing: true });
 		const platform = createTauriMobilePlatformPort(doubles.deps);
 		await platform.initialize();
@@ -805,6 +868,20 @@ describe("tauri-mobile adapter — biometric", () => {
 			hasHardware: false,
 			isEnrolled: false,
 		});
+		expect(await platform.biometric.authenticate("unlock")).toEqual({
+			success: true,
+		});
+		expect(doubles.firstPartyAuthenticate.prompts).toEqual(["unlock"]);
+	});
+
+	test("authenticate is not_available when both hosts are missing", async () => {
+		const doubles = createTauriMobileDoubles({
+			biometryModuleMissing: true,
+			firstPartyAuthenticateUnavailable: true,
+		});
+		const platform = createTauriMobilePlatformPort(doubles.deps);
+		await platform.initialize();
+
 		expect((await platform.biometric.authenticate("unlock")).error).toBe(
 			"not_available",
 		);

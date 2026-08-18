@@ -255,10 +255,10 @@ them and both should be exercised the next time the app runs on real hardware:
   are all new. If `getUriForFile` throws, the authority in `SharePlugin.kt` and the one in
   the plugin's `AndroidManifest.xml` have drifted apart — they are duplicated by necessity.
 
-### 8. Self-hosting server picker has no mobile UI
+### 8. ~~Self-hosting server picker has no mobile UI~~ — settled
 
-`src/lib/auth-server.ts` was ported whole so the logic is intact, but the login screen exposes no
-way to change the server URL. A self-hosted user cannot sign in on mobile.
+Login, add-account and Settings share `ServerPickerSheet`. Known servers, add a URL, and
+assign one to the account. "Add account" does not rewrite the account you already have.
 
 ### 9. ~~`/debug` route still ships~~ — settled, deleted
 

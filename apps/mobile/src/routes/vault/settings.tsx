@@ -28,6 +28,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "next-themes";
 import { useState } from "react";
 import { InlineNotice } from "@/components/auth-kit";
+import { ServerPickerSheet } from "@/components/server-picker-sheet";
 import {
 	AccountAvatar,
 	ConfirmSheet,
@@ -96,6 +97,7 @@ function SettingsScreen() {
 	const { resolvedTheme, setTheme } = useTheme();
 
 	const [isAutoLockOpen, setIsAutoLockOpen] = useState(false);
+	const [isServerPickerOpen, setIsServerPickerOpen] = useState(false);
 	const [isConfirmingSignOut, setIsConfirmingSignOut] = useState(false);
 	const [accountPendingRemoval, setAccountPendingRemoval] =
 		useState<AccountMetadata | null>(null);
@@ -293,7 +295,6 @@ function SettingsScreen() {
 	return (
 		<TabScreen
 			title={m.mob_settings_title()}
-			activeTab="settings"
 			overlay={
 				<>
 					<MobileSheet
@@ -328,6 +329,18 @@ function SettingsScreen() {
 							})}
 						</div>
 					</MobileSheet>
+
+					<ServerPickerSheet
+						open={isServerPickerOpen}
+						onOpenChange={setIsServerPickerOpen}
+						selectedUrl={settings.serverUrl ?? ""}
+						persistToAccount
+						onSelected={(serverUrl) => {
+							patchSettings({ serverUrl });
+							toast.success(m.toast_auth_server_updated());
+							void queryClient.invalidateQueries();
+						}}
+					/>
 
 					<ConfirmSheet
 						open={isConfirmingSignOut}
@@ -380,6 +393,8 @@ function SettingsScreen() {
 									<IconNetwork className={iconClass.row} />
 								</IconTile>
 							}
+							showChevron
+							onPress={() => setIsServerPickerOpen(true)}
 						/>
 					</ListCard>
 				</section>

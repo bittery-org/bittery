@@ -16,6 +16,7 @@ import android.util.Log
 import android.util.Pair
 import android.view.View
 import android.view.autofill.AutofillId
+import android.widget.inline.InlinePresentationSpec
 import androidx.annotation.RequiresApi
 import androidx.autofill.inline.UiVersions
 import com.bittery.mobile.credentialprovider.activity.AutofillAuthActivity
@@ -117,12 +118,11 @@ class BitteryAutofillService : AutofillService() {
                     Log.w(TAG, "  → Check: Gboard settings → Text correction → Show suggestions")
                 }
 
-                val inlineSpec = inlineRequest?.inlinePresentationSpecs?.firstOrNull { spec ->
-                    val versions = UiVersions.getVersions(spec.style)
-                    versions.contains(UiVersions.INLINE_UI_VERSION_1)
-                }
+                val inlineSpecs = inlineRequest?.inlinePresentationSpecs.orEmpty()
+                val inlineSpec = InlineSuggestionLayout.scrollableSpec(inlineSpecs)
+                val pinnedSpec = InlineSuggestionLayout.pinnedSpec(inlineSpecs)
                 if (inlineRequest != null && inlineSpec == null) {
-                    val availableVersions = inlineRequest.inlinePresentationSpecs.map { spec ->
+                    val availableVersions = inlineSpecs.map { spec ->
                         UiVersions.getVersions(spec.style)
                     }
                     Log.w(TAG, "Inline suggestions requested but no v1-compatible spec found: $availableVersions")
@@ -137,56 +137,31 @@ class BitteryAutofillService : AutofillService() {
                 }
                 val attributionIntent = createAttributionIntent().also { lastAttributionIntent = it }
 
-                val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
-                Log.d(TAG, "Unlocked users: ${unlockedUserIds.size}, Vault unlocked: ${VaultStateManager.isUnlocked()}")
+                Log.d(
+                    TAG,
+                    "Unlocked users: ${VaultStateManager.getUnlockedUserIds().size}, " +
+                        "Vault unlocked: ${VaultStateManager.isUnlocked()}"
+                )
 
-                val datasets = mutableListOf<android.service.autofill.Dataset>()
-                for (userId in unlockedUserIds) {
-                    val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
-                    val userDatasets = datasetBuilder.buildDatasets(
-                        fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
-                        domain = domain,
-                        muk = muk,
-                        inlineSpec = inlineSpec,
-                        attributionIntent = attributionIntent,
-                        userId = userId
-                    )
-                    datasets.addAll(userDatasets)
-                    if (datasets.size >= MAX_DATASETS) break
-                }
-
-                if (inlineMaxSuggestionCount != null && datasets.size > inlineMaxSuggestionCount) {
-                    val originalSize = datasets.size
-                    datasets.subList(inlineMaxSuggestionCount, datasets.size).clear()
-                    Log.d(TAG, "Trimmed datasets from $originalSize to ${datasets.size} to respect IME inline max")
-                }
-
-                Log.d(TAG, "Built ${datasets.size} datasets")
-
-                if (datasets.isNotEmpty()) {
-                    val responseBuilder = FillResponse.Builder()
-                    datasets.forEach { responseBuilder.addDataset(it) }
-
-                    // Add "Open Bittery" action at the end of inline suggestions (only for inline)
-                    if (inlineSpec != null && (inlineMaxSuggestionCount == null || datasets.size < inlineMaxSuggestionCount)) {
-                        datasetBuilder.buildOpenAppDataset(
-                            fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
-                            inlineSpec = inlineSpec,
-                            attributionIntent = attributionIntent
-                        )?.let {
-                            responseBuilder.addDataset(it)
-                            Log.d(TAG, "Added 'Open Bittery' inline dataset")
-                        }
-                    } else if (inlineSpec != null) {
-                        Log.d(TAG, "Skipping 'Open Bittery' inline dataset to respect IME max suggestions")
-                    }
-
-                    callback.onSuccess(responseBuilder.build())
+                val response = datasetBuilder.buildUnlockedResponse(
+                    fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
+                    domain = domain,
+                    inlineSpec = inlineSpec,
+                    pinnedSpec = pinnedSpec,
+                    maxSuggestionCount = inlineMaxSuggestionCount,
+                    attributionIntent = attributionIntent,
+                )
+                if (response != null) {
+                    callback.onSuccess(response)
                     return@launch
                 }
 
                 if (!VaultStateManager.isUnlocked()) {
-                    val authResponse = buildAuthenticationResponse(fieldIds, domain)
+                    val authResponse = buildAuthenticationResponse(
+                        fieldIds = fieldIds,
+                        domain = domain,
+                        inlineSpec = inlineSpec,
+                    )
                     callback.onSuccess(authResponse)
                     return@launch
                 }
@@ -205,9 +180,22 @@ class BitteryAutofillService : AutofillService() {
         callback.onFailure("Save not supported")
     }
 
+    /**
+     * The locked fill: a single "Unlock Bittery" entry that authenticates the
+     * *whole response*.
+     *
+     * Response-level auth on purpose. Dataset-level auth would let a pinned
+     * brand chip ride along, but the framework then demands a single [Dataset]
+     * back from [AutofillAuthActivity] and silently drops the session when it
+     * gets anything else — which is how unlocking used to leave the strip empty
+     * until the browser was reloaded. Response-level auth is the shape that
+     * takes a FillResponse back, so the credential list appears the moment
+     * biometrics pass. The brand chip returns with that response.
+     */
     private fun buildAuthenticationResponse(
         fieldIds: FieldIds,
-        domain: String?
+        domain: String?,
+        inlineSpec: InlinePresentationSpec?,
     ): FillResponse {
         val authIntent = Intent(applicationContext, AutofillAuthActivity::class.java).apply {
             putExtra(EXTRA_AUTOFILL_DOMAIN, domain ?: "")
@@ -215,6 +203,8 @@ class BitteryAutofillService : AutofillService() {
             fieldIds.passwordId?.let { putExtra(EXTRA_AUTOFILL_PASSWORD_ID, it) }
         }
 
+        // Mutable: the framework adds the assist structure and the IME's
+        // InlineSuggestionsRequest to this intent before launching the activity.
         val pendingIntent = PendingIntent.getActivity(
             applicationContext,
             "autofill_auth".hashCode(),
@@ -222,13 +212,33 @@ class BitteryAutofillService : AutofillService() {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val presentation = android.widget.RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
-            setTextViewText(android.R.id.text1, "Unlock Bittery")
+        val unlock = InlineSuggestionContentSpec.unlock()
+        val presentation = datasetBuilder.createMenuPresentation(
+            unlock.title ?: InlineSuggestionContentSpec.UNLOCK_TITLE,
+        )
+        val builder = FillResponse.Builder()
+
+        val inlinePresentation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlineSpec != null) {
+            datasetBuilder.createInlinePresentation(
+                spec = inlineSpec,
+                content = unlock,
+                attributionIntent = pendingIntent,
+            )
+        } else {
+            null
         }
 
-        return FillResponse.Builder()
-            .setAuthentication(fieldIds.toArray(), pendingIntent.intentSender, presentation)
-            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlinePresentation != null) {
+            builder.setAuthentication(
+                fieldIds.toArray(),
+                pendingIntent.intentSender,
+                presentation,
+                inlinePresentation,
+            )
+        } else {
+            builder.setAuthentication(fieldIds.toArray(), pendingIntent.intentSender, presentation)
+        }
+        return builder.build()
     }
 
     private fun findFieldIds(structure: AssistStructure): FieldIds {
@@ -362,15 +372,7 @@ class BitteryAutofillService : AutofillService() {
     private fun extractDomain(origin: String?): String? =
         DomainMatch.normalizeHost(origin).takeIf { it.isNotEmpty() }
 
-    private fun createAttributionIntent(): PendingIntent {
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: Intent()
-        return PendingIntent.getActivity(
-            applicationContext,
-            "autofill_attribution".hashCode(),
-            launchIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
+    private fun createAttributionIntent(): PendingIntent = datasetBuilder.appLaunchIntent()
 
     private fun isHtmlPasswordField(node: AssistStructure.ViewNode): Boolean {
         val htmlInfo = node.htmlInfo ?: return false

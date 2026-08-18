@@ -8,11 +8,16 @@ import android.security.keystore.KeyProperties
 import android.security.keystore.UserNotAuthenticatedException
 import android.util.Base64
 import androidx.annotation.RequiresApi
+import com.bittery.mobile.credentialprovider.service.EscrowPolicy
+import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.PrivateKey
+import java.security.spec.MGF1ParameterSpec
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
 
 /**
  * Manages biometric escrow of the Master Unlock Key (MUK).
@@ -21,8 +26,9 @@ import javax.crypto.spec.GCMParameterSpec
  * biometric-protected key. Later, the user can authenticate with biometrics to
  * retrieve the escrowed MUK without entering their password again.
  *
- * The escrow has a configurable timeout (default 10 minutes). After timeout,
- * the escrow is considered invalid and the user must enter their password again.
+ * The escrow has a configurable timeout (default: the 30-day master-password
+ * re-entry period). Auto-lock only drops the in-memory MUK; the escrow has to
+ * outlive a lock so autofill can unlock with biometrics from another app.
  *
  * Security properties:
  * - MUK is encrypted with AES-256-GCM using a Keystore key
@@ -37,27 +43,33 @@ class MukEscrowManager(private val context: Context) {
     companion object {
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEY_ALIAS = "bittery_muk_escrow_key"
+        private const val RSA_KEY_ALIAS = "bittery_muk_escrow_rsa"
         private const val ALGORITHM = KeyProperties.KEY_ALGORITHM_AES
         private const val BLOCK_MODE = KeyProperties.BLOCK_MODE_GCM
         private const val PADDING = KeyProperties.ENCRYPTION_PADDING_NONE
         private const val KEY_SIZE = 256
         private const val GCM_TAG_LENGTH = 128
-        private const val GCM_IV_LENGTH = 12
+        private const val RSA_KEY_SIZE = 2048
+        private const val RSA_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
+        private const val SCHEME_RSA = "rsa-oaep"
+        private const val SCHEME_AES = "aes-gcm"
 
         // Authentication validity: 0 means require auth for every operation
         // We use 0 for maximum security - biometric required for each decryption
         private const val AUTH_VALIDITY_SECONDS = 0
 
-        // Default escrow timeout: 10 minutes
-        const val DEFAULT_ESCROW_TIMEOUT_MS = 10 * 60 * 1000L
-
-        // 30-day master password re-entry period (matches RN: MASTER_PASSWORD_REENTRY_PERIOD_MS)
+        // 30-day master password re-entry period (matches AccountStore).
         const val MASTER_PASSWORD_REENTRY_PERIOD_MS = 30L * 24 * 60 * 60 * 1000
+
+        // Escrow outlives auto-lock. It expires with the re-entry period so a
+        // locked vault can still unwrap from the keyboard bar.
+        const val DEFAULT_ESCROW_TIMEOUT_MS = MASTER_PASSWORD_REENTRY_PERIOD_MS
 
         // SharedPreferences for storing escrowed data
         private const val PREFS_NAME = "bittery_muk_escrow"
         private const val PREF_ESCROWED_MUK = "escrowed_muk"
         private const val PREF_ESCROW_IV = "escrow_iv"
+        private const val PREF_ESCROW_SCHEME = "escrow_scheme"
         private const val PREF_ESCROW_TIMESTAMP = "escrow_timestamp"
         private const val PREF_ESCROW_TIMEOUT = "escrow_timeout_ms"
         private const val PREF_ESCROW_EMAIL = "escrow_email"
@@ -72,84 +84,108 @@ class MukEscrowManager(private val context: Context) {
     }
 
     /**
-     * Generate the escrow encryption key in Android Keystore.
-     * The key requires biometric authentication for each use.
+     * Generate the RSA wrap key. Encrypt uses the public half and needs no
+     * prompt, so a successful app unlock can escrow in the background.
+     * Decrypt uses the private half and still requires a biometric prompt.
      */
     fun generateKey() {
-        if (keyExists()) {
+        if (rsaKeyExists()) {
             return
         }
 
-        val keyGenerator = KeyGenerator.getInstance(ALGORITHM, KEYSTORE_PROVIDER)
-
-        val builder = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        val keyPairGenerator = KeyPairGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_RSA,
+            KEYSTORE_PROVIDER,
         )
-            .setBlockModes(BLOCK_MODE)
-            .setEncryptionPaddings(PADDING)
-            .setKeySize(KEY_SIZE)
+        val builder = KeyGenParameterSpec.Builder(
+            RSA_KEY_ALIAS,
+            KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+            .setKeySize(RSA_KEY_SIZE)
             .setUserAuthenticationRequired(true)
 
-        // Require biometric auth for each operation (no time-based validity)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             builder.setUserAuthenticationParameters(
                 AUTH_VALIDITY_SECONDS,
-                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
             )
         } else {
             @Suppress("DEPRECATION")
             builder.setUserAuthenticationValidityDurationSeconds(AUTH_VALIDITY_SECONDS)
         }
 
-        // Invalidate key if biometric enrollment changes
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             builder.setInvalidatedByBiometricEnrollment(true)
         }
 
-        keyGenerator.init(builder.build())
-        keyGenerator.generateKey()
+        keyPairGenerator.initialize(builder.build())
+        keyPairGenerator.generateKeyPair()
     }
 
     /**
      * Check if the escrow key exists in Keystore.
      */
     fun keyExists(): Boolean {
-        return keyStore.containsAlias(KEY_ALIAS)
+        return rsaKeyExists() || keyStore.containsAlias(KEY_ALIAS)
+    }
+
+    private fun rsaKeyExists(): Boolean {
+        return keyStore.containsAlias(RSA_KEY_ALIAS)
     }
 
     /**
      * Delete the escrow key and clear any escrowed data.
      */
     fun deleteKeyAndClearEscrow() {
-        if (keyExists()) {
+        if (keyStore.containsAlias(KEY_ALIAS)) {
             keyStore.deleteEntry(KEY_ALIAS)
+        }
+        if (rsaKeyExists()) {
+            keyStore.deleteEntry(RSA_KEY_ALIAS)
         }
         clearEscrow()
     }
 
+    private fun oaepSpec(): OAEPParameterSpec =
+        OAEPParameterSpec(
+            "SHA-256",
+            "MGF1",
+            MGF1ParameterSpec.SHA1,
+            PSource.PSpecified.DEFAULT,
+        )
+
     /**
-     * Get a cipher for encryption. Must be wrapped in BiometricPrompt.CryptoObject.
+     * Cipher for wrapping the MUK. Uses the RSA public key, so it does not
+     * need a biometric prompt.
      */
     fun getEncryptCipher(): Cipher {
-        if (!keyExists()) {
-            generateKey()
-        }
-
-        val key = keyStore.getKey(KEY_ALIAS, null) as SecretKey
-        val cipher = Cipher.getInstance("$ALGORITHM/$BLOCK_MODE/$PADDING")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
+        generateKey()
+        val publicKey = keyStore.getCertificate(RSA_KEY_ALIAS).publicKey
+        val cipher = Cipher.getInstance(RSA_TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
         return cipher
     }
 
     /**
-     * Get a cipher for decryption. Must be wrapped in BiometricPrompt.CryptoObject.
+     * Cipher for unwrapping the MUK. Must be wrapped in BiometricPrompt.CryptoObject.
      *
      * @throws IllegalStateException if no escrowed data exists
      * @throws KeyPermanentlyInvalidatedException if biometric enrollment changed
      */
     fun getDecryptCipher(): Cipher {
-        if (!keyExists()) {
+        if (usesRsaEscrow()) {
+            if (!rsaKeyExists()) {
+                throw IllegalStateException("Escrow key does not exist")
+            }
+            val privateKey = keyStore.getKey(RSA_KEY_ALIAS, null) as PrivateKey
+            val cipher = Cipher.getInstance(RSA_TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, privateKey, oaepSpec())
+            return cipher
+        }
+
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
             throw IllegalStateException("Escrow key does not exist")
         }
 
@@ -164,6 +200,11 @@ class MukEscrowManager(private val context: Context) {
         return cipher
     }
 
+    private fun usesRsaEscrow(): Boolean {
+        val scheme = prefs.getString(PREF_ESCROW_SCHEME, null)
+        return scheme == SCHEME_RSA || (scheme == null && rsaKeyExists() && prefs.getString(PREF_ESCROW_IV, null).isNullOrBlank())
+    }
+
     /**
      * Escrow the Master Unlock Key using an already-authenticated cipher.
      * Call this after successful password unlock to enable future biometric unlock.
@@ -171,7 +212,7 @@ class MukEscrowManager(private val context: Context) {
      * @param muk The 32-byte Master Unlock Key
      * @param cipher Already-authenticated cipher from BiometricPrompt
      * @param email The account email this escrow is for
-     * @param timeoutMs Escrow validity timeout in milliseconds (default 10 min)
+     * @param timeoutMs Escrow validity timeout in milliseconds
      */
     fun escrowMuk(
         muk: ByteArray,
@@ -184,15 +225,37 @@ class MukEscrowManager(private val context: Context) {
 
         val encryptedMuk = cipher.doFinal(muk)
         val iv = cipher.iv
-
-        prefs.edit()
+        val editor = prefs.edit()
             .putString(PREF_ESCROWED_MUK, Base64.encodeToString(encryptedMuk, Base64.NO_WRAP))
-            .putString(PREF_ESCROW_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
             .putLong(PREF_ESCROW_TIMESTAMP, System.currentTimeMillis())
             .putLong(PREF_ESCROW_TIMEOUT, timeoutMs)
             .putString(PREF_ESCROW_EMAIL, email)
             .putString(PREF_ESCROW_USER_ID, userId)
-            .apply()
+
+        if (iv != null && iv.isNotEmpty()) {
+            editor
+                .putString(PREF_ESCROW_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+                .putString(PREF_ESCROW_SCHEME, SCHEME_AES)
+        } else {
+            editor
+                .remove(PREF_ESCROW_IV)
+                .putString(PREF_ESCROW_SCHEME, SCHEME_RSA)
+        }
+        editor.apply()
+    }
+
+    /**
+     * Wrap the MUK with the RSA public key. No biometric prompt — the private
+     * half still demands one on unwrap.
+     */
+    fun escrowMukUnattended(
+        muk: ByteArray,
+        email: String,
+        timeoutMs: Long = DEFAULT_ESCROW_TIMEOUT_MS,
+        userId: String? = null,
+    ) {
+        val cipher = getEncryptCipher()
+        escrowMuk(muk, cipher, email, timeoutMs, userId)
     }
 
     /**
@@ -223,6 +286,7 @@ class MukEscrowManager(private val context: Context) {
         prefs.edit()
             .remove(PREF_ESCROWED_MUK)
             .remove(PREF_ESCROW_IV)
+            .remove(PREF_ESCROW_SCHEME)
             .remove(PREF_ESCROW_TIMESTAMP)
             .remove(PREF_ESCROW_TIMEOUT)
             .remove(PREF_ESCROW_EMAIL)
@@ -368,14 +432,11 @@ class MukEscrowManager(private val context: Context) {
      * @return true if password entry is required, false if biometric can be used
      */
     fun isMasterPasswordReentryRequired(): Boolean {
-        val lastEntry = getLastMasterPasswordEntry()
-        if (lastEntry == 0L) {
-            // Never entered password - require it
-            return true
-        }
-
-        val timeSinceLastEntry = System.currentTimeMillis() - lastEntry
-        return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS
+        return EscrowPolicy.isMasterPasswordReentryDue(
+            lastEntryMs = getLastMasterPasswordEntry(),
+            nowMs = System.currentTimeMillis(),
+            periodMs = MASTER_PASSWORD_REENTRY_PERIOD_MS,
+        )
     }
 
     /**

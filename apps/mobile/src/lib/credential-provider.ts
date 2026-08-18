@@ -286,7 +286,7 @@ export function getMasterUnlockKeyBase64(
 
 /**
  * Escrow the MUK with biometric protection after a password unlock, enabling later
- * biometric-only unlocks. Rejects if the user cancels the prompt.
+ * biometric-only unlocks from autofill. Rejects if the user cancels the prompt.
  * Mutating: throws when the plugin is absent.
  */
 export function escrowMukWithBiometric(

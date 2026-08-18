@@ -61,10 +61,16 @@ area.
 - **Bars are translucent, not opaque.** `AppBar` and `TabBar` sit on `bg-*/80` plus
   `backdrop-blur-xl`, guarded by `supports-[backdrop-filter]`. Content visibly passing under
   a blurred bar is the cheapest native cue available.
-- **Route changes animate through the View Transitions API.** `defaultViewTransition` is on
-  in `main.tsx`; the `::view-transition-*` rules live in `styles.css`. It is a cross-fade
-  with a small rise, *not* a directional slide — the router does not report push vs pop, and
-  a slide that runs backwards on Back is worse than no slide.
+- **Route changes animate through the View Transitions API.** `defaultViewTransition` in
+  `main.tsx` passes `routeTransitionTypes` (`src/lib/tab-route.ts`); the
+  `::view-transition-*` rules live in `styles.css`. Four types:
+  `tab` (cross-fade the pane, tab bar stays put), `push` / `pop` (horizontal slide),
+  `fade` (auth and anything we cannot classify). The tab bar is a named element so it is
+  not part of the root snapshot. Fallbacks: no API → cut; API without types → the untyped
+  root cross-fade; `prefers-reduced-motion` → cut; `deviceMemory <= 2` → fade, never a slide.
+- **Sheets are a custom layer, not Radix.** `MobileSheet` follows the finger, fades the scrim
+  with the drag, lifts above the keyboard, and consumes Android back. A Radix dialog cannot
+  do any of those without fighting its own exit lock.
 - **Scrolling is explicit.** Every scroll region is a bounded `ScreenScroll`, never the page.
   `.native-scroll` carries momentum, `overscroll-behavior: contain` and no scrollbar.
 - **WebView chrome is off** in `styles.css`: no tap highlight, no long-press callout, no
@@ -107,12 +113,16 @@ so Browse, the account sheet and deep links can push into them.
 
 The account avatar in the app bar opens `AccountSwitcher`: switch account, add account,
 settings, trash, lock. `TabScreen` renders it on every tab root, so no screen adds it.
+The tab bar itself lives on the `/vault` layout (`routes/vault/route.tsx`), not on
+`TabScreen`, so switching tabs keeps the same DOM node.
 
 ## Brand moments (the only sanctioned ambient purple)
 
 1. **Screen aurora** — `<Aurora />`, a radial `primary-deep` wash pinned to the top, fading
    by ~220px. Items, Browse, auth and unlock only.
-2. **Sheet header** — the wash + hairline every `MobileSheet` paints (`brandAccent`).
+2. **Sheet header** — parked. `MobileSheet` can paint a `primary-deep` wash + hairline
+   (`brandAccent`), but we leave it off on the phone; it reads as leftover desktop chrome.
+   Flip the default in `mobile-sheet.tsx` if we restore it.
 3. **Selection tint + `<GlowBar />`** — `bg-selected` plus a 1px `primary/15` ring, never a
    solid fill and never flipped text.
 4. **Icon tiles** — `<GradientTile />`, a deterministic 135° gradient from the shared
@@ -127,7 +137,15 @@ Anything else purple needs sign-off.
 
 220ms on `ease-native` (`cubic-bezier(0.32, 0.72, 0, 1)`). Press scale 0.985. Skeletons
 pulse; nothing else loops. No spring, no bounce, no attention-seeking entrances. The whole
-system is disabled under `prefers-reduced-motion`.
+system is disabled under `prefers-reduced-motion`. Route changes use the View Transition
+types in `src/lib/tab-route.ts` (`tab`, `push`, `pop`, `fade`); see "What the WebView
+changes" above for the fallbacks.
+
+Sheets are the one exception on duration, because they travel the full height of the
+screen: enter 400ms, snap-back 280ms, exit still 220ms so "close this sheet, then open the
+next" callers (`SHEET_EXIT_MS`) stay lined up. The grabber is a real drag handle — the
+sheet follows the finger, the scrim fades with the drag, a flick or a 28% pull dismisses,
+and pulling up past rest rubber-bands. Android's system back closes the top sheet.
 
 ## Iconography
 

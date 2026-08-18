@@ -542,6 +542,8 @@ jobs:
             changed:
               - 'apps/mobile/**'
               - 'packages/crypto/**'
+              - '.cargo/config.toml'
+              - 'scripts/check-android-page-size.mjs'
               # DomainMatchVectorsTest (run in mobile-android) pins the plugin's Kotlin
               # matching to this file, so a change here must re-run that test.
               - 'apps/extension/src/lib/hostname.ts'
@@ -607,13 +609,12 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      # NDK_HOME is not exported by default; pick the highest installed version, matching the
-      # export in docs/mobile-migration-state.md's own prerequisites.
-      - name: Locate NDK
+      - name: Install pinned 16 KB-compatible NDK
         shell: bash
         run: |
           set -euo pipefail
-          echo "NDK_HOME=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
+          yes | sdkmanager "ndk;28.2.13676358" >/dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Build crypto WASM
         run: pnpm run build:crypto-wasm
@@ -639,6 +640,10 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "tauri android build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify 16 KB native-library alignment
+        working-directory: apps/mobile
+        run: pnpm run android:check-page-size
+
       - uses: actions/upload-artifact@v7
         with:
           name: mobile-debug-apk
@@ -651,9 +656,9 @@ jobs:
       # after the build above generates gen/android/tauri.settings.gradle, so this cannot be
       # its own job.
       #
-      # Filtered to the domain package on purpose: CryptoTestVectors calls android.util.Base64
-      # (a throwing stub in the unit-test android.jar) and JNIs into the Rust library that is
-      # not loaded here. Widening this filter means fixing that file first.
+      # Filtered on purpose: CryptoTestVectors calls android.util.Base64 (a throwing stub
+      # in the unit-test android.jar) and JNIs into the Rust library that is not loaded
+      # here. The service package is pure (IME-chip copy and escrow policy).
       - name: Credential-provider unit tests
         working-directory: apps/mobile/src-tauri/gen/android
         shell: bash
@@ -661,7 +666,8 @@ jobs:
           set -euo pipefail
           start="$(date +%s)"
           ./gradlew --no-daemon :tauri-plugin-bittery-credential-provider:testDebugUnitTest \
-            --tests 'com.bittery.mobile.credentialprovider.domain.*'
+            --tests 'com.bittery.mobile.credentialprovider.domain.*' \
+            --tests 'com.bittery.mobile.credentialprovider.service.*'
           elapsed="$(( $(date +%s) - start ))"
           echo "credential-provider unit tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 

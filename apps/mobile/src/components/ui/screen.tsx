@@ -1,10 +1,11 @@
 /**
  * The canvas and the app bar — the two things every route composes.
  *
- * Height math: `__root.tsx` pads its wrapper by `--safe-top` / `--safe-bottom`, so `Screen`
- * subtracts those insets back out to become exactly the visible area. Without that the
- * scroll region is unbounded, the page itself scrolls under the sticky bar, and both the
- * app bar and `overscroll-behavior: contain` stop working.
+ * Height: `__root.tsx` is a full-WebView flex column that pads `--safe-top` only, so
+ * `Screen` is `flex-1` and fills whatever is left. Do not size this with `100dvh` minus
+ * insets — on Android WebView `dvh` and the WebView bounds disagree (especially on
+ * Samsung 3-button nav), and subtracting `--safe-bottom` here while `TabBar` also pads
+ * it leaves a blank band above the system buttons.
  */
 
 import { IconArrowLeft } from "@bittery/ui/icons";
@@ -32,13 +33,10 @@ export function Screen({
 	return (
 		<div
 			className={cn(
-				"relative flex w-full flex-col overflow-hidden",
+				"relative flex min-h-0 w-full flex-1 flex-col overflow-hidden",
 				surface === "overlay" ? "bg-surface-secondary" : "bg-background",
 				className,
 			)}
-			style={{
-				height: "calc(100dvh - var(--safe-top) - var(--safe-bottom))",
-			}}
 		>
 			{aurora ? <Aurora /> : null}
 			{children}

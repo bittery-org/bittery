@@ -141,6 +141,10 @@ impl<R: Runtime> CredentialProvider<R> {
         Err(crate::Error::Unsupported)
     }
 
+    pub fn authenticate(&self, _args: AuthenticateArgs) -> crate::Result<bool> {
+        Err(crate::Error::Unsupported)
+    }
+
     pub fn open_credential_provider_settings(&self) -> crate::Result<bool> {
         Err(crate::Error::Unsupported)
     }

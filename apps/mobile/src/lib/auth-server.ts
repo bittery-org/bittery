@@ -130,17 +130,48 @@ export function rememberServerUrl(serverUrl: string): string[] {
 	return next;
 }
 
+/**
+ * Drop a URL from the recency list. The active server and any account assignment
+ * stay put — this is only the picker's remembered hosts.
+ */
+export function forgetServerUrl(serverUrl: string): string[] {
+	const normalized = normalizeAuthServerUrl(serverUrl);
+	const current = readKnownServerUrls();
+	if (!normalized) {
+		return current;
+	}
+
+	const next = current.filter((url) => url !== normalized);
+	writeKnownServerUrls(next);
+	return next;
+}
+
+/** Hostname (and port, when it is not the default) for a picker row. */
+export function getServerLabel(serverUrl: string): string {
+	try {
+		const parsed = new URL(serverUrl);
+		return `${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`;
+	} catch {
+		return serverUrl;
+	}
+}
+
 export async function setActiveAuthServerUrl(
 	serverUrl: string,
+	options?: { persistToAccount?: boolean },
 ): Promise<string | null> {
 	const normalized = normalizeAuthServerUrl(serverUrl);
 	if (!normalized) {
 		return null;
 	}
 
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount) {
-		await storage.storeServerUrl(normalized, activeAccount);
+	// "Add account" is already sitting on another account. Writing through
+	// would re-point that account at a host it never signed in to.
+	if (options?.persistToAccount !== false) {
+		const activeAccount = await storage.getActiveAccount();
+		if (activeAccount) {
+			await storage.storeServerUrl(normalized, activeAccount);
+		}
 	}
 
 	storeActiveServerUrl(normalized);

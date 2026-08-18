@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillManager
+import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.annotation.RequiresApi
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -15,6 +16,7 @@ import androidx.fragment.app.FragmentActivity
 import com.bittery.mobile.credentialprovider.crypto.MukEscrowManager
 import com.bittery.mobile.credentialprovider.service.AutofillDatasetBuilder
 import com.bittery.mobile.credentialprovider.service.BitteryAutofillService
+import com.bittery.mobile.credentialprovider.service.InlineSuggestionLayout
 import com.bittery.mobile.credentialprovider.state.VaultStateManager
 import com.bittery.mobile.credentialprovider.storage.CredentialDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -135,41 +137,63 @@ class AutofillAuthActivity : FragmentActivity() {
         biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
     }
 
+    /**
+     * Hand the unlocked vault back to the framework.
+     *
+     * The service authenticates at *response* level, so what goes into
+     * [AutofillManager.EXTRA_AUTHENTICATION_RESULT] must be a FillResponse —
+     * anything else and the framework drops the session without a word.
+     *
+     * The inline specs matter just as much. The IME's request is forwarded to
+     * this activity in the launch intent; without it the returned datasets have
+     * no inline presentation and the keyboard strip stays empty after a
+     * successful unlock, even though the fill itself worked.
+     */
     private fun buildAndFinish(unlockedUserIds: List<String>) {
         val fieldIds = AutofillDatasetBuilder.FieldIds(usernameId, passwordId)
+        Log.d(TAG, "Building response for ${unlockedUserIds.size} unlocked user(s)")
+
+        val inlineRequest = inlineSuggestionsRequest()
+        val inlineSpecs = inlineRequest?.inlinePresentationSpecs.orEmpty()
+        val inlineSpec = InlineSuggestionLayout.scrollableSpec(inlineSpecs)
+        val pinnedSpec = InlineSuggestionLayout.pinnedSpec(inlineSpecs)
+        val maxSuggestionCount = if (inlineRequest != null && inlineSpec != null) {
+            inlineRequest.maxSuggestionCount.coerceAtLeast(0)
+        } else {
+            null
+        }
+        Log.d(TAG, "Inline specs from IME: ${inlineSpecs.size}, max=$maxSuggestionCount")
 
         activityScope.launch {
-            val datasets = withContext(Dispatchers.IO) {
-                val results = mutableListOf<android.service.autofill.Dataset>()
-                for (userId in unlockedUserIds) {
-                    val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
-                    val userDatasets = datasetBuilder.buildDatasets(
-                        fieldIds = fieldIds,
-                        domain = domain,
-                        muk = muk,
-                        inlineSpec = null,
-                        attributionIntent = null,
-                        userId = userId
-                    )
-                    results.addAll(userDatasets)
-                    if (results.size >= BitteryAutofillService.MAX_DATASETS) break
-                }
-                results
+            val response = withContext(Dispatchers.IO) {
+                datasetBuilder.buildUnlockedResponse(
+                    fieldIds = fieldIds,
+                    domain = domain,
+                    inlineSpec = inlineSpec,
+                    pinnedSpec = pinnedSpec,
+                    maxSuggestionCount = maxSuggestionCount,
+                    attributionIntent = datasetBuilder.appLaunchIntent(),
+                )
             }
 
-            if (datasets.isEmpty()) {
+            if (response == null) {
                 finishWithError("No credentials")
                 return@launch
             }
 
-            val responseBuilder = android.service.autofill.FillResponse.Builder()
-            datasets.forEach { responseBuilder.addDataset(it) }
-
             val resultIntent = Intent()
-            resultIntent.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, responseBuilder.build())
+            resultIntent.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, response)
             setResult(Activity.RESULT_OK, resultIntent)
             finish()
         }
+    }
+
+    private fun inlineSuggestionsRequest(): InlineSuggestionsRequest? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return getParcelableExtraCompat(
+            AutofillManager.EXTRA_INLINE_SUGGESTIONS_REQUEST,
+            InlineSuggestionsRequest::class.java,
+        )
     }
 
     private fun launchAppForUnlock(passwordRequired: Boolean) {

@@ -9,6 +9,7 @@ OUT_DIR="$SCRIPT_DIR/../android/generated"
 cd "$SCRIPT_DIR"
 
 CARGO_NDK_VERSION="4.1.2"
+ANDROID_NDK_VERSION="28.2.13676358"
 if ! command -v cargo-ndk >/dev/null 2>&1 ||
 	[[ "$(cargo ndk --version)" != "cargo-ndk ${CARGO_NDK_VERSION}" ]]; then
 	cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
@@ -18,10 +19,10 @@ fi
 # deliberate choice always wins over the highest installed version.
 if [[ -z "${ANDROID_NDK_HOME:-}${ANDROID_NDK_ROOT:-}${NDK_HOME:-}" ]]; then
 	ndk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}/ndk"
-	ANDROID_NDK_HOME="$(ls -d "$ndk_root"/* 2>/dev/null | sort -V | tail -1 || true)"
-	if [[ -z "$ANDROID_NDK_HOME" ]]; then
-		echo "error: no Android NDK found under $ndk_root." >&2
-		echo "       Install one, or point ANDROID_NDK_HOME at it." >&2
+	ANDROID_NDK_HOME="$ndk_root/$ANDROID_NDK_VERSION"
+	if [[ ! -d "$ANDROID_NDK_HOME" ]]; then
+		echo "error: Android NDK $ANDROID_NDK_VERSION is not installed." >&2
+		echo "       Install it with sdkmanager 'ndk;$ANDROID_NDK_VERSION'." >&2
 		exit 1
 	fi
 	export ANDROID_NDK_HOME

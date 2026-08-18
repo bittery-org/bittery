@@ -76,6 +76,13 @@ pub struct EmailArgs {
     pub email: String,
 }
 
+/// Reason shown on the OS biometric sheet. Empty falls back on the Kotlin side.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthenticateArgs {
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncVaultDataArgs {

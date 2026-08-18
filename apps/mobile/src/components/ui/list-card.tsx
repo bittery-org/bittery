@@ -52,6 +52,12 @@ export interface ListRowProps {
 	showChevron?: boolean;
 	tone?: "default" | "danger";
 	compact?: boolean;
+	/**
+	 * Let the title and subtitle wrap. The default is a single-line ellipsis, which is
+	 * right for settings values and item names, but clips the longer helper copy on
+	 * auth banners.
+	 */
+	wrap?: boolean;
 	ariaLabel?: string;
 	className?: string;
 }
@@ -68,6 +74,7 @@ export function ListRow({
 	showChevron = false,
 	tone = "default",
 	compact = false,
+	wrap = false,
 	ariaLabel,
 	className,
 }: ListRowProps) {
@@ -78,14 +85,20 @@ export function ListRow({
 			<div className="min-w-0 flex-1 text-left">
 				<div
 					className={cn(
-						"truncate font-medium text-base",
+						"font-medium text-base",
+						wrap ? "text-pretty" : "truncate",
 						tone === "danger" ? "text-danger" : "text-foreground",
 					)}
 				>
 					{title}
 				</div>
 				{subtitle ? (
-					<div className="mt-0.5 truncate text-muted-foreground text-sm">
+					<div
+						className={cn(
+							"mt-0.5 text-muted-foreground text-sm",
+							wrap ? "text-pretty" : "truncate",
+						)}
+					>
 						{subtitle}
 					</div>
 				) : null}
@@ -109,6 +122,7 @@ export function ListRow({
 
 	const rowClassName = cn(
 		"flex w-full items-center px-4",
+		wrap && "py-3",
 		isSelected && "bg-selected",
 		className,
 	);

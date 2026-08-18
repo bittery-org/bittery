@@ -20,7 +20,6 @@ import {
 	IconFileLock,
 	IconKey,
 	IconLayoutGrid,
-	IconQrCode,
 	IconSearch,
 	IconUser,
 } from "@bittery/ui/icons";
@@ -85,23 +84,14 @@ function AllItemsScreen() {
 	return (
 		<TabScreen
 			title={m.mob_tab_all_items()}
-			activeTab="items"
 			aurora
 			actions={
-				<>
-					<BarButton
-						onClick={() => navigate({ to: "/vault/search" })}
-						aria-label={m.mob_tab_search()}
-					>
-						<IconSearch className={iconClass.bar} />
-					</BarButton>
-					<BarButton
-						onClick={() => void createItemFlow.scanTotpQr()}
-						aria-label={m.mob_form_totp_scan_qr()}
-					>
-						<IconQrCode className={iconClass.bar} />
-					</BarButton>
-				</>
+				<BarButton
+					onClick={() => navigate({ to: "/vault/search" })}
+					aria-label={m.mob_tab_search()}
+				>
+					<IconSearch className={iconClass.bar} />
+				</BarButton>
 			}
 			toolbar={
 				<CategoryRail value={categoryFilter} onChange={setCategoryFilter} />
@@ -136,7 +126,7 @@ function AllItemsScreen() {
 					/>
 				)
 			) : (
-				<div className="flex flex-col gap-6 px-4 pt-4">
+				<div className="flex flex-col gap-6 px-4 pt-1">
 					{favoriteItems.length > 0 ? (
 						<section>
 							{/* The label is the affordance: favorites has no tab, so this is how the
@@ -164,7 +154,6 @@ function AllItemsScreen() {
 									<MobileItemRow
 										key={item.id}
 										item={item}
-										showVaultName
 										onSelect={() => openItem(item.id)}
 										onToggleFavorite={() => handleToggle(item)}
 									/>
@@ -183,7 +172,6 @@ function AllItemsScreen() {
 									<MobileItemRow
 										key={item.id}
 										item={item}
-										showVaultName
 										onSelect={() => openItem(item.id)}
 										onToggleFavorite={() => handleToggle(item)}
 									/>
@@ -198,7 +186,6 @@ function AllItemsScreen() {
 				open={createItemFlow.isOpen}
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
-				initialCategory={createItemFlow.initialCategory}
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 		</TabScreen>

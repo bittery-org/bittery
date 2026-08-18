@@ -33,6 +33,7 @@ const COMMANDS: &[&str] = &[
     // Capability
     "is_available",
     "is_biometric_available",
+    "authenticate",
     "open_credential_provider_settings",
     "is_supported",
 ];

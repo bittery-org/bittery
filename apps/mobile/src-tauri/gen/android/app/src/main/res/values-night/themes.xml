@@ -1,6 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.bittery_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Samsung 3-button nav otherwise paints an opaque scrim that stacks with CSS insets. -->
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
     </style>
 </resources>

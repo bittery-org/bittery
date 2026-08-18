@@ -48,7 +48,6 @@ function FavoritesScreen() {
 							<MobileItemRow
 								key={item.id}
 								item={item}
-								showVaultName
 								onSelect={() =>
 									navigate({
 										to: "/vault/favorites/$itemId",

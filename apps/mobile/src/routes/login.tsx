@@ -1,4 +1,8 @@
 import { useLogin } from "@bittery/core/hooks";
+import {
+	type ParsedDeviceSetupPayload,
+	parseDeviceSetupParams,
+} from "@bittery/shared/device-setup";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
@@ -7,33 +11,89 @@ import {
 	IconKey,
 	IconLock,
 	IconMail,
+	IconNetwork,
+	IconQrCode,
 	IconTriangleAlert,
 } from "@bittery/ui/icons";
+import { cn } from "@bittery/ui/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	redirect,
+	useNavigate,
+	useRouter,
+} from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
 	AuthField,
 	AuthFooterNote,
+	AuthTextAction,
 	AuthToggle,
 	BrandLockup,
 	InlineNotice,
 	PasswordField,
 	submitForm,
 } from "@/components/auth-kit";
-import { BrandButton, Screen, ScreenScroll } from "@/components/ui";
+import { ServerPickerSheet } from "@/components/server-picker-sheet";
 import {
+	AppBar,
+	BrandButton,
+	IconTile,
+	iconClass,
+	ListCard,
+	ListRow,
+	Pressable,
+	QrScannerOverlay,
+	Screen,
+	ScreenScroll,
+	waitForScannerOverlayPaint,
+} from "@/components/ui";
+import { useMobileAccountRuntime } from "@/contexts/account-context";
+import { resolveAddAccountExit } from "@/lib/add-account-exit";
+import {
+	getServerLabel,
 	resolveActiveAuthServerUrl,
 	setActiveAuthServerUrl,
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
+import {
+	CameraPermissionDeniedError,
+	cancelActiveScan,
+	formatScanError,
+	InvalidDeviceSetupQrError,
+	isScanCancelled,
+	scanDeviceSetupQr,
+} from "@/lib/barcode-scanner";
+import { prepareCredentialProviderAfterPasswordUnlock } from "@/lib/credential-provider-password-unlock";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
 	prefillEmail?: string;
 	addAccount?: boolean;
+	setup?: string;
+	v?: string;
+	email?: string;
+	serverUrl?: string;
+	teamName?: string;
+	secretKey?: string;
+}
+
+function setupPayloadFromSearch(
+	search: LoginSearchParams,
+): ParsedDeviceSetupPayload | null {
+	try {
+		return parseDeviceSetupParams({
+			setup: search.setup,
+			v: search.v,
+			email: search.email,
+			serverUrl: search.serverUrl,
+			teamName: search.teamName,
+			secretKey: search.secretKey,
+		});
+	} catch {
+		return null;
+	}
 }
 
 export const Route = createFileRoute("/login")({
@@ -53,6 +113,10 @@ export const Route = createFileRoute("/login")({
 		 * is falsy and reads as "not asked for".
 		 */
 		if (search.addAccount) {
+			return;
+		}
+
+		if (setupPayloadFromSearch(search)) {
 			return;
 		}
 
@@ -90,13 +154,33 @@ export const Route = createFileRoute("/login")({
 			typeof search.prefillEmail === "string" ? search.prefillEmail : undefined,
 		// A deep link or a reload carries the flag back as the string "true".
 		addAccount: search.addAccount === true || search.addAccount === "true",
+		setup: typeof search.setup === "string" ? search.setup : undefined,
+		v: typeof search.v === "string" ? search.v : undefined,
+		email: typeof search.email === "string" ? search.email : undefined,
+		serverUrl:
+			typeof search.serverUrl === "string" ? search.serverUrl : undefined,
+		teamName: typeof search.teamName === "string" ? search.teamName : undefined,
+		secretKey:
+			typeof search.secretKey === "string" ? search.secretKey : undefined,
 	}),
 });
 
 export function LoginPage() {
 	const { m } = useI18n();
-	const { prefillEmail } = Route.useSearch();
+	const search = Route.useSearch();
+	const {
+		prefillEmail,
+		addAccount,
+		setup: setupFlag,
+		v: setupVersion,
+		email: setupEmail,
+		serverUrl: setupServerUrl,
+		teamName: setupTeamName,
+		secretKey: setupSecretKey,
+	} = search;
 	const navigate = useNavigate();
+	const router = useRouter();
+	const { manager } = useMobileAccountRuntime();
 	const queryClient = useQueryClient();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
@@ -110,6 +194,11 @@ export function LoginPage() {
 	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
 		useState(false);
 	const [isPrefilled, setIsPrefilled] = useState(false);
+	const [setupComplete, setSetupComplete] = useState(false);
+	const [hasSetupSecret, setHasSetupSecret] = useState(false);
+	const [isScanningSetup, setIsScanningSetup] = useState(false);
+	const [isServerPickerOpen, setIsServerPickerOpen] = useState(false);
+	const scanningSetupRef = useRef(false);
 	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
 	// See `submitForm`: the gradient button is not a native submit control.
 	const formRef = useRef<HTMLFormElement>(null);
@@ -122,7 +211,9 @@ export function LoginPage() {
 	});
 
 	const applyServerUrl = async (candidateUrl: string) => {
-		const nextServerUrl = await setActiveAuthServerUrl(candidateUrl);
+		const nextServerUrl = await setActiveAuthServerUrl(candidateUrl, {
+			persistToAccount: !addAccount,
+		});
 		if (!nextServerUrl) {
 			toast.error(m.toast_auth_server_invalid_url());
 			return null;
@@ -137,6 +228,25 @@ export function LoginPage() {
 		let active = true;
 
 		const prefill = async () => {
+			const setup = setupPayloadFromSearch({
+				setup: setupFlag,
+				v: setupVersion,
+				email: setupEmail,
+				serverUrl: setupServerUrl,
+				teamName: setupTeamName,
+				secretKey: setupSecretKey,
+			});
+			if (setup) {
+				setEmail(setup.email);
+				if (setup.secretKey) setSecretKey(setup.secretKey);
+				const appliedServerUrl = await setActiveAuthServerUrl(setup.serverUrl);
+				if (!active) return;
+				if (appliedServerUrl) setServerUrl(appliedServerUrl);
+				setSetupComplete(true);
+				setHasSetupSecret(Boolean(setup.secretKey));
+				return;
+			}
+
 			if (prefillEmail) {
 				const [storedSecretKey, storedServerUrl] = await Promise.all([
 					storage.getStoredSecretKey(prefillEmail),
@@ -173,7 +283,15 @@ export function LoginPage() {
 		return () => {
 			active = false;
 		};
-	}, [prefillEmail]);
+	}, [
+		prefillEmail,
+		setupFlag,
+		setupVersion,
+		setupEmail,
+		setupServerUrl,
+		setupTeamName,
+		setupSecretKey,
+	]);
 
 	useEffect(() => {
 		const unsubscribe = subscribeActiveAuthServerUrl((nextServerUrl) => {
@@ -197,19 +315,20 @@ export function LoginPage() {
 				}
 			}
 
-			// `apps/mobile/app/(auth)/login.tsx:225` — a fresh sign-in is an unlock, so the
-			// MUK reaches the credential provider here rather than a debounce later. Never
-			// fatal: a failed mirror costs autofill a few seconds, a thrown one costs the
-			// user their sign-in.
+			// A fresh sign-in is a password unlock, so the MUK, the native
+			// password stamp and (when biometric is on) the autofill escrow
+			// all move here rather than a debounce later. Never fatal: a
+			// failed prepare costs autofill a few seconds, a thrown one
+			// costs the user their sign-in.
 			const signedInAccountId = await storage.getActiveAccount();
 			if (signedInAccountId) {
 				try {
-					await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+					await prepareCredentialProviderAfterPasswordUnlock([
 						signedInAccountId,
 					]);
 				} catch (error) {
 					console.warn(
-						"[Login] Failed to mirror MUK to credential provider",
+						"[Login] Failed to prepare the credential provider",
 						error,
 					);
 				}
@@ -234,6 +353,78 @@ export function LoginPage() {
 		},
 	});
 
+	const applySetupPayload = async (payload: ParsedDeviceSetupPayload) => {
+		setEmail(payload.email);
+		setSecretKey(payload.secretKey ?? "");
+		const appliedServerUrl = await applyServerUrl(payload.serverUrl);
+		if (!appliedServerUrl) return;
+		setSetupComplete(true);
+		setHasSetupSecret(Boolean(payload.secretKey));
+		if (!payload.secretKey) {
+			toast.success(m.login_alert_setup_loaded_message());
+		}
+	};
+
+	const closeSetupScanner = () => {
+		scanningSetupRef.current = false;
+		setIsScanningSetup(false);
+		void cancelActiveScan();
+	};
+
+	const scanSetupQr = async () => {
+		scanningSetupRef.current = true;
+		setIsScanningSetup(true);
+		await waitForScannerOverlayPaint();
+		if (!scanningSetupRef.current) return;
+		try {
+			const payload = await scanDeviceSetupQr();
+			if (!scanningSetupRef.current) return;
+			await applySetupPayload(payload);
+		} catch (error) {
+			if (isScanCancelled(error)) return;
+			if (error instanceof CameraPermissionDeniedError) {
+				toast.error(m.device_setup_scanner_permission_description());
+				return;
+			}
+			if (error instanceof InvalidDeviceSetupQrError) {
+				toast.error(m.device_setup_scanner_invalid_qr_error());
+				return;
+			}
+			console.warn(
+				"[login] setup scan did not complete",
+				formatScanError(error),
+			);
+		} finally {
+			scanningSetupRef.current = false;
+			setIsScanningSetup(false);
+		}
+	};
+
+	const startOver = () => {
+		setEmail("");
+		setPassword("");
+		setSecretKey("");
+		setSetupComplete(false);
+		setHasSetupSecret(false);
+		void navigate({
+			to: "/login",
+			search: addAccount ? { addAccount: true } : {},
+		});
+	};
+
+	const leaveAddAccount = () => {
+		const activeAccount = manager.getActiveAccount();
+		const exit = resolveAddAccountExit({
+			canGoBack: router.history.canGoBack(),
+			isUnlocked: activeAccount ? manager.isUnlocked(activeAccount) : false,
+		});
+		if (exit.kind === "back") {
+			router.history.back();
+			return;
+		}
+		void navigate({ to: exit.to });
+	};
+
 	const handleLogin = async (e: React.FormEvent) => {
 		e.preventDefault();
 
@@ -257,112 +448,211 @@ export function LoginPage() {
 	};
 
 	return (
-		<Screen aurora>
-			<ScreenScroll inset="plain">
-				{/* `min-h-full` + `justify-center` centres the form on a tall phone but lets it
-				    grow past the fold once the keyboard is up. */}
-				<div className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-7 px-4 py-8">
-					<BrandLockup
-						title={m.auth_signin_title_default()}
-						subtitle={m.auth_signin_description_default()}
+		<>
+			<Screen aurora>
+				{addAccount ? (
+					<AppBar
+						title={m.mob_login_title_add_account()}
+						onBack={leaveAddAccount}
+						backLabel={m.mob_common_go_back()}
+						bordered={false}
 					/>
-
-					{isPrefilled && (
-						<InlineNotice
-							tone="warning"
-							icon={IconTriangleAlert}
-							title={m.auth_signin_session_expired_title()}
-							description={m.auth_signin_session_expired_desktop_description()}
-						/>
-					)}
-
-					<form
-						ref={formRef}
-						onSubmit={handleLogin}
-						className="flex flex-col gap-4"
+				) : null}
+				<ScreenScroll inset="plain">
+					{/* Top-aligned so the QR banner and biometric toggle keep their full
+					    wrapping height instead of being pinched into a centred column. */}
+					<div
+						className={cn(
+							"mx-auto flex min-h-full w-full max-w-sm flex-col gap-6 px-5 pb-6",
+							addAccount ? "pt-4" : "pt-10",
+						)}
 					>
-						<AuthField
-							id="email"
-							label={m.auth_signin_label_email()}
-							icon={IconMail}
-							type="email"
-							value={email}
-							onChange={(e) => setEmail(e.target.value)}
-							required
-							placeholder={m.auth_signin_placeholder_email()}
-							disabled={isPrefilled}
-							inputMode="email"
-							autoComplete="username"
-							autoCapitalize="none"
-							autoCorrect="off"
-						/>
-
-						<PasswordField
-							id="secretKey"
-							label={m.auth_signin_label_secret_key()}
-							icon={IconKey}
-							description={m.auth_signin_secret_key_help()}
-							value={secretKey}
-							onChange={(e) => setSecretKey(e.target.value)}
-							required
-							placeholder={m.auth_signin_placeholder_secret_key()}
-							// A 34-character key does not fit a phone field at 15px. Mono at 13px
-							// with tight tracking shows the whole format hint without wrapping.
-							inputClassName="font-mono text-sm tracking-tighter"
-							autoComplete="off"
-							autoCapitalize="characters"
-							autoCorrect="off"
-						/>
-
-						<PasswordField
-							id="password"
-							label={m.auth_signin_label_password()}
-							icon={IconLock}
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							required
-							placeholder={m.auth_signin_placeholder_password()}
-							autoComplete="current-password"
-							autoCapitalize="none"
-							autoCorrect="off"
-						/>
-
-						{biometricAvailable && (
-							<AuthToggle
-								icon={IconFingerprint}
-								label={m.auth_signin_biometric_enable()}
-								isSelected={enableBiometric}
-								onSelectedChange={setEnableBiometric}
+						{addAccount ? (
+							<p className="text-pretty text-muted-foreground text-sm">
+								{m.mob_login_description_add_account()}
+							</p>
+						) : (
+							<BrandLockup
+								title={m.auth_signin_title_default()}
+								subtitle={m.auth_signin_description_default()}
 							/>
 						)}
 
-						{requiresInsecureTransportConfirmation ? (
-							<AuthToggle
+						{isPrefilled && (
+							<InlineNotice
 								tone="warning"
 								icon={IconTriangleAlert}
-								label={m.auth_insecure_http_confirmation_label()}
-								description={m.auth_insecure_http_confirmation_description()}
-								isSelected={insecureTransportConfirmed}
-								onSelectedChange={setInsecureTransportConfirmed}
+								title={m.auth_signin_session_expired_title()}
+								description={m.auth_signin_session_expired_desktop_description()}
+							/>
+						)}
+
+						{!setupComplete && !isPrefilled ? (
+							<ListCard>
+								<ListRow
+									title={m.login_setup_device_banner_title()}
+									subtitle={m.login_setup_device_banner_description()}
+									leading={
+										<IconTile tone="brand">
+											<IconQrCode className={iconClass.bar} />
+										</IconTile>
+									}
+									showChevron
+									wrap
+									isDisabled={isScanningSetup}
+									onPress={() => void scanSetupQr()}
+								/>
+							</ListCard>
+						) : null}
+
+						<form
+							ref={formRef}
+							onSubmit={handleLogin}
+							className="flex flex-col gap-4"
+						>
+							{setupComplete ? (
+								<AuthField
+									id="serverUrl"
+									label={m.login_server_url_label()}
+									value={serverUrl}
+									disabled
+								/>
+							) : (
+								<ListCard>
+									<ListRow
+										title={m.login_server_row_label()}
+										subtitle={
+											getServerLabel(serverUrl) ||
+											m.auth_footer_server_loading()
+										}
+										leading={
+											<IconTile>
+												<IconNetwork className={iconClass.row} />
+											</IconTile>
+										}
+										showChevron
+										onPress={() => setIsServerPickerOpen(true)}
+									/>
+								</ListCard>
+							)}
+
+							<AuthField
+								id="email"
+								label={m.auth_signin_label_email()}
+								icon={IconMail}
+								type="email"
+								value={email}
+								onChange={(e) => setEmail(e.target.value)}
+								required
+								placeholder={m.auth_signin_placeholder_email()}
+								disabled={isPrefilled || setupComplete}
+								inputMode="email"
+								autoComplete="username"
+								autoCapitalize="none"
+								autoCorrect="off"
+							/>
+
+							{hasSetupSecret ? null : (
+								<PasswordField
+									id="secretKey"
+									label={m.auth_signin_label_secret_key()}
+									icon={IconKey}
+									description={m.auth_signin_secret_key_help()}
+									value={secretKey}
+									onChange={(e) => setSecretKey(e.target.value)}
+									required
+									placeholder={m.auth_signin_placeholder_secret_key()}
+									// A 34-character key does not fit a phone field at 15px. Mono at 13px
+									// with tight tracking shows the whole format hint without wrapping.
+									inputClassName="font-mono text-sm tracking-tighter"
+									autoComplete="off"
+									autoCapitalize="characters"
+									autoCorrect="off"
+								/>
+							)}
+
+							<PasswordField
+								id="password"
+								label={m.auth_signin_label_password()}
+								icon={IconLock}
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+								required
+								placeholder={m.auth_signin_placeholder_password()}
+								autoComplete="current-password"
+								autoCapitalize="none"
+								autoCorrect="off"
+							/>
+
+							{biometricAvailable && (
+								<AuthToggle
+									icon={IconFingerprint}
+									label={m.auth_signin_biometric_enable()}
+									isSelected={enableBiometric}
+									onSelectedChange={setEnableBiometric}
+								/>
+							)}
+
+							{requiresInsecureTransportConfirmation ? (
+								<AuthToggle
+									tone="warning"
+									icon={IconTriangleAlert}
+									label={m.auth_insecure_http_confirmation_label()}
+									description={m.auth_insecure_http_confirmation_description()}
+									isSelected={insecureTransportConfirmed}
+									onSelectedChange={setInsecureTransportConfirmed}
+								/>
+							) : null}
+
+							<BrandButton
+								size="lg"
+								className="mt-1"
+								onClick={() => submitForm(formRef.current)}
+								isLoading={loginMutation.isPending}
+								label={
+									loginMutation.isPending
+										? m.auth_signin_button_signing_in()
+										: m.auth_signin_button_sign_in()
+								}
+							/>
+
+							{setupComplete ? (
+								<Pressable
+									onClick={startOver}
+									className="self-center py-1 text-muted-foreground text-sm"
+								>
+									{m.login_setup_complete_not_you()}
+								</Pressable>
+							) : null}
+						</form>
+
+						{addAccount ? (
+							<AuthTextAction
+								label={m.mob_login_cancel_add_account()}
+								onPress={leaveAddAccount}
 							/>
 						) : null}
 
-						<BrandButton
-							size="lg"
-							className="mt-1"
-							onClick={() => submitForm(formRef.current)}
-							isLoading={loginMutation.isPending}
-							label={
-								loginMutation.isPending
-									? m.auth_signin_button_signing_in()
-									: m.auth_signin_button_sign_in()
-							}
-						/>
-					</form>
-
-					<AuthFooterNote label={m.mob_auth_encrypted_note()} />
-				</div>
-			</ScreenScroll>
-		</Screen>
+						<div className="mt-auto pt-4">
+							<AuthFooterNote label={m.mob_auth_encrypted_note()} />
+						</div>
+					</div>
+				</ScreenScroll>
+			</Screen>
+			<QrScannerOverlay
+				open={isScanningSetup}
+				title={m.device_setup_scanner_title()}
+				instruction={m.device_setup_scanner_footer()}
+				backLabel={m.mob_common_go_back()}
+				onCancel={closeSetupScanner}
+			/>
+			<ServerPickerSheet
+				open={isServerPickerOpen}
+				onOpenChange={setIsServerPickerOpen}
+				selectedUrl={serverUrl}
+				persistToAccount={!addAccount}
+				onSelected={setServerUrl}
+			/>
+		</>
 	);
 }

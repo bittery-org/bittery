@@ -38,7 +38,10 @@ export const iconClass = {
  * area. Mirrors native's `useBottomInset()`; a plain value because CSS can do the insets.
  */
 export const scrollBottomInset = {
-	/** Screens with a tab bar below the scroller. */
+	/**
+	 * Tab-root screens. The tab bar is `position: fixed` over the scroller, so
+	 * the last row must clear the bar, the home indicator, and the 24px gap.
+	 */
 	tabBar: "calc(var(--tab-bar-height) + var(--safe-bottom) + 24px)",
 	/** Pushed screens with nothing below the scroller. */
 	plain: "calc(var(--safe-bottom) + 24px)",

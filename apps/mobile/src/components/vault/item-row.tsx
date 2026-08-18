@@ -4,7 +4,8 @@
  *
  * It used to wrap `@bittery/ui`'s `VaultItemListRow`, a dense desktop row sized for a mouse. This
  * is the native shape instead: a 56pt row, a 40pt leading tile, a title line that carries the
- * TOTP and passkey indicators, and a second line for the vault chip and the identifying detail.
+ * TOTP and passkey indicators, and a second line for the identifying detail (username, category,
+ * masked card). Vault name stays off the row — it belongs on the item, not in the list.
  * The row paints no background or border — it lives inside a `ListCard`, which owns the card
  * chrome and the hairlines between rows.
  */
@@ -12,13 +13,7 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { getDomainFromUrl } from "@bittery/shared/favicon";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import {
-	IconClock,
-	IconPasskey,
-	IconStar,
-	IconUsers,
-	IconVault,
-} from "@bittery/ui/icons";
+import { IconClock, IconPasskey, IconStar } from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { iconClass, layout, Pressable } from "@/components/ui";
 import { Favicon } from "@/components/vault/favicon";
@@ -29,15 +24,12 @@ type Messages = ReturnType<typeof useI18n>["m"];
 type RowItem = DecryptedItemWithContext & {
 	id: string;
 	vaultId: string;
-	vault?: { name: string; type?: string } | null;
 };
 
 interface MobileItemRowProps {
 	item: RowItem;
 	onSelect: () => void;
 	onToggleFavorite: () => void;
-	/** Items / favorites / tag span multiple vaults; a single vault's own list does not. */
-	showVaultName?: boolean;
 }
 
 /** Login rows show who the credential belongs to; every other category names itself. */
@@ -66,12 +58,10 @@ export function MobileItemRow({
 	item,
 	onSelect,
 	onToggleFavorite,
-	showVaultName = false,
 }: MobileItemRowProps) {
 	const { m } = useI18n();
 
 	const subtitle = getSubtitle(item, m);
-	const vault = showVaultName ? item.vault : null;
 	const hasTotp = item.category === "login" && Boolean(item.totpSecret);
 	const hasPasskeys =
 		item.category === "login" && (item.passkeys?.length ?? 0) > 0;
@@ -100,14 +90,9 @@ export function MobileItemRow({
 							<IconPasskey className="size-3.5 shrink-0 text-muted-foreground" />
 						) : null}
 					</div>
-					{vault || subtitle ? (
-						<div className="mt-0.5 flex items-center gap-1.5">
-							{vault ? <VaultChip name={vault.name} type={vault.type} /> : null}
-							{subtitle ? (
-								<span className="min-w-0 flex-1 truncate text-muted-foreground text-sm">
-									{subtitle}
-								</span>
-							) : null}
+					{subtitle ? (
+						<div className="mt-0.5 truncate text-muted-foreground text-sm">
+							{subtitle}
 						</div>
 					) : null}
 				</div>
@@ -137,17 +122,5 @@ export function MobileItemRow({
 				/>
 			</Pressable>
 		</div>
-	);
-}
-
-/** Neutral chip naming the vault an item lives in. Never status-coloured. */
-function VaultChip({ name, type }: { name: string; type?: string }) {
-	const Icon = type === "team" ? IconUsers : IconVault;
-
-	return (
-		<span className="flex max-w-[45%] shrink-0 items-center gap-1 rounded-full border border-border bg-surface-secondary px-1.5 py-0.5">
-			<Icon className="size-2.5 shrink-0 text-muted-foreground" />
-			<span className="truncate text-2xs text-muted-foreground">{name}</span>
-		</span>
 	);
 }

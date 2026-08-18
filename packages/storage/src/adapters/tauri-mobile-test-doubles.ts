@@ -32,8 +32,8 @@
  *     Its one job is the call log — `executes` and `selects` — which is what proves `recordPut`
  *     and `recordDelete` are O(1). Every *behavioural* record test, including the shared
  *     conformance suite, runs on real SQLite.
- *   - `BiometryDouble` covers only `checkStatus` and `authenticate`, because those are the
- *     only two functions the adapter still uses from that plugin.
+ *   - `BiometryDouble` covers `checkStatus` and the authenticate *fallback*. Production
+ *     Android authenticate goes through {@link FirstPartyAuthenticateDouble}.
  *   - `@tauri-apps/plugin-store`'s `Store.load(path)` returns the *same* store for the same
  *     path, so `loadStore` hands back one instance per path — which is what makes the
  *     `store.json` / `secrets.json` separation observable to a test.
@@ -436,6 +436,33 @@ export class BiometryDouble implements TauriMobileBiometry {
 	}
 }
 
+/**
+ * First-party `MainActivity`-hosted prompt (`plugin:bittery-credential-provider|authenticate`).
+ *
+ * Distinct from {@link BiometryDouble}: that double is the third-party plugin, whose
+ * Android path launches a translucent `BiometryActivity` via `startActivityForResult`
+ * and never shows a sheet on this app. Tests that want the production Android host
+ * use this one.
+ */
+export class FirstPartyAuthenticateDouble {
+	/** When false, `loadFirstPartyAuthenticate` answers `null` — iOS, or no plugin. */
+	available = true;
+	/** When set, `authenticate` rejects with it. */
+	authFailure: unknown = null;
+	readonly prompts: string[] = [];
+
+	async authenticate(reason: string): Promise<void> {
+		this.prompts.push(reason);
+		if (this.authFailure !== null) {
+			throw this.authFailure;
+		}
+	}
+
+	resetCallLog(): void {
+		this.prompts.length = 0;
+	}
+}
+
 // ============================================================================
 // tauri-plugin-bittery-keystore
 // ============================================================================
@@ -620,6 +647,8 @@ interface TauriMobileDoublesOf<TDatabase extends TauriSqlDatabase> {
 	biometry: BiometryDouble;
 	/** `tauri-plugin-bittery-keystore` — the secret tier when the probe says yes. */
 	keystore: KeystoreDouble;
+	/** First-party `MainActivity` biometric host. */
+	firstPartyAuthenticate: FirstPartyAuthenticateDouble;
 }
 
 /** Records on real SQLite. The default, and what every behavioural test uses. */
@@ -649,6 +678,11 @@ export interface TauriMobileDoublesOptions {
 	 * said no. Distinct from `keystoreModuleMissing`, and the adapter must fall back on both.
 	 */
 	keystoreUnavailable?: boolean;
+	/**
+	 * Simulate no first-party authenticate host — iOS, or an APK built without
+	 * `bittery-credential-provider`. The adapter must then use the third-party plugin.
+	 */
+	firstPartyAuthenticateUnavailable?: boolean;
 }
 
 /**
@@ -679,6 +713,11 @@ function buildDoubles<TDatabase extends TauriSqlDatabase>(
 	if (options.keystoreUnavailable === true) {
 		keystore.available = false;
 		keystore.backing = "Android Keystore unavailable — probe declined";
+	}
+
+	const firstPartyAuthenticate = new FirstPartyAuthenticateDouble();
+	if (options.firstPartyAuthenticateUnavailable === true) {
+		firstPartyAuthenticate.available = false;
 	}
 
 	const deps: TauriMobileDeps = {
@@ -718,9 +757,23 @@ function buildDoubles<TDatabase extends TauriSqlDatabase>(
 			}
 			return keystore.invoke;
 		},
+		loadFirstPartyAuthenticate: async () => {
+			if (!firstPartyAuthenticate.available) {
+				return null;
+			}
+			return (reason: string) => firstPartyAuthenticate.authenticate(reason);
+		},
 	};
 
-	return { deps, store, secrets, database, biometry, keystore };
+	return {
+		deps,
+		store,
+		secrets,
+		database,
+		biometry,
+		keystore,
+		firstPartyAuthenticate,
+	};
 }
 
 /**

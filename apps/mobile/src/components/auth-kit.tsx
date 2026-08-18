@@ -43,7 +43,7 @@ export function BrandLockup({
 			{/* No `text-balance`: balancing pinches two lines to half the screen, which reads
 			    as a narrow column under a wide title. */}
 			{subtitle ? (
-				<p className="mt-1.5 max-w-[19rem] text-muted-foreground text-sm">
+				<p className="mt-1.5 text-pretty text-muted-foreground text-sm">
 					{subtitle}
 				</p>
 			) : null}
@@ -287,9 +287,13 @@ export function AuthToggle({
 				/>
 			) : null}
 			<div className="min-w-0 flex-1">
-				<p className="font-medium text-base text-foreground">{label}</p>
+				<p className="text-pretty font-medium text-base text-foreground">
+					{label}
+				</p>
 				{description ? (
-					<p className="mt-0.5 text-muted-foreground text-sm">{description}</p>
+					<p className="mt-0.5 text-pretty text-muted-foreground text-sm">
+						{description}
+					</p>
 				) : null}
 			</div>
 			<Switch
@@ -317,10 +321,12 @@ export function AuthTextAction({
 	return (
 		<Pressable
 			onClick={onPress}
-			className="flex h-11 w-full items-center justify-center gap-2 rounded-xl font-medium text-muted-foreground text-sm"
+			className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 py-2 font-medium text-muted-foreground text-sm"
 		>
-			{Icon ? <Icon aria-hidden className={iconClass.chip} /> : null}
-			{label}
+			{Icon ? (
+				<Icon aria-hidden className={cn("shrink-0", iconClass.chip)} />
+			) : null}
+			<span className="min-w-0 text-pretty text-center">{label}</span>
 		</Pressable>
 	);
 }

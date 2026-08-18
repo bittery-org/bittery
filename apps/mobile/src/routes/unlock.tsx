@@ -31,7 +31,10 @@ import {
 	ScreenScroll,
 } from "@/components/ui";
 import { useMobileAccountRuntime } from "@/contexts/account-context";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
+import {
+	prepareCredentialProviderAfterPasswordUnlock,
+	prepareCredentialProviderAfterUnlock,
+} from "@/lib/credential-provider-password-unlock";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -79,12 +82,9 @@ export function UnlockPage() {
 	 */
 	const mirrorUnlockedMuks = useCallback(async (unlocked: string[]) => {
 		try {
-			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(unlocked);
+			await prepareCredentialProviderAfterUnlock(unlocked);
 		} catch (error) {
-			console.warn(
-				"[Unlock] Failed to mirror MUKs to credential provider",
-				error,
-			);
+			console.warn("[Unlock] Failed to prepare the credential provider", error);
 		}
 	}, []);
 	const getPartialUnlockMessage = useCallback(
@@ -137,7 +137,7 @@ export function UnlockPage() {
 	// Unlock all accounts at once with password
 	const quickUnlockAll = useQuickUnlockAll({
 		onSuccess: async (result) => {
-			await mirrorUnlockedMuks(result.unlocked);
+			await prepareCredentialProviderAfterPasswordUnlock(result.unlocked);
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			showUnlockToast({
@@ -150,7 +150,7 @@ export function UnlockPage() {
 			navigate({ to: "/vault" });
 		},
 		onPartialSuccess: async (result) => {
-			await mirrorUnlockedMuks(result.unlocked);
+			await prepareCredentialProviderAfterPasswordUnlock(result.unlocked);
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));

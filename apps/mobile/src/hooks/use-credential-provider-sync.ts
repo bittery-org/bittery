@@ -42,7 +42,7 @@ import {
 	credentialProvider as CredentialProvider,
 	type PendingPasskeyMutation,
 } from "@/lib/credential-provider";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
+import { prepareCredentialProviderAfterUnlock } from "@/lib/credential-provider-password-unlock";
 import { storage } from "@/lib/storage";
 
 const MAX_PENDING_PASSKEY_ATTEMPTS = 5;
@@ -239,9 +239,7 @@ export function useCredentialProviderSync(
 				return;
 			}
 
-			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(
-				unlockedAccountIds,
-			);
+			await prepareCredentialProviderAfterUnlock(unlockedAccountIds);
 
 			debugLog("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {

@@ -1,6 +1,14 @@
 {
 	"$schema": "https://turbo.build/schema.json",
 	"ui": "tui",
+	"globalPassThroughEnv": [
+		"ANDROID_HOME",
+		"ANDROID_SDK_ROOT",
+		"ANDROID_NDK_HOME",
+		"ANDROID_NDK_ROOT",
+		"NDK_HOME",
+		"LLVM_READELF"
+	],
 	"tasks": {
 		"build": {
 			"dependsOn": ["^build"],

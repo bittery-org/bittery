@@ -13,8 +13,8 @@
  *
  * What still comes from `@bittery/ui`, because it is real shared logic rather than presentation:
  * `handleCopy` (clipboard + auto-clear + toast copy, see `clipboard-bridge.ts` for why that path
- * matters on Android) and `EditItemSheet`. The tag editor and the password history are local
- * sheets — desktop's are a Radix popover and a centred modal, neither of which survives a phone.
+ * matters on Android). Edit, tags and password history are local sheets — desktop's are a
+ * right-hand drawer, a Radix popover and a centred modal, none of which survive a phone.
  */
 
 import {
@@ -44,13 +44,7 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import {
-	EditItemSheet,
-	getTagColorFromName,
-	handleCopy,
-	Skeleton,
-	toast,
-} from "@bittery/ui";
+import { getTagColorFromName, handleCopy, Skeleton, toast } from "@bittery/ui";
 import {
 	IconArrowLeftRight,
 	IconCheck,
@@ -94,9 +88,11 @@ import {
 	MobileSheet,
 	Pressable,
 	SectionLabel,
+	SHEET_EXIT_MS,
 	SheetAction,
 	TextField,
 } from "@/components/ui";
+import { EditItemSheet } from "@/components/vault/edit-item-sheet";
 import { Favicon } from "@/components/vault/favicon";
 import { ItemAttachments } from "@/components/vault/item-attachments";
 import { MoveItemSheet } from "@/components/vault/move-item-sheet";
@@ -1309,7 +1305,7 @@ function ItemDetailHeader({
 	const { m } = useI18n();
 
 	return (
-		<div className="relative pt-2 pb-6">
+		<div className="relative pt-6 pb-6">
 			{/* 6% in light, 9% in dark — two elements rather than one, because a token cannot
 			    carry a per-theme alpha and an arbitrary value owes light mode its own story. */}
 			<div
@@ -1560,13 +1556,13 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 	};
 
 	/**
-	 * Closes the overflow sheet, then runs the action once it has finished animating out. Radix
-	 * keeps a scroll lock and a `pointer-events: none` on the body for the length of the exit
-	 * transition, so opening the next sheet in the same tick leaves the app briefly untappable.
+	 * Closes the overflow sheet, then runs the action once it has finished animating out.
+	 * Two sheets in the same tick stack their scrims and the first one is still catching
+	 * the tap.
 	 */
 	const runAction = (action: () => void) => {
 		setIsActionsOpen(false);
-		setTimeout(action, 220);
+		setTimeout(action, SHEET_EXIT_MS);
 	};
 
 	const CategoryBody = rawItem ? CATEGORY_FIELDS[rawItem.category] : null;
@@ -1718,8 +1714,6 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 								}
 							}}
 							isSubmitting={updateItem.isPending}
-							dataTestId="edit-item-sheet"
-							side="bottom"
 						/>
 					) : null}
 

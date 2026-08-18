@@ -57,7 +57,6 @@ function TagItemsScreen() {
 							<MobileItemRow
 								key={item.id}
 								item={item}
-								showVaultName
 								onSelect={() =>
 									navigate({
 										to: "/vault/tag/$tagName/$itemId",

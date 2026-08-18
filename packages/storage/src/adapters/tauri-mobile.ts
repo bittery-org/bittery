@@ -13,7 +13,7 @@
  * | `kv*` scope `device`   | `@tauri-apps/plugin-store`, `store.json`, key as given           |
  * | `kv*` scope `session`  | `store.json`, key under the `session:` namespace                 |
  * | records                | `@tauri-apps/plugin-sql` — a SQLite table, one row per record    |
- * | biometric              | `@choochmeque/tauri-plugin-biometry-api` `checkStatus`/`authenticate` |
+ * | biometric              | `checkStatus` from `@choochmeque/tauri-plugin-biometry-api`; `authenticate` prefers `plugin:bittery-credential-provider|authenticate` (MainActivity-hosted `BiometricPrompt`) and falls back to the third-party plugin |
  *
  * The secret tier prefers the Android Keystore, through the first-party
  * `apps/mobile/src-tauri/plugins/keystore` plugin, and falls back to `secrets.json` when
@@ -259,6 +259,16 @@ export interface TauriMobileDeps {
 	 * probe's "unavailable" answer. Both paths are handled.
 	 */
 	loadKeystore(): Promise<TauriKeystoreInvoke>;
+	/**
+	 * First-party biometric prompt hosted on `MainActivity`.
+	 *
+	 * Returns `null` when that host is not registered (iOS, or an APK built without
+	 * `bittery-credential-provider`). The adapter then falls back to the third-party
+	 * plugin. Must not *call* authenticate as the probe: that would raise a prompt.
+	 */
+	loadFirstPartyAuthenticate(): Promise<
+		((reason: string) => Promise<void>) | null
+	>;
 }
 
 const defaultDeps: TauriMobileDeps = {
@@ -280,6 +290,21 @@ const defaultDeps: TauriMobileDeps = {
 	loadKeystore: async () => {
 		const module = await import("@tauri-apps/api/core");
 		return module.invoke as unknown as TauriKeystoreInvoke;
+	},
+	loadFirstPartyAuthenticate: async () => {
+		try {
+			const { invoke } = await import("@tauri-apps/api/core");
+			// `is_supported` resolves on Android (plugin present) and rejects on the
+			// iOS/desktop stub. It does not raise a prompt.
+			await invoke("plugin:bittery-credential-provider|is_supported");
+			return async (reason: string) => {
+				await invoke("plugin:bittery-credential-provider|authenticate", {
+					reason,
+				});
+			};
+		} catch {
+			return null;
+		}
 	},
 };
 
@@ -364,6 +389,9 @@ function classifyBiometricFailure(cause: unknown): BiometricPortResult {
 
 function createTauriMobileBiometricPort(
 	loadBiometry: () => Promise<TauriMobileBiometry>,
+	loadFirstPartyAuthenticate: () => Promise<
+		((reason: string) => Promise<void>) | null
+	>,
 ): BiometricPort {
 	/** `null` when the plugin is absent or the probe itself failed — both mean "no". */
 	const probe = async (): Promise<TauriBiometryStatus | null> => {
@@ -373,6 +401,15 @@ function createTauriMobileBiometricPort(
 			return null;
 		}
 	};
+
+	/**
+	 * Prefer the first-party host. The third-party plugin's Android path starts a
+	 * translucent `BiometryActivity` through `startActivityForResult`; on Tauri 2.11
+	 * that either never initialises the launcher or the floating activity is cancelled
+	 * before a sheet appears. `CredentialProviderPlugin` already hosts `BiometricPrompt`
+	 * on the live `MainActivity`.
+	 */
+	const firstPartyAuthenticate = memoise(loadFirstPartyAuthenticate);
 
 	return {
 		isAvailable: async () => (await probe())?.isAvailable === true,
@@ -402,6 +439,21 @@ function createTauriMobileBiometricPort(
 		},
 
 		authenticate: async (reason) => {
+			let firstParty: ((prompt: string) => Promise<void>) | null = null;
+			try {
+				firstParty = await firstPartyAuthenticate();
+			} catch {
+				firstParty = null;
+			}
+			if (firstParty !== null) {
+				try {
+					await firstParty(reason);
+					return { success: true };
+				} catch (cause) {
+					return classifyBiometricFailure(cause);
+				}
+			}
+
 			let biometry: TauriMobileBiometry;
 			try {
 				biometry = await loadBiometry();
@@ -441,6 +493,9 @@ export function createTauriMobilePlatformPort(
 	const store = memoise(() => deps.loadStore(STORE_PATH));
 	const secrets = memoise(() => deps.loadStore(SECRETS_STORE_PATH));
 	const biometry = memoise(() => deps.loadBiometry());
+	const firstPartyAuthenticate = memoise(() =>
+		deps.loadFirstPartyAuthenticate(),
+	);
 
 	/**
 	 * The live secret backend, decided once by `initialize()`.
@@ -539,7 +594,7 @@ export function createTauriMobilePlatformPort(
 		// Records live in their own SQLite table, which no native host reads. The empty
 		// string is the honest answer, and `AccountStore` concatenates it unconditionally.
 		recordKeyPrefix: "",
-		biometric: createTauriMobileBiometricPort(biometry),
+		biometric: createTauriMobileBiometricPort(biometry, firstPartyAuthenticate),
 
 		/**
 		 * Both store files are opened eagerly. The biometry plugin is loaded lazily on

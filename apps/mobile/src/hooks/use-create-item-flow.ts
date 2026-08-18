@@ -4,11 +4,6 @@ import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast, type VaultOption } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import {
-	InvalidTotpSecretError,
-	NotAnOtpAuthUriError,
-	scanTotpSetupToClipboard,
-} from "@/lib/barcode-scanner";
 import { useI18n } from "@/providers/i18n-provider";
 
 /**
@@ -17,30 +12,15 @@ import { useI18n } from "@/providers/i18n-provider";
  * `/vault` route does (`apps/desktop/src/routes/vault/route.tsx`), then navigates to the new
  * item's detail screen in its vault on success.
  *
- * `scanTotpQr` is the second entry point these same screens offer, next to "+": scan a TOTP
- * `otpauth://` QR (`apps/mobile`'s equivalent lived inside its `TotpForm`, see
- * `src/lib/barcode-scanner.ts` for why it lands on the clipboard instead of a form field here),
- * then open the sheet on the Authenticator form so the shared `TotpForm`'s clipboard auto-paste
- * picks the scan up immediately.
- *
- * Render the returned state with `@/components/vault/create-item-sheet`, not `@bittery/ui`'s
- * `CreateItemSheet` — the local one is the mobile-shaped twin and is what `initialCategory`
- * below is for.
+ * Authenticator QR scanning lives on the sheet itself — picking that category opens the
+ * camera — not as a second app-bar entry point. Render the returned state with
+ * `@/components/vault/create-item-sheet`, not `@bittery/ui`'s `CreateItemSheet`.
  */
 export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const [isOpen, setIsOpen] = useState(false);
-	const [initialCategory, setInitialCategory] = useState<
-		ItemCategory | undefined
-	>(undefined);
 	const createItem = useCreateItem();
-
-	/** Clears the QR scan's category preselection so the next plain "+" opens the picker. */
-	const setSheetOpen = (open: boolean) => {
-		if (!open) setInitialCategory(undefined);
-		setIsOpen(open);
-	};
 
 	const vaultOptions: VaultOption[] = vaultKeys.map((v) => ({
 		id: v.vaultId,
@@ -69,7 +49,7 @@ export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 				data,
 				accountId,
 			});
-			setSheetOpen(false);
+			setIsOpen(false);
 			toast.success(m.mob_create_item_toast_success());
 			navigate({
 				to: "/vault/$id/$itemId",
@@ -85,40 +65,11 @@ export function useCreateItemFlow(vaultKeys: VaultKeyWithAccount[]) {
 		}
 	};
 
-	/**
-	 * Scans a TOTP QR, validates it, writes it to the clipboard, and opens the create-item
-	 * sheet straight on the Authenticator form, where `TotpForm`'s clipboard auto-paste
-	 * fills the secret in.
-	 */
-	const scanTotpQr = async () => {
-		try {
-			await scanTotpSetupToClipboard();
-			toast.success(m.mob_form_totp_toast_imported());
-			setInitialCategory("totp");
-			setIsOpen(true);
-		} catch (error) {
-			if (error instanceof NotAnOtpAuthUriError) {
-				toast.error(m.mob_qr_scanner_invalid_qr_message());
-				return;
-			}
-			if (error instanceof InvalidTotpSecretError) {
-				toast.error(m.mob_qr_scanner_invalid_secret_message());
-				return;
-			}
-			// Includes a user-cancelled or permission-denied scan — `scan()` rejects for
-			// both, and `apps/mobile`'s scanner treated a cancel as "say nothing", so this
-			// does too rather than showing an error for a deliberate cancel.
-			console.warn("[scanTotpQr] scan did not complete", error);
-		}
-	};
-
 	return {
 		isOpen,
-		setIsOpen: setSheetOpen,
-		initialCategory,
+		setIsOpen,
 		vaultOptions,
 		handleCreateItem,
-		scanTotpQr,
 		isPending: createItem.isPending,
 	};
 }

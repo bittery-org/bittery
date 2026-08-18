@@ -155,7 +155,6 @@ export function TravelModeSheet({
 				}}
 				title={m.travel_mode_disable_title()}
 				description={m.travel_mode_disable_description()}
-				brandAccent={false}
 			>
 				<form
 					onSubmit={(event) => {

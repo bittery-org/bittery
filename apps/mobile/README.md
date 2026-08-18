@@ -7,6 +7,12 @@ chunks.
 
 - App identifier is `com.bittery.mobile`, deliberately different from the Expo app's
   `io.bittery.app` so both can be installed side by side during the migration.
+- Launcher icons come from the old Expo app (`assets/icon.png` and
+  `assets/adaptive-icon.png`). `pnpm tauri icon assets/icon.png` regenerates
+  `src-tauri/icons/`. The phone does not read that folder: copy the Android and
+  iOS snapshots into `src-tauri/gen/android` and `src-tauri/gen/apple` as well,
+  or the launcher keeps the default Tauri mark. `scripts/check-launcher-icons.test.ts`
+  is the tripwire.
 - Vite serves on port 3040 (desktop owns 3002).
 - `src-tauri/tauri.conf.json` sets `security.csp` to `null`. JSON has no comments, so the reason
   lives here: a real CSP will need `wasm-unsafe-eval` for the crypto worker once that lands, and
@@ -18,7 +24,7 @@ Every Tauri Android command needs this environment:
 
 ```sh
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-export NDK_HOME="$(ls -d "$HOME/Library/Android/sdk/ndk/"* | sort -V | tail -1)"
+export NDK_HOME="$HOME/Library/Android/sdk/ndk/28.2.13676358"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ```
 
@@ -32,9 +38,12 @@ Build a debug APK:
 
 ```sh
 pnpm android:build   # tauri android build --debug --target aarch64 --apk
+pnpm android:check-page-size
 ```
 
 Output lands at `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
+NDK r28 and the root Cargo linker configuration make the native libraries compatible with both
+4 KB and 16 KB Android page sizes; this does not change the app's Android 7 (`minSdk = 24`) floor.
 Install and launch it on the `Pixel_9` AVD (API 36, arm64, `google_apis_playstore` — the only AVD on
 this machine set up for the mobile work):
 
@@ -53,7 +62,8 @@ plain `pnpm dev` at the root leaves the phone app out. For UI-only work without 
 **Four things to not get wrong:**
 
 - **Never re-run `pnpm tauri android init`.** It rewrites `AndroidManifest.xml`,
-  `app/build.gradle.kts`, and `tauri.settings.gradle`, and resets the Kotlin version bump below.
+  `app/build.gradle.kts`, and `tauri.settings.gradle`, resets the Kotlin version bump below,
+  and puts the default Tauri launcher icon back into `gen/android`.
 - **`AndroidManifest.xml` must keep `android:allowBackup="false"`.** It is hand-added, and
   `android init` drops it. Without it `shared_prefs/bittery_keystore_secrets.xml` — the secret
   tier's ciphertext — goes to Google cloud backup. The bytes are useless without the Keystore

@@ -112,6 +112,12 @@
 /* WebView behaviour                                                           */
 /* -------------------------------------------------------------------------- */
 
+html,
+body,
+#root {
+	height: 100%;
+}
+
 html {
 	color-scheme: light dark;
 	/* A pinch-zoomable password manager reads as a website. */
@@ -168,19 +174,153 @@ svg {
 	}
 }
 
+/*
+ * Windowed QR scan. The plugin puts the camera under a transparent WebView.
+ * Everything still opaque — including portaled sheets — would hide the preview,
+ * so this class punches a hole through the page. The dim and the corner
+ * brackets are camera chrome, not app chrome: they sit on the live feed,
+ * which is not a themed surface, so they stay near-black / white.
+ */
+html.qr-scanning,
+html.qr-scanning body {
+	background-color: transparent;
+}
+
+html.qr-scanning #root,
+html.qr-scanning body > *:not(.qr-scanner-overlay) {
+	visibility: hidden;
+}
+
+html.qr-scanning .qr-scanner-overlay {
+	visibility: visible;
+	color: white;
+}
+
+.qr-scanner-overlay > header,
+.qr-scanner-overlay > p {
+	background-color: oklch(0 0 0 / 0.55);
+}
+
+/*
+ * BarButton paints `text-foreground`, which is a dark grey in light mode and
+ * loses the arrow on the camera. Force the control itself — not inherited
+ * colour — so the exit affordance stays white on the feed.
+ */
+html.qr-scanning .qr-scanner-overlay button {
+	color: white;
+	background-color: oklch(1 0 0 / 0.22);
+}
+
+html.qr-scanning .qr-scanner-overlay button svg {
+	color: white;
+	stroke: white;
+}
+
+.qr-scanner-frame {
+	box-shadow: 0 0 0 9999px oklch(0 0 0 / 0.62);
+}
+
+.qr-scanner-corner {
+	position: absolute;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-color: white;
+	border-style: solid;
+}
+
+.qr-scanner-corner-tl {
+	top: 0;
+	left: 0;
+	border-width: 3px 0 0 3px;
+	border-top-left-radius: 12px;
+}
+
+.qr-scanner-corner-tr {
+	top: 0;
+	right: 0;
+	border-width: 3px 3px 0 0;
+	border-top-right-radius: 12px;
+}
+
+.qr-scanner-corner-bl {
+	bottom: 0;
+	left: 0;
+	border-width: 0 0 3px 3px;
+	border-bottom-left-radius: 12px;
+}
+
+.qr-scanner-corner-br {
+	bottom: 0;
+	right: 0;
+	border-width: 0 3px 3px 0;
+	border-bottom-right-radius: 12px;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Motion                                                                      */
 /* -------------------------------------------------------------------------- */
 
 /*
  * Route transitions. TanStack Router drives these through `document.startViewTransition`
- * (`defaultViewTransition` in main.tsx); a WebView without the API simply cuts, which is the
- * correct fallback — nothing here is load-bearing.
+ * (`defaultViewTransition` in main.tsx).
  *
- * A cross-fade with a small rise, not a directional slide: the router does not tell us
- * whether a navigation is a push or a pop, and a slide that goes the wrong way on Back is
- * far more jarring than no slide at all.
+ * Fallbacks, cheapest first:
+ *   1. No View Transitions API (iOS < 18, stale Android WebView) — instant cut.
+ *   2. API yes, types no — the untyped rules below (cross-fade, no slide).
+ *   3. `prefers-reduced-motion` / `routeTransitionTypes` returning false — cut,
+ *      no snapshot. The reduce-motion block at the bottom is a second belt.
+ *   4. Low-end (`deviceMemory <= 2`) — types become `fade`, never a slide.
+ *
+ * Typed navigations (`tab` / `push` / `pop` / `fade`) only apply when the
+ * WebView matches `:active-view-transition-type()`. Slides are transform +
+ * opacity only so they stay on the compositor.
+ *
+ * The tab bar is a named element (`view-transition-name: tab-bar`) so it is
+ * carved out of the root snapshot and does not ride the page animation.
  */
+.tab-bar {
+	view-transition-name: tab-bar;
+}
+
+::view-transition-group(tab-bar) {
+	z-index: 20;
+	animation: none;
+}
+
+::view-transition-old(tab-bar),
+::view-transition-new(tab-bar) {
+	animation: none;
+	mix-blend-mode: normal;
+}
+
+/* Instant highlight swap on tab change — both snapshots are translucent, so a
+   cross-fade would darken the bar for a frame. */
+html:active-view-transition-type(tab)::view-transition-old(tab-bar) {
+	opacity: 0;
+}
+
+html:active-view-transition-type(push)::view-transition-old(tab-bar) {
+	animation: tab-bar-out 180ms var(--ease-native) both;
+}
+
+html:active-view-transition-type(pop)::view-transition-new(tab-bar) {
+	animation: tab-bar-in 180ms var(--ease-native) both;
+}
+
+@keyframes tab-bar-out {
+	to {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+@keyframes tab-bar-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) {
 	animation-duration: 220ms;
@@ -189,44 +329,118 @@ svg {
 	mix-blend-mode: normal;
 }
 
+/* Untyped fallback and `fade`: cross-fade, no directional motion. */
 ::view-transition-old(root) {
-	animation-name: route-out;
+	animation-name: route-fade-out;
 }
 
 ::view-transition-new(root) {
-	animation-name: route-in;
+	animation-name: route-fade-in;
 }
 
-@keyframes route-out {
+html:active-view-transition-type(tab)::view-transition-old(root) {
+	animation-name: route-fade-out;
+}
+
+html:active-view-transition-type(tab)::view-transition-new(root) {
+	animation-name: route-fade-in;
+}
+
+html:active-view-transition-type(push)::view-transition-old(root) {
+	animation-name: route-push-out;
+}
+
+html:active-view-transition-type(push)::view-transition-new(root) {
+	animation-name: route-push-in;
+	z-index: 1;
+}
+
+html:active-view-transition-type(pop)::view-transition-old(root) {
+	animation-name: route-pop-out;
+	z-index: 1;
+}
+
+html:active-view-transition-type(pop)::view-transition-new(root) {
+	animation-name: route-pop-in;
+}
+
+@keyframes route-fade-out {
 	to {
 		opacity: 0;
-		transform: scale(0.99);
 	}
 }
 
-@keyframes route-in {
-	from {
-		opacity: 0;
-		transform: scale(1.012) translateY(6px);
-	}
-}
-
-@keyframes sheet-in {
-	from {
-		transform: translateY(100%);
-	}
-	to {
-		transform: translateY(0);
-	}
-}
-
-@keyframes scrim-in {
+@keyframes route-fade-in {
 	from {
 		opacity: 0;
 	}
+}
+
+@keyframes route-push-out {
 	to {
-		opacity: 1;
+		opacity: 0.6;
+		transform: translateX(-22%);
 	}
+}
+
+@keyframes route-push-in {
+	from {
+		transform: translateX(100%);
+	}
+}
+
+@keyframes route-pop-out {
+	to {
+		transform: translateX(100%);
+	}
+}
+
+@keyframes route-pop-in {
+	from {
+		opacity: 0.6;
+		transform: translateX(-22%);
+	}
+}
+
+/*
+ * Bottom sheet. Transform and opacity are driven from JS so a drag can take
+ * over the same properties the enter/exit transition uses. These rules only
+ * set the compositor layer and the resting off-screen pose.
+ */
+.mobile-sheet[data-exiting] {
+	pointer-events: none;
+}
+
+.mobile-sheet-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 50;
+	background: #000;
+	opacity: 0;
+	touch-action: none;
+}
+
+.mobile-sheet-panel {
+	position: fixed;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 51;
+	overflow: hidden;
+	overscroll-behavior: none;
+	transform: translate3d(0, 100%, 0);
+	will-change: transform;
+}
+
+.mobile-sheet-panel [data-sheet-handle] {
+	transition:
+		transform 120ms var(--ease-native),
+		background-color 120ms var(--ease-native);
+}
+
+.mobile-sheet-panel[data-dragging] [data-sheet-handle] {
+	background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+	transform: scaleX(1.15);
 }
 
 /*

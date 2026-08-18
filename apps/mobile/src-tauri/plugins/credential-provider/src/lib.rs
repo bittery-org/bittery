@@ -76,6 +76,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_last_master_password_entry,
             commands::is_available,
             commands::is_biometric_available,
+            commands::authenticate,
             commands::open_credential_provider_settings,
             commands::is_supported,
         ])

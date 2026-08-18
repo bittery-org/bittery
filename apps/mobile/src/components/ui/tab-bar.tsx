@@ -2,6 +2,10 @@
  * Flush bottom bar — hairline top border over a blurred canvas, not a floating pill. The
  * active tab is a primary-coloured icon and label; there is no pill, no background swap.
  *
+ * `position: fixed` so the bar overlays the scroller (content can pass under the blur)
+ * and so tab switches do not change the page's height. `view-transition-name: tab-bar`
+ * (`.tab-bar` in styles.css) carves it out of the root snapshot.
+ *
  * The blur is texture, not transparency: the bar stays a legible surface at 88% opacity and
  * the content scrolling underneath is only ever suggested.
  */
@@ -30,8 +34,12 @@ export function TabBar<Key extends string>({
 	return (
 		<nav
 			aria-label={ariaLabel}
-			className="relative z-20 shrink-0 border-border/80 border-t bg-background/88 supports-[backdrop-filter]:backdrop-blur-xl"
-			style={{ paddingBottom: "var(--safe-bottom)" }}
+			className="tab-bar fixed right-0 bottom-0 left-0 z-20 border-border/80 border-t bg-background/88 supports-[backdrop-filter]:backdrop-blur-xl"
+			style={{
+				paddingBottom: "var(--safe-bottom)",
+				paddingLeft: "var(--safe-left)",
+				paddingRight: "var(--safe-right)",
+			}}
 		>
 			<div className="flex items-stretch">
 				{tabs.map((tab) => {

@@ -2,9 +2,9 @@
  * One vault's item list, pushed from Browse. Each row opens `/vault/$id/$itemId`.
  *
  * No virtualisation: the spike measured ~51ms to decrypt 2 000 items, so a plain list is fine.
- * Creating an item is the FAB, preselected to this vault; the app bar keeps the TOTP-QR scanner
- * and carries the vault's own edit/delete actions behind an overflow sheet — this screen is the
- * only place a single vault is the subject, so it is where those two verbs belong.
+ * Creating an item is the FAB, preselected to this vault. The app bar carries the vault's
+ * own edit/delete actions behind an overflow sheet — this screen is the only place a
+ * single vault is the subject, so it is where those two verbs belong.
  */
 
 import {
@@ -18,7 +18,6 @@ import {
 	IconEllipsis,
 	IconKey,
 	IconPencil,
-	IconQrCode,
 	IconTrash,
 } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -32,6 +31,7 @@ import {
 	iconClass,
 	ListCard,
 	MobileSheet,
+	SHEET_EXIT_MS,
 	SheetAction,
 } from "@/components/ui";
 import { CreateItemSheet } from "@/components/vault/create-item-sheet";
@@ -65,13 +65,12 @@ function VaultItemListScreen() {
 
 	/**
 	 * Closes the overflow sheet, then runs the action once it has finished animating out.
-	 * Radix holds a scroll lock and `pointer-events: none` on the body for the length of the
-	 * exit transition, so opening the next sheet in the same tick leaves the app untappable.
-	 * Same reason and same 220ms as `ItemDetailScreen.runAction`.
+	 * Two sheets in the same tick stack their scrims and the first one is still catching
+	 * the tap. Same reason and same `SHEET_EXIT_MS` as `ItemDetailScreen.runAction`.
 	 */
 	const runAction = (action: () => void) => {
 		setIsActionsOpen(false);
-		setTimeout(action, 220);
+		setTimeout(action, SHEET_EXIT_MS);
 	};
 
 	const handleDeleteVault = async () => {
@@ -109,12 +108,6 @@ function VaultItemListScreen() {
 			onBack={() => navigate({ to: "/vault" })}
 			headerEnd={
 				<>
-					<BarButton
-						onClick={() => void createItemFlow.scanTotpQr()}
-						aria-label={m.mob_form_totp_scan_qr()}
-					>
-						<IconQrCode className={iconClass.bar} />
-					</BarButton>
 					{/* Read-only members cannot rename or delete, so they get no overflow at all
 					    rather than a sheet of disabled rows. */}
 					{vaultInfo && !isReadOnly ? (
@@ -222,7 +215,6 @@ function VaultItemListScreen() {
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
 				selectedVaultId={id}
-				initialCategory={createItemFlow.initialCategory}
 				onCreateItem={createItemFlow.handleCreateItem}
 			/>
 		</MobileScreen>
