@@ -35,24 +35,27 @@ cargo test
 pnpm run build:crypto-wasm
 ```
 
-### React Native
+### Android
 
 ```bash
 pnpm run build:crypto-android
-pnpm run build:crypto-ios
 ```
 
-These commands generate the Kotlin, Objective-C++, C++, JSI, and TurboModule sources consumed
-by `@bittery/crypto-react-native`. The Android command covers all shipped ABIs; the iOS command
-builds device and simulator XCFrameworks. `BUILD.md` describes the generated and ignored
-outputs.
+Builds all four shipped ABIs and generates the UniFFI Kotlin beside them, into
+`packages/crypto/android/generated`. The Tauri credential provider is the only consumer;
+everything else on mobile reaches this crate through WASM. `BUILD.md` describes the generated
+and ignored outputs.
+
+There is no iOS binding target. The iOS app has no native crypto consumer — the credential
+provider is Android-only — so nothing builds an XCFramework today.
 
 ## Crate Structure
 
 ```
 crates/
 ├── bittery-crypto-core/    # Core crypto primitives (no platform deps)
-└── bittery-crypto-api/     # Shared UniFFI API for web and React Native
+├── bittery-crypto-api/     # Shared UniFFI API for web (WASM) and Android (Kotlin)
+└── uniffi-bindgen/         # Version-pinned UniFFI generator, used by build-android.sh
 ```
 
 ## API Usage

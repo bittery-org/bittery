@@ -1,118 +1,72 @@
-import { BlurView } from "expo-blur";
-import { Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useUniwind } from "uniwind";
-import { cn } from "@/lib/utils";
-import type { AppIcon } from "./icons";
-import { iconSize, layout } from "./theme";
-
-export interface TabBarIcons {
-	[routeName: string]: AppIcon;
-}
-
 /**
- * Structural subset of react-navigation's `BottomTabBarProps`. Declared here
- * because `@react-navigation/bottom-tabs` is a transitive expo-router
- * dependency and is not resolvable from this workspace.
- */
-interface TabBarProps {
-	state: {
-		index: number;
-		routes: Array<{ key: string; name: string }>;
-	};
-	descriptors: Record<string, { options: { title?: string } }>;
-	navigation: {
-		emit: (event: {
-			type: "tabPress";
-			target: string;
-			canPreventDefault: true;
-		}) => { defaultPrevented: boolean };
-		navigate: (name: string) => void;
-	};
-}
-
-/**
- * Flush bottom bar — hairline top border over a blurred canvas, not a floating
- * pill. Active state is accent icon + label with a short accent underline.
+ * Flush bottom bar — hairline top border over a blurred canvas, not a floating pill. The
+ * active tab is a primary-coloured icon and label; there is no pill, no background swap.
  *
- * `icons` is the allow-list: it decides which routes get a tab and in what
- * order. A `Tabs.Screen` left out of it stays routable but never appears here.
- * Filtering on the descriptor's `href` instead does not work — expo-router
- * consumes `href: null` before the options reach a custom `tabBar`, so hidden
- * routes arrive indistinguishable from real tabs.
+ * The blur is texture, not transparency: the bar stays a legible surface at 88% opacity and
+ * the content scrolling underneath is only ever suggested.
  */
-export function createTabBar(icons: TabBarIcons) {
-	const tabOrder = Object.keys(icons);
 
-	return function TabBar({ state, descriptors, navigation }: TabBarProps) {
-		const insets = useSafeAreaInsets();
-		const { theme } = useUniwind();
+import { cn } from "@bittery/ui/lib/utils";
+import type { ComponentType } from "react";
+import { Pressable } from "./pressable";
+import { iconClass } from "./theme";
 
-		const visibleRoutes = tabOrder.flatMap((name) =>
-			state.routes.filter((route) => route.name === name),
-		);
+export interface TabDefinition<Key extends string> {
+	key: Key;
+	label: string;
+	icon: ComponentType<{ className?: string }>;
+	onSelect: () => void;
+}
 
-		return (
-			<View className="absolute right-0 bottom-0 left-0">
-				{/* The blur is texture, not transparency — the bar stays a legible
-				    surface, so the scrim below it does most of the work. */}
-				<BlurView
-					intensity={theme === "dark" ? 24 : 40}
-					tint={theme === "dark" ? "dark" : "light"}
-					className="border-border border-t"
-				>
-					<View
-						className="flex-row bg-background/95"
-						style={{
-							height: layout.tabBarHeight + insets.bottom,
-							paddingBottom: insets.bottom,
-						}}
-					>
-						{visibleRoutes.map((route) => {
-							const descriptor = descriptors[route.key];
-							const isFocused = state.routes[state.index]?.key === route.key;
-							const Icon = icons[route.name];
-							const label = descriptor?.options.title ?? route.name;
-
-							return (
-								<Pressable
-									key={route.key}
-									accessibilityRole="button"
-									accessibilityState={isFocused ? { selected: true } : {}}
-									accessibilityLabel={label}
-									onPress={() => {
-										const event = navigation.emit({
-											type: "tabPress",
-											target: route.key,
-											canPreventDefault: true,
-										});
-										if (!isFocused && !event.defaultPrevented) {
-											navigation.navigate(route.name);
-										}
-									}}
-									className="flex-1 items-center justify-center gap-1 pt-1.5"
-								>
-									{Icon ? (
-										<Icon
-											size={iconSize.bar}
-											className={isFocused ? "text-accent" : "text-muted"}
-										/>
-									) : null}
-									<Text
-										numberOfLines={1}
-										className={cn(
-											"font-medium text-2xs",
-											isFocused ? "text-accent" : "text-muted",
-										)}
-									>
-										{label}
-									</Text>
-								</Pressable>
-							);
-						})}
-					</View>
-				</BlurView>
-			</View>
-		);
-	};
+export function TabBar<Key extends string>({
+	tabs,
+	active,
+	ariaLabel,
+}: {
+	tabs: ReadonlyArray<TabDefinition<Key>>;
+	active: Key;
+	ariaLabel: string;
+}) {
+	return (
+		<nav
+			aria-label={ariaLabel}
+			className="relative z-20 shrink-0 border-border/80 border-t bg-background/88 supports-[backdrop-filter]:backdrop-blur-xl"
+			style={{ paddingBottom: "var(--safe-bottom)" }}
+		>
+			<div className="flex items-stretch">
+				{tabs.map((tab) => {
+					const isActive = tab.key === active;
+					const Icon = tab.icon;
+					return (
+						<Pressable
+							key={tab.key}
+							onClick={tab.onSelect}
+							aria-current={isActive ? "page" : undefined}
+							className={cn(
+								"flex flex-1 flex-col items-center justify-center gap-1 rounded-none pt-2 pb-1.5",
+								isActive ? "text-primary" : "text-muted-foreground",
+							)}
+							style={{ minHeight: "var(--tab-bar-height)" }}
+						>
+							<Icon
+								className={cn(
+									iconClass.bar,
+									"transition-transform duration-150 ease-native",
+									isActive && "scale-105",
+								)}
+							/>
+							<span
+								className={cn(
+									"max-w-full truncate text-2xs",
+									isActive ? "font-semibold" : "font-medium",
+								)}
+							>
+								{tab.label}
+							</span>
+						</Pressable>
+					);
+				})}
+			</div>
+		</nav>
+	);
 }

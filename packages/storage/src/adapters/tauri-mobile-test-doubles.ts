@@ -441,7 +441,7 @@ export class BiometryDouble implements TauriMobileBiometry {
 // ============================================================================
 
 /**
- * `apps/mobile-tauri/src-tauri/plugins/keystore`, in memory, at the invoke boundary.
+ * `apps/mobile/src-tauri/plugins/keystore`, in memory, at the invoke boundary.
  *
  * The double sits where the real seam is — `@tauri-apps/api/core`'s `invoke` — rather than at a
  * hand-shaped facade, because every failure the adapter must survive is an invoke *rejection*:

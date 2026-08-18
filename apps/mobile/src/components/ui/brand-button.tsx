@@ -1,104 +1,65 @@
-import { useThemeColor } from "heroui-native";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import { useUniwind } from "uniwind";
-import { cn } from "@/lib/utils";
-import { useBrandColor } from "./theme";
+/**
+ * The primary action: `primary → primary-deep` vertical gradient, a 1px top inset highlight
+ * and a purple glow in dark mode. There is exactly one of these per screen, and "the purple
+ * thing" therefore always means "the thing you came here to do".
+ *
+ * Do not rebuild it out of `<Button variant="default">` plus classes.
+ */
 
-interface BrandButtonProps {
-	label: string;
-	onPress?: () => void;
-	isDisabled?: boolean;
+import { cn } from "@bittery/ui/lib/utils";
+import type { ReactNode } from "react";
+import { Pressable, type PressableProps } from "./pressable";
+
+const HEIGHTS = { md: "h-11", lg: "h-13" } as const;
+
+interface BrandButtonProps extends Omit<PressableProps, "children"> {
+	label: ReactNode;
 	isLoading?: boolean;
 	/** Full-bleed inside its container; the default for form submits. */
 	fullWidth?: boolean;
-	size?: "md" | "lg";
-	leading?: React.ReactNode;
-	className?: string;
+	size?: keyof typeof HEIGHTS;
+	leading?: ReactNode;
 }
 
-const HEIGHTS = { md: 44, lg: 52 } as const;
-
-/**
- * The primary action: accent → accent-deep gradient, 1px top inset highlight and
- * an accent glow in dark mode. Never rebuild this with `Button` plus classes.
- */
 export function BrandButton({
 	label,
-	onPress,
-	isDisabled = false,
 	isLoading = false,
 	fullWidth = true,
 	size = "md",
 	leading,
+	disabled,
 	className,
+	...props
 }: BrandButtonProps) {
-	const { theme } = useUniwind();
-	const [accent, accentForeground] = useThemeColor([
-		"accent",
-		"accent-foreground",
-	]);
-	const [accentDeep] = useBrandColor(["accentDeep"]);
-	const height = HEIGHTS[size];
-	const inert = isDisabled || isLoading;
+	const inert = disabled || isLoading;
 
 	return (
 		<Pressable
-			onPress={onPress}
+			{...props}
 			disabled={inert}
+			scale
+			haptic={false}
 			className={cn(
-				"overflow-hidden rounded-xl",
+				"flex items-center justify-center gap-2 overflow-hidden rounded-xl px-5",
+				"bg-gradient-to-b from-primary to-primary-deep text-primary-foreground",
+				"font-semibold text-base",
+				// The inset highlight is what stops a flat gradient reading as a coloured box.
+				"shadow-[inset_0_1px_0_0_rgb(255_255_255/0.22)]",
+				!inert && "dark:shadow-glow",
+				HEIGHTS[size],
 				fullWidth ? "w-full" : "self-start",
 				className,
 			)}
-			style={[
-				{ height },
-				inert ? { opacity: 0.5 } : null,
-				theme === "dark" && !inert
-					? {
-							shadowColor: accentDeep,
-							shadowOpacity: 0.45,
-							shadowRadius: 14,
-							shadowOffset: { width: 0, height: 6 },
-							elevation: 8,
-						}
-					: null,
-			]}
 		>
-			<Svg
-				width="100%"
-				height={height}
-				style={{ position: "absolute", top: 0, left: 0 }}
-			>
-				<Defs>
-					<LinearGradient id="brandButton" x1="0" y1="0" x2="0" y2="1">
-						<Stop offset="0" stopColor={accent} />
-						<Stop offset="1" stopColor={accentDeep} />
-					</LinearGradient>
-				</Defs>
-				<Rect
-					x="0"
-					y="0"
-					width="100%"
-					height={height}
-					fill="url(#brandButton)"
+			{isLoading ? (
+				<span
+					aria-hidden
+					className="size-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"
 				/>
-			</Svg>
-			<View
-				pointerEvents="none"
-				className="absolute top-0 right-0 left-0 h-px"
-				style={{ backgroundColor: "rgba(255,255,255,0.22)" }}
-			/>
-			<View className="flex-1 flex-row items-center justify-center gap-2 px-5">
-				{isLoading ? (
-					<ActivityIndicator size="small" color={accentForeground} />
-				) : (
-					leading
-				)}
-				<Text className="font-semibold text-accent-foreground text-base">
-					{label}
-				</Text>
-			</View>
+			) : (
+				leading
+			)}
+			{label}
 		</Pressable>
 	);
 }

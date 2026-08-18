@@ -1,91 +1,88 @@
+import { isUnauthorizedApiError } from "@bittery/api-contract";
+import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
+import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
-import { useToast } from "heroui-native";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { AppState } from "react-native";
-import { crypto } from "../lib/crypto";
+import { crypto } from "@/lib/crypto";
+import { lifecycleDeps } from "@/lib/lifecycle";
+import { storage } from "@/lib/storage";
 import {
-	getMobileSyncDb,
+	getMobileSyncStore,
 	getOrCreateMobileSyncClientId,
-} from "../lib/sync-client-id";
-import { useI18n } from "../providers/i18n-provider";
-import { lifecycleDeps } from "../services/lifecycle";
-import { vaultCrypto, vaultRepository } from "../services/vault-runtime";
+} from "@/lib/sync-client-id";
+import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
+import { useI18n } from "@/providers/i18n-provider";
+
+// Mobile currently has one webview process. This tail coordinates every SyncStorage instance
+// in that process; the Tauri store write and save stay inside the same critical section.
+let mobileSyncUpdateTail: Promise<void> = Promise.resolve();
 
 /**
- * React Native-compatible sync storage implementation using SQLite
+ * Tauri-compatible sync storage implementation
  */
-class ReactNativeSyncStorage implements SyncStorage {
+class MobileSyncStorage implements SyncStorage {
 	async get<T>(key: string): Promise<T | null> {
 		try {
-			const db = await getMobileSyncDb();
-			const result = await db.getFirstAsync<{ value: string }>(
-				"SELECT value FROM sync_storage WHERE key = ?",
-				[key],
-			);
-			return result ? JSON.parse(result.value) : null;
+			const store = await getMobileSyncStore();
+			const value = await store.get<string>(key);
+			return value ? JSON.parse(value) : null;
 		} catch {
 			return null;
 		}
 	}
 
 	async set<T>(key: string, value: T): Promise<void> {
-		const db = await getMobileSyncDb();
-		await db.runAsync(
-			"INSERT OR REPLACE INTO sync_storage (key, value) VALUES (?, ?)",
-			[key, JSON.stringify(value)],
-		);
+		const store = await getMobileSyncStore();
+		await store.set(key, JSON.stringify(value));
+		await store.save();
 	}
 
 	async remove(key: string): Promise<void> {
-		const db = await getMobileSyncDb();
-		await db.runAsync("DELETE FROM sync_storage WHERE key = ?", [key]);
+		const store = await getMobileSyncStore();
+		await store.delete(key);
+		await store.save();
 	}
 
 	async update<T>(
 		key: string,
 		updater: (current: T | null) => T | null,
 	): Promise<T | null> {
-		const db = await getMobileSyncDb();
 		let result: T | null = null;
-		// The exclusive SQLite transaction owns coordination for every connection to this
-		// database, not just calls made by this React hook instance.
-		await db.withExclusiveTransactionAsync(async (transaction) => {
-			const stored = await transaction.getFirstAsync<{ value: string }>(
-				"SELECT value FROM sync_storage WHERE key = ?",
-				[key],
-			);
+		const update = mobileSyncUpdateTail.then(async () => {
+			const store = await getMobileSyncStore();
+			const stored = await store.get<string>(key);
 			let current: T | null = null;
 			if (stored) {
 				try {
-					current = JSON.parse(stored.value) as T;
+					current = JSON.parse(stored) as T;
 				} catch {
 					current = null;
 				}
 			}
 			result = updater(current);
 			if (result === null) {
-				await transaction.runAsync("DELETE FROM sync_storage WHERE key = ?", [
-					key,
-				]);
+				await store.delete(key);
 			} else {
-				await transaction.runAsync(
-					"INSERT OR REPLACE INTO sync_storage (key, value) VALUES (?, ?)",
-					[key, JSON.stringify(result)],
-				);
+				await store.set(key, JSON.stringify(result));
 			}
+			await store.save();
 		});
+		mobileSyncUpdateTail = update.catch(() => undefined);
+		await update;
 		return result;
 	}
 }
 
+const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
- * Mobile-specific sync hook that integrates with React Native storage
+ * Mobile-specific sync hook that integrates with Tauri storage
  */
 export function useMobileSync(
 	queryClient: QueryClient,
@@ -93,8 +90,6 @@ export function useMobileSync(
 	enabled = true,
 ) {
 	const { m } = useI18n();
-	const { toast } = useToast();
-	const router = useRouter();
 	const accountSync = useMemo(
 		() =>
 			createAccountSync({
@@ -129,37 +124,110 @@ export function useMobileSync(
 		lifecycle.getSnapshot,
 	);
 
-	// Native account state may change while JavaScript is suspended.
-	useEffect(() => {
-		const subscription = AppState.addEventListener("change", (nextState) => {
-			if (nextState === "active") void manager.refresh();
-		});
-		return () => subscription.remove();
-	}, [manager]);
-
-	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
-	const onSessionRevoked = useCallback(
-		async (payload: { sessionId: string }) => {
-			const outcome = await accountSync.invalidateSession(payload);
-			if (outcome.affected.length === 0) {
-				return;
+	/** The UI half of an invalidation; the record half already happened in core. */
+	const applyInvalidatedSession = useCallback(
+		async (outcome: LifecycleOutcome) => {
+			const invalidated = outcome.affected[0];
+			if (!invalidated) {
+				return null;
 			}
+
 			await queryClient.cancelQueries();
 			queryClient.clear();
-			lifecycle.clear();
-			await manager.refresh();
-			router.replace("/(auth)/login");
+
+			if (outcome.wasActive) {
+				window.location.href = "/unlock";
+			}
+			return invalidated;
 		},
-		[accountSync, lifecycle, manager, queryClient, router],
+		[queryClient],
 	);
+
+	const handleAccountSessionInvalidation = useCallback(
+		async (sessionId: string) => {
+			await applyInvalidatedSession(
+				await accountSync.invalidateSession({ sessionId }),
+			);
+			lifecycle.clear();
+		},
+		[accountSync, applyInvalidatedSession, lifecycle],
+	);
+
+	const onSessionRevoked = useCallback(
+		async (payload: { sessionId: string }) => {
+			const revoked = await applyInvalidatedSession(
+				await accountSync.invalidateSession(payload),
+			);
+			if (!revoked) {
+				return;
+			}
+			lifecycle.clear();
+		},
+		[accountSync, applyInvalidatedSession, lifecycle],
+	);
+
+	// Revalidate persisted sessions on startup/interval when online.
+	// This catches revoked sessions even if the app was closed at revocation time.
+	useEffect(() => {
+		if (!enabled || !isInitialized) {
+			return;
+		}
+
+		let cancelled = false;
+
+		const revalidateSessions = async () => {
+			if (typeof navigator !== "undefined" && !navigator.onLine) {
+				return;
+			}
+
+			const accounts = await storage.getAccountsList();
+			for (const account of accounts) {
+				if (cancelled) {
+					return;
+				}
+
+				const [token, url, sessionData] = await Promise.all([
+					storage.getAuthToken(account.accountId),
+					storage.getServerUrl(account.accountId),
+					storage.getStoredSessionData(account.accountId),
+				]);
+
+				if (!token || !url || !sessionData?.sessionId) {
+					continue;
+				}
+
+				try {
+					await createAccountApiClient(token, url, undefined, undefined, {
+						insecureTransportConfirmed:
+							account.insecureTransportConfirmed === true,
+					}).auth.me();
+				} catch (error) {
+					if (!isUnauthorizedApiError(error)) {
+						continue;
+					}
+
+					await handleAccountSessionInvalidation(sessionData.sessionId);
+				}
+			}
+		};
+
+		void revalidateSessions();
+		const interval = setInterval(() => {
+			void revalidateSessions();
+		}, SESSION_REVALIDATION_INTERVAL_MS);
+
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
+	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
+
+	const syncStorage = useMemo(() => new MobileSyncStorage(), []);
 	const onTerminalCommandFailure = useCallback(() => {
-		toast.show({
-			variant: "danger",
-			label: m.sync_command_terminal_error(),
+		toast.error(m.sync_command_terminal_error(), {
 			description: m.sync_command_terminal_error_description(),
-			placement: "bottom",
 		});
-	}, [m, toast]);
+	}, [m]);
 
 	const syncState = useSync({
 		clientId,
@@ -167,7 +235,6 @@ export function useMobileSync(
 		sources: assembly?.sources ?? [],
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!clientId && assembly !== null,
-		realtimeEnabled: true,
 		replicaStore: assembly?.replicaStore,
 		commandProjection: assembly?.commandProjection,
 		semanticCommandExecutor: assembly?.semanticCommandExecutor,

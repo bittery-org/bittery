@@ -873,11 +873,14 @@ export async function storeUnlockSession(
 		(await storage.getServerUrl(accountId)) ??
 		getDefaultServerUrl();
 
+	// Same reason as the login path: the token below is not in storage yet, and on an
+	// unlock the stored one is typically absent (the lock dropped it) or dead. Verify
+	// travel mode with the token this unlock just obtained.
 	await prepareTravelModeForSession(
 		accountId,
 		storage,
 		itemCache,
-		options?.travelModeApiClient,
+		resolveTravelModeApiClientForToken(result.token, serverUrl, options),
 	);
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);

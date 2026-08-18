@@ -27,7 +27,6 @@ Rebuild each client target that needs local testing:
 ```bash
 pnpm run build:crypto-wasm
 pnpm run build:crypto-android
-pnpm run build:crypto-ios
 ```
 
 An implementation-only change should not normally alter generated source, although it will
@@ -42,29 +41,34 @@ exports.
 If every client needs the operation, update `packages/crypto/port/src/crypto-port.ts` and the
 shared marshalling in `packages/crypto/port/src/uniffi-bindings.ts`. The compiler-enforced
 forwarded-member lists in the WASM and WASM-worker adapters must also include the new member.
-React Native reuses the same handle adapter and marshalling.
+
+A new member reaches Android's credential provider only through the regenerated Kotlin, which
+has no TypeScript port in front of it — check `NativeCrypto.kt` if the operation is one that
+process needs.
 
 Regenerate all bindings after changing the exported surface:
 
 ```bash
 pnpm run build:crypto-wasm
 pnpm run build:crypto-android
-pnpm run build:crypto-ios
 ```
 
-Never edit generated bindings manually. Change the Rust API or `ubrn.config.yaml`, regenerate,
-and review the resulting diff.
+Never edit generated bindings manually. Change the Rust API or the generator configuration,
+regenerate, and review the resulting diff.
 
 ## Binding and generator changes
 
-Generator configuration lives in `ubrn.config.yaml`. Generator and runtime versions are pinned
-in the workspace manifests and `patches/uniffi-bindgen-react-native@0.31.0-3.patch`; update them
-together to avoid UniFFI metadata version skew. The patch also makes the generated WASM
+WASM generator configuration lives in `ubrn.config.yaml`. Generator and runtime versions are
+pinned in the workspace manifests and `patches/uniffi-bindgen-react-native@0.31.0-3.patch`;
+update them together to avoid UniFFI metadata version skew. Android does not go through that
+generator — `build-android.sh` calls `crates/uniffi-bindgen`, whose `uniffi` pin must match the
+one in `crates/bittery-crypto-api/Cargo.toml`. The patch also makes the generated WASM
 entrypoint use a standard asset URL because Vite does not support raw WASM ES module imports.
 Remove that part once ubrn emits a bundler-compatible URL itself.
 
 Regenerate the affected targets after changing generator configuration, pins, platform
-scaffolding, or the patch. Run all three builds before merging a change shared by every target.
+scaffolding, or the patch. Run both builds — WASM and Android — before merging a change shared
+by every target.
 
 ## Generated files
 

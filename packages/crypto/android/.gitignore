@@ -1,0 +1,2 @@
+# Native binaries are reproducibly rebuilt before app compilation.
+generated/jniLibs/

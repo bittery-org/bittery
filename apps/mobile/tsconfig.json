@@ -1,22 +1,20 @@
 {
-	/* Bittery's strict base first, Expo's on top: Expo owns the React Native
-	   platform knobs (module "preserve", customConditions, moduleDetection and
-	   the native-build excludes) and must win where the two overlap. */
-	"extends": ["@bittery/config/tsconfig.base.json", "expo/tsconfig.base"],
+	"extends": "@bittery/config/tsconfig.base.json",
 	"compilerOptions": {
-		"allowImportingTsExtensions": true,
-		// Not a bun package; drop the base's ["bun"] rather than pull Bun's
-		// globals into a React Native runtime.
-		"types": [],
+		/* Tauri's webview floor; keeps the emitted syntax below the base's ESNext. */
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"useDefineForClassFields": true,
+		"jsx": "react-jsx",
+		"types": ["vite/client"],
+		"noEmit": true,
+
+		/* Path aliases */
+		"baseUrl": ".",
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["src/*"]
 		}
 	},
-	"include": [
-		"**/*.ts",
-		"**/*.tsx",
-		".expo/types/**/*.ts",
-		"env.d.ts",
-		"expo-env.d.ts"
-	]
+	"include": ["src"],
+	"references": [{ "path": "./tsconfig.node.json" }]
 }

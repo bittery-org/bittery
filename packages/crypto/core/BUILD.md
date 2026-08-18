@@ -56,27 +56,26 @@ Release artifacts measured during the UniFFI migration:
 - previous hand-written wasm-bindgen binary: 1,199,470 bytes;
 - generated ubrn binary after `wasm-opt -Oz`: 790,712 bytes (34.1% smaller).
 
-## React Native
+## Android
 
-From the repository root, generate all four Android ABIs or the iOS device and simulator
-XCFrameworks:
+From the repository root:
 
 ```bash
 pnpm run build:crypto-android
-pnpm run build:crypto-ios
 ```
 
-The pinned ubrn generator writes its TypeScript, C++, Kotlin, and Objective-C++ sources to
-`packages/crypto/react-native`, whose package name is `@bittery/crypto-react-native`.
-Native libraries and XCFrameworks are ignored build artifacts; generated source and module
-scaffolding are tracked so React Native codegen and autolinking can resolve the package in a
-fresh worktree. The mobile `android` and `ios` scripts build the corresponding artifacts;
-its `eas-build-post-install` script selects the active `EAS_BUILD_PLATFORM`. CI exercises both
-native generation paths independently.
+`build-android.sh` runs `cargo ndk` for all four shipped ABIs and then `crates/uniffi-bindgen`
+— a wrapper pinned to the same `uniffi` version the crate links against — over the resulting
+`.so`. Both land in `packages/crypto/android/generated`: the `.so` files are ignored build
+artifacts, the Kotlin is tracked so a regeneration that changes it shows up in review.
 
-Android's credential-provider module depends on that same Gradle project and calls the
-generated Kotlin UniFFI API directly. Its explicitly audited master-unlock-key export does
-not pass through JavaScript.
+The Tauri credential provider is the only consumer. It reaches both directories with a Gradle
+`srcDir` rather than vendoring them (ADR 0012), and calls the generated Kotlin UniFFI API
+directly — its explicitly audited master-unlock-key export does not pass through JavaScript.
+
+This path used to run through `uniffi-bindgen-react-native`. That generator is still used for
+the WASM target and produced byte-identical Kotlin, but it also required a React Native package
+to write into, which outlived the React Native app.
 
 ## Rust checks
 

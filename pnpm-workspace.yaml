@@ -4,7 +4,6 @@ packages:
   - packages/crypto/core
   - packages/crypto/wasm
   - packages/crypto/port
-  - packages/crypto/react-native
   - spikes/*
 
 catalog:

@@ -16,7 +16,7 @@
  * | biometric              | `@choochmeque/tauri-plugin-biometry-api` `checkStatus`/`authenticate` |
  *
  * The secret tier prefers the Android Keystore, through the first-party
- * `apps/mobile-tauri/src-tauri/plugins/keystore` plugin, and falls back to `secrets.json` when
+ * `apps/mobile/src-tauri/plugins/keystore` plugin, and falls back to `secrets.json` when
  * that plugin is not there to answer — iOS, an old Android, a build without it. The fallback is
  * a **recorded security downgrade**, not a secure store. See `SECRET_BACKING_FALLBACK` below and
  * `docs/mobile-migration-decisions.md` D4b (the Keystore) and D4a (what the fallback costs).
@@ -212,7 +212,7 @@ export interface TauriKeystoreSecretValue {
 }
 
 /**
- * The four commands of `apps/mobile-tauri/src-tauri/plugins/keystore`, as invoke calls.
+ * The four commands of `apps/mobile/src-tauri/plugins/keystore`, as invoke calls.
  *
  * Declared structurally, exactly as `tauri.ts` declares `TauriInvoke`, and reached through
  * `@tauri-apps/api/core`'s `invoke`. There is deliberately **no guest-JS npm package**: the
@@ -562,7 +562,7 @@ export function createTauriMobilePlatformPort(
 		 * candidate, `impierce/tauri-plugin-keystore`, is a single 18-month-stale alpha with
 		 * no companion package on npm, which is worse supply chain rather than better.
 		 *
-		 * So `apps/mobile-tauri/src-tauri/plugins/keystore` is first-party: one AES-256-GCM
+		 * So `apps/mobile/src-tauri/plugins/keystore` is first-party: one AES-256-GCM
 		 * key in the `AndroidKeyStore` provider *without* `setUserAuthenticationRequired`, so
 		 * a read costs nothing. `docs/mobile-migration-decisions.md` D4b holds the long form,
 		 * including what it does and does not guarantee; D4a holds what the fallback costs when

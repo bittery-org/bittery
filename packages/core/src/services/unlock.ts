@@ -18,8 +18,8 @@ import { findAccountById } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import { type CredentialMirror, lockAccount } from "./account-lifecycle";
 import {
-	createStaticStoredAccountApiClient,
 	createStoredAccountApiClient,
+	createStoredAccountUnlockApiClient,
 } from "./api-client";
 import { performSRPUnlock, storeUnlockSessionOwned } from "./auth-service";
 import { selectActiveAccountAfterUnlock } from "./select-active-account";
@@ -35,7 +35,6 @@ import type { TravelModeApiClient } from "./travel-mode-service";
  */
 export type UnlockFailureReason =
 	| "no_stored_secret_key"
-	| "no_auth_token"
 	| "credential_rejected"
 	| "travel_mode_unverified";
 
@@ -172,16 +171,13 @@ async function acquireWithPassword(
 				continue;
 			}
 
-			// Static client: an unlock runs before a session exists, so there is
-			// nothing for a refreshing client to refresh against.
-			const apiClient = await createStaticStoredAccountApiClient(
+			// Non-refreshing, and unauthenticated when the lock already dropped the token:
+			// an unlock runs before a session exists, so there is nothing to refresh
+			// against and nothing to authenticate with yet.
+			const apiClient = await createStoredAccountUnlockApiClient(
 				storage,
 				accountId,
 			);
-			if (!apiClient) {
-				failed.push({ accountId, email, reason: "no_auth_token" });
-				continue;
-			}
 
 			const serverUrl =
 				(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
@@ -189,6 +185,10 @@ async function acquireWithPassword(
 				{ accountId, password },
 				{ crypto, apiClient, storage },
 			);
+			// No `travelModeApiClient`: the client above may hold a dead token or none at
+			// all, and travel mode is verified before the new one is committed to storage.
+			// `storeUnlockSession` builds that client from the token this unlock just
+			// minted instead.
 			await storeUnlockSessionOwned(
 				result,
 				storage,
@@ -196,7 +196,6 @@ async function acquireWithPassword(
 				crypto,
 				accountId,
 				{
-					travelModeApiClient: apiClient,
 					serverUrl,
 					setActive: false,
 				},

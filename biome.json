@@ -22,7 +22,7 @@
 			"!**/test-results",
 			"!**/dist",
 			"!**/build",
-			"!packages/crypto/react-native",
+			"!packages/crypto/android/generated",
 			"!packages/crypto/wasm",
 			"!spikes/*/plugins/*/permissions",
 			"!packages/ui/src/components",
@@ -89,8 +89,7 @@
 							"@bittery/core/types": "Removed cross-package alias. Import from \"@bittery/types\" instead.",
 							"@bittery/core/core-context": "Removed subpath export. Import from the \"@bittery/core\" root entry instead.",
 							"@bittery/api-contract/src/generated/schema": "Import server types from @bittery/api-contract's public exports, never the generated schema directly.",
-							"@bittery/crypto-wasm": "Only @bittery/crypto-port may import generated crypto bindings.",
-							"@bittery/crypto-react-native": "Only @bittery/crypto-port may import generated crypto bindings."
+							"@bittery/crypto-wasm": "Only @bittery/crypto-port may import generated crypto bindings."
 						},
 						"patterns": [
 							{
@@ -98,10 +97,7 @@
 								"message": "Import server types from @bittery/api-contract's public exports, never the generated schema directly."
 							},
 							{
-								"group": [
-									"@bittery/crypto-wasm/**",
-									"@bittery/crypto-react-native/**"
-								],
+								"group": ["@bittery/crypto-wasm/**"],
 								"message": "Only @bittery/crypto-port may import generated crypto bindings."
 							}
 						]
@@ -137,16 +133,6 @@
 				"rules": {
 					"a11y": {
 						"noSvgWithoutTitle": "off"
-					}
-				}
-			}
-		},
-		{
-			"includes": ["apps/mobile/global.css"],
-			"linter": {
-				"rules": {
-					"suspicious": {
-						"noDuplicateCustomProperties": "off"
 					}
 				}
 			}

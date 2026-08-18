@@ -96,7 +96,7 @@ All cryptographic operations are implemented in a single Rust codebase (`package
 | Web | WebAssembly (WASM) |
 | Server | Native Rust |
 | Desktop | Tauri commands (direct Rust calls) |
-| Mobile | Expo native module |
+| Mobile | WebAssembly (WASM), plus UniFFI Kotlin in the Android credential provider |
 
 This eliminates the risk of JavaScript crypto implementation bugs and ensures consistent behavior across all platforms.
 

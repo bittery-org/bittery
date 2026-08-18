@@ -1,21 +1,21 @@
-export {
-	Aurora,
-	GlowBar,
-	GradientTile,
-	getGradientForName,
-	SheetBrandAccent,
-} from "./brand";
-export { BrandButton } from "./brand-button";
-export { EmptyState, ErrorState } from "./empty-state";
-export { Fab } from "./fab";
-export * from "./icons";
-export type { ListRowProps } from "./list-card";
-export { ListCard, ListRow, SectionLabel } from "./list-card";
-export { PressScale } from "./press-scale";
-export { AppBar, Screen, useBottomInset } from "./screen";
-export type { FilterChip, SegmentedOption } from "./segmented";
-export { ChipRail, Segmented } from "./segmented";
-export type { TabBarIcons } from "./tab-bar";
-export { createTabBar } from "./tab-bar";
-export type { BrandColor } from "./theme";
-export { iconSize, layout, useBrandColor } from "./theme";
+/**
+ * The mobile kit. Screens compose from here and never restyle a primitive ad hoc — if a
+ * screen needs a variant, add it to the primitive so every screen inherits it.
+ *
+ * `apps/mobile/DESIGN-NATIVE.md` is the spec; `../../styles.css` holds the tokens.
+ */
+
+export * from "./account-avatar";
+export * from "./brand";
+export * from "./brand-button";
+export * from "./empty-state";
+export * from "./fab";
+export * from "./list-card";
+export * from "./mobile-sheet";
+export * from "./pressable";
+export * from "./screen";
+export * from "./segmented";
+export * from "./switch";
+export * from "./tab-bar";
+export * from "./text-field";
+export * from "./theme";

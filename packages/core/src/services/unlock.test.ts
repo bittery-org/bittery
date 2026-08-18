@@ -169,7 +169,13 @@ describe("unlock all accounts", () => {
 		expect(await storage.getActiveAccount()).toEqual("acc-2");
 	});
 
-	it("reports no_auth_token when the account has a secret key but no token", async () => {
+	/**
+	 * A lock drops `jwt_token` and keeps `session_data`, so "no stored token" is the
+	 * ordinary state of a locked account rather than a reason to refuse. This unlock
+	 * has to reach the server and re-run SRP; against `OFFLINE_SERVER_URL` that fails,
+	 * and the failure being `credential_rejected` is the proof it was attempted at all.
+	 */
+	it("re-runs SRP for an account whose lock already dropped the auth token", async () => {
 		const { storage } = await createStorage({ withAuthToken: ["acc-2"] });
 
 		const outcome = await unlockAllWithPassword(
@@ -177,8 +183,13 @@ describe("unlock all accounts", () => {
 			{ storage, itemCache, crypto, credentialMirror },
 		);
 
+		expect(outcome.unlocked).toEqual(["acc-2"]);
 		expect(outcome.failed).toEqual([
-			{ accountId: "acc-1", email: "a@test.com", reason: "no_auth_token" },
+			{
+				accountId: "acc-1",
+				email: "a@test.com",
+				reason: "credential_rejected",
+			},
 		]);
 	});
 

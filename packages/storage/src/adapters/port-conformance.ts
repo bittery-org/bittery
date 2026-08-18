@@ -34,8 +34,9 @@ const VALID_PLATFORMS: readonly Platform[] = [
 ];
 
 /**
- * Comfortably over the ~2048-byte `expo-secure-store` limit on Android, so this value proves
- * that chunking inside the react-native adapter is invisible above the port.
+ * Comfortably over the size limit a platform secure store is likely to impose (Android's was
+ * ~2048 bytes), so this value proves that any chunking an adapter does is invisible above the
+ * port.
  */
 const LARGE_SECRET = "0123456789abcdef".repeat(512); // 8192 chars
 

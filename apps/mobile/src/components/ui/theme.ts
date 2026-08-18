@@ -1,19 +1,20 @@
-import { useCSSVariable } from "uniwind";
+/**
+ * Shared sizing constants, ported from `apps/mobile/src/components/ui/theme.ts` so both
+ * mobile apps lay out identically. See `apps/mobile/DESIGN-NATIVE.md` § Layout constants.
+ */
 
-/** Shared spacing/size constants from DESIGN-NATIVE.md. */
 export const layout = {
 	screenPadding: 16,
 	cardPadding: 14,
 	rowHeight: 56,
 	rowHeightCompact: 48,
-	appBarHeight: 44,
-	tabBarHeight: 52,
+	appBarHeight: 52,
+	tabBarHeight: 54,
 	iconTile: 40,
 	iconTileLarge: 56,
-	gap: { xs: 8, sm: 12, md: 16, lg: 24 },
 } as const;
 
-/** Icon sizes by context — keeps every bar and row visually aligned. */
+/** Icon sizes by context — this is what keeps every bar and row optically aligned. */
 export const iconSize = {
 	chip: 16,
 	row: 18,
@@ -22,23 +23,23 @@ export const iconSize = {
 } as const;
 
 /**
- * Brand tokens heroui's own `useThemeColor` doesn't know about because they are
- * Bittery additions in `global.css`.
+ * Tailwind size classes matching `iconSize`. Icons here are `lucide-react` SVGs sized by
+ * class rather than by prop, so call sites stay declarative.
  */
-const BRAND_VARIABLES = {
-	accentDeep: "--color-accent-deep",
-	selected: "--color-selected",
-	borderStrong: "--color-border-strong",
-	info: "--color-info",
+export const iconClass = {
+	chip: "size-4",
+	row: "size-[18px]",
+	bar: "size-5",
+	header: "size-6",
 } as const;
 
-export type BrandColor = keyof typeof BRAND_VARIABLES;
-
-export function useBrandColor<const T extends readonly BrandColor[]>(
-	names: T,
-): { [K in keyof T]: string } {
-	const values = useCSSVariable(names.map((name) => BRAND_VARIABLES[name]));
-	return values.map((value) =>
-		typeof value === "string" ? value : String(value),
-	) as { [K in keyof T]: string };
-}
+/**
+ * Bottom padding a scroll region needs so its last row clears the tab bar and the gesture
+ * area. Mirrors native's `useBottomInset()`; a plain value because CSS can do the insets.
+ */
+export const scrollBottomInset = {
+	/** Screens with a tab bar below the scroller. */
+	tabBar: "calc(var(--tab-bar-height) + var(--safe-bottom) + 24px)",
+	/** Pushed screens with nothing below the scroller. */
+	plain: "calc(var(--safe-bottom) + 24px)",
+} as const;

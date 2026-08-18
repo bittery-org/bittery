@@ -89,7 +89,7 @@ jobs:
       fail-fast: false
       # Weekly E2E only needs the WASM artifact; native bindings remain covered
       # by change-driven CI rather than making the harness-rot check wait for them.
-      matrix: ${{ fromJSON(github.event_name == 'schedule' && '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"}]}' || '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"},{"binding":"android","runs-on":"ubuntu-latest","targets":"aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android"},{"binding":"ios","runs-on":"macos-15","targets":"aarch64-apple-ios,aarch64-apple-ios-sim"}]}') }}
+      matrix: ${{ fromJSON(github.event_name == 'schedule' && '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"}]}' || '{"include":[{"binding":"wasm","runs-on":"ubuntu-latest","targets":"wasm32-unknown-unknown"},{"binding":"android","runs-on":"ubuntu-latest","targets":"aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android"}]}') }}
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v7
@@ -129,16 +129,12 @@ jobs:
         if: matrix.binding == 'wasm'
         run: packages/crypto/core/build-wasm.sh
 
-      - name: Build Android React Native bindings
+      - name: Build Android bindings
         if: matrix.binding == 'android'
         run: pnpm run build:crypto-android
 
-      - name: Build iOS React Native bindings
-        if: matrix.binding == 'ios'
-        run: pnpm run build:crypto-ios
-
       # The uniffi/wasm-bindgen output above is committed (only the native
-      # binaries - .wasm, jniLibs, xcframework - are gitignored), so a source
+      # binaries - .wasm and the jniLibs .so files - are gitignored), so a source
       # change that regenerates it differently than what's checked in must fail
       # here rather than surface as an unreviewed drift later.
       - name: Check generated bindings are committed
@@ -150,14 +146,11 @@ jobs:
               paths=(packages/crypto/wasm/generated)
               regen_cmd="pnpm run build:crypto-wasm"
               ;;
-            android|ios)
-              # Only the TypeScript bindings are asserted. ubrn runs the generated C++ through
-              # clang-format, whose line wrapping and reference placement differ by clang-format
-              # version, so cpp/generated cannot diff cleanly across machines. It is a compiled
-              # build input rather than a consumed contract; the TypeScript is what drifts
-              # semantically and what typecheck depends on.
-              paths=(packages/crypto/react-native/src/generated)
-              regen_cmd="pnpm run build:crypto-${{ matrix.binding }}"
+            android)
+              # The Kotlin only. The .so files beside it are gitignored binaries, rebuilt
+              # before every app compile.
+              paths=(packages/crypto/android/generated/java)
+              regen_cmd="pnpm run build:crypto-android"
               ;;
           esac
           if ! git diff --exit-code -- "${paths[@]}"; then
@@ -458,78 +451,15 @@ jobs:
       - name: Script tests
         run: node --test "scripts/**/*.test.mjs"
 
-  # `expo-doctor` — config schema, duplicate native modules, SDK version drift —
-  # has no equivalent anywhere else in CI, and the mobile typecheck only reaches
-  # a runner today buried inside the js-types turbo graph, where a mobile-only
-  # break is indistinguishable from a web one.
-  #
-  # No crypto artifact download: the UniFFI React Native bindings under
-  # packages/crypto/react-native/src/generated are committed, and mobile never
-  # touches the WASM adapter (only its .wasm binary is gitignored anyway).
-  mobile:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          pnpm install --frozen-lockfile
-          elapsed="$(( $(date +%s) - start ))"
-          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-
-      # packages/i18n/src/paraglide is generated, and mobile imports it.
-      - name: Generate i18n
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          pnpm run i18n:generate
-          elapsed="$(( $(date +%s) - start ))"
-          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Mobile typecheck
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          pnpm --filter mobile run check-types
-          elapsed="$(( $(date +%s) - start ))"
-          echo "mobile typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-
-      # Advisory: the duplicate-dependency check always fails under pnpm here.
-      # apps/mobile pins TypeScript 6 while the other workspaces are on 5.x, so
-      # pnpm resolves two peer-variants of expo@57.0.11 that differ only in
-      # JS tooling. `expo-modules-autolinking resolve` emits a single copy on
-      # both platforms, so the native build is unaffected.
-      - name: Expo doctor
-        continue-on-error: true
-        working-directory: apps/mobile
-        run: npx expo-doctor
-
-  # apps/mobile-tauri (the Tauri rewrite, mid-migration - see
-  # docs/mobile-migration-state.md) had no job at all: nothing type-checked, linted or built it
-  # on a push. Frontend-only, like js-types / js-static: the generated crypto WASM it imports
+  # Frontend-only, like js-types / js-static: the generated crypto WASM apps/mobile imports
   # (D6 in docs/mobile-migration-decisions.md) is gitignored and vite build cannot resolve it
   # without the artifact crypto-bindings already produced, so this reuses that artifact exactly
-  # like js-types does rather than rebuilding it.
+  # like js-types does rather than rebuilding it. The Android half is mobile-android, below.
   #
   # `check-types` also runs the app's own `lint:promises` scan (see package.json) - that is
   # this app's only noMisusedPromises enforcement (gap 10 in mobile-migration-state.md), so it
   # rides along with typecheck rather than needing its own step.
-  mobile-tauri:
+  mobile:
     if: github.event_name != 'schedule'
     needs: crypto-bindings
     runs-on: ubuntu-latest
@@ -559,7 +489,7 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
-      # packages/i18n/src/paraglide is generated, and mobile-tauri imports it
+      # packages/i18n/src/paraglide is generated, and mobile imports it
       # (src/providers/i18n-provider.tsx).
       - name: Generate i18n
         shell: bash
@@ -575,9 +505,9 @@ jobs:
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          pnpm exec turbo -F mobile-tauri check-types
+          pnpm exec turbo -F mobile check-types
           elapsed="$(( $(date +%s) - start ))"
-          echo "mobile-tauri typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "mobile typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
       # Web-app-shaped build (tsc + vite), no Tauri/Android toolchain involved -
       # proves the renderer bundles, independent of whether the native shell does.
@@ -586,19 +516,19 @@ jobs:
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          pnpm --filter mobile-tauri exec vite build
+          pnpm --filter mobile exec vite build
           elapsed="$(( $(date +%s) - start ))"
-          echo "mobile-tauri vite build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "mobile vite build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Biome
-        run: pnpm exec biome check apps/mobile-tauri
+        run: pnpm exec biome check apps/mobile
 
-  # Detects changes under apps/mobile-tauri or the crypto packages it embeds, so
-  # mobile-tauri-android (below) can skip the heavy Android/NDK toolchain on PRs that cannot
+  # Detects changes under apps/mobile or the crypto packages it embeds, so
+  # mobile-android (below) can skip the heavy Android/NDK toolchain on PRs that cannot
   # have broken it. See D11 in docs/mobile-migration-decisions.md for what this trades off.
   # Runs unconditionally (including on schedule) so the boolean is always available; the
-  # schedule/release/dispatch cases are handled by mobile-tauri-android's own `if`.
-  mobile-tauri-android-changed:
+  # schedule/release/dispatch cases are handled by mobile-android's own `if`.
+  mobile-android-changed:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.filter.outputs.changed }}
@@ -610,8 +540,11 @@ jobs:
         with:
           filters: |
             changed:
-              - 'apps/mobile-tauri/**'
+              - 'apps/mobile/**'
               - 'packages/crypto/**'
+              # DomainMatchVectorsTest (run in mobile-android) pins the plugin's Kotlin
+              # matching to this file, so a change here must re-run that test.
+              - 'apps/extension/src/lib/hostname.ts'
 
   # The full `pnpm tauri android build` needs the Android SDK, the NDK, a JDK, all four Rust
   # Android targets, and pnpm build:crypto-android for the UniFFI .so files the credential
@@ -620,19 +553,19 @@ jobs:
   # docs/mobile-migration-decisions.md for the alternatives considered and what this misses).
   #
   # GitHub's ubuntu-latest image ships the Android SDK and several NDK versions preinstalled
-  # (android-unit and crypto-bindings' android leg already rely on this, with no explicit SDK
+  # (crypto-bindings' android leg already relies on this, with no explicit SDK
   # setup step), so only the JDK and the Rust targets are added here.
   #
   # No signing secret is read anywhere in this job - the build is `--debug`, unsigned, exactly
   # what a developer runs locally. If a signing step is ever added here, it must check
   # `secrets.<NAME> != ''` first so a missing secret degrades that one step, not the job.
-  mobile-tauri-android:
+  mobile-android:
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')) ||
-      needs.mobile-tauri-android-changed.outputs.changed == 'true'
-    needs: mobile-tauri-android-changed
+      needs.mobile-android-changed.outputs.changed == 'true'
+    needs: mobile-android-changed
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -651,8 +584,8 @@ jobs:
         with:
           workspaces: |
             packages/crypto/core
-            apps/mobile-tauri/src-tauri
-          key: mobile-tauri-android
+            apps/mobile/src-tauri
+          key: mobile-android
 
       # Pinned exactly like crypto-bindings' android leg - a security gate must not itself be
       # an unpinned download, and the two jobs should build the same artifact the same way.
@@ -697,7 +630,7 @@ jobs:
       # Same command a developer runs locally (docs/mobile-migration-state.md), one arch only -
       # this is a breakage check, not a release artifact.
       - name: Tauri Android build (debug, aarch64)
-        working-directory: apps/mobile-tauri
+        working-directory: apps/mobile
         shell: bash
         run: |
           set -euo pipefail
@@ -708,81 +641,35 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: mobile-tauri-debug-apk
-          path: apps/mobile-tauri/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+          name: mobile-debug-apk
+          path: apps/mobile/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
           retention-days: 7
           if-no-files-found: error
 
-  # The Android credential provider is the only place DomainMatch runs, and its
-  # vectors are the seam pinning it to apps/extension/src/lib/hostname.ts - so
-  # without this job the Kotlin half of a user-visible matching bug is unguarded.
-  # No workflow invoked Gradle before, and PasskeyMutationDaoTest (Room
-  # transaction atomicity across a process restart) was equally unreachable.
-  #
-  # JVM unit tests only: `test`, never `connectedAndroidTest`. Instrumentation
-  # needs an emulator, which is minutes of boot per PR for the one DAO suite that
-  # requires it (PasskeyMutationDaoTest), so that one stays manual.
-  # apps/mobile/android is gitignored and generated, so the job prebuilds it;
-  # --no-install skips the dependency sync Expo would otherwise run.
-  android-unit:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      # mobile imports the generated messages, and prebuild type-resolves the app.
-      - run: pnpm run i18n:generate
-
-      - uses: gradle/actions/setup-gradle@v5
-
-      # Generates apps/mobile/android, including the settings.gradle that
-      # autolinks :credential-provider and the crypto bindings.
-      - name: Expo prebuild (Android)
-        working-directory: apps/mobile
-        run: npx expo prebuild --platform android --no-install
-
-      # Filtered to the domain package on purpose. The module's other JVM test,
-      # CryptoTestVectors, calls android.util.Base64 (a throwing stub in the
-      # unit-test android.jar) and KeyDerivation, which JNIs into the Rust
-      # library that is not loaded here - so it cannot pass as a unit test today
-      # and would take the job red. Widening this filter means fixing that file
-      # first. Everything in `domain` is pure Kotlin stdlib.
-      - name: Android unit tests
-        working-directory: apps/mobile/android
+      # The credential provider is the only place DomainMatch runs, and its vectors are the
+      # seam pinning it to apps/extension/src/lib/hostname.ts. The Gradle project only exists
+      # after the build above generates gen/android/tauri.settings.gradle, so this cannot be
+      # its own job.
+      #
+      # Filtered to the domain package on purpose: CryptoTestVectors calls android.util.Base64
+      # (a throwing stub in the unit-test android.jar) and JNIs into the Rust library that is
+      # not loaded here. Widening this filter means fixing that file first.
+      - name: Credential-provider unit tests
+        working-directory: apps/mobile/src-tauri/gen/android
         shell: bash
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          ./gradlew --no-daemon :credential-provider:testDebugUnitTest \
-            --tests 'expo.modules.credentialprovider.domain.*'
+          ./gradlew --no-daemon :tauri-plugin-bittery-credential-provider:testDebugUnitTest \
+            --tests 'com.bittery.mobile.credentialprovider.domain.*'
           elapsed="$(( $(date +%s) - start ))"
-          echo "android unit tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "credential-provider unit tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: android-unit-test-report
-          # The Gradle project's projectDir is the module directory, not a
-          # subdirectory of the generated apps/mobile/android, so that is where
-          # the HTML/XML report lands.
-          path: apps/mobile/modules/credential-provider/android/build/reports/tests/**
+          name: credential-provider-test-report
+          path: apps/mobile/src-tauri/plugins/credential-provider/android/build/reports/tests/**
           retention-days: 7
           if-no-files-found: warn
 

@@ -1,3 +1,36 @@
+/**
+ * Ported line for line from `apps/mobile/src/hooks/use-credential-provider-sync.ts`.
+ *
+ * The signature functions, the per-account bookkeeping, the ordering of every guard, the
+ * passkey writeback loop and the error handling are unchanged: this hook decides what key
+ * material reaches a *separate Android process*, so a behaviour change here is a security
+ * change. Only the platform seams were rewritten, and they are all listed here.
+ *
+ * **Every credential-provider call is now `await`ed.** Six of them were synchronous in
+ * Expo (`isAvailable`, `isBiometricAvailable`, and their siblings on the read-only
+ * surface); a `Promise` in a condition is always truthy, so a missed `await` inverts the
+ * guard silently. `pnpm lint:promises` (Biome `nursery/noMisusedPromises`, chained onto
+ * `check-types`) is the mechanical check that none were missed.
+ *
+ * **`Platform.OS !== "android"` is gone, with no replacement.** It guarded the *plugin*,
+ * not the OS, and the plugin only exists in the Android build — a non-Android host fails
+ * the availability probe and `isAvailable()` answers `false`. The `isAvailable` state
+ * below already carries that fact, so every `Platform.OS !== "android" || !isAvailable`
+ * pair collapses to `!isAvailable`.
+ *
+ * **React Native's `AppState` became `document.visibilityState`.** `"active"` maps to
+ * `"visible"`, and `AppState.addEventListener("change", …)` to a `visibilitychange`
+ * listener. Same two questions, same two answers.
+ *
+ * **`InteractionManager.runAfterInteractions` became `requestIdleCallback`.** Both mean
+ * "not while the user is mid-gesture"; neither is load-bearing for correctness.
+ *
+ * **`syncVaultData` throwing is now a real outcome.** The bridge's mutating commands
+ * reject when the plugin is absent instead of fabricating a zero-count success. The
+ * signature is recorded only *after* the await resolves, so a throw leaves the account
+ * unrecorded and the next pass retries it — which is the whole reason the bridge throws.
+ */
+
 import {
 	useAccountsInfo,
 	useItems,
@@ -5,16 +38,23 @@ import {
 } from "@bittery/core/hooks";
 import { createNativeItemSyncCommand } from "@bittery/sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, InteractionManager, Platform } from "react-native";
-import { storage } from "@/services/storage";
-import type { PendingPasskeyMutation } from "../../modules/credential-provider";
-import CredentialProvider from "../../modules/credential-provider";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../services/credential-provider-master-unlock-key";
+import {
+	credentialProvider as CredentialProvider,
+	type PendingPasskeyMutation,
+} from "@/lib/credential-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/lib/credential-provider-master-unlock-key";
+import { storage } from "@/lib/storage";
 
 const MAX_PENDING_PASSKEY_ATTEMPTS = 5;
 const MAX_PENDING_PASSKEY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Expo gated this on `__DEV__ && EXPO_PUBLIC_CREDENTIAL_SYNC_DEBUG === "true"`. Vite has
+ * no `__DEV__`, and `import.meta.env.DEV` is false in the `--debug` APK — that build still
+ * runs `vite build` in production mode — so the `&&` would make these logs unreachable on
+ * a device. The opt-in half is what mattered: off unless someone builds with the flag.
+ */
 const CREDENTIAL_SYNC_DEBUG =
-	__DEV__ && process.env.EXPO_PUBLIC_CREDENTIAL_SYNC_DEBUG === "true";
+	import.meta.env.VITE_CREDENTIAL_SYNC_DEBUG === "true";
 
 function hashString(input: string): number {
 	let hash = 0;
@@ -76,6 +116,13 @@ function debugLog(message: string, payload?: unknown) {
 		return;
 	}
 	console.log(message, payload);
+}
+
+/** The `AppState.currentState === "active"` question, asked of a WebView. */
+function isAppForegrounded(): boolean {
+	return (
+		typeof document === "undefined" || document.visibilityState === "visible"
+	);
 }
 
 /**
@@ -145,23 +192,31 @@ export function useCredentialProviderSync(
 			return;
 		}
 
-		if (Platform.OS !== "android") {
-			debugLog("[CredentialProviderSync] Not Android, skipping");
-			setIsAvailable(false);
-			setIsBiometricAvailable(false);
-			return;
-		}
+		// The Expo version answered both questions synchronously and short-circuited on
+		// `Platform.OS !== "android"` first. Both answers are promises now, so the effect
+		// resolves them and drops a late answer that arrives after `enabled` flipped.
+		let cancelled = false;
+		void (async () => {
+			const [credentialProviderAvailable, biometricAvailable] =
+				await Promise.all([
+					CredentialProvider.isAvailable(),
+					CredentialProvider.isBiometricAvailable(),
+				]);
+			if (cancelled) {
+				return;
+			}
+			debugLog("[CredentialProviderSync] Availability check:", {
+				credentialProviderAvailable,
+				biometricAvailable,
+			});
 
-		const credentialProviderAvailable = CredentialProvider.isAvailable();
-		const biometricAvailable = CredentialProvider.isBiometricAvailable();
-		debugLog("[CredentialProviderSync] Availability check:", {
-			credentialProviderAvailable,
-			biometricAvailable,
-			sdkVersion: Platform.Version,
-		});
+			setIsAvailable(credentialProviderAvailable);
+			setIsBiometricAvailable(biometricAvailable);
+		})();
 
-		setIsAvailable(credentialProviderAvailable);
-		setIsBiometricAvailable(biometricAvailable);
+		return () => {
+			cancelled = true;
+		};
 	}, [enabled]);
 
 	/**
@@ -169,7 +224,7 @@ export function useCredentialProviderSync(
 	 * This enables on-demand decryption in the credential provider service.
 	 */
 	const ensureNativeMukSet = useCallback(async () => {
-		if (!enabled || Platform.OS !== "android" || !isAvailable) return;
+		if (!enabled || !isAvailable) return;
 
 		try {
 			const unlockedAccountIds = await storage.getUnlockedAccounts();
@@ -208,7 +263,7 @@ export function useCredentialProviderSync(
 	} | null> => {
 		debugLog("[CredentialProviderSync] syncVaultData() called");
 
-		if (!enabled || !isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable) {
 			debugLog("[CredentialProviderSync] Vault sync skipped: not available");
 			return null;
 		}
@@ -392,6 +447,9 @@ export function useCredentialProviderSync(
 					items: itemsData,
 				};
 
+				// The signature is recorded *after* this resolves, never before. An absent
+				// plugin rejects here rather than fabricating `{vaultKeys: 0, items: 0}`,
+				// and the throw must leave this account unrecorded so the next pass retries.
 				const result = await CredentialProvider.syncVaultData(
 					JSON.stringify(syncData),
 				);
@@ -430,7 +488,7 @@ export function useCredentialProviderSync(
 		failed: number;
 		discarded: number;
 	}> => {
-		if (!enabled || !isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable) {
 			return { applied: 0, failed: 0, discarded: 0 };
 		}
 
@@ -503,7 +561,7 @@ export function useCredentialProviderSync(
 			failedByError.set(message, ids);
 		};
 
-		for (const mutation of pending as PendingPasskeyMutation[]) {
+		for (const mutation of pending) {
 			const ageMs = Date.now() - mutation.createdAt;
 			if (
 				mutation.attemptCount >= MAX_PENDING_PASSKEY_ATTEMPTS ||
@@ -583,7 +641,14 @@ export function useCredentialProviderSync(
 
 	const waitForInteractionsToFinish = useCallback(async () => {
 		await new Promise<void>((resolve) => {
-			InteractionManager.runAfterInteractions(() => resolve());
+			// `InteractionManager.runAfterInteractions` has no WebView equivalent;
+			// `requestIdleCallback` carries the same intent — don't start heavy work while
+			// the main thread is busy — and falls back to a macrotask where it is missing.
+			if (typeof requestIdleCallback === "function") {
+				requestIdleCallback(() => resolve(), { timeout: 500 });
+				return;
+			}
+			setTimeout(resolve, 0);
 		});
 	}, []);
 
@@ -595,10 +660,9 @@ export function useCredentialProviderSync(
 		debugLog("[CredentialProviderSync] sync() called", {
 			isAvailable,
 			isBiometricAvailable,
-			platform: Platform.OS,
 		});
 
-		if (!enabled || !isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable) {
 			debugLog(
 				"[CredentialProviderSync] Sync skipped: not available or not Android",
 			);
@@ -689,7 +753,7 @@ export function useCredentialProviderSync(
 	// Flush provider-generated passkey mutations while app is running.
 	// This avoids requiring an app restart before passkey-created items appear and sync remotely.
 	useEffect(() => {
-		if (!enabled || !isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable) {
 			return;
 		}
 
@@ -719,23 +783,21 @@ export function useCredentialProviderSync(
 
 		void flushNow("mount");
 
-		const appStateSubscription = AppState.addEventListener(
-			"change",
-			(nextState) => {
-				if (nextState === "active") {
-					void flushNow("app_active");
-				}
-			},
-		);
+		const handleVisibilityChange = () => {
+			if (isAppForegrounded()) {
+				void flushNow("app_active");
+			}
+		};
+		document.addEventListener("visibilitychange", handleVisibilityChange);
 
-		const intervalMs = __DEV__ ? 120000 : 60000;
+		const intervalMs = import.meta.env.DEV ? 120000 : 60000;
 		const intervalId = setInterval(() => {
 			void flushNow("interval");
 		}, intervalMs);
 
 		return () => {
 			disposed = true;
-			appStateSubscription.remove();
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
 			clearInterval(intervalId);
 		};
 	}, [enabled, isAvailable, flushPendingPasskeyMutationsAndRefresh]);
@@ -755,9 +817,8 @@ export function useCredentialProviderSync(
 			isAvailable,
 			isBiometricAvailable,
 			isLoadingItems,
-			platform: Platform.OS,
 			itemCount: loginItems.length,
-			appState: AppState.currentState,
+			foregrounded: isAppForegrounded(),
 		});
 
 		if (
@@ -766,8 +827,7 @@ export function useCredentialProviderSync(
 			!isAvailable ||
 			!isBiometricAvailable ||
 			isLoadingItems ||
-			AppState.currentState !== "active" ||
-			Platform.OS !== "android"
+			!isAppForegrounded()
 		) {
 			debugLog("[CredentialProviderSync] Auto-sync skipped due to conditions");
 			return;
@@ -792,14 +852,21 @@ export function useCredentialProviderSync(
 		// Set debounced sync
 		debounceTimerRef.current = setTimeout(() => {
 			debugLog("[CredentialProviderSync] Debounce timer fired, starting sync");
-			sync();
+			void sync();
 		}, debounceMs);
 
-		return () => {
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current);
-			}
-		};
+		// No cleanup that clears the timer. The Expo original returned one, and on this
+		// platform it starves the sync outright — measured on the emulator: the effect
+		// schedules the timer, `accountsInfo` resolves a few hundred ms later with a new
+		// array identity (`useAccountsInfo` sets `structuralSharing: false`, so every
+		// resolution is a new reference), that re-runs the effect, React fires the cleanup
+		// and cancels the pending timer, and the re-run hits `currentHash ===
+		// lastItemsHashRef.current` and returns without scheduling a replacement. The
+		// debounce never fires and nothing ever reaches the provider.
+		//
+		// Debounce coalescing is unaffected: the `clearTimeout` above still collapses
+		// repeat schedules into one. Only the unmount clear is needed, and it is its own
+		// effect below.
 	}, [
 		enabled,
 		autoSync,
@@ -811,6 +878,16 @@ export function useCredentialProviderSync(
 		debounceMs,
 		loginItems.length,
 	]);
+
+	// Drop a pending debounce when the hook goes away, and only then.
+	useEffect(
+		() => () => {
+			if (debounceTimerRef.current) {
+				clearTimeout(debounceTimerRef.current);
+			}
+		},
+		[],
+	);
 
 	return {
 		/** Whether the credential provider API is available (Android 14+) */

@@ -92,4 +92,40 @@ export async function createStaticStoredAccountApiClient(
 	});
 }
 
+/**
+ * Builds the client a password unlock talks to: the stored auth token when one exists, an
+ * unauthenticated client for the account's server when it does not.
+ *
+ * A missing token is the *normal* state here, not a failure. `AccountStore.clearSession`
+ * drops `jwt_token` on every lock and deliberately keeps `session_data`, so quick unlock
+ * nearly always runs without a token — it re-runs SRP against `startLogin`/`finishLogin`,
+ * neither of which is authenticated, and mints a fresh one. Refusing to build a client
+ * without a token would make locking an account indistinguishable from signing out of it.
+ */
+export async function createStoredAccountUnlockApiClient(
+	storage: AccountStore,
+	accountId: string,
+): Promise<DefaultApiClient> {
+	const [authToken, account, serverUrl] = await Promise.all([
+		storage.getAuthToken(accountId),
+		storage.getAccountMetadata(accountId),
+		storage.getServerUrl(accountId),
+	]);
+	const resolvedServerUrl = serverUrl || getDefaultServerUrl();
+	const metadata = {
+		insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
+	};
+
+	if (!authToken) {
+		return createApiClientForServer(resolvedServerUrl, undefined, metadata);
+	}
+	return createAccountApiClient(
+		authToken,
+		resolvedServerUrl,
+		undefined,
+		undefined,
+		metadata,
+	);
+}
+
 export { createAccountApiClient, createApiClientForServer };

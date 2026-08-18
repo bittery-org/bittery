@@ -19,9 +19,6 @@
 		},
 		"./adapters/wasm-static": {
 			"default": "./src/adapters/wasm-static.ts"
-		},
-		"./adapters/react-native": {
-			"default": "./src/adapters/react-native.ts"
 		}
 	},
 	"scripts": {
@@ -30,19 +27,14 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
-		"@bittery/crypto-react-native": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
-		"@bittery/crypto-wasm": "workspace:*",
-		"@bittery/crypto-react-native": "workspace:*"
+		"@bittery/crypto-wasm": "workspace:*"
 	},
 	"peerDependenciesMeta": {
 		"@bittery/crypto-wasm": {
-			"optional": true
-		},
-		"@bittery/crypto-react-native": {
 			"optional": true
 		}
 	}

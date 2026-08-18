@@ -1,217 +1,169 @@
 /**
- * The pieces the three identity surfaces (full sign-in, quick unlock and the
- * autofill unlock modal) share. Local to those screens on purpose — if a fourth
- * surface needs them they should move into `src/components/ui/`.
+ * The pieces the two identity surfaces — full sign-in and quick unlock — share. Ported from
+ * `apps/mobile/src/components/auth-kit.tsx`, and local to those two screens on purpose: if a
+ * third surface ever needs them they belong in `components/ui/` instead.
+ *
+ * `apps/mobile/DESIGN-NATIVE.md` is the spec. Nothing here paints purple except the two
+ * lockups, which are sanctioned brand moments (§ Brand moments 4).
  */
 
-import { Input, Label, PressableFeedback, TextField } from "heroui-native";
-import { useState } from "react";
-import { Image, Text, View } from "react-native";
+import { BitteryLogo } from "@bittery/ui";
+import { IconEye, IconEyeOff, IconShieldCheck } from "@bittery/ui/icons";
+import { cn } from "@bittery/ui/lib/utils";
+import { type ComponentType, type ReactNode, useState } from "react";
 import {
-	type AppIcon,
-	GradientTile,
-	IconEye,
-	IconEyeOff,
-	IconFingerprint,
-	IconScanFace,
-	iconSize,
-	layout,
+	iconClass,
+	Pressable,
+	Switch,
+	TextField,
+	type TextFieldProps,
 } from "@/components/ui";
-import type { BiometricTypeToken } from "@/lib/biometric-type";
-import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
-import type { AccountMetadata } from "@/services/storage";
 
-/** The wordmark lockup that opens the full sign-in screen. */
-export function BrandLockup({ subtitle }: { subtitle?: string }) {
-	return (
-		<View className="items-center">
-			<Image
-				accessible={false}
-				source={require("../../assets/logo.png")}
-				style={{ width: 196, height: 66 }}
-				resizeMode="contain"
-			/>
-			{subtitle ? (
-				<Text className="mt-3 max-w-xs text-center text-muted text-sm">
-					{subtitle}
-				</Text>
-			) : null}
-		</View>
-	);
-}
-
-/** The accent tile + title block the unlock surfaces open with. */
-export function UnlockLockup({
-	icon: Icon,
+/**
+ * The lockup that opens the full sign-in screen: the wordmark in brand purple, exactly as
+ * the other apps paint it, never a stand-in glyph with "Bittery" typed underneath. This is
+ * the one screen whose job is to say *which product* you are signing in to, so it spends
+ * the space on the actual logo and nothing else.
+ */
+export function BrandLockup({
 	title,
 	subtitle,
-	compact = false,
 }: {
-	icon: AppIcon;
-	title: string;
-	subtitle?: string | null;
-	compact?: boolean;
+	title: ReactNode;
+	subtitle?: ReactNode;
 }) {
-	const size = compact ? 60 : 76;
-
 	return (
-		<View className="items-center">
-			<GradientTile name="Bittery" accent glow size={size} radius={20}>
-				<Icon size={compact ? 26 : 32} className="text-accent-foreground" />
-			</GradientTile>
-			<Text className="mt-5 text-center font-semibold text-2xl text-foreground tracking-tight">
+		<div className="flex flex-col items-center text-center">
+			{/* Not `aria-hidden`: its `<title>` is what names the product to a screen reader. */}
+			<BitteryLogo className="h-12 text-primary" />
+			<h1 className="mt-6 font-semibold text-foreground text-xl tracking-tight">
 				{title}
-			</Text>
+			</h1>
+			{/* No `text-balance`: balancing pinches two lines to half the screen, which reads
+			    as a narrow column under a wide title. */}
 			{subtitle ? (
-				<Text className="mt-1.5 text-center text-muted text-sm">
+				<p className="mt-1.5 max-w-[19rem] text-muted-foreground text-sm">
 					{subtitle}
-				</Text>
+				</p>
 			) : null}
-		</View>
+		</div>
 	);
 }
 
-/** Face-vs-finger is the one thing a translated label cannot carry. */
-export function BiometricGlyph({
-	token,
-	size = iconSize.bar,
-	className,
+/** The unlock lockup: the same wordmark, smaller, over the greeting. */
+export function UnlockLockup({
+	title,
+	subtitle,
 }: {
-	token: BiometricTypeToken;
-	size?: number;
-	className?: string;
+	title: ReactNode;
+	subtitle?: ReactNode;
 }) {
-	const Icon = token === "face" ? IconScanFace : IconFingerprint;
-	return <Icon size={size} className={className} />;
-}
-
-interface AuthFieldProps {
-	label: string;
-	description?: string;
-	icon?: AppIcon;
-	value: string;
-	onChangeText: (value: string) => void;
-	placeholder?: string;
-	isInvalid?: boolean;
-	autoFocus?: boolean;
-	autoCapitalize?: "none" | "characters" | "sentences" | "words";
-	keyboardType?: "default" | "email-address" | "url";
-	textContentType?: "emailAddress" | "password" | "none";
-	inputClassName?: string;
-}
-
-/** Labelled field with an optional leading glyph well. */
-export function AuthField({
-	label,
-	description,
-	icon: Icon,
-	value,
-	onChangeText,
-	placeholder,
-	isInvalid = false,
-	autoFocus,
-	autoCapitalize = "none",
-	keyboardType = "default",
-	textContentType = "none",
-	inputClassName,
-}: AuthFieldProps) {
 	return (
-		<TextField isInvalid={isInvalid}>
-			<Label>{label}</Label>
-			<View className="w-full flex-row items-center">
-				<Input
-					placeholder={placeholder}
-					value={value}
-					onChangeText={onChangeText}
-					autoCapitalize={autoCapitalize}
-					autoCorrect={false}
-					autoFocus={autoFocus}
-					keyboardType={keyboardType}
-					textContentType={textContentType}
-					className={cn("flex-1", Icon ? "pl-11" : "", inputClassName)}
-				/>
-				{Icon ? (
-					<Icon
-						size={iconSize.bar}
-						className="absolute left-3.5 text-muted"
-						pointerEvents="none"
-					/>
-				) : null}
-			</View>
-			{description ? (
-				<Text className="mt-1.5 px-1 text-muted text-xs">{description}</Text>
+		<div className="flex flex-col items-center text-center">
+			<BitteryLogo className="h-10 text-primary" />
+			<h1 className="mt-6 font-semibold text-2xl text-foreground tracking-tight">
+				{title}
+			</h1>
+			{subtitle ? (
+				<p className="mt-1.5 max-w-[19rem] text-muted-foreground text-sm">
+					{subtitle}
+				</p>
 			) : null}
-		</TextField>
+		</div>
 	);
 }
 
-interface PasswordFieldProps {
-	label: string;
-	value: string;
-	onChangeText: (value: string) => void;
-	placeholder?: string;
-	icon: AppIcon;
-	isInvalid?: boolean;
-	autoFocus?: boolean;
-	onSubmit?: () => void;
+/**
+ * The held moment before an identity screen knows what to show — the splash redirect, and
+ * unlock while it reads the account list.
+ *
+ * A breathing wordmark rather than a spinner: a spinner says "something is slow", this says
+ * "the app is opening". It is decorative, exactly as the bare spinner it replaces was, so it
+ * announces nothing.
+ */
+export function BrandSplash() {
+	return (
+		<div className="flex min-h-0 flex-1 items-center justify-center">
+			<BitteryLogo aria-hidden className="h-12 animate-pulse text-primary" />
+		</div>
+	);
 }
 
-/** Master-password entry with the reveal toggle every unlock surface carries. */
-export function PasswordField({
-	label,
-	value,
-	onChangeText,
-	placeholder,
-	icon: Icon,
-	isInvalid = false,
-	autoFocus = false,
-	onSubmit,
-}: PasswordFieldProps) {
+/**
+ * The trust line under a sign-in form. Quiet on purpose — it is a reassurance, not a claim
+ * competing with the primary action.
+ */
+export function AuthFooterNote({ label }: { label: ReactNode }) {
+	return (
+		<p className="flex items-center justify-center gap-1.5 text-muted-foreground text-xs">
+			<IconShieldCheck aria-hidden className="size-3.5 shrink-0" />
+			{label}
+		</p>
+	);
+}
+
+/**
+ * Submit a form from outside it.
+ *
+ * `BrandButton` is a `Pressable`, which is always `type="button"` — it cannot *be* a form's
+ * submit control. `requestSubmit()` takes exactly the path a submit button would: it runs
+ * constraint validation (so `required` still bites) and then fires `onSubmit`. A WebView old
+ * enough to lack it falls back to a plain dispatch, which skips validation but still signs
+ * the user in rather than doing nothing at all.
+ */
+export function submitForm(form: HTMLFormElement | null) {
+	if (!form) return;
+
+	if (typeof form.requestSubmit === "function") {
+		form.requestSubmit();
+		return;
+	}
+
+	form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
+/**
+ * The identity screens' name for the kit's `TextField`. It is an alias and not a component:
+ * the field itself was promoted to `components/ui/text-field.tsx` once attachments and the
+ * vault form needed it too, exactly as this module's header says it should be.
+ */
+export const AuthField = TextField;
+
+interface PasswordFieldProps extends Omit<TextFieldProps, "trailing"> {
+	/** Controls the reveal toggle too, so a pending submit cannot be poked at. */
+	disabled?: boolean;
+}
+
+/** Secret entry with the reveal toggle every identity surface carries. */
+export function PasswordField({ disabled, ...props }: PasswordFieldProps) {
 	const { m } = useI18n();
 	const [isRevealed, setIsRevealed] = useState(false);
 
 	return (
-		<TextField isInvalid={isInvalid}>
-			<Label>{label}</Label>
-			<View className="w-full flex-row items-center">
-				<Input
-					placeholder={placeholder}
-					value={value}
-					onChangeText={onChangeText}
-					secureTextEntry={!isRevealed}
-					textContentType="password"
-					autoCapitalize="none"
-					autoCorrect={false}
-					autoFocus={autoFocus}
-					returnKeyType="go"
-					onSubmitEditing={onSubmit}
-					className="flex-1 pr-12 pl-11"
-				/>
-				<Icon
-					size={iconSize.bar}
-					className="absolute left-3.5 text-muted"
-					pointerEvents="none"
-				/>
-				<PressableFeedback
-					onPress={() => setIsRevealed((revealed) => !revealed)}
-					accessibilityRole="button"
-					accessibilityLabel={
+		<AuthField
+			{...props}
+			disabled={disabled}
+			type={isRevealed ? "text" : "password"}
+			trailing={
+				<Pressable
+					onClick={() => setIsRevealed((revealed) => !revealed)}
+					disabled={disabled}
+					aria-label={
 						isRevealed
 							? m.vaults_detail_items_form_login_action_hide_password()
 							: m.vaults_detail_items_form_login_action_show_password()
 					}
-					className="absolute right-2 h-9 w-9 items-center justify-center rounded-full"
+					className="absolute right-1.5 flex size-9 items-center justify-center rounded-full text-muted-foreground"
 				>
-					<PressableFeedback.Highlight />
 					{isRevealed ? (
-						<IconEyeOff size={iconSize.bar} className="text-muted" />
+						<IconEyeOff className={iconClass.bar} />
 					) : (
-						<IconEye size={iconSize.bar} className="text-muted" />
+						<IconEye className={iconClass.bar} />
 					)}
-				</PressableFeedback>
-			</View>
-		</TextField>
+				</Pressable>
+			}
+		/>
 	);
 }
 
@@ -224,9 +176,16 @@ const NOTICE_TONES = {
 		container: "border-warning/25 bg-warning-soft",
 		accent: "text-warning",
 	},
-	info: {
-		container: "border-info/25 bg-info/10",
-		accent: "text-info",
+	info: { container: "border-info/25 bg-info-soft", accent: "text-info" },
+	/** Advisory rather than status: no colour claim at all. */
+	neutral: {
+		container: "border-transparent bg-surface-tertiary",
+		accent: "text-muted-foreground",
+	},
+	/** Reserved for the master-password countdown, which is about the vault itself. */
+	brand: {
+		container: "border-primary/15 bg-primary-soft",
+		accent: "text-primary",
 	},
 } as const;
 
@@ -239,121 +198,129 @@ export function InlineNotice({
 	className,
 }: {
 	tone: keyof typeof NOTICE_TONES;
-	icon: AppIcon;
-	title?: string;
-	description: string;
+	icon: ComponentType<{ className?: string }>;
+	title?: ReactNode;
+	description: ReactNode;
 	className?: string;
 }) {
 	const styles = NOTICE_TONES[tone];
 
 	return (
-		<View
+		<div
 			className={cn(
-				"flex-row items-start gap-3 rounded-xl border px-3.5 py-3",
+				"flex items-start gap-3 rounded-xl border px-3.5 py-3",
 				styles.container,
 				className,
 			)}
 		>
-			<Icon size={iconSize.row} className={cn("mt-0.5", styles.accent)} />
-			<View className="min-w-0 flex-1">
+			<Icon
+				aria-hidden
+				className={cn("mt-0.5 shrink-0", iconClass.row, styles.accent)}
+			/>
+			<div className="min-w-0 flex-1">
 				{title ? (
-					<Text className={cn("font-medium text-sm", styles.accent)}>
-						{title}
-					</Text>
+					<p className={cn("font-medium text-sm", styles.accent)}>{title}</p>
 				) : null}
-				<Text
-					className={cn("text-sm", title ? "mt-0.5 text-muted" : styles.accent)}
+				<p
+					className={cn(
+						"text-sm",
+						title ? "mt-0.5 text-muted-foreground" : styles.accent,
+					)}
 				>
 					{description}
-				</Text>
-			</View>
-		</View>
+				</p>
+			</div>
+		</div>
 	);
 }
 
 /** The "or" rule between the biometric affordance and the password form. */
-export function AuthDivider({ label }: { label: string }) {
+export function AuthDivider({ label }: { label: ReactNode }) {
 	return (
-		<View className="flex-row items-center gap-3">
-			<View className="h-px flex-1 bg-border" />
-			<Text className="text-muted text-xs uppercase tracking-[0.06em]">
+		<div className="flex items-center gap-3">
+			<span aria-hidden className="h-px flex-1 bg-separator" />
+			<span className="font-semibold text-2xs text-muted-foreground uppercase tracking-[0.06em]">
 				{label}
-			</Text>
-			<View className="h-px flex-1 bg-border" />
-		</View>
+			</span>
+			<span aria-hidden className="h-px flex-1 bg-separator" />
+		</div>
 	);
 }
 
 /**
- * Account initials: teamName → name → email, first letters of up to two words.
- * Mirrors `getAccountInitials` in `packages/ui/src/components/account-switcher.tsx`;
- * a raw email is never sliced because that produces "j." artifacts.
+ * A switch with its own label and description, on a card. The auth screens use it for the
+ * two consent choices sign-in offers; settings puts its switches in `ListRow`s instead.
  */
-export function getAccountInitials(account?: AccountMetadata | null): string {
-	if (!account) {
-		return "?";
-	}
-
-	const source =
-		account.teamName || account.name || account.email.split("@")[0];
-	const words = (source ?? "")
-		.split(/[\s._-]+/)
-		.filter(Boolean)
-		.slice(0, 2);
-
-	if (words.length === 0) {
-		return "?";
-	}
-
-	return words
-		.map((word) => word.charAt(0))
-		.join("")
-		.toUpperCase();
-}
-
-/**
- * Account avatar: the accent gradient with initials, or the team's own image
- * when it has one. Accounts never take a name-hashed gradient.
- */
-export function AccountAvatar({
-	account,
-	size = layout.iconTile,
-	radius = 14,
+export function AuthToggle({
+	label,
+	description,
+	icon: Icon,
+	isSelected,
+	onSelectedChange,
+	tone = "default",
 }: {
-	account?: AccountMetadata | null;
-	size?: number;
-	radius?: number;
+	label: ReactNode;
+	description?: ReactNode;
+	icon?: ComponentType<{ className?: string }>;
+	isSelected: boolean;
+	onSelectedChange: (next: boolean) => void;
+	/** `warning` is for the insecure-transport consent, which must not look routine. */
+	tone?: "default" | "warning";
 }) {
 	return (
-		<GradientTile name="Bittery" accent size={size} radius={radius}>
-			{account?.teamAvatarUrl ? (
-				<Image
-					source={{ uri: account.teamAvatarUrl }}
-					style={{
-						position: "absolute",
-						width: size,
-						height: size,
-						borderRadius: radius,
-					}}
-				/>
-			) : (
-				<Text
-					className={cn(
-						"font-semibold text-accent-foreground",
-						size >= 48 ? "text-base" : "text-sm",
-					)}
-				>
-					{getAccountInitials(account)}
-				</Text>
+		<div
+			className={cn(
+				"flex items-center gap-3 rounded-2xl border p-3.5",
+				tone === "warning"
+					? "border-warning/30 bg-warning-soft"
+					: "border-border bg-surface shadow-surface",
 			)}
-		</GradientTile>
+		>
+			{Icon ? (
+				<Icon
+					aria-hidden
+					className={cn(
+						"shrink-0",
+						iconClass.bar,
+						tone === "warning" ? "text-warning" : "text-muted-foreground",
+					)}
+				/>
+			) : null}
+			<div className="min-w-0 flex-1">
+				<p className="font-medium text-base text-foreground">{label}</p>
+				{description ? (
+					<p className="mt-0.5 text-muted-foreground text-sm">{description}</p>
+				) : null}
+			</div>
+			<Switch
+				isSelected={isSelected}
+				onSelectedChange={onSelectedChange}
+				ariaLabel={typeof label === "string" ? label : undefined}
+			/>
+		</div>
 	);
 }
 
-/** The label an account shows in lists and pickers. */
-export function getAccountLabel(
-	account: AccountMetadata,
-	fallback: string,
-): string {
-	return account.teamName || account.name || account.email || fallback;
+/**
+ * A quiet, full-width text action — "use a different account", "not you?". Never a second
+ * filled button: a screen has exactly one primary action.
+ */
+export function AuthTextAction({
+	label,
+	icon: Icon,
+	onPress,
+}: {
+	label: ReactNode;
+	icon?: ComponentType<{ className?: string }>;
+	onPress: () => void;
+}) {
+	return (
+		<Pressable
+			onClick={onPress}
+			className="flex h-11 w-full items-center justify-center gap-2 rounded-xl font-medium text-muted-foreground text-sm"
+		>
+			{Icon ? <Icon aria-hidden className={iconClass.chip} /> : null}
+			{label}
+		</Pressable>
+	);
 }

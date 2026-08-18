@@ -28,9 +28,6 @@
 		},
 		"./adapters/tauri-mobile": {
 			"default": "./src/adapters/tauri-mobile.ts"
-		},
-		"./adapters/react-native": {
-			"default": "./src/adapters/react-native.ts"
 		}
 	},
 	"scripts": {
