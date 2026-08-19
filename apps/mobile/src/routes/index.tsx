@@ -1,43 +1,32 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BrandSplash } from "@/components/auth-kit";
 import { Screen } from "@/components/ui";
+import { storage } from "@/lib/storage";
+import { resolveVaultRouteAccess } from "@/lib/vault-route-access";
 
 export const Route = createFileRoute("/")({
+	/**
+	 * The launcher icon, and the whole reason `resolveVaultRouteAccess` exists.
+	 *
+	 * This used to carry its own copy of the decision — accounts list, adopt the first
+	 * account, `isSessionValid`, `unlockAccount(id, true)` — which was right for every
+	 * cold start except the one the user notices: unlock in Bittery's own autofill sheet,
+	 * come back to the app, get asked for the password again. Only the shared decision
+	 * borrows the live native key, so only the shared decision can answer that. `/vault`
+	 * and `/login` ask the same question of the same function.
+	 */
 	beforeLoad: async ({ context }) => {
-		// Check for accounts
-		const accountsList = context.runtime.accounts.getAccounts();
-
-		const [firstAccount] = accountsList;
-		if (!firstAccount) {
-			// No accounts, go to login
+		const access = await resolveVaultRouteAccess(
+			context.runtime.accounts,
+			storage,
+		);
+		if (access === "login") {
 			throw redirect({ to: "/login" });
 		}
-
-		// Get active account
-		let activeAccount = context.runtime.accounts.getActiveAccount();
-
-		if (!activeAccount) {
-			// Has accounts but none active, set first as active
-			await context.runtime.accounts.switchAccount(firstAccount.accountId);
-			activeAccount = firstAccount.accountId;
+		if (access === "unlock") {
+			throw redirect({ to: "/unlock" });
 		}
-
-		// Single account mode: check if the active account has a valid session.
-		const sessionValid =
-			await context.runtime.accounts.storage.isSessionValid(activeAccount);
-
-		if (sessionValid) {
-			const restored = await context.runtime.accounts.unlockAccount(
-				activeAccount,
-				true,
-			);
-			if (restored) {
-				throw redirect({ to: "/vault" });
-			}
-		}
-
-		// Session not valid or restore failed, go to unlock
-		throw redirect({ to: "/unlock" });
+		throw redirect({ to: "/vault" });
 	},
 	/**
 	 * `beforeLoad` above reads storage and may restore a session, so this is the app's cold

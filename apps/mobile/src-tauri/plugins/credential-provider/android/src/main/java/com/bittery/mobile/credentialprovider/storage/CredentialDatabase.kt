@@ -14,9 +14,10 @@ import androidx.room.RoomDatabase
         VaultKeyEntity::class,
         ItemEntity::class,
         ItemDomainEntity::class,
-        PendingPasskeyMutationEntity::class
+        PendingPasskeyMutationEntity::class,
+        TravelModePolicyEntity::class
     ],
-	version = 7,
+	version = 8,
     exportSchema = false
 )
 abstract class CredentialDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class CredentialDatabase : RoomDatabase() {
     abstract fun itemDomainDao(): ItemDomainDao
     abstract fun pendingPasskeyMutationDao(): PendingPasskeyMutationDao
     abstract fun passkeyMutationDao(): PasskeyMutationDao
+    abstract fun travelModePolicyDao(): TravelModePolicyDao
 
     companion object {
         private const val DATABASE_NAME = "bittery_credentials.db"

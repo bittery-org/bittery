@@ -39,7 +39,7 @@ impl<R: Runtime> CredentialProvider<R> {
         Err(crate::Error::Unsupported)
     }
 
-    pub fn clear_master_unlock_key(&self, _args: UserIdArgs) -> crate::Result<bool> {
+    pub fn clear_master_unlock_key(&self, _args: AccountIdArgs) -> crate::Result<bool> {
         Err(crate::Error::Unsupported)
     }
 
@@ -47,12 +47,22 @@ impl<R: Runtime> CredentialProvider<R> {
         Err(crate::Error::Unsupported)
     }
 
-    pub fn is_vault_unlocked(&self, _args: UserIdArgs) -> crate::Result<bool> {
+    pub fn is_vault_unlocked(&self, _args: AccountIdArgs) -> crate::Result<bool> {
         Err(crate::Error::Unsupported)
     }
 
-    pub fn get_master_unlock_key_base64(&self, _args: UserIdArgs) -> crate::Result<Option<String>> {
+    pub fn get_master_unlock_key_base64(&self, _args: AccountIdArgs) -> crate::Result<Option<String>> {
         Err(crate::Error::Unsupported)
+    }
+
+    /// `Ok(None)`, not `Err(Unsupported)`: a host with no live store has no live key,
+    /// which is the same answer a locked Android vault gives. The route guard reads it
+    /// as "nothing to borrow" and carries on, so nothing has to know the platform.
+    pub fn borrow_live_master_unlock_key_base64(
+        &self,
+        _args: RequiredAccountIdArgs,
+    ) -> crate::Result<Option<String>> {
+        Ok(None)
     }
 
     // ------------------------------------------------------------------
@@ -80,6 +90,10 @@ impl<R: Runtime> CredentialProvider<R> {
     }
 
     pub fn clear_escrow(&self) -> crate::Result<bool> {
+        Err(crate::Error::Unsupported)
+    }
+
+    pub fn clear_escrow_for_account(&self, _args: RequiredAccountIdArgs) -> crate::Result<bool> {
         Err(crate::Error::Unsupported)
     }
 

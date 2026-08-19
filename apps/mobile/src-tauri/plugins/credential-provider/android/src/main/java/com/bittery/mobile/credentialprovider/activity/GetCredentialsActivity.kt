@@ -5,113 +5,133 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.util.Base64
 import android.util.Log
 import androidx.annotation.RequiresApi
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PasswordCredential
 import androidx.credentials.PublicKeyCredential
+import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
-import androidx.credentials.provider.ProviderCreateCredentialRequest
-import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.credentials.webauthn.AuthenticatorAssertionResponse
 import androidx.credentials.webauthn.AuthenticatorAttestationResponse
 import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
 import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import androidx.fragment.app.FragmentActivity
-import com.bittery.mobile.credentialprovider.crypto.MukEscrowManager
-import com.bittery.mobile.credentialprovider.crypto.NativeCrypto
-import com.bittery.mobile.credentialprovider.crypto.VaultDecryptor
-import com.bittery.mobile.credentialprovider.domain.DomainMatch
 import com.bittery.mobile.credentialprovider.passkey.CreateRequestContext
 import com.bittery.mobile.credentialprovider.passkey.PasskeyUtils
-import com.bittery.mobile.credentialprovider.passkey.StoredPasskey
+import com.bittery.mobile.credentialprovider.service.BeginGetCredentialResponses
 import com.bittery.mobile.credentialprovider.service.BitteryCredentialProviderService
-import com.bittery.mobile.credentialprovider.state.VaultStateManager
-import com.bittery.mobile.credentialprovider.storage.CredentialDatabase
-import com.bittery.mobile.credentialprovider.storage.ItemDomainEntity
-import com.bittery.mobile.credentialprovider.storage.PendingPasskeyMutationEntity
+import com.bittery.mobile.credentialprovider.vault.NativeCredentialVault
+import com.bittery.mobile.credentialprovider.vault.NativeCredentialVaults
+import com.bittery.mobile.credentialprovider.vault.PasskeyAssertionRequest
+import com.bittery.mobile.credentialprovider.vault.PasskeyAssertionResult
+import com.bittery.mobile.credentialprovider.vault.PasskeySaveCandidate
+import com.bittery.mobile.credentialprovider.vault.PasskeySaveRequest
+import com.bittery.mobile.credentialprovider.vault.PasskeySaveResult
+import com.bittery.mobile.credentialprovider.vault.PasskeySaveTarget
+import com.bittery.mobile.credentialprovider.vault.PasskeySaveTargetChoice
+import com.bittery.mobile.credentialprovider.vault.PasswordReveal
+import com.bittery.mobile.credentialprovider.vault.UnlockResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
-import java.time.Instant
-import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
- * Activity for credential selection and biometric authentication.
- * This is launched via PendingIntent from the CredentialProviderService.
+ * The screen behind every credential-provider entry.
+ *
+ * The system launches it by `PendingIntent` when the user picks one of Bittery's
+ * entries, so it is the one place in the credential provider that can show
+ * something: a biometric prompt, or a list to choose from.
+ *
+ * It owns the *framework* half of each request — reading the provider request,
+ * building the WebAuthn response objects, setting the activity result — and asks
+ * [NativeCredentialVault] for everything else. No key, no row and no cipher is
+ * handled here.
  */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 class GetCredentialsActivity : FragmentActivity() {
     companion object {
         private const val TAG = "GetCredentialsActivity"
-    }
 
-    private fun computeNextSignCount(currentCount: Int): Int {
-        val nowSeconds = (System.currentTimeMillis() / 1000L) + 1L
-        val fromStored = currentCount.toLong() + 1L
-        val next = maxOf(fromStored, nowSeconds)
-        return next.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    }
-
-    private sealed class PasskeyCreateTarget {
-        data class ExistingItem(
-            val item: com.bittery.mobile.credentialprovider.storage.ItemEntity
-        ) : PasskeyCreateTarget()
-
-        object CreateNewItem : PasskeyCreateTarget()
+        /** The line under "Unlock Bittery" when this screen asks for biometrics. */
+        private const val UNLOCK_SUBTITLE = "Authenticate to access your passwords"
     }
 
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-	private lateinit var database: CredentialDatabase
-	private lateinit var mukEscrowManager: MukEscrowManager
-    private val allowlistJson: String by lazy {
-        loadAllowlistJson()
-    }
+    private lateinit var vault: NativeCredentialVault
 
-	private var itemId: String? = null
+    /** The same response builder the service uses. See [BeginGetCredentialResponses]. */
+    private val responses by lazy { BeginGetCredentialResponses(applicationContext, TAG) }
+    private val allowlistJson: String get() = responses.allowlistJson
+
+    private var itemId: String? = null
     private var passkeyCredentialId: String? = null
     private var requestType: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        VaultStateManager.initialize(applicationContext)
 
-		database = CredentialDatabase.getInstance(applicationContext)
-        mukEscrowManager = MukEscrowManager(applicationContext)
+        vault = NativeCredentialVaults.of(applicationContext)
 
-		itemId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_ITEM_ID)
-        passkeyCredentialId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_PASSKEY_CREDENTIAL_ID)
+        itemId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_ITEM_ID)
+        passkeyCredentialId =
+            intent.getStringExtra(BitteryCredentialProviderService.EXTRA_PASSKEY_CREDENTIAL_ID)
         requestType = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_REQUEST_TYPE)
 
         Log.d(
             TAG,
-			"Activity started - requestType: $requestType, itemId: $itemId, passkeyCredentialId: $passkeyCredentialId, pid=${android.os.Process.myPid()}"
+            "Activity started - requestType: $requestType, itemId: $itemId, " +
+                "passkeyCredentialId: $passkeyCredentialId, pid=${android.os.Process.myPid()}"
         )
-        VaultStateManager.dumpDebugState("GetCredentialsActivity.onCreate")
-        Log.d(TAG, "MUK Escrow state: hasValidEscrow=${mukEscrowManager.hasValidEscrow()}, canUseBiometricUnlock=${mukEscrowManager.canUseBiometricUnlock()}, escrowUserId=${mukEscrowManager.getEscrowUserId()}")
 
-		when (requestType) {
-			BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
-				if (itemId != null) {
-					handleGetItemCredential()
-				} else {
-					finishWithError("No item ID provided")
-				}
-			}
+        unlockIfNeededThenDispatch()
+    }
+
+    /**
+     * The cold-start gate.
+     *
+     * The live keys are in memory only, so a service started cold has none. This
+     * activity is the one place that can ask: it can show a `BiometricPrompt` and
+     * unwrap the escrowed key. Without a usable escrow it hands the user to the
+     * app for a master-password unlock. Neither path answers "no credentials".
+     */
+    private fun unlockIfNeededThenDispatch() {
+        if (vault.unlockedAccountIds().isNotEmpty()) {
+            dispatchRequest()
+            return
+        }
+
+        val state = vault.biometricUnlockState()
+        if (!state.canUnlock) {
+            Log.d(
+                TAG,
+                "No usable escrow - launching the app " +
+                    "(passwordRequired=${state.masterPasswordRequired})"
+            )
+            launchAppForPasswordUnlock(passwordRequired = state.masterPasswordRequired)
+            return
+        }
+
+        activityScope.launch { unlockThen { dispatchRequest() } }
+    }
+
+    private fun dispatchRequest() {
+        when (requestType) {
+            BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
+                if (itemId != null) {
+                    handleGetItemCredential()
+                } else {
+                    finishWithError("No item ID provided")
+                }
+            }
             BitteryCredentialProviderService.REQUEST_TYPE_GET_PASSKEY -> handleGetPasskeyCredential()
             BitteryCredentialProviderService.REQUEST_TYPE_CREATE_PASSKEY -> handleCreatePasskeyCredential()
             BitteryCredentialProviderService.REQUEST_TYPE_UNLOCK -> handleUnlock()
@@ -122,11 +142,93 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * Prompt for biometrics, then carry on.
+     *
+     * This is the only way a locked vault comes back inside the credential
+     * provider. The vault decides whether the escrow may be used and does the
+     * unwrapping; this only turns a refusal into a cancelled request.
+     */
+    private suspend fun unlockThen(onUnlocked: suspend () -> Unit) {
+        when (val result = vault.unlockWithBiometric(this, UNLOCK_SUBTITLE)) {
+            is UnlockResult.Unlocked -> onUnlocked()
+
+            UnlockResult.NoEscrow ->
+                launchAppForPasswordUnlock(passwordRequired = false)
+
+            // A pre-rekey record. Re-enrolment needs the master password.
+            UnlockResult.NeedsReenrolment ->
+                launchAppForPasswordUnlock(passwordRequired = true)
+
+            is UnlockResult.Rejected -> finishWithError("Authentication error: ${result.message}")
+
+            is UnlockResult.PromptUnavailable -> finishWithError(result.message)
+
+            is UnlockResult.PromptFailed -> finishWithError(result.message)
+
+            is UnlockResult.Failed -> finishWithError("Failed to unlock: ${result.message}")
+        }
+    }
 
     /**
-     * Handle unified storage credential retrieval (uses VaultStateManager MUK).
-     * The item is decrypted using the MUK from VaultStateManager.
+     * The plain unlock request, behind the "Unlock Bittery" entry.
+     *
+     * An `AuthenticationAction` is not finished by a bare `RESULT_OK`. The framework
+     * asked a question and wants the *answer*: a fresh `BeginGetCredentialResponse`
+     * built now that the vault is open. Returning nothing leaves the picker with the
+     * locked response it already had, which is an unlocked vault showing no
+     * suggestions.
      */
+    private fun handleUnlock() {
+        if (vault.unlockedAccountIds().isEmpty()) {
+            Log.w(TAG, "Unlock request could not be served here - launching the app")
+            launchAppForPasswordUnlock(
+                passwordRequired = vault.biometricUnlockState().masterPasswordRequired,
+            )
+            return
+        }
+
+        val beginRequest = PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)
+        if (beginRequest == null) {
+            // Nothing to answer. The unlock itself still happened and stands.
+            Log.w(TAG, "Unlocked, but this intent carries no begin-get request")
+            setResult(Activity.RESULT_OK)
+            finish()
+            return
+        }
+
+        activityScope.launch {
+            try {
+                val rawOrigin = try {
+                    beginRequest.callingAppInfo?.getOrigin(allowlistJson)
+                } catch (_: Exception) {
+                    null
+                }
+                val callingOrigin = responses.resolveCallingOrigin(
+                    rawOrigin,
+                    beginRequest.callingAppInfo?.packageName,
+                )
+
+                val response: BeginGetCredentialResponse =
+                    responses.build(vault, beginRequest, callingOrigin)
+
+                val resultIntent = Intent()
+                PendingIntentHandler.setBeginGetCredentialResponse(resultIntent, response)
+                setResult(Activity.RESULT_OK, resultIntent)
+                Log.d(TAG, "Unlocked - returned a rebuilt begin-get response")
+                finish()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to rebuild the response after unlock", e)
+                finishWithError("Failed to build credentials: ${e.message}")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Passwords
+    // ------------------------------------------------------------------
+
+    /** Hand back the password of the item the user picked. */
     private fun handleGetItemCredential() {
         val iId = itemId
         if (iId == null) {
@@ -136,35 +238,30 @@ class GetCredentialsActivity : FragmentActivity() {
 
         activityScope.launch {
             try {
-                // Load item to determine user context
-                val item = withContext(Dispatchers.IO) {
-                    database.itemDao().getById(iId)
-                }
+                when (val reveal = vault.revealPassword(iId)) {
+                    is PasswordReveal.Revealed -> completeGetItemCredential(reveal)
 
-                if (item == null) {
-                    finishWithError("Item not found")
-                    return@launch
-                }
+                    PasswordReveal.ItemNotFound -> finishWithError("Item not found")
 
-                val muk = VaultStateManager.getMasterUnlockKey(item.userId)
-                if (muk == null) {
-                    Log.w(TAG, "MUK not available for user ${item.userId}, need to unlock first")
-                    VaultStateManager.dumpDebugState("handleGetItemCredential MUK=null")
-                    val escrowUserId = mukEscrowManager.getEscrowUserId()
-                    val hasEscrow = mukEscrowManager.hasValidEscrow()
-                    val canBiometric = mukEscrowManager.canUseBiometricUnlock()
-                    Log.d(TAG, "Escrow state: hasValidEscrow=$hasEscrow, canBiometricUnlock=$canBiometric, escrowUserId=$escrowUserId, itemUserId=${item.userId}")
-                    if (hasEscrow && (escrowUserId == null || escrowUserId == item.userId)) {
-                        Log.d(TAG, "Attempting escrow unlock for item $iId")
-                        handleUnlockWithEscrow(iId, escrowUserId ?: item.userId)
-                    } else {
-                        Log.w(TAG, "No valid escrow for user (hasEscrow=$hasEscrow, escrowUserId=$escrowUserId vs itemUserId=${item.userId}), launching app for password unlock")
-                        launchAppForPasswordUnlock(passwordRequired = false)
+                    is PasswordReveal.Failed -> finishWithError(reveal.reason)
+
+                    is PasswordReveal.Locked -> {
+                        if (reveal.canUnlockWithBiometric) {
+                            Log.w(TAG, "No live key for this item's account - trying escrow")
+                            unlockThen {
+                                val again = vault.revealPassword(iId)
+                                if (again is PasswordReveal.Revealed) {
+                                    completeGetItemCredential(again)
+                                } else {
+                                    finishWithError("Item not found")
+                                }
+                            }
+                        } else {
+                            Log.w(TAG, "No escrow for this item's account - launching the app")
+                            launchAppForPasswordUnlock(passwordRequired = false)
+                        }
                     }
-                    return@launch
                 }
-
-                completeGetItemCredential(item, muk)
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing item credential retrieval", e)
                 finishWithError("Failed to prepare authentication: ${e.message}")
@@ -172,9 +269,27 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    /**
-     * Handle passkey assertion retrieval for a pre-selected item + credential ID.
-     */
+    private fun completeGetItemCredential(reveal: PasswordReveal.Revealed) {
+        // The framework only accepts an answer to the request it started.
+        if (PendingIntentHandler.retrieveProviderGetCredentialRequest(intent) == null) {
+            finishWithError("Credential provider request is missing")
+            return
+        }
+
+        val response = GetCredentialResponse(
+            PasswordCredential(id = reveal.username, password = reveal.password),
+        )
+        val resultIntent = Intent()
+        PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish()
+    }
+
+    // ------------------------------------------------------------------
+    // Passkey assertion
+    // ------------------------------------------------------------------
+
+    /** Sign an assertion with the passkey the user picked. */
     private fun handleGetPasskeyCredential() {
         val iId = itemId
         val selectedCredentialId = passkeyCredentialId
@@ -185,24 +300,62 @@ class GetCredentialsActivity : FragmentActivity() {
 
         activityScope.launch {
             try {
-                val item = withContext(Dispatchers.IO) {
-                    database.itemDao().getById(iId)
+                val providerGetRequest =
+                    PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
+                        ?: return@launch finishWithError("No provider get request found")
+
+                val passkeyOption = providerGetRequest.credentialOptions
+                    .firstOrNull { it is GetPublicKeyCredentialOption } as? GetPublicKeyCredentialOption
+                    ?: return@launch finishWithError("No public key credential option found")
+
+                val rawOrigin = try {
+                    providerGetRequest.callingAppInfo?.getOrigin(allowlistJson)
+                } catch (_: Exception) {
+                    null
+                }
+                val origin = responses.resolveCallingOrigin(
+                    rawOrigin,
+                    providerGetRequest.callingAppInfo?.packageName,
+                )
+
+                val rpId = PasskeyUtils.parseRpIdFromGetRequestJson(passkeyOption.requestJson)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: responses.passkeyRpIdFromOrigin(origin).takeIf { it.isNotBlank() }
+                    ?: return@launch finishWithError("Missing rpId in get request")
+
+                val clientDataHash = passkeyOption.clientDataHash
+                if (clientDataHash == null || clientDataHash.isEmpty()) {
+                    return@launch finishWithError("Missing clientDataHash for assertion")
                 }
 
-                if (item == null) {
-                    finishWithError("Item not found")
-                    return@launch
-                }
+                val assertion = vault.assertPasskey(
+                    PasskeyAssertionRequest(
+                        itemId = iId,
+                        credentialId = selectedCredentialId,
+                        rpId = rpId,
+                        clientDataHashBase64 = PasskeyUtils.encodeBase64(clientDataHash),
+                    ),
+                )
 
-                val muk = VaultStateManager.getMasterUnlockKey(item.userId)
-                if (muk == null) {
-                    Log.w(TAG, "MUK not available for passkey get (userId=${item.userId})")
-                    VaultStateManager.dumpDebugState("handleGetPasskeyCredential MUK=null")
-                    launchAppForPasswordUnlock(passwordRequired = false)
-                    return@launch
-                }
+                when (assertion) {
+                    is PasskeyAssertionResult.Signed -> completeGetPasskeyCredential(
+                        assertion = assertion,
+                        requestJson = passkeyOption.requestJson,
+                        origin = origin,
+                        packageName = providerGetRequest.callingAppInfo?.packageName ?: "",
+                        clientDataHash = clientDataHash,
+                    )
 
-                completeGetPasskeyCredential(item, muk, selectedCredentialId)
+                    PasskeyAssertionResult.ItemNotFound -> finishWithError("Item not found")
+
+                    PasskeyAssertionResult.Locked -> {
+                        Log.w(TAG, "No live key for this passkey's account - launching the app")
+                        launchAppForPasswordUnlock(passwordRequired = false)
+                    }
+
+                    is PasskeyAssertionResult.Failed ->
+                        finishWithError("Failed to complete passkey assertion: ${assertion.reason}")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing passkey assertion", e)
                 finishWithError("Failed to prepare passkey assertion: ${e.message}")
@@ -210,113 +363,108 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    /**
-     * Handle passkey creation request.
-     */
+    private fun completeGetPasskeyCredential(
+        assertion: PasskeyAssertionResult.Signed,
+        requestJson: String,
+        origin: String,
+        packageName: String,
+        clientDataHash: ByteArray,
+    ) {
+        val assertionResponse = AuthenticatorAssertionResponse(
+            PublicKeyCredentialRequestOptions(requestJson),
+            assertion.credentialIdBytes,
+            origin,
+            true,
+            true,
+            true,
+            true,
+            assertion.userHandle,
+            packageName,
+            clientDataHash
+        ).apply {
+            this.authenticatorData = assertion.authenticatorData
+            this.signature = assertion.signature
+        }
+
+        val fidoCredential = FidoPublicKeyCredential(
+            assertion.credentialIdBytes,
+            assertionResponse,
+            "platform"
+        )
+
+        val resultIntent = Intent()
+        PendingIntentHandler.setGetCredentialResponse(
+            resultIntent,
+            GetCredentialResponse(PublicKeyCredential(fidoCredential.json())),
+        )
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish()
+    }
+
+    // ------------------------------------------------------------------
+    // Passkey registration
+    // ------------------------------------------------------------------
+
     private fun handleCreatePasskeyCredential() {
         activityScope.launch {
             try {
                 val createRequest = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
-                if (createRequest == null) {
-                    finishWithError("No create request found")
-                    return@launch
-                }
+                    ?: return@launch finishWithError("No create request found")
 
                 val callingRequest = createRequest.callingRequest as? CreatePublicKeyCredentialRequest
-                if (callingRequest == null) {
-                    finishWithError("Not a passkey create request")
-                    return@launch
-                }
-
-                try {
-                    val source = JSONObject(callingRequest.requestJson).optJSONObject("publicKey")
-                        ?: JSONObject(callingRequest.requestJson)
-                    val requestedRpId = source.optJSONObject("rp")?.optString("id")
-                        ?: source.optString("rpId")
-                    val excludeCount = source.optJSONArray("excludeCredentials")?.length() ?: 0
-                    Log.d(
-                        TAG,
-                        "Passkey create request parsed (rpId=$requestedRpId, excludeCredentials=$excludeCount)"
-                    )
-                } catch (_: Exception) {
-                    Log.w(TAG, "Failed to parse raw passkey create request JSON")
-                }
+                    ?: return@launch finishWithError("Not a passkey create request")
 
                 val context = PasskeyUtils.parseCreateRequestContext(callingRequest.requestJson)
-                if (context == null) {
-                    finishWithError("Invalid passkey creation payload")
-                    return@launch
+                    ?: return@launch finishWithError("Invalid passkey creation payload")
+
+                val target = when (
+                    val choice = vault.passkeySaveTarget(context.rpId, context.userName)
+                ) {
+                    is PasskeySaveTargetChoice.Resolved -> choice.target
+
+                    is PasskeySaveTargetChoice.Ambiguous -> askWhereToSave(choice.candidates)
+                        ?: return@launch finishWithError("Passkey save target selection cancelled")
+
+                    PasskeySaveTargetChoice.VaultLocked -> {
+                        Log.w(TAG, "No unlocked account available for passkey create")
+                        return@launch launchAppForPasswordUnlock(passwordRequired = false)
+                    }
+
+                    PasskeySaveTargetChoice.LockedAccountOwnsMatch -> {
+                        Log.w(TAG, "A matching item exists, but its account is locked")
+                        return@launch launchAppForPasswordUnlock(passwordRequired = false)
+                    }
                 }
 
-                val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
-                Log.d(TAG, "Passkey create unlockedUserIds=$unlockedUserIds")
-                if (unlockedUserIds.isEmpty()) {
-                    Log.w(TAG, "No unlocked user available for passkey create")
-                    launchAppForPasswordUnlock(passwordRequired = false)
-                    return@launch
-                }
-
-                val candidates = withContext(Dispatchers.IO) {
-                    loadPasskeyCreateCandidates(
-                        userIds = unlockedUserIds,
+                val saved = vault.savePasskey(
+                    PasskeySaveRequest(
+                        target = target,
                         rpId = context.rpId,
-                        requestedUserName = context.userName
+                        rpName = context.rpName,
+                        userHandle = context.userHandle,
+                        userName = context.userName,
+                        userDisplayName = context.userDisplayName,
+                    ),
+                )
+
+                when (saved) {
+                    is PasskeySaveResult.Saved -> completeCreatePasskeyCredential(
+                        saved = saved,
+                        callingRequestJson = callingRequest.requestJson,
+                        origin = responses.resolveCallingOrigin(
+                            try {
+                                createRequest.callingAppInfo?.getOrigin(allowlistJson)
+                            } catch (_: Exception) {
+                                null
+                            },
+                            createRequest.callingAppInfo?.packageName,
+                        ),
+                        context = context,
                     )
-                }
-                val resolvedCandidates = if (candidates.isEmpty()) {
-                    val decryptedFallbackCandidates = withContext(Dispatchers.IO) {
-                        loadPasskeyCreateCandidatesByDecryptingItems(
-                            userIds = unlockedUserIds,
-                            rpId = context.rpId,
-                            requestedUserName = context.userName
-                        )
-                    }
-                    if (decryptedFallbackCandidates.isNotEmpty()) {
-                        Log.d(
-                            TAG,
-                            "Passkey create decrypted fallback candidates found (count=${decryptedFallbackCandidates.size}, itemIds=${decryptedFallbackCandidates.map { it.id }})"
-                        )
-                    }
-                    decryptedFallbackCandidates
-                } else {
-                    candidates
-                }
-                Log.d(
-                    TAG,
-                    "Passkey create candidates (rpId=${context.rpId}, user=${context.userName}, count=${resolvedCandidates.size}, itemIds=${resolvedCandidates.map { it.id }})"
-                )
 
-                if (resolvedCandidates.isEmpty()) {
-                    val allUserCandidates = withContext(Dispatchers.IO) {
-                        loadPasskeyCreateCandidatesAnyUser(
-                            rpId = context.rpId,
-                            requestedUserName = context.userName
-                        )
-                    }
-                    if (allUserCandidates.isNotEmpty()) {
-                        val lockedUserIds = allUserCandidates.map { it.userId }.distinct()
-                        Log.w(
-                            TAG,
-                            "Found matching passkey target in local DB but user is not unlocked. lockedUserIds=$lockedUserIds, itemIds=${allUserCandidates.map { it.id }}"
-                        )
-                        launchAppForPasswordUnlock(passwordRequired = false)
-                        return@launch
-                    }
+                    is PasskeySaveResult.Failed ->
+                        finishWithError("Failed to prepare passkey creation: ${saved.reason}")
                 }
-
-                val target = resolvePasskeyCreateTarget(resolvedCandidates, context.userName)
-                if (target == null) {
-                    finishWithError("Passkey save target selection cancelled")
-                    return@launch
-                }
-
-                completeCreatePasskeyCredential(
-                    createRequest = createRequest,
-                    callingRequest = callingRequest,
-                    context = context,
-                    target = target,
-                    fallbackUserId = unlockedUserIds.first()
-                )
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing passkey creation", e)
                 finishWithError("Failed to prepare passkey creation: ${e.message}")
@@ -324,1046 +472,75 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    /**
-     * Try to unlock using escrowed MUK.
-     */
-    private fun handleUnlockWithEscrow(pendingItemId: String?, userId: String) {
-        activityScope.launch {
-            try {
-                val cipher = mukEscrowManager.getDecryptCipher()
-
-                withContext(Dispatchers.Main) {
-                    val escrowPromptInfo = BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("Unlock Bittery")
-                        .setSubtitle("Authenticate to access your passwords")
-                        .setAllowedAuthenticators(
-                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                        )
-                        .build()
-
-                    val escrowCallback = object : BiometricPrompt.AuthenticationCallback() {
-                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                            result.cryptoObject?.cipher?.let { authenticatedCipher ->
-                                activityScope.launch {
-                                    try {
-                                        val muk = mukEscrowManager.retrieveEscrowedMuk(authenticatedCipher)
-                                        VaultStateManager.setMasterUnlockKey(userId, muk)
-                                        Log.d(TAG, "Successfully retrieved escrowed MUK for userId=$userId")
-                                        VaultStateManager.dumpDebugState("AFTER escrow unlock")
-
-                                        // If we have a pending item, complete the retrieval
-                                        if (pendingItemId != null) {
-                                            val item = withContext(Dispatchers.IO) {
-                                                database.itemDao().getById(pendingItemId)
-                                            }
-                                            if (item != null) {
-                                                completeGetItemCredential(item, muk)
-                                            } else {
-                                                finishWithError("Item not found")
-                                            }
-                                        } else {
-                                            // Just unlock was requested
-                                            setResult(Activity.RESULT_OK)
-                                            finish()
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Failed to retrieve escrowed MUK", e)
-                                        finishWithError("Failed to unlock: ${e.message}")
-                                    }
-                                }
-                            } ?: finishWithError("No cipher after authentication")
-                        }
-
-                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                            finishWithError("Authentication error: $errString")
-                        }
-
-                        override fun onAuthenticationFailed() {
-                            // Let user retry
-                        }
-                    }
-
-                    BiometricPrompt(this@GetCredentialsActivity, ContextCompat.getMainExecutor(this@GetCredentialsActivity), escrowCallback)
-                        .authenticate(escrowPromptInfo, BiometricPrompt.CryptoObject(cipher))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error preparing escrow unlock", e)
-                finishWithError("Failed to prepare unlock: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Handle unlock request (no specific credential, just unlock the vault).
-     */
-    private fun handleUnlock() {
-        Log.d(TAG, "handleUnlock: Starting unlock flow")
-        VaultStateManager.dumpDebugState("handleUnlock")
-
-        // Check 30-day master password requirement
-        val masterPwRequired = mukEscrowManager.isMasterPasswordReentryRequired()
-        Log.d(TAG, "handleUnlock: masterPasswordReentryRequired=$masterPwRequired")
-        if (masterPwRequired) {
-            Log.d(TAG, "30-day master password re-entry required")
-            launchAppForPasswordUnlock(passwordRequired = true)
-            return
-        }
-
-        // Check if we can use escrowed MUK
-        val canBiometric = mukEscrowManager.canUseBiometricUnlock()
-        val hasEscrow = mukEscrowManager.hasValidEscrow()
-        val escrowUserId = mukEscrowManager.getEscrowUserId()
-        Log.d(TAG, "handleUnlock: canBiometricUnlock=$canBiometric, hasValidEscrow=$hasEscrow, escrowUserId=$escrowUserId")
-
-        if (canBiometric) {
-            val userId = escrowUserId ?: "default"
-            Log.d(TAG, "handleUnlock: Using escrow unlock for userId=$userId")
-            handleUnlockWithEscrow(null, userId)
-        } else {
-            // Need to launch main app for full unlock
-            Log.w(TAG, "handleUnlock: No valid escrow (hasEscrow=$hasEscrow, canBiometric=$canBiometric), need full password unlock")
-            launchAppForPasswordUnlock(passwordRequired = false)
-        }
-    }
-
-    /**
-     * Complete item credential retrieval using the provided MUK.
-     */
-    private fun completeGetItemCredential(item: com.bittery.mobile.credentialprovider.storage.ItemEntity, muk: ByteArray) {
-        activityScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    // Get the vault key for this item
-                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
-                    if (vaultKey == null) {
-                        withContext(Dispatchers.Main) {
-                            finishWithError("Vault key not found")
-                        }
-                        return@withContext
-                    }
-
-                    // Decrypt the vault key using MUK
-                    val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
-
-                    // Decrypt the item to get the password
-                    val decryptedItem = VaultDecryptor.decryptLoginItem(item, decryptedVaultKey)
-                    val password = decryptedItem.password
-
-                    if (password == null) {
-                        withContext(Dispatchers.Main) {
-                            finishWithError("No password found in item")
-                        }
-                        return@withContext
-                    }
-
-                    // Update last used timestamp
-                    database.itemDao().updateLastUsed(item.id, System.currentTimeMillis())
-
-                    Log.d(TAG, "Successfully decrypted item credential for ${decryptedItem.username}")
-
-                    // Create the password credential response
-                    val passwordCredential = PasswordCredential(
-                        id = decryptedItem.username ?: item.username ?: "",
-                        password = password
-                    )
-
-                    withContext(Dispatchers.Main) {
-                        // Get the original request to build proper response
-                        val getRequest = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
-                        if (getRequest != null) {
-                            val response = GetCredentialResponse(passwordCredential)
-                            val resultIntent = Intent()
-                            PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-                            setResult(Activity.RESULT_OK, resultIntent)
-                        } else {
-                            finishWithError("Credential provider request is missing")
-                            return@withContext
-                        }
-                        finish()
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error completing item credential retrieval", e)
-                withContext(Dispatchers.Main) {
-                    finishWithError("Failed to retrieve credential: ${e.message}")
-                }
-            }
-        }
-    }
-
-    /**
-     * Complete passkey assertion response generation.
-     */
-    private fun completeGetPasskeyCredential(
-        item: com.bittery.mobile.credentialprovider.storage.ItemEntity,
-        muk: ByteArray,
-        selectedCredentialId: String
-    ) {
-        activityScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val providerGetRequest = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
-                        ?: throw IllegalStateException("No provider get request found")
-
-                    val passkeyOption = providerGetRequest.credentialOptions
-                        .firstOrNull { it is GetPublicKeyCredentialOption } as? GetPublicKeyCredentialOption
-                        ?: throw IllegalStateException("No public key credential option found")
-
-                    val normalizedCredentialId = PasskeyUtils.canonicalizeCredentialId(selectedCredentialId)
-                        ?: throw IllegalStateException("Invalid selected credential ID")
-
-                    val rawOrigin = try {
-                        providerGetRequest.callingAppInfo?.getOrigin(allowlistJson)
-                    } catch (_: Exception) {
-                        null
-                    }
-                    val origin = resolveCallingOrigin(rawOrigin, providerGetRequest.callingAppInfo?.packageName)
-
-                    val rpId = PasskeyUtils.parseRpIdFromGetRequestJson(passkeyOption.requestJson)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: extractPasskeyRpIdFromOrigin(origin).takeIf { it.isNotBlank() }
-                        ?: throw IllegalStateException("Missing rpId in get request")
-
-                    val allowedCredentialIds =
-                        PasskeyUtils.parseAllowCredentialIdsFromGetRequestJson(passkeyOption.requestJson)
-                    if (allowedCredentialIds.isNotEmpty()) {
-                        val containsSelected = allowedCredentialIds.contains(normalizedCredentialId)
-                        Log.d(
-                            TAG,
-                            "Passkey get allowCredentials parsed (count=${allowedCredentialIds.size}, containsSelected=$containsSelected, selected=$normalizedCredentialId)"
-                        )
-                    }
-
-                    val clientDataHash = passkeyOption.clientDataHash
-                        ?: throw IllegalStateException("Missing clientDataHash for assertion")
-                    if (clientDataHash.isEmpty()) {
-                        throw IllegalStateException("Missing clientDataHash for assertion")
-                    }
-
-                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
-                        ?: throw IllegalStateException("Vault key not found")
-                    val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
-
-                    val itemDataJson = VaultDecryptor.decryptItemJson(item, decryptedVaultKey)
-                    val passkeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
-                    val targetPasskey = passkeys.firstOrNull {
-                        PasskeyUtils.canonicalizeCredentialId(it.credentialId) == normalizedCredentialId &&
-                            domainsEquivalent(it.rpId, rpId)
-                    } ?: throw IllegalStateException("Passkey not found in selected item")
-
-                    val nextSignCount = computeNextSignCount(targetPasskey.signCount)
-                    val signResult = NativeCrypto.passkeySignAssertion(
-                        privateKeyBase64 = targetPasskey.privateKey,
-                        rpId = rpId,
-                        clientDataHashBase64 = PasskeyUtils.encodeBase64(clientDataHash),
-                        signCount = nextSignCount
-                    )
-                    if (!signResult.isSuccess || signResult.value == null) {
-                        throw IllegalStateException(signResult.error ?: "Assertion signing failed")
-                    }
-
-                    val signJson = JSONObject(signResult.value)
-                    val authenticatorData = PasskeyUtils.decodeBase64OrBase64Url(
-                        signJson.getString("authenticatorData")
-                    )
-                    val signatureDer = PasskeyUtils.decodeBase64OrBase64Url(
-                        signJson.getString("signatureDer")
-                    )
-                    val credentialIdBytes = PasskeyUtils.decodeBase64OrBase64Url(normalizedCredentialId)
-                    val userHandleBytes = try {
-                        PasskeyUtils.decodeBase64OrBase64Url(targetPasskey.userHandle)
-                    } catch (_: Exception) {
-                        ByteArray(0)
-                    }
-
-                    // Update passkey metadata in encrypted item payload
-                    val nowIso = Instant.now().toString()
-                    val passkeyMetadataUpdated = updateStoredPasskeyUsageMetadata(
-                        itemDataJson = itemDataJson,
-                        credentialId = normalizedCredentialId,
-                        rpId = rpId,
-                        nextSignCount = nextSignCount,
-                        lastUsedAtIso = nowIso
-                    )
-                    if (!passkeyMetadataUpdated) {
-                        Log.w(
-                            TAG,
-                            "Passkey usage metadata not updated (credentialId=$normalizedCredentialId, rpId=$rpId)"
-                        )
-                    }
-
-                    val baseVersion = item.version
-                    val encryptionVersion = baseVersion + 1L
-                    val encryptedItem = VaultDecryptor.encryptItemJson(
-                        updatedJson = itemDataJson,
-                        vaultKey = decryptedVaultKey,
-                        vaultId = item.vaultId,
-                        itemId = item.id,
-                        version = encryptionVersion,
-                        userId = item.userId
-                    )
-                    val updatedItem = item.copy(
-                        encryptedData = encryptedItem.ciphertext,
-                        encryptionIv = encryptedItem.iv,
-                        encryptionAlgorithm = encryptedItem.algorithm,
-                        version = encryptionVersion,
-                        lastModifiedBy = item.userId,
-                        encryptionVersion = encryptionVersion,
-                        encryptedByUserId = item.userId,
-                        lastUsedAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    if (passkeyMetadataUpdated) {
-                        database.passkeyMutationDao().updateItemAndQueue(
-                            updatedItem,
-                            pendingPasskeyMutation(
-                                userId = item.userId,
-                                vaultId = item.vaultId,
-                                itemId = item.id,
-                                operation = "update_item",
-                                encryptedData = encryptedItem.ciphertext,
-                                encryptionIv = encryptedItem.iv,
-                                encryptionAlgorithm = encryptedItem.algorithm,
-                                baseVersion = baseVersion,
-                                encryptionVersion = encryptionVersion,
-                                encryptedByUserId = item.userId
-                            )
-                        )
-                    } else {
-                        database.itemDao().insert(updatedItem)
-                    }
-
-                    val requestOptions = PublicKeyCredentialRequestOptions(passkeyOption.requestJson)
-                    val packageName = providerGetRequest.callingAppInfo?.packageName ?: ""
-
-                    val assertionResponse = AuthenticatorAssertionResponse(
-                        requestOptions,
-                        credentialIdBytes,
-                        origin,
-                        true,
-                        true,
-                        true,
-                        true,
-                        userHandleBytes,
-                        packageName,
-                        clientDataHash
-                    ).apply {
-                        this.authenticatorData = authenticatorData
-                        this.signature = signatureDer
-                    }
-
-                    val fidoCredential = FidoPublicKeyCredential(
-                        credentialIdBytes,
-                        assertionResponse,
-                        "platform"
-                    )
-                    val authenticationResponseJson = fidoCredential.json()
-
-                    GetCredentialResponse(PublicKeyCredential(authenticationResponseJson))
-                }
-
-                val resultIntent = Intent()
-                PendingIntentHandler.setGetCredentialResponse(resultIntent, result)
-                setResult(Activity.RESULT_OK, resultIntent)
-                finish()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error completing passkey assertion", e)
-                finishWithError("Failed to complete passkey assertion: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Complete passkey registration and persist the resulting passkey in local storage.
-     */
-    private suspend fun completeCreatePasskeyCredential(
-        createRequest: ProviderCreateCredentialRequest,
-        callingRequest: CreatePublicKeyCredentialRequest,
-        context: CreateRequestContext,
-        target: PasskeyCreateTarget,
-        fallbackUserId: String
-    ) {
-        withContext(Dispatchers.IO) {
-            val targetItem = when (target) {
-                is PasskeyCreateTarget.ExistingItem -> target.item
-                PasskeyCreateTarget.CreateNewItem -> null
-            }
-
-            val resolvedUserId = targetItem?.userId ?: fallbackUserId
-            val muk = VaultStateManager.getMasterUnlockKey(resolvedUserId)
-                ?: throw IllegalStateException("Vault is locked for selected account")
-
-            val vaultKeyEntity = when (target) {
-                is PasskeyCreateTarget.ExistingItem -> {
-                    database.vaultKeyDao().getByVaultId(target.item.vaultId, target.item.userId)
-                }
-                PasskeyCreateTarget.CreateNewItem -> {
-                    selectWritableVaultKeyForUser(resolvedUserId)
-                }
-            } ?: throw IllegalStateException("No writable vault key available")
-
-            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKeyEntity, muk)
-            val keypairResult = NativeCrypto.passkeyGenerateKeypair()
-            if (!keypairResult.isSuccess || keypairResult.value == null) {
-                throw IllegalStateException(keypairResult.error ?: "Failed to generate passkey keypair")
-            }
-
-            val keypairJson = JSONObject(keypairResult.value)
-            val privateKeyBase64 = keypairJson.getString("privateKey")
-            val publicKeyCoseBase64 = keypairJson.getString("publicKeyCose")
-            val publicKeySpkiBase64 = keypairJson.getString("publicKeySpki")
-
-            val credentialIdResult = NativeCrypto.passkeyGenerateCredentialId()
-            if (!credentialIdResult.isSuccess || credentialIdResult.value == null) {
-                throw IllegalStateException(credentialIdResult.error ?: "Failed to generate credential ID")
-            }
-            val credentialIdBase64 = credentialIdResult.value
-            val credentialId = PasskeyUtils.canonicalizeCredentialId(credentialIdBase64)
-                ?: throw IllegalStateException("Invalid generated credential ID")
-
-            val credentialIdBytes = PasskeyUtils.decodeBase64OrBase64Url(credentialId)
-            val publicKeyCoseBytes = PasskeyUtils.decodeBase64OrBase64Url(publicKeyCoseBase64)
-            val publicKeySpkiBytes = PasskeyUtils.decodeBase64OrBase64Url(publicKeySpkiBase64)
-            val attestationResult = NativeCrypto.passkeyBuildAttestationObject(
-                rpId = context.rpId,
-                credentialIdBase64 = credentialIdBase64,
-                cosePublicKeyBase64 = publicKeyCoseBase64,
-                signCount = 0
-            )
-            if (!attestationResult.isSuccess || attestationResult.value == null) {
-                throw IllegalStateException(attestationResult.error ?: "Failed to build attestation object")
-            }
-
-            val attestationJson = JSONObject(attestationResult.value)
-            val attestationObject = PasskeyUtils.decodeBase64OrBase64Url(
-                attestationJson.getString("attestationObject")
-            )
-            val authenticatorData = PasskeyUtils.decodeBase64OrBase64Url(
-                attestationJson.getString("authenticatorData")
-            )
-            val requestedRpId = PasskeyUtils.normalizeHost(context.rpId)
-            val passkeyModel = StoredPasskey(
-                credentialId = credentialId,
-                rpId = requestedRpId,
-                rpName = context.rpName,
-                userHandle = context.userHandle,
-                userName = context.userName,
-                userDisplayName = context.userDisplayName,
-                privateKey = privateKeyBase64,
-                publicKey = publicKeyCoseBase64,
-                algorithm = -7,
-                signCount = 0,
-                transports = listOf("internal", "hybrid"),
-                createdAt = Instant.now().toString()
-            )
-
-            val updatedItem = if (targetItem != null) {
-                val itemDataJson = VaultDecryptor.decryptItemJson(targetItem, decryptedVaultKey)
-                appendStoredPasskeyPreservingExisting(itemDataJson, passkeyModel)
-
-                val baseVersion = targetItem.version
-                val encryptionVersion = baseVersion + 1L
-                val encryptedItem = VaultDecryptor.encryptItemJson(
-                    updatedJson = itemDataJson,
-                    vaultKey = decryptedVaultKey,
-                    vaultId = targetItem.vaultId,
-                    itemId = targetItem.id,
-                    version = encryptionVersion,
-                    userId = targetItem.userId
-                )
-                targetItem.copy(
-                    encryptedData = encryptedItem.ciphertext,
-                    encryptionIv = encryptedItem.iv,
-                    encryptionAlgorithm = encryptedItem.algorithm,
-                    version = encryptionVersion,
-                    lastModifiedBy = targetItem.userId,
-                    encryptionVersion = encryptionVersion,
-                    encryptedByUserId = targetItem.userId,
-                    updatedAt = System.currentTimeMillis()
-                ).also { item ->
-                    database.passkeyMutationDao().updateItemAndQueue(
-                        item,
-                        pendingPasskeyMutation(
-                            userId = item.userId,
-                            vaultId = item.vaultId,
-                            itemId = item.id,
-                            operation = "update_item",
-                            encryptedData = encryptedItem.ciphertext,
-                            encryptionIv = encryptedItem.iv,
-                            encryptionAlgorithm = encryptedItem.algorithm,
-                            baseVersion = baseVersion,
-                            encryptionVersion = encryptionVersion,
-                            encryptedByUserId = item.userId
-                        )
-                    )
-                }
-            } else {
-                val tempItemId = UUID.randomUUID().toString()
-                val primaryUrl = "https://${requestedRpId}"
-                val itemDataJson = JSONObject().apply {
-                    put("title", context.rpName.ifBlank { requestedRpId })
-                    put("username", context.userName)
-                    put("url", primaryUrl)
-                    put("urls", JSONArray())
-                }
-                PasskeyUtils.writeStoredPasskeys(itemDataJson, listOf(passkeyModel))
-
-                val encryptedItem = VaultDecryptor.encryptItemJson(
-                    updatedJson = itemDataJson,
-                    vaultKey = decryptedVaultKey,
-                    vaultId = vaultKeyEntity.vaultId,
-                    itemId = tempItemId,
-                    version = 1L,
-                    userId = vaultKeyEntity.userId
-                )
-                val createdItem = com.bittery.mobile.credentialprovider.storage.ItemEntity(
-                    id = tempItemId,
-                    vaultId = vaultKeyEntity.vaultId,
-                    userId = vaultKeyEntity.userId,
-                    category = "login",
-                    displayTitle = context.rpName.ifBlank { requestedRpId },
-                    encryptedData = encryptedItem.ciphertext,
-                    encryptionIv = encryptedItem.iv,
-                    encryptionAlgorithm = encryptedItem.algorithm,
-                    primaryDomain = requestedRpId,
-                    username = context.userName,
-                    iconUrl = null,
-                    lastUsedAt = 0L,
-                    syncedAt = System.currentTimeMillis(),
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    isFavorite = false,
-                    version = 1L,
-                    lastModifiedBy = vaultKeyEntity.userId,
-                    encryptionVersion = 1L,
-                    encryptedByUserId = vaultKeyEntity.userId
-                )
-
-                // One row per lookup key, matching how sync indexes items in
-                // CredentialProviderModule - a passkey registered at
-                // login.example.com would otherwise never be found from an
-                // example.com origin.
-                database.passkeyMutationDao().createItemAndQueue(
-                    createdItem,
-                    DomainMatch.lookupKeys(requestedRpId).mapIndexed { index, domain ->
-                        ItemDomainEntity(
-                            itemId = createdItem.id,
-                            domain = domain,
-                            isPrimary = index == 0,
-                            fullUrl = primaryUrl
-                        )
-                    },
-                    pendingPasskeyMutation(
-                        userId = createdItem.userId,
-                        vaultId = createdItem.vaultId,
-                        itemId = createdItem.id,
-                        operation = "create_item",
-                        encryptedData = encryptedItem.ciphertext,
-                        encryptionIv = encryptedItem.iv,
-                        encryptionAlgorithm = encryptedItem.algorithm,
-                        baseVersion = 0L,
-                        encryptionVersion = 1L,
-                        encryptedByUserId = createdItem.userId
-                    )
-                )
-                createdItem
-            }
-
-            val rawOrigin = try {
-                createRequest.callingAppInfo?.getOrigin(allowlistJson)
-            } catch (_: Exception) {
-                null
-            }
-            val origin = resolveCallingOrigin(rawOrigin, createRequest.callingAppInfo?.packageName)
-            val creationOptions = PublicKeyCredentialCreationOptions(callingRequest.requestJson)
-
-            val attestationResponse = AuthenticatorAttestationResponse(
-                creationOptions,
-                credentialIdBytes,
-                publicKeyCoseBytes,
-                origin,
-                true,
-                true,
-                true,
-                true,
-                null,
-                null
-            ).apply {
-                this.attestationObject = attestationObject
-            }
-
-            val fidoCredential = FidoPublicKeyCredential(
-                credentialIdBytes,
-                attestationResponse,
-                "platform"
-            )
-            val registrationResponseJson = fidoCredential.json()
-            val registrationJson = JSONObject(registrationResponseJson)
-            val responseJson = registrationJson.optJSONObject("response")
-                ?: JSONObject().also { registrationJson.put("response", it) }
-            // Chromium's CredMan bridge requires this field to deserialize create responses.
-            responseJson.put("publicKeyAlgorithm", -7)
-            responseJson.put("authenticatorData", PasskeyUtils.encodeBase64Url(authenticatorData))
-            responseJson.put("publicKey", PasskeyUtils.encodeBase64Url(publicKeySpkiBytes))
-
-            val hasClientDataJson = responseJson.has("clientDataJSON")
-            val hasPublicKeyAlgorithm = responseJson.has("publicKeyAlgorithm")
-            val hasAuthenticatorData = responseJson.has("authenticatorData")
-            val hasPublicKey = responseJson.has("publicKey")
-            Log.d(
-                TAG,
-                "Passkey registration response built (rpId=${context.rpId}, origin=$origin, clientDataJSON=$hasClientDataJson, publicKeyAlgorithm=$hasPublicKeyAlgorithm, authenticatorData=$hasAuthenticatorData, publicKey=$hasPublicKey)"
-            )
-            val response = CreatePublicKeyCredentialResponse(registrationJson.toString())
-
-            withContext(Dispatchers.Main) {
-                val resultIntent = Intent()
-                PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                setResult(Activity.RESULT_OK, resultIntent)
-                Log.d(TAG, "Passkey created and stored on item ${updatedItem.id}")
-                finish()
-            }
-        }
-    }
-
-
-    private suspend fun loadPasskeyCreateCandidates(
-        userIds: List<String>,
-        rpId: String,
-        requestedUserName: String
-    ): List<com.bittery.mobile.credentialprovider.storage.ItemEntity> {
-        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
-        if (normalizedRpId.isBlank()) return emptyList()
-
-        val domainsToQuery = DomainMatch.relyingPartyLookupKeys(normalizedRpId)
-        val results = LinkedHashMap<String, com.bittery.mobile.credentialprovider.storage.ItemEntity>()
-        for (userId in userIds) {
-            for (domain in domainsToQuery) {
-                val items = database.itemDao().getLoginItemsByDomain(domain, userId)
-                for (item in items) {
-                    results[item.id] = item
-                }
-            }
-        }
-
-        val candidates = results.values.toList()
-        val normalizedRequestedUser = normalizeUsername(requestedUserName)
-        if (normalizedRequestedUser.isBlank()) {
-            return candidates
-        }
-
-        val exactUserMatches = candidates.filter {
-            normalizeUsername(it.username) == normalizedRequestedUser
-        }
-        Log.d(
-            TAG,
-            "Passkey candidate lookup complete (rpId=$normalizedRpId, domains=$domainsToQuery, requestedUser=$normalizedRequestedUser, total=${candidates.size}, userMatches=${exactUserMatches.size})"
-        )
-        return if (exactUserMatches.isNotEmpty()) exactUserMatches else candidates
-    }
-
-    private suspend fun loadPasskeyCreateCandidatesAnyUser(
-        rpId: String,
-        requestedUserName: String
-    ): List<com.bittery.mobile.credentialprovider.storage.ItemEntity> {
-        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
-        if (normalizedRpId.isBlank()) return emptyList()
-
-        val domainsToQuery = DomainMatch.relyingPartyLookupKeys(normalizedRpId)
-        val results = LinkedHashMap<String, com.bittery.mobile.credentialprovider.storage.ItemEntity>()
-
-        val byDomain = database.itemDao().getLoginItemsByDomainsAnyUser(domainsToQuery)
-        for (item in byDomain) {
-            results[item.id] = item
-        }
-
-        val candidates = results.values.toList()
-        val normalizedRequestedUser = normalizeUsername(requestedUserName)
-        if (normalizedRequestedUser.isBlank()) {
-            return candidates
-        }
-
-        val exactUserMatches = candidates.filter {
-            normalizeUsername(it.username) == normalizedRequestedUser
-        }
-        return if (exactUserMatches.isNotEmpty()) exactUserMatches else candidates
-    }
-
-    private suspend fun loadPasskeyCreateCandidatesByDecryptingItems(
-        userIds: List<String>,
-        rpId: String,
-        requestedUserName: String
-    ): List<com.bittery.mobile.credentialprovider.storage.ItemEntity> {
-        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
-        if (normalizedRpId.isBlank()) return emptyList()
-        val normalizedRequestedUser = normalizeUsername(requestedUserName)
-        if (normalizedRequestedUser.isBlank()) return emptyList()
-
-        val results = LinkedHashMap<String, com.bittery.mobile.credentialprovider.storage.ItemEntity>()
-        for (userId in userIds) {
-            val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
-            val loginItems = database.itemDao().getLoginItemsByUserId(userId)
-            for (item in loginItems) {
-                if (normalizeUsername(item.username) != normalizedRequestedUser) {
-                    continue
-                }
-
-                val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
-                    ?: continue
-
-                try {
-                    val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
-                    val itemDataJson = VaultDecryptor.decryptItemJson(item, decryptedVaultKey)
-                    val domains = extractCandidateDomainsFromItemData(itemDataJson)
-                    if (domains.any { domainsEquivalent(it, normalizedRpId) }) {
-                        results[item.id] = item
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed decrypted candidate lookup for item ${item.id}", e)
-                }
-            }
-        }
-
-        return results.values.toList()
-    }
-
-    private suspend fun resolvePasskeyCreateTarget(
-        candidates: List<com.bittery.mobile.credentialprovider.storage.ItemEntity>,
-        requestedUserName: String
-    ): PasskeyCreateTarget? {
-        if (candidates.isEmpty()) return PasskeyCreateTarget.CreateNewItem
-
-        val normalizedRequestedUser = normalizeUsername(requestedUserName)
-        if (normalizedRequestedUser.isNotBlank()) {
-            val userMatches = candidates.filter {
-                normalizeUsername(it.username) == normalizedRequestedUser
-            }
-
-            if (userMatches.size == 1) {
-                Log.d(TAG, "Auto-selected existing login item by username match")
-                return PasskeyCreateTarget.ExistingItem(userMatches.first())
-            }
-
-            if (userMatches.size > 1) {
-                val bestMatch = userMatches.maxWithOrNull(
-                    compareBy<com.bittery.mobile.credentialprovider.storage.ItemEntity> {
-                        it.lastUsedAt
-                    }.thenBy {
-                        it.updatedAt
-                    }
-                ) ?: userMatches.first()
-                Log.d(TAG, "Auto-selected most recent login item among username matches")
-                return PasskeyCreateTarget.ExistingItem(bestMatch)
-            }
-        }
-
-        if (candidates.size == 1) {
-            return PasskeyCreateTarget.ExistingItem(candidates.first())
-        }
-
-        return selectPasskeyCreateTarget(candidates)
-    }
-
-    private suspend fun selectPasskeyCreateTarget(
-        candidates: List<com.bittery.mobile.credentialprovider.storage.ItemEntity>
-    ): PasskeyCreateTarget? = suspendCoroutine { continuation ->
-        val labels = candidates.map { item ->
-            val username = item.username?.takeIf { it.isNotBlank() } ?: "Unknown account"
-            "${item.displayTitle.ifBlank { "Login item" }} ($username)"
+    /** The only question this screen asks with a list: which login holds the passkey. */
+    private suspend fun askWhereToSave(
+        candidates: List<PasskeySaveCandidate>,
+    ): PasskeySaveTarget? = suspendCoroutine { continuation ->
+        val labels = candidates.map { candidate ->
+            "${candidate.label} (${candidate.username ?: "Unknown account"})"
         }.toMutableList()
         labels.add("Create new login item")
 
-        val dialog = AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Save passkey to")
             .setItems(labels.toTypedArray()) { _, which ->
                 if (which == labels.lastIndex) {
-                    continuation.resume(PasskeyCreateTarget.CreateNewItem)
+                    continuation.resume(PasskeySaveTarget.NewItem)
                 } else {
-                    continuation.resume(PasskeyCreateTarget.ExistingItem(candidates[which]))
+                    continuation.resume(
+                        PasskeySaveTarget.ExistingItem(candidates[which].itemId),
+                    )
                 }
             }
-            .setOnCancelListener {
-                continuation.resume(null)
-            }
+            .setOnCancelListener { continuation.resume(null) }
             .create()
-
-        dialog.show()
+            .show()
     }
 
-    private suspend fun selectWritableVaultKeyForUser(
-        userId: String
-    ): com.bittery.mobile.credentialprovider.storage.VaultKeyEntity? {
-        val keys = database.vaultKeyDao().getByUserId(userId)
-        if (keys.isEmpty()) return null
-
-        return keys
-            .filter { it.role != "read-only" }
-            .sortedWith(
-                compareBy<com.bittery.mobile.credentialprovider.storage.VaultKeyEntity> {
-                    if (it.vaultType == "personal") 0 else 1
-                }.thenBy { it.vaultName }
-            )
-            .firstOrNull()
-    }
-
-    private fun pendingPasskeyMutation(
-        userId: String,
-        vaultId: String,
-        itemId: String,
-        operation: String,
-        encryptedData: String,
-        encryptionIv: String,
-        encryptionAlgorithm: String,
-        baseVersion: Long,
-        encryptionVersion: Long,
-        encryptedByUserId: String
-    ): PendingPasskeyMutationEntity {
-        return PendingPasskeyMutationEntity(
-            id = UUID.randomUUID().toString(),
-            userId = userId,
-            vaultId = vaultId,
-            itemId = itemId,
-            operation = operation,
-            encryptedData = encryptedData,
-            encryptionIv = encryptionIv,
-            encryptionAlgorithm = encryptionAlgorithm,
-            baseVersion = baseVersion,
-            encryptionVersion = encryptionVersion,
-            encryptedByUserId = encryptedByUserId,
-            createdAt = System.currentTimeMillis(),
-            attemptCount = 0,
-            lastError = null
-        )
-    }
-
-    private fun extractPasskeyRpIdFromOrigin(origin: String): String {
-        if (!origin.startsWith("http")) return ""
-        return DomainMatch.normalizeHost(origin)
-    }
-
-    /** Passkey rpId identity, not the wider password-matching rule. */
-    private fun domainsEquivalent(left: String, right: String): Boolean =
-        DomainMatch.sameRelyingParty(left, right)
-
-    private fun normalizeUsername(value: String?): String {
-        return value.orEmpty().trim().lowercase()
-    }
-
-    private fun extractCandidateDomainsFromItemData(itemDataJson: JSONObject): Set<String> {
-        val domains = LinkedHashSet<String>()
-
-        val primaryUrl = itemDataJson.optString("url")
-        val primaryDomain = PasskeyUtils.normalizeHost(primaryUrl)
-        if (primaryDomain.isNotBlank()) {
-            domains.add(primaryDomain)
-        }
-
-        val urls = itemDataJson.optJSONArray("urls")
-        if (urls != null) {
-            for (index in 0 until urls.length()) {
-                val raw = urls.optString(index)
-                val domain = PasskeyUtils.normalizeHost(raw)
-                if (domain.isNotBlank()) {
-                    domains.add(domain)
-                }
-            }
-        }
-
-        val storedPasskeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
-        for (passkey in storedPasskeys) {
-            val domain = PasskeyUtils.normalizeHost(passkey.rpId)
-            if (domain.isNotBlank()) {
-                domains.add(domain)
-            }
-        }
-
-        return domains
-    }
-
-    private fun updateStoredPasskeyUsageMetadata(
-        itemDataJson: JSONObject,
-        credentialId: String,
-        rpId: String,
-        nextSignCount: Int,
-        lastUsedAtIso: String
-    ): Boolean {
-        val passkeysJson = itemDataJson.optJSONArray("passkeys") ?: return false
-        var updated = false
-
-        for (index in 0 until passkeysJson.length()) {
-            val passkeyJson = passkeysJson.optJSONObject(index) ?: continue
-            val passkeyCredentialId = extractCanonicalCredentialIdFromPasskeyJson(passkeyJson) ?: continue
-            if (passkeyCredentialId != credentialId) {
-                continue
-            }
-
-            val passkeyRpId = extractRpIdFromPasskeyJson(passkeyJson)
-            if (passkeyRpId.isBlank() || !domainsEquivalent(passkeyRpId, rpId)) {
-                continue
-            }
-
-            passkeyJson.put("signCount", nextSignCount)
-            passkeyJson.put("lastUsedAt", lastUsedAtIso)
-            updated = true
-        }
-
-        return updated
-    }
-
-    private fun appendStoredPasskeyPreservingExisting(
-        itemDataJson: JSONObject,
-        passkey: StoredPasskey
+    private fun completeCreatePasskeyCredential(
+        saved: PasskeySaveResult.Saved,
+        callingRequestJson: String,
+        origin: String,
+        context: CreateRequestContext,
     ) {
-        val passkeysJson = itemDataJson.optJSONArray("passkeys")
-            ?: JSONArray().also { itemDataJson.put("passkeys", it) }
-        passkeysJson.put(serializeStoredPasskey(passkey))
-    }
-
-    private fun serializeStoredPasskey(passkey: StoredPasskey): JSONObject {
-        val transportsJson = JSONArray()
-        for (transport in passkey.transports) {
-            transportsJson.put(transport)
+        val attestationResponse = AuthenticatorAttestationResponse(
+            PublicKeyCredentialCreationOptions(callingRequestJson),
+            saved.credentialIdBytes,
+            saved.publicKeyCose,
+            origin,
+            true,
+            true,
+            true,
+            true,
+            null,
+            null
+        ).apply {
+            this.attestationObject = saved.attestationObject
         }
 
-        return JSONObject().apply {
-            put("credentialId", PasskeyUtils.canonicalizeCredentialId(passkey.credentialId) ?: passkey.credentialId)
-            put("rpId", PasskeyUtils.normalizeHost(passkey.rpId))
-            put("rpName", passkey.rpName)
-            put("userHandle", PasskeyUtils.canonicalizeCredentialId(passkey.userHandle) ?: passkey.userHandle)
-            put("userName", passkey.userName)
-            put("userDisplayName", passkey.userDisplayName)
-            put("privateKey", passkey.privateKey)
-            put("publicKey", passkey.publicKey)
-            put("algorithm", passkey.algorithm)
-            put("signCount", passkey.signCount)
-            put("createdAt", passkey.createdAt)
-            passkey.lastUsedAt?.let { put("lastUsedAt", it) }
-            passkey.status?.let { put("status", it) }
-            passkey.statusReason?.let { put("statusReason", it) }
-            passkey.statusUpdatedAt?.let { put("statusUpdatedAt", it) }
-            put("transports", transportsJson)
-        }
-    }
+        val fidoCredential = FidoPublicKeyCredential(
+            saved.credentialIdBytes,
+            attestationResponse,
+            "platform"
+        )
+        val registrationJson = JSONObject(fidoCredential.json())
+        val responseJson = registrationJson.optJSONObject("response")
+            ?: JSONObject().also { registrationJson.put("response", it) }
+        // Chromium's CredMan bridge requires this field to deserialize create responses.
+        responseJson.put("publicKeyAlgorithm", -7)
+        responseJson.put("authenticatorData", PasskeyUtils.encodeBase64Url(saved.authenticatorData))
+        responseJson.put("publicKey", PasskeyUtils.encodeBase64Url(saved.publicKeySpki))
 
-    private fun extractCanonicalCredentialIdFromPasskeyJson(passkeyJson: JSONObject): String? {
-        val rawValue = when {
-            passkeyJson.has("credentialId") -> passkeyJson.opt("credentialId")
-            passkeyJson.has("id") -> passkeyJson.opt("id")
-            passkeyJson.has("rawId") -> passkeyJson.opt("rawId")
-            else -> null
-        }
+        Log.d(TAG, "Passkey registration response built (rpId=${context.rpId}, origin=$origin)")
 
-        return canonicalizeCredentialIdFromJsonValue(rawValue)
-    }
-
-    private fun extractRpIdFromPasskeyJson(passkeyJson: JSONObject): String {
-        val rpId = when {
-            passkeyJson.has("rpId") -> passkeyJson.optString("rpId")
-            passkeyJson.has("rpID") -> passkeyJson.optString("rpID")
-            else -> passkeyJson.optJSONObject("rp")?.optString("id").orEmpty()
-        }
-
-        return PasskeyUtils.normalizeHost(rpId)
-    }
-
-    private fun canonicalizeCredentialIdFromJsonValue(rawValue: Any?): String? {
-        return when (rawValue) {
-            is String -> PasskeyUtils.canonicalizeCredentialId(rawValue)
-            is JSONArray -> {
-                val bytes = ByteArray(rawValue.length())
-                for (index in 0 until rawValue.length()) {
-                    val numeric = rawValue.optInt(index, -1)
-                    if (numeric !in 0..255) return null
-                    bytes[index] = numeric.toByte()
-                }
-                PasskeyUtils.encodeBase64Url(bytes)
-            }
-            else -> null
-        }
-    }
-
-    private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
-        val origins = extractOriginList(originJsonOrString)
-        val origin = origins
-            .firstOrNull { it.isNotBlank() }
-            ?.let { normalizeOrigin(it) }
-        return origin ?: packageName.orEmpty()
-    }
-
-    private fun normalizeOrigin(origin: String): String {
-        val trimmed = origin.trim()
-        if (trimmed.isBlank()) return trimmed
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-            return trimmed
-        }
-
-        return try {
-            val uri = java.net.URI(trimmed)
-            val scheme = uri.scheme?.lowercase() ?: return trimmed.removeSuffix("/")
-            val host = uri.host?.lowercase() ?: return trimmed.removeSuffix("/")
-            val authorityHost = if (host.contains(":")) "[$host]" else host
-            val port = uri.port
-            val includePort = port != -1 &&
-                !((scheme == "https" && port == 443) || (scheme == "http" && port == 80))
-
-            buildString {
-                append(scheme)
-                append("://")
-                append(authorityHost)
-                if (includePort) {
-                    append(':')
-                    append(port)
-                }
-            }
-        } catch (_: Exception) {
-            trimmed.removeSuffix("/")
-        }
-    }
-
-    private fun extractOriginList(originJsonOrString: String?): List<String> {
-        if (originJsonOrString.isNullOrBlank()) return emptyList()
-
-        val trimmed = originJsonOrString.trim()
-        if (trimmed.startsWith("[")) {
-            try {
-                val array = JSONArray(trimmed)
-                val results = ArrayList<String>(array.length())
-                for (index in 0 until array.length()) {
-                    val value = array.optString(index, "")
-                    if (value.isNotBlank()) {
-                        results.add(value)
-                    }
-                }
-                if (results.isNotEmpty()) {
-                    return results
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse origin JSON: $originJsonOrString", e)
-            }
-        }
-
-        return listOf(originJsonOrString)
-    }
-
-    private fun loadAllowlistJson(): String {
-        return try {
-            val resources = applicationContext.resources
-            val resId = resources.getIdentifier(
-                "credential_provider_allowlist",
-                "raw",
-                applicationContext.packageName
-            )
-            if (resId == 0) {
-                Log.w(TAG, "Allowlist resource not found")
-                "[]"
-            } else {
-                resources.openRawResource(resId).bufferedReader().use { it.readText() }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to load allowlist JSON", e)
-            "[]"
-        }
+        val resultIntent = Intent()
+        PendingIntentHandler.setCreateCredentialResponse(
+            resultIntent,
+            CreatePublicKeyCredentialResponse(registrationJson.toString()),
+        )
+        setResult(Activity.RESULT_OK, resultIntent)
+        Log.d(TAG, "Passkey created and stored on item ${saved.itemId}")
+        finish()
     }
 
     /**
@@ -1374,7 +551,6 @@ class GetCredentialsActivity : FragmentActivity() {
      */
     private fun launchAppForPasswordUnlock(passwordRequired: Boolean) {
         try {
-            // Create intent to launch the main app
             val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             if (launchIntent == null) {
                 Log.e(TAG, "Could not get launch intent for app")
@@ -1382,21 +558,17 @@ class GetCredentialsActivity : FragmentActivity() {
                 return
             }
 
-            // Add flags to ensure we return to autofill after unlock
+            // Come back to autofill after the unlock.
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-
-            // Add extra to indicate this is an autofill unlock request
             launchIntent.putExtra("autofill_unlock", true)
             launchIntent.putExtra("password_required", passwordRequired)
-
-            // Optional: Add deep link to specific unlock screen
-            // The React Native app can handle this via linking configuration
-            launchIntent.data = android.net.Uri.parse("bittery://autofill-unlock?passwordRequired=$passwordRequired")
+            launchIntent.data = android.net.Uri.parse(
+                "bittery://autofill-unlock?passwordRequired=$passwordRequired"
+            )
 
             Log.d(TAG, "Launching app for password unlock (passwordRequired=$passwordRequired)")
             startActivity(launchIntent)
 
-            // Finish this activity - user will come back through autofill flow after unlocking
             setResult(Activity.RESULT_CANCELED)
             finish()
         } catch (e: Exception) {

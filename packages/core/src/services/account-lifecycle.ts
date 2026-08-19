@@ -41,6 +41,7 @@ export type LifecycleStep =
 	// step instead of escaping (a desktop keychain throw, CONTEXT.md §4.4).
 	| "read_account_state"
 	| "purge_credential_mirror"
+	| "forget_quick_unlock"
 	| "clear_item_cache"
 	| "clear_session"
 	| "forget_session"
@@ -78,6 +79,15 @@ export interface SessionCredentialRef {
 }
 
 /**
+ * How much quick-unlock material to forget.
+ *
+ * Named accounts for a sign-out or a removal, `"device"` for a wipe or a
+ * deletion — including material this device can no longer attribute to any
+ * account it still lists.
+ */
+export type QuickUnlockScope = SessionCredentialRef[] | "device";
+
+/**
  * Copies of key material or bearer tokens this process handed outside
  * `AccountStore` — the Android autofill MUK mirror, the API client cache.
  * May drop more than asked (platforms without per-account granularity), never
@@ -85,11 +95,22 @@ export interface SessionCredentialRef {
  */
 export interface CredentialMirror {
 	purge(refs: SessionCredentialRef[]): Promise<void>;
+
+	/**
+	 * Drop the device-held material that lets an account unlock without a full
+	 * sign-in — Android's biometric master-unlock-key escrow, and anything like it.
+	 *
+	 * Separate from [purge] because a lock must *keep* it: a lock is meant to be
+	 * undone by a biometric prompt. A sign-out, a removal, a wipe and a deletion
+	 * all promise a full sign-in next time, so they forget it as well as purging.
+	 */
+	forgetQuickUnlock(scope: QuickUnlockScope): Promise<void>;
 }
 
 /** The explicit "this platform mirrors nothing" answer. */
 export const NO_CREDENTIAL_MIRROR: CredentialMirror = {
 	async purge(): Promise<void> {},
+	async forgetQuickUnlock(): Promise<void> {},
 };
 
 export interface LifecycleDeps {
@@ -194,6 +215,23 @@ async function purgeMirror(
 	);
 }
 
+/**
+ * Forget quick unlock before `AccountStore` drops its own copy.
+ *
+ * Same order as [purgeMirror], for the same reason: material left behind after
+ * the account row is gone is material nothing can enumerate to clean up later.
+ */
+async function forgetQuickUnlock(
+	scope: QuickUnlockScope,
+	accountId: string | null,
+	{ credentialMirror }: LifecycleDeps,
+	failures: LifecycleStepFailure[],
+): Promise<void> {
+	await step(failures, accountId, "forget_quick_unlock", () =>
+		credentialMirror.forgetQuickUnlock(scope),
+	);
+}
+
 async function lockOne(
 	accountId: string,
 	deps: LifecycleDeps,
@@ -233,6 +271,9 @@ async function endSession(
 ): Promise<void> {
 	const ref = await snapshotCredentials(deps.storage, accountId, failures);
 	await purgeMirror([ref], accountId, deps, failures);
+	// A sign-out promises a full sign-in next time. Leaving the escrow behind
+	// would let a biometric prompt walk straight back in.
+	await forgetQuickUnlock([ref], accountId, deps, failures);
 	await step(failures, accountId, "clear_item_cache", () =>
 		deps.itemCache.clearItemCache(accountId),
 	);
@@ -249,6 +290,7 @@ async function removeOne(
 ): Promise<void> {
 	const ref = await snapshotCredentials(deps.storage, accountId, failures);
 	await purgeMirror([ref], accountId, deps, failures);
+	await forgetQuickUnlock([ref], accountId, deps, failures);
 	// Cache before the row: the accountId is the only name for the
 	// `${accountId}:items|vaults|meta` segments, so once the accounts list is
 	// rewritten nothing can enumerate them again and the ciphertext is orphaned.
@@ -440,6 +482,9 @@ export async function wipeDevice(
 	await step(failures, null, "clear_account_data", () =>
 		deps.storage.clearAllStoredData(),
 	);
+	// Device-scoped too, and unconditional: the loop above can only name the
+	// accounts this device still lists, and a wipe leaves nothing at all.
+	await forgetQuickUnlock("device", null, deps, failures);
 
 	return buildOutcome(deps.storage, pre, pre.accounts, failures);
 }
@@ -474,6 +519,10 @@ export async function deleteAccountEverywhere(
 	}
 
 	await removeOne(accountId, pre, deps, failures);
+	// Unconditional, unlike a plain removal. The account is gone from the server
+	// and can never be signed into again, the escrow is one slot whose owner a
+	// device cannot always name, and re-enrolling costs one master password entry.
+	await forgetQuickUnlock("device", accountId, deps, failures);
 	return buildOutcome(
 		deps.storage,
 		pre,

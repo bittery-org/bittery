@@ -40,7 +40,12 @@ function session(
 const calls: {
 	lastPasswordUpdates: number;
 	stampShouldFail: boolean;
-	escrows: Array<{ email: string; userId?: string; timeoutMs?: number }>;
+	escrows: Array<{
+		email: string;
+		accountId?: string;
+		userId?: string;
+		timeoutMs?: number;
+	}>;
 	mirrored: string[][];
 	biometricByAccount: Record<string, boolean>;
 	sessionByAccount: Record<string, StoredSessionData | null>;
@@ -88,6 +93,7 @@ const deps = {
 		},
 		escrowMukWithBiometric: async (params: {
 			email: string;
+			accountId?: string;
 			userId?: string;
 			timeoutMs?: number;
 		}) => {
@@ -142,6 +148,9 @@ describe("prepareCredentialProviderAfterPasswordUnlock", () => {
 		expect(calls.escrows).toEqual([
 			{
 				email: "ada@example.com",
+				// Both ids travel: the escrow restores into live state keyed by
+				// `accountId`, and stamps native cache rows with the server `userId`.
+				accountId: "a",
 				userId: "user-1",
 				timeoutMs: 30 * DAY_MS,
 			},

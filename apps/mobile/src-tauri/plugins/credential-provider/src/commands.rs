@@ -17,12 +17,14 @@ use crate::CredentialProviderExt;
 pub(crate) fn set_master_unlock_key<R: Runtime>(
     app: AppHandle<R>,
     muk_base64: String,
+    account_id: Option<String>,
     user_id: Option<String>,
     auto_lock_timeout_ms: Option<f64>,
 ) -> crate::Result<bool> {
     app.credential_provider()
         .set_master_unlock_key(SetMasterUnlockKeyArgs {
             muk_base64,
+            account_id,
             user_id,
             auto_lock_timeout_ms,
         })
@@ -32,22 +34,22 @@ pub(crate) fn set_master_unlock_key<R: Runtime>(
 pub(crate) fn set_muk_auto_lock_timeout<R: Runtime>(
     app: AppHandle<R>,
     timeout_ms: f64,
-    user_id: Option<String>,
+    account_id: Option<String>,
 ) -> crate::Result<bool> {
     app.credential_provider()
         .set_muk_auto_lock_timeout(SetMukAutoLockTimeoutArgs {
             timeout_ms,
-            user_id,
+            account_id,
         })
 }
 
 #[command]
 pub(crate) fn clear_master_unlock_key<R: Runtime>(
     app: AppHandle<R>,
-    user_id: Option<String>,
+    account_id: Option<String>,
 ) -> crate::Result<bool> {
     app.credential_provider()
-        .clear_master_unlock_key(UserIdArgs { user_id })
+        .clear_master_unlock_key(AccountIdArgs { account_id })
 }
 
 #[command]
@@ -58,19 +60,32 @@ pub(crate) fn clear_all_master_unlock_keys<R: Runtime>(app: AppHandle<R>) -> cra
 #[command]
 pub(crate) fn is_vault_unlocked<R: Runtime>(
     app: AppHandle<R>,
-    user_id: Option<String>,
+    account_id: Option<String>,
 ) -> crate::Result<bool> {
     app.credential_provider()
-        .is_vault_unlocked(UserIdArgs { user_id })
+        .is_vault_unlocked(AccountIdArgs { account_id })
 }
 
 #[command]
 pub(crate) fn get_master_unlock_key_base64<R: Runtime>(
     app: AppHandle<R>,
-    user_id: Option<String>,
+    account_id: Option<String>,
 ) -> crate::Result<Option<String>> {
     app.credential_provider()
-        .get_master_unlock_key_base64(UserIdArgs { user_id })
+        .get_master_unlock_key_base64(AccountIdArgs { account_id })
+}
+
+/// Borrow the live master unlock key of one account.
+///
+/// Reads the in-process live store and nothing else — no escrow, no prompt, no disk —
+/// so `None` means "that account has no live key right now" and never "ask the user".
+#[command]
+pub(crate) fn borrow_live_master_unlock_key_base64<R: Runtime>(
+    app: AppHandle<R>,
+    account_id: String,
+) -> crate::Result<Option<String>> {
+    app.credential_provider()
+        .borrow_live_master_unlock_key_base64(RequiredAccountIdArgs { account_id })
 }
 
 // ----------------------------------------------------------------------
@@ -81,12 +96,14 @@ pub(crate) fn get_master_unlock_key_base64<R: Runtime>(
 pub(crate) fn escrow_muk_with_biometric<R: Runtime>(
     app: AppHandle<R>,
     email: String,
+    account_id: Option<String>,
     user_id: Option<String>,
     timeout_ms: Option<f64>,
 ) -> crate::Result<bool> {
     app.credential_provider()
         .escrow_muk_with_biometric(EscrowMukArgs {
             email,
+            account_id,
             user_id,
             timeout_ms,
         })
@@ -119,6 +136,17 @@ pub(crate) fn get_escrow_remaining_time<R: Runtime>(app: AppHandle<R>) -> crate:
 #[command]
 pub(crate) fn clear_escrow<R: Runtime>(app: AppHandle<R>) -> crate::Result<bool> {
     app.credential_provider().clear_escrow()
+}
+
+/// Clear the escrow only when it belongs to this account. The escrow is one slot,
+/// so signing one account out must not cost another its biometric unlock.
+#[command]
+pub(crate) fn clear_escrow_for_account<R: Runtime>(
+    app: AppHandle<R>,
+    account_id: String,
+) -> crate::Result<bool> {
+    app.credential_provider()
+        .clear_escrow_for_account(RequiredAccountIdArgs { account_id })
 }
 
 // ----------------------------------------------------------------------

@@ -15,8 +15,10 @@ import {
 	useRef,
 	useSyncExternalStore,
 } from "react";
+import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { type AccountMetadata, itemCache, storage } from "@/lib/storage";
+import { resolveResumeAccess } from "@/lib/vault-route-access";
 import { vaultRepository } from "@/lib/vault-runtime";
 
 interface AccountContextValue {
@@ -47,6 +49,11 @@ export function createMobileClientRuntime(
 		itemCache,
 		vaultRepository,
 		credentialMirror: lifecycleDeps.credentialMirror,
+		// Android alone can borrow a live master unlock key from its own autofill
+		// process; `acceptBorrowedMasterUnlockKey` needs a `CryptoPort` to import those
+		// bytes and to compare them against the account's stored key before trusting
+		// them. The same port `storage` runs on, so both see one key identity.
+		crypto,
 		// No `onActiveChanged` / `onLockBroadcast`: those exist on desktop so it can tell the
 		// Chrome extension about active-account switches and lock events over native
 		// messaging. Mobile has no extension and nothing listening for that broadcast, so
@@ -146,10 +153,23 @@ export function AccountProvider({
 					await storage.storeBackgroundTimestamp(accountId);
 					return;
 				}
-				if (await service.shouldLock()) {
-					await service.lock();
-				}
+				// Auto-lock first, then the one thing a resume may open: a master unlock
+				// key Bittery's own autofill sheet left live while the app was away. See
+				// `resolveResumeAccess` for why this is not the `/` guard — that one
+				// restores the stored session with no prompt and would undo a lock.
+				const resumed = await resolveResumeAccess(service, manager, storage);
 				await storage.clearBackgroundTimestamp(accountId);
+				// `"locked"` is already heading for `/unlock` through `onLock` below, and
+				// `"unchanged"` means every guard would answer exactly what it answered
+				// before — so only an adopted native key is worth a navigation. Only from
+				// the lock screen: `/login` may be mid-"add account", and every other
+				// screen is already inside the vault.
+				if (
+					resumed === "unlocked" &&
+					router.state.location.pathname === "/unlock"
+				) {
+					await router.navigate({ to: "/vault" });
+				}
 			});
 			void visibilityInFlight.catch((error) => {
 				console.warn(
@@ -181,7 +201,7 @@ export function AccountProvider({
 			service.dispose();
 			autolockService.current = null;
 		};
-	}, [lockAllAccounts, router]);
+	}, [lockAllAccounts, manager, router]);
 
 	// No `trigger-biometric-unlock` event listener here: that event is raised by the
 	// desktop native-messaging bridge when the Chrome extension asks the desktop app to

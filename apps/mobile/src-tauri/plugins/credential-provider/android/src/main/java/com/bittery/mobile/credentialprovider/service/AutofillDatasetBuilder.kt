@@ -21,16 +21,18 @@ import android.service.autofill.Dataset
 import android.service.autofill.FillResponse
 import android.service.autofill.InlinePresentation
 import com.bittery.mobile.credentialprovider.R
-import com.bittery.mobile.credentialprovider.crypto.VaultDecryptor
-import com.bittery.mobile.credentialprovider.domain.DomainMatch
-import com.bittery.mobile.credentialprovider.state.VaultStateManager
-import com.bittery.mobile.credentialprovider.storage.CredentialDatabase
-import com.bittery.mobile.credentialprovider.storage.ItemEntity
+import com.bittery.mobile.credentialprovider.vault.NativeCredentialVault
 
+/**
+ * Turns what the vault offers into what the autofill framework accepts.
+ *
+ * Internal because it speaks the vault's language on one side and `RemoteViews`,
+ * `Dataset` and `FillResponse` on the other. That mapping is the whole job.
+ */
 @RequiresApi(Build.VERSION_CODES.O)
-class AutofillDatasetBuilder(
+internal class AutofillDatasetBuilder(
     private val context: Context,
-    private val database: CredentialDatabase
+    private val vault: NativeCredentialVault
 ) {
     private data class PresentationContent(
         val title: String,
@@ -74,19 +76,21 @@ class AutofillDatasetBuilder(
     ): FillResponse? {
         if (!fieldIds.hasAny()) return null
 
-        val datasets = mutableListOf<Dataset>()
-        for (userId in VaultStateManager.getUnlockedUserIds()) {
-            val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
-            datasets += buildDatasets(
-                fieldIds = fieldIds,
-                domain = domain,
-                muk = muk,
-                inlineSpec = inlineSpec,
-                attributionIntent = attributionIntent,
-                userId = userId,
-            )
-            if (datasets.size >= BitteryAutofillService.MAX_DATASETS) break
-        }
+        // Live keys only. A cold service gets nothing back and the caller falls
+        // back to the auth activity, which can show a prompt.
+        val datasets = vault
+            .credentialsForOrigin(domain.orEmpty(), BitteryAutofillService.MAX_DATASETS)
+            .mapNotNull { credential ->
+                buildDataset(
+                    label = credential.label,
+                    username = credential.username,
+                    password = credential.password,
+                    fieldIds = fieldIds,
+                    inlineSpec = inlineSpec,
+                    attributionIntent = attributionIntent,
+                )
+            }
+            .toMutableList()
 
         val scrollableSlots = InlineSuggestionLayout.scrollableSlotCount(
             maxSuggestionCount,
@@ -131,77 +135,6 @@ class AutofillDatasetBuilder(
             launchIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-    }
-
-    suspend fun buildDatasets(
-        fieldIds: FieldIds,
-        domain: String?,
-        muk: ByteArray?,
-        inlineSpec: InlinePresentationSpec?,
-        attributionIntent: PendingIntent?,
-        userId: String
-    ): List<Dataset> {
-        val datasets = mutableListOf<Dataset>()
-        if (!fieldIds.hasAny()) return datasets
-
-        if (muk != null && !domain.isNullOrBlank()) {
-            val items = getItemsForDomain(domain, userId)
-            Log.d(BitteryAutofillService.TAG, "Found ${items.size} items for domain: $domain")
-            for (item in items) {
-                val dataset = buildDatasetFromItem(item, muk, userId, fieldIds, inlineSpec, attributionIntent)
-                if (dataset != null) {
-                    datasets.add(dataset)
-                    if (datasets.size >= BitteryAutofillService.MAX_DATASETS) return datasets
-                }
-            }
-        }
-
-		return datasets
-    }
-
-    private suspend fun getItemsForDomain(domain: String, userId: String): List<ItemEntity> {
-        // Items are indexed under DomainMatch.lookupKeys, so querying the same
-        // keys is DomainMatch.matches expressed in SQL.
-        val keys = DomainMatch.lookupKeys(domain)
-        val items: List<ItemEntity> = when (keys.size) {
-            0 -> emptyList()
-            1 -> database.itemDao().getLoginItemsByDomain(keys[0], userId)
-            else -> database.itemDao().getLoginItemsByDomainAndParent(keys[0], keys[1], userId)
-        }
-
-        if (items.isEmpty()) {
-            // Debug: Check what domains we have in the database
-            val allDomains = try {
-                database.itemDomainDao().getAllDomains()
-            } catch (e: Exception) {
-                emptyList()
-            }
-            Log.d(BitteryAutofillService.TAG, "No items found for domain '$domain'. Available domains: ${allDomains.take(10)}")
-        }
-
-        return items
-    }
-
-    private suspend fun buildDatasetFromItem(
-        item: ItemEntity,
-        muk: ByteArray,
-        userId: String,
-        fieldIds: FieldIds,
-        inlineSpec: InlinePresentationSpec?,
-        attributionIntent: PendingIntent?
-    ): Dataset? {
-        return try {
-            val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, userId) ?: return null
-            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
-            val decryptedItem = VaultDecryptor.decryptLoginItem(item, decryptedVaultKey)
-            val username = decryptedItem.username ?: item.username ?: return null
-            val password = decryptedItem.password ?: return null
-            val label = item.displayTitle.ifBlank { username }
-            buildDataset(label, username, password, fieldIds, inlineSpec, attributionIntent)
-        } catch (e: Exception) {
-            Log.w(BitteryAutofillService.TAG, "Failed to decrypt item ${item.id}", e)
-            null
-        }
     }
 
     private fun buildDataset(

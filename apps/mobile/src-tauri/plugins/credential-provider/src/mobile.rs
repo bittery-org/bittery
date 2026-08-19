@@ -49,7 +49,7 @@ impl<R: Runtime> CredentialProvider<R> {
         self.call("setMukAutoLockTimeout", args)
     }
 
-    pub fn clear_master_unlock_key(&self, args: UserIdArgs) -> crate::Result<bool> {
+    pub fn clear_master_unlock_key(&self, args: AccountIdArgs) -> crate::Result<bool> {
         self.call("clearMasterUnlockKey", args)
     }
 
@@ -57,12 +57,19 @@ impl<R: Runtime> CredentialProvider<R> {
         self.call("clearAllMasterUnlockKeys", ())
     }
 
-    pub fn is_vault_unlocked(&self, args: UserIdArgs) -> crate::Result<bool> {
+    pub fn is_vault_unlocked(&self, args: AccountIdArgs) -> crate::Result<bool> {
         self.call("isVaultUnlocked", args)
     }
 
-    pub fn get_master_unlock_key_base64(&self, args: UserIdArgs) -> crate::Result<Option<String>> {
+    pub fn get_master_unlock_key_base64(&self, args: AccountIdArgs) -> crate::Result<Option<String>> {
         self.call("getMasterUnlockKeyBase64", args)
+    }
+
+    pub fn borrow_live_master_unlock_key_base64(
+        &self,
+        args: RequiredAccountIdArgs,
+    ) -> crate::Result<Option<String>> {
+        self.call("borrowLiveMasterUnlockKeyBase64", args)
     }
 
     // ------------------------------------------------------------------
@@ -91,6 +98,10 @@ impl<R: Runtime> CredentialProvider<R> {
 
     pub fn clear_escrow(&self) -> crate::Result<bool> {
         self.call("clearEscrow", ())
+    }
+
+    pub fn clear_escrow_for_account(&self, args: RequiredAccountIdArgs) -> crate::Result<bool> {
+        self.call("clearEscrowForAccount", args)
     }
 
     // ------------------------------------------------------------------

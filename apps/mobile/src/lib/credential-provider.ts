@@ -43,8 +43,8 @@
  *
  * *Mutating* commands get no fallback — they throw {@link CredentialProviderError} with
  * code `PLUGIN_UNAVAILABLE`. A resolved promise from a mutation is read by callers as
- * proof the mutation happened: `use-credential-provider-sync.ts` caches a sync signature
- * the moment `syncVaultData` resolves, so a fabricated `{vaultKeys: 0, items: 0}` would
+ * proof the mutation happened: `credential-replica.ts` records an account's published
+ * generation the moment `syncVaultData` resolves, so a fabricated `{vaultKeys: 0, items: 0}` would
  * mark the account synced forever and autofill would serve stale data with no error
  * anywhere. Better to throw and let the caller retry.
  *
@@ -63,6 +63,7 @@
 
 import type {
 	EscrowMukParams,
+	LiveMasterUnlockKeyBorrower,
 	PendingPasskeyMutation,
 	ProviderSupport,
 	SyncVaultDataResult,
@@ -70,6 +71,7 @@ import type {
 
 export type {
 	EscrowMukParams,
+	LiveMasterUnlockKeyBorrower,
 	PendingPasskeyMutation,
 	ProviderSupport,
 	SyncVaultDataResult,
@@ -217,8 +219,12 @@ async function callMutating<T>(command: string, args?: Args): Promise<T> {
 // ============================================
 
 /**
- * Set the Master Unlock Key after successful login/unlock. This makes the MUK
- * available to the CredentialProviderService for decryption.
+ * Hand an unlocked Master Unlock Key to the native live store, so the credential
+ * provider services can decrypt while the app is unlocked.
+ *
+ * Live only: nothing is written to disk, so an auto-lock or a process restart
+ * really does lose it. Both ids are required — `accountId` keys the live state,
+ * `userId` stamps the native cache rows — and a blank one is rejected.
  *
  * Mutating: throws when the plugin is absent.
  *
@@ -227,34 +233,37 @@ async function callMutating<T>(command: string, args?: Args): Promise<T> {
  */
 export function setMasterUnlockKey(
 	mukBase64: string,
-	userId?: string,
+	accountId: string,
+	userId: string,
 	autoLockTimeoutMs?: number,
 ): Promise<boolean> {
 	return callMutating("set_master_unlock_key", {
 		mukBase64,
+		accountId,
 		userId,
 		autoLockTimeoutMs,
 	});
 }
 
 /**
- * Update the native MUK auto-lock timeout for a user.
- * Applies immediately to currently persisted native MUK state.
+ * Update the native auto-lock timeout for one account.
+ * Applies immediately: a live key is re-armed against the new timeout.
  * Mutating: throws when the plugin is absent.
  */
 export function setMukAutoLockTimeout(
 	timeoutMs: number,
-	userId?: string,
+	accountId: string,
 ): Promise<boolean> {
-	return callMutating("set_muk_auto_lock_timeout", { timeoutMs, userId });
+	return callMutating("set_muk_auto_lock_timeout", { timeoutMs, accountId });
 }
 
 /**
- * Clear the Master Unlock Key (on logout or auto-lock).
+ * Drop the live Master Unlock Key for one account, or for every account when no
+ * id is given (on logout or auto-lock). The bytes are zeroized natively.
  * Mutating: throws when the plugin is absent.
  */
-export function clearMasterUnlockKey(userId?: string): Promise<boolean> {
-	return callMutating("clear_master_unlock_key", { userId });
+export function clearMasterUnlockKey(accountId?: string): Promise<boolean> {
+	return callMutating("clear_master_unlock_key", { accountId });
 }
 
 /**
@@ -265,19 +274,43 @@ export function clearAllMasterUnlockKeys(): Promise<boolean> {
 	return callMutating("clear_all_master_unlock_keys");
 }
 
-/** Whether the vault is currently unlocked (MUK available). */
-export function isVaultUnlocked(userId?: string): Promise<boolean> {
-	return call("is_vault_unlocked", false, { userId });
+/** Whether an account — or any account, with no id — has a live MUK. */
+export function isVaultUnlocked(accountId?: string): Promise<boolean> {
+	return call("is_vault_unlocked", false, { accountId });
 }
 
 /**
- * The MUK as a Base64 string (for debugging/verification only).
+ * The live MUK as a Base64 string (for debugging/verification only).
  * WARNING: only use in development builds.
  */
 export function getMasterUnlockKeyBase64(
-	userId?: string,
+	accountId: string,
 ): Promise<string | null> {
-	return call<string | null>("get_master_unlock_key_base64", null, { userId });
+	return call<string | null>("get_master_unlock_key_base64", null, {
+		accountId,
+	});
+}
+
+/**
+ * Borrow the live Master Unlock Key of one account, if the credential provider is
+ * holding one right now.
+ *
+ * The command this reaches reads the in-process live store and nothing else: no
+ * biometric escrow, no prompt, no disk. `null` therefore means exactly "that account
+ * has no live native key" — a lock, an auto-lock or a process restart all answer it,
+ * and so does a host with no plugin at all. It is a read-only command for that reason:
+ * an absent bridge and a locked vault must leave the caller in the same state.
+ *
+ * The bytes are the master unlock key. Do not log the result, do not store it, and
+ * hand it straight to `AccountSessionManager.acceptBorrowedMasterUnlockKey`, which
+ * proves it belongs to the account before it is trusted.
+ */
+export function borrowLiveMasterUnlockKey(
+	accountId: string,
+): Promise<string | null> {
+	return call<string | null>("borrow_live_master_unlock_key_base64", null, {
+		accountId,
+	});
 }
 
 // ============================================
@@ -294,6 +327,7 @@ export function escrowMukWithBiometric(
 ): Promise<boolean> {
 	return callMutating("escrow_muk_with_biometric", {
 		email: params.email,
+		accountId: params.accountId,
 		userId: params.userId,
 		timeoutMs: params.timeoutMs,
 	});
@@ -329,6 +363,18 @@ export function getEscrowRemainingTime(): Promise<number> {
  */
 export function clearEscrow(): Promise<boolean> {
 	return callMutating("clear_escrow");
+}
+
+/**
+ * Clear the MUK escrow only if it belongs to this account, and say whether it did.
+ *
+ * The escrow is a single slot, so signing one account out must not cost another
+ * account the biometric unlock it enrolled. The native side owns that comparison —
+ * which account the slot holds never leaves the provider process.
+ * Mutating: throws when the plugin is absent.
+ */
+export function clearEscrowForAccount(accountId: string): Promise<boolean> {
+	return callMutating("clear_escrow_for_account", { accountId });
 }
 
 // ============================================
@@ -461,12 +507,14 @@ export const credentialProvider = {
 	clearAllMasterUnlockKeys,
 	isVaultUnlocked,
 	getMasterUnlockKeyBase64,
+	borrowLiveMasterUnlockKey,
 	escrowMukWithBiometric,
 	retrieveEscrowedMuk,
 	hasValidEscrow,
 	hasValidEscrowForEmail,
 	getEscrowRemainingTime,
 	clearEscrow,
+	clearEscrowForAccount,
 	syncVaultData,
 	getPendingPasskeyMutations,
 	markPendingPasskeyMutationsApplied,

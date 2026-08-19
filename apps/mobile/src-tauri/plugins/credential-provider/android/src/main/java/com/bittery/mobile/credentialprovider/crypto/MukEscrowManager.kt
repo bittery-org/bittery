@@ -74,6 +74,7 @@ class MukEscrowManager(private val context: Context) {
         private const val PREF_ESCROW_TIMEOUT = "escrow_timeout_ms"
         private const val PREF_ESCROW_EMAIL = "escrow_email"
         private const val PREF_ESCROW_USER_ID = "escrow_user_id"
+        private const val PREF_ESCROW_ACCOUNT_ID = "escrow_account_id"
         private const val PREF_LAST_MASTER_PASSWORD_ENTRY = "last_master_password_entry"
     }
 
@@ -218,10 +219,13 @@ class MukEscrowManager(private val context: Context) {
         muk: ByteArray,
         cipher: Cipher,
         email: String,
+        accountId: String,
+        userId: String,
         timeoutMs: Long = DEFAULT_ESCROW_TIMEOUT_MS,
-        userId: String? = null
     ) {
         require(muk.size == 32) { "MUK must be 32 bytes" }
+        require(accountId.isNotBlank()) { "accountId is required" }
+        require(userId.isNotBlank()) { "userId is required" }
 
         val encryptedMuk = cipher.doFinal(muk)
         val iv = cipher.iv
@@ -230,6 +234,7 @@ class MukEscrowManager(private val context: Context) {
             .putLong(PREF_ESCROW_TIMESTAMP, System.currentTimeMillis())
             .putLong(PREF_ESCROW_TIMEOUT, timeoutMs)
             .putString(PREF_ESCROW_EMAIL, email)
+            .putString(PREF_ESCROW_ACCOUNT_ID, accountId)
             .putString(PREF_ESCROW_USER_ID, userId)
 
         if (iv != null && iv.isNotEmpty()) {
@@ -251,11 +256,12 @@ class MukEscrowManager(private val context: Context) {
     fun escrowMukUnattended(
         muk: ByteArray,
         email: String,
+        accountId: String,
+        userId: String,
         timeoutMs: Long = DEFAULT_ESCROW_TIMEOUT_MS,
-        userId: String? = null,
     ) {
         val cipher = getEncryptCipher()
-        escrowMuk(muk, cipher, email, timeoutMs, userId)
+        escrowMuk(muk, cipher, email, accountId, userId, timeoutMs)
     }
 
     /**
@@ -290,15 +296,24 @@ class MukEscrowManager(private val context: Context) {
             .remove(PREF_ESCROW_TIMESTAMP)
             .remove(PREF_ESCROW_TIMEOUT)
             .remove(PREF_ESCROW_EMAIL)
+            .remove(PREF_ESCROW_ACCOUNT_ID)
             .remove(PREF_ESCROW_USER_ID)
             .apply()
     }
 
     /**
-     * Check if there is a valid (non-expired) escrow.
+     * Whether there is a valid (non-expired) escrow that names both identities.
+     *
+     * A record written before the account-id rekey carries only a server user id.
+     * It is treated as invalid rather than guessed at: the user re-enrols biometric
+     * unlock after one master-password entry, and no record can unlock the wrong
+     * account in the meantime.
      */
     fun hasValidEscrow(): Boolean {
-        val mukBase64 = prefs.getString(PREF_ESCROWED_MUK, null) ?: return false
+        prefs.getString(PREF_ESCROWED_MUK, null) ?: return false
+        if (getEscrowAccountId().isNullOrBlank()) return false
+        if (getEscrowUserId().isNullOrBlank()) return false
+
         val timestamp = prefs.getLong(PREF_ESCROW_TIMESTAMP, 0)
         val timeout = prefs.getLong(PREF_ESCROW_TIMEOUT, DEFAULT_ESCROW_TIMEOUT_MS)
 
@@ -324,8 +339,14 @@ class MukEscrowManager(private val context: Context) {
         return prefs.getString(PREF_ESCROW_EMAIL, null)
     }
 
+    /** The server user id the escrowed key belongs to. */
     fun getEscrowUserId(): String? {
         return prefs.getString(PREF_ESCROW_USER_ID, null)
+    }
+
+    /** The account id the escrowed key belongs to. Null on a pre-rekey record. */
+    fun getEscrowAccountId(): String? {
+        return prefs.getString(PREF_ESCROW_ACCOUNT_ID, null)
     }
 
     /**

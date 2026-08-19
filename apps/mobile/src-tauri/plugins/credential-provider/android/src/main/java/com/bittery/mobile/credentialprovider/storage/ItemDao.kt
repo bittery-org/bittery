@@ -1,11 +1,10 @@
 package com.bittery.mobile.credentialprovider.storage
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 
 /**
  * Data Access Object for vault item operations.
@@ -80,15 +79,17 @@ interface ItemDao {
     ): List<ItemEntity>
 
     /**
-     * Insert or replace an item.
+     * Add an item, or update the one already there.
+     *
+     * `@Upsert`, never `@Insert(REPLACE)`. `INSERT OR REPLACE` deletes the conflicting
+     * row, and `item_domains` cascades from `items`, so re-writing an item would drop
+     * the domain index autofill matches it on.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insert(item: ItemEntity)
 
-    /**
-     * Insert or replace multiple items.
-     */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /** The same, for a whole sync's worth of items. See [insert] for why upsert. */
+    @Upsert
     suspend fun insertAll(items: List<ItemEntity>)
 
     /**

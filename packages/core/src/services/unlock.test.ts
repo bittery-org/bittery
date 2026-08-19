@@ -425,10 +425,15 @@ describe("unlock all accounts", () => {
 			verifiable: ["acc-2"],
 		});
 		const purge = mock(async () => {});
+		const forgetQuickUnlock = mock(async () => {});
 
 		await unlockAllWithBiometric(
 			{ promptMessage: PROMPT },
-			{ storage, itemCache, credentialMirror: { purge } },
+			{
+				storage,
+				itemCache,
+				credentialMirror: { purge, forgetQuickUnlock },
+			},
 		);
 
 		// Fail closed: the rejected account must not stay unlocked.

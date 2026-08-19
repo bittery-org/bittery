@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	accountMetadata,
 	createTestAccountStore,
 	createTestItemCache,
+	mukFor,
 	seedAccountWithSession,
+	type TestAccountStore,
 } from "../testing/account-store-harness";
 import type { AccountSessionManagerOptions } from "./account-session-manager";
 import { ClientRuntime } from "./client-runtime";
@@ -419,10 +422,11 @@ describe("AccountSessionManager", () => {
 	it("removeAccount purges the injected credential mirror", async () => {
 		const storage = await createStore();
 		const purge = mock(async () => {});
+		const forgetQuickUnlock = mock(async () => {});
 		const manager = createManager({
 			storage,
 			itemCache,
-			credentialMirror: { purge },
+			credentialMirror: { purge, forgetQuickUnlock },
 			verifyUnlockPolicy: async () => {},
 		});
 
@@ -529,10 +533,11 @@ describe("AccountSessionManager", () => {
 		const storage = await createStore();
 		const clearSession = spyOn(storage, "clearSession");
 		const purge = mock(async () => {});
+		const forgetQuickUnlock = mock(async () => {});
 		const manager = createManager({
 			storage,
 			itemCache,
-			credentialMirror: { purge },
+			credentialMirror: { purge, forgetQuickUnlock },
 			verifyUnlockPolicy: async () => {
 				throw new Error("policy unavailable");
 			},
@@ -547,5 +552,186 @@ describe("AccountSessionManager", () => {
 		]);
 		expect(clearSession).toHaveBeenCalledWith("acc-2");
 		expect(manager.isUnlocked("acc-2")).toBe(false);
+	});
+});
+
+/**
+ * Borrowing a master unlock key another surface of the device already holds.
+ *
+ * Android's own autofill and credential-provider activities unlock inside the app's
+ * process and leave the key in a live store the app never read. These pin what the
+ * app is allowed to do with such a claim: prove it, verify policy, then commit — and
+ * leak no key ref on any of the paths that refuse.
+ */
+describe("AccountSessionManager.acceptBorrowedMasterUnlockKey", () => {
+	let harness: TestAccountStore;
+	let cache: ItemCache;
+
+	async function seed(): Promise<void> {
+		await seedAccountWithSession(
+			harness,
+			accountMetadata({ accountId: "acc-1" }),
+			{ unlocked: false },
+		);
+		await seedAccountWithSession(
+			harness,
+			accountMetadata({ accountId: "acc-2", addedAt: 2, lastActiveAt: 2 }),
+			{ unlocked: false },
+		);
+		await harness.store.setActiveAccount("acc-1");
+	}
+
+	function manager(
+		verifyUnlockPolicy: (accountId: string) => Promise<void> = async () => {},
+	) {
+		return createManager({
+			storage: harness.store,
+			itemCache: cache,
+			crypto: harness.crypto,
+			verifyUnlockPolicy,
+		});
+	}
+
+	function borrowed(accountId: string): string {
+		return arrayBufferToBase64(mukFor(accountId));
+	}
+
+	beforeEach(async () => {
+		harness = await createTestAccountStore();
+		cache = (await createTestItemCache()).cache;
+		await seed();
+	});
+
+	it("adopts a key that really is the account's own", async () => {
+		const session = manager();
+		await session.refresh();
+		const before = harness.crypto.liveKeyCount;
+
+		const accepted = await session.acceptBorrowedMasterUnlockKey(
+			"acc-1",
+			borrowed("acc-1"),
+		);
+
+		expect(accepted).toBe(true);
+		expect(session.isUnlocked("acc-1")).toBe(true);
+		expect(await harness.store.getUnlockedAccounts()).toEqual(["acc-1"]);
+		// One ref survives: the one the store now owns and destroys on the next lock.
+		expect(harness.crypto.liveKeyCount).toBe(before + 1);
+	});
+
+	it("emits an unlock-state change the app can observe", async () => {
+		const session = manager();
+		await session.refresh();
+		const unlockedSets: string[][] = [];
+		harness.store.onUnlockStateChanged((ids) => unlockedSets.push([...ids]));
+		let snapshots = 0;
+		session.subscribe(() => {
+			snapshots++;
+		});
+
+		await session.acceptBorrowedMasterUnlockKey("acc-1", borrowed("acc-1"));
+
+		expect(unlockedSets).toContainEqual(["acc-1"]);
+		expect(snapshots).toBeGreaterThan(0);
+	});
+
+	it("refuses a key that belongs to another account and keeps no ref", async () => {
+		const session = manager();
+		await session.refresh();
+		const before = harness.crypto.liveKeyCount;
+
+		const accepted = await session.acceptBorrowedMasterUnlockKey(
+			"acc-1",
+			borrowed("acc-2"),
+		);
+
+		expect(accepted).toBe(false);
+		expect(session.isUnlocked("acc-1")).toBe(false);
+		expect(await harness.store.getUnlockedAccounts()).toEqual([]);
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
+	it("refuses bytes that are not a key at all", async () => {
+		const session = manager();
+		await session.refresh();
+		const before = harness.crypto.liveKeyCount;
+
+		expect(
+			await session.acceptBorrowedMasterUnlockKey(
+				"acc-1",
+				arrayBufferToBase64(new Uint8Array(32).fill(9)),
+			),
+		).toBe(false);
+		expect(
+			await session.acceptBorrowedMasterUnlockKey("acc-1", "not base64 !!"),
+		).toBe(false);
+		expect(await session.acceptBorrowedMasterUnlockKey("acc-1", "")).toBe(
+			false,
+		);
+		expect(session.isUnlocked("acc-1")).toBe(false);
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
+	it("refuses an account this device does not know", async () => {
+		const session = manager();
+		await session.refresh();
+
+		expect(
+			await session.acceptBorrowedMasterUnlockKey("acc-9", borrowed("acc-1")),
+		).toBe(false);
+		expect(await harness.store.getUnlockedAccounts()).toEqual([]);
+	});
+
+	it("refuses once the session is no longer valid", async () => {
+		const session = manager();
+		await session.refresh();
+		// `clearSession` drops the JWT, which is what `isSessionValid` refuses on.
+		await harness.store.clearSession("acc-1");
+		const before = harness.crypto.liveKeyCount;
+
+		expect(
+			await session.acceptBorrowedMasterUnlockKey("acc-1", borrowed("acc-1")),
+		).toBe(false);
+		expect(session.isUnlocked("acc-1")).toBe(false);
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
+	it("refuses when travel mode cannot be verified", async () => {
+		const session = manager(async () => {
+			throw new Error("policy unavailable");
+		});
+		await session.refresh();
+		const before = harness.crypto.liveKeyCount;
+
+		expect(
+			await session.acceptBorrowedMasterUnlockKey("acc-1", borrowed("acc-1")),
+		).toBe(false);
+		expect(session.isUnlocked("acc-1")).toBe(false);
+		expect(await harness.store.getUnlockedAccounts()).toEqual([]);
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
+	it("never prompts: the stored key is unwrapped with biometrics skipped", async () => {
+		const session = manager();
+		await session.refresh();
+		const decrypt = spyOn(harness.store, "decryptStoredMasterUnlockKey");
+
+		await session.acceptBorrowedMasterUnlockKey("acc-1", borrowed("acc-1"));
+
+		expect(decrypt).toHaveBeenCalledWith("acc-1", true);
+	});
+
+	it("refuses without a CryptoPort rather than trusting the bytes", async () => {
+		const session = createManager({
+			storage: harness.store,
+			itemCache: cache,
+			verifyUnlockPolicy: async () => {},
+		});
+		await session.refresh();
+
+		expect(
+			await session.acceptBorrowedMasterUnlockKey("acc-1", borrowed("acc-1")),
+		).toBe(false);
+		expect(await harness.store.getUnlockedAccounts()).toEqual([]);
 	});
 });

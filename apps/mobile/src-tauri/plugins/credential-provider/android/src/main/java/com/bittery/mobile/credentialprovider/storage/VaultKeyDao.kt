@@ -1,9 +1,8 @@
 package com.bittery.mobile.credentialprovider.storage
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 
 /**
  * Data Access Object for vault key operations.
@@ -30,15 +29,17 @@ interface VaultKeyDao {
     suspend fun getByVaultId(vaultId: String, userId: String): VaultKeyEntity?
 
     /**
-     * Insert or replace vault keys.
+     * Add a vault key, or update the one already there.
+     *
+     * `@Upsert`, never `@Insert(REPLACE)`. SQLite's `INSERT OR REPLACE` deletes the
+     * row it conflicts with, and `items` cascades from `vault_keys`, so one re-sent
+     * vault key would take that vault's whole item and domain index with it.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insert(vaultKey: VaultKeyEntity)
 
-    /**
-     * Insert or replace multiple vault keys.
-     */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /** The same, for a whole sync's worth of keys. See [insert] for why upsert. */
+    @Upsert
     suspend fun insertAll(vaultKeys: List<VaultKeyEntity>)
 
     /**

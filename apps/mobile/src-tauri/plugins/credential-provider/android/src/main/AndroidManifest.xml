@@ -22,10 +22,10 @@
 
             CRITICAL: Do NOT add android:process to this service.
 
-            BitteryCredentialProviderService shares VaultStateManager with the main app
-            to reach the Master Unlock Key that decrypts credentials. A separate process
-            would give the service its own isolated singleton, with no MUK in it, and
-            the shared MukEscrowManager and Room database would split the same way.
+            BitteryCredentialProviderService shares the process-wide vault with the
+            main app to reach the Master Unlock Key that decrypts credentials. A
+            separate process would give the service its own empty vault, and the
+            escrow and the Room database would split the same way.
         -->
         <service
             android:name=".service.BitteryCredentialProviderService"

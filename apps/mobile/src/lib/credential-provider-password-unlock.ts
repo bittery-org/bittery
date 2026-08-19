@@ -100,6 +100,7 @@ export async function prepareCredentialProviderAfterUnlock(
 			const timeoutMs = await store.getMasterPasswordReentryPeriodMs();
 			await provider.escrowMukWithBiometric({
 				email,
+				accountId,
 				userId,
 				timeoutMs,
 			});

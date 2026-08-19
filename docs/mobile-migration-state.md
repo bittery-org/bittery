@@ -80,7 +80,7 @@ server change for that is committed; see D10 in the decisions file.
 ### Debugging
 
 The Android WebView logs `console` under the tag **`Tauri/Console`**, not `chromium`. Kotlin logs
-under `CredentialProviderPlugin`, `VaultStateManager`, `BitteryAutofill`, `BitteryCredProvider`.
+under `CredentialProviderPlugin`, `NativeCredentialVault`, `BitteryAutofill`, `BitteryCredProvider`.
 
 The `/debug` self-test route is **deleted**. It ran the storage ports, the Keystore probe and the
 credential provider's read-only surface on mount and printed a JSON report; it was migration

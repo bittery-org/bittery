@@ -13,6 +13,7 @@ const COMMANDS: &[&str] = &[
     "clear_all_master_unlock_keys",
     "is_vault_unlocked",
     "get_master_unlock_key_base64",
+    "borrow_live_master_unlock_key_base64",
     // MUK escrow
     "escrow_muk_with_biometric",
     "retrieve_escrowed_muk",
@@ -20,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "has_valid_escrow_for_email",
     "get_escrow_remaining_time",
     "clear_escrow",
+    "clear_escrow_for_account",
     // Sync
     "sync_vault_data",
     "get_pending_passkey_mutations",

@@ -24,10 +24,31 @@ pub struct Wrapped<T> {
 // number type; narrowing here would reject a caller the old bridge accepted.
 // ----------------------------------------------------------------------
 
+/// The *server* user id, for queries against the Android Room cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserIdArgs {
     pub user_id: Option<String>,
+}
+
+/// The account id, which is what live unlock state on the Kotlin side is keyed by.
+/// There is no fallback value: a blank id is rejected there.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountIdArgs {
+    pub account_id: Option<String>,
+}
+
+/// The account id, required rather than optional.
+///
+/// Separate from [`AccountIdArgs`] because a command that answers "no live key" for a
+/// *missing* id is indistinguishable from one that answers it for a locked vault, and
+/// the caller would never learn it had asked the wrong question. `borrow_live_master_
+/// unlock_key_base64` names its account or fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequiredAccountIdArgs {
+    pub account_id: String,
 }
 
 /// No `#[derive(Debug)]`. This struct carries the master unlock key, and a derived
@@ -38,6 +59,7 @@ pub struct UserIdArgs {
 #[serde(rename_all = "camelCase")]
 pub struct SetMasterUnlockKeyArgs {
     pub muk_base64: String,
+    pub account_id: Option<String>,
     pub user_id: Option<String>,
     pub auto_lock_timeout_ms: Option<f64>,
 }
@@ -49,6 +71,7 @@ impl std::fmt::Debug for SetMasterUnlockKeyArgs {
                 "muk_base64",
                 &format_args!("<redacted, {} chars>", self.muk_base64.len()),
             )
+            .field("account_id", &self.account_id)
             .field("user_id", &self.user_id)
             .field("auto_lock_timeout_ms", &self.auto_lock_timeout_ms)
             .finish()
@@ -59,13 +82,14 @@ impl std::fmt::Debug for SetMasterUnlockKeyArgs {
 #[serde(rename_all = "camelCase")]
 pub struct SetMukAutoLockTimeoutArgs {
     pub timeout_ms: f64,
-    pub user_id: Option<String>,
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EscrowMukArgs {
     pub email: String,
+    pub account_id: Option<String>,
     pub user_id: Option<String>,
     pub timeout_ms: Option<f64>,
 }

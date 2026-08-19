@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import android.webkit.WebView
 import androidx.annotation.RequiresApi
@@ -23,21 +24,18 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import com.bittery.mobile.credentialprovider.crypto.MukEscrowManager
-import com.bittery.mobile.credentialprovider.crypto.VaultDecryptor
-import com.bittery.mobile.credentialprovider.domain.DomainMatch
-import com.bittery.mobile.credentialprovider.state.VaultStateManager
-import com.bittery.mobile.credentialprovider.storage.AuthDataEntity
-import com.bittery.mobile.credentialprovider.storage.CredentialDatabase
-import com.bittery.mobile.credentialprovider.storage.ItemDomainEntity
-import com.bittery.mobile.credentialprovider.storage.ItemEntity
-import com.bittery.mobile.credentialprovider.storage.VaultKeyEntity
+import com.bittery.mobile.credentialprovider.vault.AndroidVaultLogger
+import com.bittery.mobile.credentialprovider.vault.CredentialReplicaSnapshots
+import com.bittery.mobile.credentialprovider.vault.DEFAULT_BIOMETRIC_UNLOCK_TIMEOUT_MS
+import com.bittery.mobile.credentialprovider.vault.EnrolResult
+import com.bittery.mobile.credentialprovider.vault.NativeCredentialVaults
+import com.bittery.mobile.credentialprovider.vault.ReplicaSnapshotParse
+import com.bittery.mobile.credentialprovider.vault.ReplicaUpdateResult
+import com.bittery.mobile.credentialprovider.vault.UnlockResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 private const val TAG = "CredentialProviderPlugin"
@@ -51,13 +49,12 @@ private const val SERVICE_CLASS =
 /**
  * The Tauri bridge into the ported credential provider.
  *
- * This is a straight translation of the Expo module that used to live at
- * `apps/mobile/modules/credential-provider/android/.../CredentialProviderModule.kt`.
- * Every method body — the calls into [VaultStateManager], [MukEscrowManager], the Room
- * DAOs — is the same code, moved. Only the bridging layer changed: `Function`/
- * `AsyncFunction` became `@Command`, positional parameters became [InvokeArg] classes,
- * and `Promise` became [Invoke]. A behaviour change here is a security change, because
- * this class hands out the master unlock key.
+ * This is a bridge and nothing else. Every command parses its arguments, asks
+ * [NativeCredentialVault][com.bittery.mobile.credentialprovider.vault.NativeCredentialVault]
+ * one question, and turns the answer into a `JSObject` or a rejection. The live keys,
+ * the escrow, the replica and the cryptography live in the vault; this class does not
+ * coordinate them and must not start. A behaviour change here is a security change,
+ * because this class hands out the master unlock key.
  *
  * Everything the *system* calls — the two services and their activities — is reached by
  * intent and does not route through this class.
@@ -71,13 +68,10 @@ private const val SERVICE_CLASS =
  * **Threading.** Tauri calls `@Command` methods reflectively and synchronously on the
  * Android main thread (`PluginHandle.invoke` -> `run_on_android_context` -> wry's
  * main-thread pipe). SharedPreferences and Keystore work is cheap enough to stay there,
- * which is where the Expo module's synchronous `Function`s ran too. **Room is not**: the
- * four commands that touch the database ([syncVaultData], [getPendingPasskeyMutations],
- * [markPendingPasskeyMutationsApplied], [markPendingPasskeyMutationsFailed]) launch on
- * [pluginScope], hop to `Dispatchers.IO` for the queries exactly as the Expo module did,
- * and call `invoke.resolve` from the coroutine when it finishes. Nothing blocks the main
- * thread waiting for them. `NativeCrypto`'s `runBlocking` is reached only through
- * [recoverDomainsFromEncryptedItem], which runs inside that IO context.
+ * which is where the Expo module's synchronous `Function`s ran too. The commands that
+ * reach the replica or a prompt are `suspend` calls on the vault: they launch on
+ * [pluginScope] and resolve from the coroutine when the vault answers. The vault moves
+ * its own storage work off the main thread, so nothing here blocks it.
  */
 @TauriPlugin
 class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity) {
@@ -91,14 +85,39 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	// JSON `null` on a Kotlin primitive would trip FAIL_ON_NULL_FOR_PRIMITIVES.
 	// ------------------------------------------------------------------
 
+	/** The *server* user id, for queries against the local Room cache. */
 	@InvokeArg
 	class UserIdArgs {
 		var userId: String? = null
 	}
 
+	/**
+	 * The account id, which is what live unlock state is keyed by.
+	 *
+	 * There is no fallback value. A blank id is a caller bug, and the old
+	 * `"default"` stand-in let one account read another's vault.
+	 */
+	@InvokeArg
+	class AccountIdArgs {
+		var accountId: String? = null
+	}
+
+	/**
+	 * The account id, required rather than optional.
+	 *
+	 * A command that answers "no live key" for a *missing* id looks exactly like one
+	 * answering it for a locked vault, and the caller never learns it asked the wrong
+	 * question. [borrowLiveMasterUnlockKeyBase64] names its account or is rejected.
+	 */
+	@InvokeArg
+	class RequiredAccountIdArgs {
+		var accountId: String = ""
+	}
+
 	@InvokeArg
 	class SetMasterUnlockKeyArgs {
 		var mukBase64: String = ""
+		var accountId: String? = null
 		var userId: String? = null
 		var autoLockTimeoutMs: Double? = null
 	}
@@ -106,12 +125,13 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	@InvokeArg
 	class SetMukAutoLockTimeoutArgs {
 		var timeoutMs: Double = 0.0
-		var userId: String? = null
+		var accountId: String? = null
 	}
 
 	@InvokeArg
 	class EscrowMukArgs {
 		var email: String = ""
+		var accountId: String? = null
 		var userId: String? = null
 		var timeoutMs: Double? = null
 	}
@@ -260,15 +280,19 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 
 	/**
 	 * Application-scoped, matching the Expo module's `appContext.reactContext`. The
-	 * escrow manager and the Room instance outlive any one activity, so an activity
-	 * context here would leak it.
+	 * vault outlives any one activity, so an activity context here would leak it.
 	 */
 	private val context: Context
 		get() = activity.applicationContext
 
-	private val mukEscrowManager: MukEscrowManager by lazy { MukEscrowManager(context) }
+	/**
+	 * The process-wide vault. The same instance the two services and the two
+	 * activities use, because they all run in this process — `PROCESS-MODEL.md`.
+	 */
+	private val vault by lazy { NativeCredentialVaults.of(context) }
 
-	private val database: CredentialDatabase by lazy { CredentialDatabase.getInstance(context) }
+	/** Sync payloads report their own skipped records. */
+	private val snapshotLogger = AndroidVaultLogger(TAG)
 
 	/**
 	 * `BiometricPrompt` needs one, and it gets one: `MainActivity` extends
@@ -299,14 +323,6 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 
 
 
-	private fun ensureVaultStateManagerInitialized() {
-		try {
-			VaultStateManager.initialize(context)
-		} catch (e: Exception) {
-			Log.e(TAG, "Failed to initialize VaultStateManager", e)
-		}
-	}
-
 	/** The one resolve shape: `{ "value": <result> }`. See the class comment. */
 	private fun resolveValue(invoke: Invoke, value: Any?) {
 		val result = JSObject()
@@ -318,152 +334,198 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		ComponentName(activity.applicationContext.packageName, SERVICE_CLASS)
 
 	// ------------------------------------------------------------------
-	// Vault state management (VaultStateManager)
+	// Live unlock state
+	//
+	// Every command names an account. There is no fallback id: a blank one is
+	// rejected, because the old `"default"` stand-in pooled every account's key
+	// under one name. Nothing here logs an id, a key or a key length.
 	// ------------------------------------------------------------------
 
+	private fun requireAccountId(invoke: Invoke, accountId: String?): String? {
+		if (accountId.isNullOrBlank()) {
+			invoke.reject("accountId is required", "INVALID_PARAMS")
+			return null
+		}
+		return accountId
+	}
+
 	/**
-	 * Set the Master Unlock Key after successful login/unlock. This makes the MUK
-	 * available to the `CredentialProviderService` for decryption.
+	 * Hand the app's already-unlocked key to the vault, so the credential
+	 * provider services can decrypt while the app is unlocked.
+	 *
+	 * Live only. Nothing is written to disk, so an auto-lock or a restart really
+	 * does lose it.
 	 */
 	@Command
 	fun setMasterUnlockKey(invoke: Invoke) {
 		val args = invoke.parseArgs(SetMasterUnlockKeyArgs::class.java)
+		val accountId = requireAccountId(invoke, args.accountId) ?: return
+		val serverUserId = args.userId
+		if (serverUserId.isNullOrBlank()) {
+			invoke.reject("userId is required", "INVALID_PARAMS")
+			return
+		}
+
+		var muk: ByteArray? = null
 		try {
-			ensureVaultStateManagerInitialized()
-			val resolvedUserId = args.userId?.takeIf { it.isNotBlank() } ?: "default"
-			val resolvedTimeoutMs = args.autoLockTimeoutMs?.toLong()
-			Log.d(
-				TAG,
-				"setMasterUnlockKey: CALLED from the webview bridge (userId='$resolvedUserId', " +
-					"mukBase64Length=${args.mukBase64.length}, timeoutMs=$resolvedTimeoutMs, " +
-					"pid=${android.os.Process.myPid()})",
+			muk = Base64.decode(args.mukBase64, Base64.NO_WRAP)
+			vault.acceptUnlockedKey(
+				accountId = accountId,
+				serverUserId = serverUserId,
+				muk = muk,
+				autoLockTimeoutMs = args.autoLockTimeoutMs?.toLong(),
 			)
-			VaultStateManager.setMasterUnlockKeyFromBase64(
-				args.mukBase64,
-				resolvedUserId,
-				resolvedTimeoutMs,
-			)
-			Log.d(TAG, "setMasterUnlockKey: MUK set successfully, verifying...")
-			val verifyUnlocked = VaultStateManager.isUnlocked(resolvedUserId)
-			Log.d(TAG, "setMasterUnlockKey: Verification isUnlocked($resolvedUserId)=$verifyUnlocked")
 			emit("onVaultUnlocked")
 			resolveValue(invoke, true)
 		} catch (e: Exception) {
-			Log.e(TAG, "setMasterUnlockKey: Failed to set MUK", e)
+			Log.e(TAG, "setMasterUnlockKey: rejected (${e::class.java.simpleName})")
 			resolveValue(invoke, false)
+		} finally {
+			muk?.fill(0)
 		}
 	}
 
-	/** Update the native MUK auto-lock timeout for a user, applied immediately. */
+	/** Update the auto-lock timeout for one account, applied immediately. */
 	@Command
 	fun setMukAutoLockTimeout(invoke: Invoke) {
 		val args = invoke.parseArgs(SetMukAutoLockTimeoutArgs::class.java)
+		val accountId = requireAccountId(invoke, args.accountId) ?: return
 		try {
-			ensureVaultStateManagerInitialized()
-			val resolvedUserId = args.userId?.takeIf { it.isNotBlank() } ?: "default"
-			val resolvedTimeoutMs = args.timeoutMs.toLong()
-			Log.d(TAG, "setMukAutoLockTimeout: userId='$resolvedUserId', timeoutMs=$resolvedTimeoutMs")
-			VaultStateManager.setMukAutoLockTimeout(resolvedUserId, resolvedTimeoutMs)
+			vault.setAutoLockTimeout(accountId, args.timeoutMs.toLong())
 			resolveValue(invoke, true)
 		} catch (e: Exception) {
-			Log.e(TAG, "setMukAutoLockTimeout: failed", e)
+			Log.e(TAG, "setMukAutoLockTimeout: rejected (${e::class.java.simpleName})")
 			resolveValue(invoke, false)
 		}
 	}
 
-	/** Clear the Master Unlock Key (on logout or auto-lock). */
+	/** Lock one account, or every account when no id is given. */
 	@Command
 	fun clearMasterUnlockKey(invoke: Invoke) {
-		val args = invoke.parseArgs(UserIdArgs::class.java)
-		ensureVaultStateManagerInitialized()
-		Log.w(
-			TAG,
-			"clearMasterUnlockKey: CALLED from the webview bridge (userId='${args.userId}', " +
-				"pid=${android.os.Process.myPid()})",
-		)
-		VaultStateManager.dumpDebugState("BEFORE clearMasterUnlockKey")
-		if (args.userId.isNullOrBlank()) {
-			VaultStateManager.clearAllMasterUnlockKeys()
-		} else {
-			VaultStateManager.clearMasterUnlockKey(args.userId!!)
+		val args = invoke.parseArgs(AccountIdArgs::class.java)
+		try {
+			vault.lock(args.accountId?.takeIf { it.isNotBlank() })
+			emit("onVaultLocked")
+			resolveValue(invoke, true)
+		} catch (e: Exception) {
+			Log.e(TAG, "clearMasterUnlockKey: rejected (${e::class.java.simpleName})")
+			resolveValue(invoke, false)
 		}
-		VaultStateManager.dumpDebugState("AFTER clearMasterUnlockKey")
-		emit("onVaultLocked")
-		resolveValue(invoke, true)
 	}
 
-	/** Clear every Master Unlock Key (on logout, or when locking all accounts). */
+	/** Lock every account (on logout, or when locking all accounts). */
 	@Command
 	fun clearAllMasterUnlockKeys(invoke: Invoke) {
-		ensureVaultStateManagerInitialized()
-		Log.w(
-			TAG,
-			"clearAllMasterUnlockKeys: CALLED from the webview bridge (pid=${android.os.Process.myPid()})",
-		)
-		VaultStateManager.dumpDebugState("BEFORE clearAllMasterUnlockKeys")
-		VaultStateManager.clearAllMasterUnlockKeys()
-		VaultStateManager.dumpDebugState("AFTER clearAllMasterUnlockKeys")
+		vault.lock(null)
 		emit("onVaultLocked")
 		resolveValue(invoke, true)
 	}
 
-	/** Whether the vault is currently unlocked (MUK available). */
+	/** Whether an account — or any account, with no id — has a live key. */
 	@Command
 	fun isVaultUnlocked(invoke: Invoke) {
-		val args = invoke.parseArgs(UserIdArgs::class.java)
-		ensureVaultStateManagerInitialized()
-		Log.d(
-			TAG,
-			"isVaultUnlocked: CALLED from the webview bridge (userId='${args.userId}', " +
-				"pid=${android.os.Process.myPid()})",
-		)
-		val unlocked = if (args.userId.isNullOrBlank()) {
-			VaultStateManager.isUnlocked()
-		} else {
-			VaultStateManager.isUnlocked(args.userId!!)
-		}
-		if (!unlocked) {
-			VaultStateManager.dumpDebugState("isVaultUnlocked=FALSE")
+		val args = invoke.parseArgs(AccountIdArgs::class.java)
+		val accountId = args.accountId
+		val unlocked = try {
+			if (accountId.isNullOrBlank()) {
+				vault.unlockedAccountIds().isNotEmpty()
+			} else {
+				vault.isUnlocked(accountId)
+			}
+		} catch (e: Exception) {
+			Log.e(TAG, "isVaultUnlocked: rejected (${e::class.java.simpleName})")
+			false
 		}
 		resolveValue(invoke, unlocked)
 	}
 
 	/**
-	 * The MUK as Base64, for debugging/verification only.
+	 * The live key as Base64, for debugging/verification only.
 	 * WARNING: only use in development builds.
 	 */
 	@Command
 	fun getMasterUnlockKeyBase64(invoke: Invoke) {
-		val args = invoke.parseArgs(UserIdArgs::class.java)
-		ensureVaultStateManagerInitialized()
-		val muk = if (args.userId.isNullOrBlank()) {
-			VaultStateManager.getMasterUnlockKeyBase64()
-		} else {
-			VaultStateManager.getMasterUnlockKeyBase64(args.userId!!)
+		val args = invoke.parseArgs(AccountIdArgs::class.java)
+		val accountId = requireAccountId(invoke, args.accountId) ?: return
+		val muk = try {
+			vault.borrowLiveMasterUnlockKey(accountId)
+		} catch (e: Exception) {
+			invoke.reject("Invalid accountId", "INVALID_PARAMS")
+			return
 		}
-		resolveValue(invoke, muk)
+		if (muk == null) {
+			resolveValue(invoke, null)
+			return
+		}
+		try {
+			resolveValue(invoke, Base64.encodeToString(muk, Base64.NO_WRAP))
+		} finally {
+			muk.fill(0)
+		}
+	}
+
+	/**
+	 * The live key of one account as Base64, or `null` when there is none.
+	 *
+	 * The app calls this on boot. Bittery's own autofill and credential-provider
+	 * activities unlock in this process and leave the key in the vault; until this
+	 * existed nothing above the bridge could see that, so the app answered a
+	 * biometric unlock the user had just passed with its own lock screen.
+	 *
+	 * **Live only, and that is the whole contract.** It reads the live keys and
+	 * nothing else: no escrow, no prompt, no disk. So `null` means "no live key" —
+	 * a lock, an auto-lock or a process restart all produce it — and can never mean
+	 * "we could get one by asking the user". Restoring a key after that costs a
+	 * biometric prompt, which only an activity may show; see `PROCESS-MODEL.md`.
+	 *
+	 * The borrowed array is blanked before this returns, on both paths.
+	 */
+	@Command
+	fun borrowLiveMasterUnlockKeyBase64(invoke: Invoke) {
+		val args = invoke.parseArgs(RequiredAccountIdArgs::class.java)
+		val accountId = requireAccountId(invoke, args.accountId) ?: return
+		val muk = try {
+			vault.borrowLiveMasterUnlockKey(accountId)
+		} catch (e: Exception) {
+			invoke.reject("Invalid accountId", "INVALID_PARAMS")
+			return
+		}
+		if (muk == null) {
+			resolveValue(invoke, null)
+			return
+		}
+		try {
+			resolveValue(invoke, Base64.encodeToString(muk, Base64.NO_WRAP))
+		} finally {
+			muk.fill(0)
+		}
 	}
 
 	// ------------------------------------------------------------------
-	// MUK escrow management (MukEscrowManager)
+	// Biometric unlock
 	// ------------------------------------------------------------------
 
 	/**
 	 * Wrap the in-memory MUK so a later autofill unlock can unwrap it with
-	 * biometrics. Encrypt uses the RSA public key, so this does not show a
-	 * prompt. The command name is historical; the ACL identity stays.
+	 * biometrics. The wrap uses a public key, so this shows no prompt. The command
+	 * name is historical; the ACL identity stays.
 	 */
 	@Command
 	fun escrowMukWithBiometric(invoke: Invoke) {
 		val args = invoke.parseArgs(EscrowMukArgs::class.java)
-		ensureVaultStateManagerInitialized()
 
 		val email = args.email
-		val userId = args.userId
-		val timeoutMs = args.timeoutMs?.toLong() ?: MukEscrowManager.DEFAULT_ESCROW_TIMEOUT_MS
+		val serverUserId = args.userId
+		val timeoutMs = args.timeoutMs?.toLong() ?: DEFAULT_BIOMETRIC_UNLOCK_TIMEOUT_MS
 
 		if (email.isEmpty()) {
 			invoke.reject("email is required", "INVALID_PARAMS")
+			return
+		}
+
+		val accountId = requireAccountId(invoke, args.accountId) ?: return
+		if (serverUserId.isNullOrBlank()) {
+			invoke.reject("userId is required", "INVALID_PARAMS")
 			return
 		}
 
@@ -472,24 +534,36 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 			return
 		}
 
-		val muk = if (userId.isNullOrBlank()) {
-			VaultStateManager.getMasterUnlockKey()
-		} else {
-			VaultStateManager.getMasterUnlockKey(userId)
-		}
-		if (muk == null) {
-			invoke.reject("Vault is not unlocked", "VAULT_LOCKED")
-			return
-		}
-
 		pluginScope.launch {
-			try {
-				mukEscrowManager.escrowMukUnattended(muk, email, timeoutMs, userId)
-				Log.d(TAG, "escrowMukWithBiometric: MUK escrowed silently for $email")
-				resolveValue(invoke, true)
-			} catch (e: Exception) {
-				Log.e(TAG, "escrowMukWithBiometric: Failed to escrow MUK", e)
-				invoke.reject("Failed to escrow MUK: ${e.message}", "ESCROW_FAILED", e)
+			val result = try {
+				vault.enrolBiometricUnlock(
+					accountId = accountId,
+					serverUserId = serverUserId,
+					email = email,
+					timeoutMs = timeoutMs,
+				)
+			} catch (e: IllegalArgumentException) {
+				invoke.reject("Invalid accountId", "INVALID_PARAMS")
+				return@launch
+			}
+
+			when (result) {
+				EnrolResult.Enrolled -> {
+					Log.d(TAG, "escrowMukWithBiometric: key wrapped")
+					resolveValue(invoke, true)
+				}
+
+				EnrolResult.VaultLocked ->
+					invoke.reject("Vault is not unlocked", "VAULT_LOCKED")
+
+				is EnrolResult.Failed -> {
+					Log.e(TAG, "escrowMukWithBiometric: Failed to escrow MUK", result.cause)
+					invoke.reject(
+						"Failed to escrow MUK: ${result.message}",
+						"ESCROW_FAILED",
+						result.cause,
+					)
+				}
 			}
 		}
 	}
@@ -500,7 +574,6 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	 */
 	@Command
 	fun retrieveEscrowedMuk(invoke: Invoke) {
-		ensureVaultStateManagerInitialized()
 		val activity = currentActivity
 		if (activity == null) {
 			invoke.reject("No activity available", "NO_ACTIVITY")
@@ -512,83 +585,46 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 			return
 		}
 
-		if (!mukEscrowManager.hasValidEscrow()) {
-			invoke.reject("No valid MUK escrow available", "NO_ESCROW")
-			return
-		}
-
-		// Function to perform retrieval after auth
-		fun performRetrieval(cipher: javax.crypto.Cipher) {
-			pluginScope.launch {
-				try {
-					val muk = mukEscrowManager.retrieveEscrowedMuk(cipher)
-					val escrowUserId = mukEscrowManager.getEscrowUserId()
-					if (escrowUserId.isNullOrBlank()) {
-						VaultStateManager.setMasterUnlockKey(muk)
-					} else {
-						VaultStateManager.setMasterUnlockKey(escrowUserId, muk)
-					}
-					Log.d(TAG, "retrieveEscrowedMuk: MUK retrieved and set successfully")
+		pluginScope.launch {
+			when (
+				val result = vault.unlockWithBiometric(
+					activity,
+					"Authenticate to access your passwords",
+				)
+			) {
+				is UnlockResult.Unlocked -> {
+					Log.d(TAG, "retrieveEscrowedMuk: key unwrapped")
 					emit("onVaultUnlocked")
 					resolveValue(invoke, true)
-				} catch (e: Exception) {
-					Log.e(TAG, "retrieveEscrowedMuk: Failed to retrieve MUK", e)
-					invoke.reject("Failed to retrieve MUK: ${e.message}", "RETRIEVE_FAILED", e)
 				}
-			}
-		}
 
-		activity.runOnUiThread {
-			if (!canHostPrompt(activity)) {
-				Log.e(TAG, "retrieveEscrowedMuk: host activity cannot show a prompt")
-				invoke.reject(
-					"No activity able to show the biometric prompt",
-					"NO_ACTIVITY",
-				)
-				return@runOnUiThread
-			}
-			try {
-				val cipher = mukEscrowManager.getDecryptCipher()
-				val executor = ContextCompat.getMainExecutor(context)
+				UnlockResult.NoEscrow ->
+					invoke.reject("No valid MUK escrow available", "NO_ESCROW")
 
-				val biometricPrompt = BiometricPrompt(
-					activity,
-					executor,
-					object : BiometricPrompt.AuthenticationCallback() {
-						override fun onAuthenticationSucceeded(
-							result: BiometricPrompt.AuthenticationResult,
-						) {
-							result.cryptoObject?.cipher?.let { performRetrieval(it) }
-								?: invoke.reject("No cipher after authentication", "AUTH_ERROR")
-						}
+				// A record written before the account-id rekey. Re-enrol instead.
+				UnlockResult.NeedsReenrolment ->
+					invoke.reject("Escrow needs re-enrolment", "NO_ESCROW")
 
-						override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-							invoke.reject(errString.toString(), "AUTH_ERROR")
-						}
+				is UnlockResult.Rejected -> invoke.reject(result.message, "AUTH_ERROR")
 
-						override fun onAuthenticationFailed() {
-							// Let user retry
-						}
-					},
-				)
+				is UnlockResult.PromptUnavailable -> {
+					Log.e(TAG, "retrieveEscrowedMuk: host activity cannot show a prompt")
+					invoke.reject(result.message, "NO_ACTIVITY")
+				}
 
-				val promptInfo = BiometricPrompt.PromptInfo.Builder()
-					.setTitle("Unlock Bittery")
-					.setSubtitle("Authenticate to access your passwords")
-					.setAllowedAuthenticators(
-						BiometricManager.Authenticators.BIOMETRIC_STRONG or
-							BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+				is UnlockResult.PromptFailed -> {
+					Log.e(TAG, "Failed to show biometric prompt for retrieval")
+					invoke.reject(result.message, "PROMPT_FAILED")
+				}
+
+				is UnlockResult.Failed -> {
+					Log.e(TAG, "retrieveEscrowedMuk: Failed to retrieve MUK", result.cause)
+					invoke.reject(
+						"Failed to retrieve MUK: ${result.message}",
+						"RETRIEVE_FAILED",
+						result.cause,
 					)
-					.build()
-
-				biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
-			} catch (e: Exception) {
-				Log.e(TAG, "Failed to show biometric prompt for retrieval", e)
-				invoke.reject(
-					"Failed to show authentication prompt: ${e.message}",
-					"PROMPT_FAILED",
-					e,
-				)
+				}
 			}
 		}
 	}
@@ -599,7 +635,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			false
 		} else {
-			val hasEscrow = mukEscrowManager.hasValidEscrow()
+			val hasEscrow = vault.biometricUnlockState().hasEscrow
 			Log.d(TAG, "hasValidEscrow: $hasEscrow")
 			hasEscrow
 		}
@@ -613,7 +649,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			false
 		} else {
-			mukEscrowManager.hasValidEscrowForEmail(args.email)
+			vault.hasBiometricUnlockFor(args.email)
 		}
 		resolveValue(invoke, value)
 	}
@@ -624,7 +660,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			0L
 		} else {
-			mukEscrowManager.getEscrowRemainingTime()
+			vault.biometricUnlockState().remainingMs
 		}
 		resolveValue(invoke, value)
 	}
@@ -633,10 +669,28 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	@Command
 	fun clearEscrow(invoke: Invoke) {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-			mukEscrowManager.clearEscrow()
+			vault.forgetBiometricUnlock()
 		}
 		Log.d(TAG, "clearEscrow: Escrow cleared")
 		resolveValue(invoke, true)
+	}
+
+	/**
+	 * Clear the MUK escrow only when it belongs to this account.
+	 *
+	 * The escrow is one slot. Signing one account out must not cost another
+	 * account the biometric unlock it enrolled.
+	 */
+	@Command
+	fun clearEscrowForAccount(invoke: Invoke) {
+		val args = invoke.parseArgs(RequiredAccountIdArgs::class.java)
+		val cleared = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+			false
+		} else {
+			vault.forgetBiometricUnlockFor(args.accountId)
+		}
+		Log.d(TAG, "clearEscrowForAccount: cleared=$cleared")
+		resolveValue(invoke, cleared)
 	}
 
 	// ------------------------------------------------------------------
@@ -649,7 +703,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			true // Always require password on old devices
 		} else {
-			mukEscrowManager.isMasterPasswordReentryRequired()
+			vault.biometricUnlockState().masterPasswordRequired
 		}
 		resolveValue(invoke, value)
 	}
@@ -660,7 +714,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			false
 		} else {
-			mukEscrowManager.canUseBiometricUnlock()
+			vault.biometricUnlockState().canUnlock
 		}
 		resolveValue(invoke, value)
 	}
@@ -669,7 +723,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	@Command
 	fun updateLastMasterPasswordEntry(invoke: Invoke) {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-			mukEscrowManager.updateLastMasterPasswordEntry()
+			vault.recordMasterPasswordEntry()
 			Log.d(TAG, "updateLastMasterPasswordEntry: timestamp updated")
 		}
 		resolveValue(invoke, true)
@@ -681,7 +735,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val value = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			0L
 		} else {
-			mukEscrowManager.getLastMasterPasswordEntry()
+			vault.biometricUnlockState().lastMasterPasswordEntryMs
 		}
 		resolveValue(invoke, value)
 	}
@@ -884,299 +938,56 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 	}
 
 	// ------------------------------------------------------------------
-	// Vault sync (Room — off the main thread)
+	// The local replica (off the main thread, inside the vault)
 	// ------------------------------------------------------------------
 
 	/**
-	 * Sync account KDF metadata, vault keys and items for the vault-based autofill
-	 * system. Encrypted data is stored as it arrives; decryption happens on demand with
-	 * the MUK, so no biometric prompt is needed here.
+	 * Replace the local replica with what the server just sent: account KDF
+	 * metadata, vault keys and login items. Everything arrives encrypted and is
+	 * stored as it arrives, so no biometric prompt is needed here.
 	 *
-	 * `dataJson` carries `userId`, `email`, `secretKey`, a `kdfProfile`
-	 * (`schemaVersion`/`algorithm`/`iterations`), `vaultKeys` and `items`. An incomplete
-	 * profile is rejected.
+	 * `dataJson` carries `accountId`, `userId`, `email`, `secretKey`, a
+	 * `kdfProfile` (`schemaVersion`/`algorithm`/`iterations`), `vaultKeys`, `items`
+	 * and a `travelMode` policy (`verified`/`enabled`/`hiddenVaultIds`/`updatedAt`).
+	 * An incomplete payload is rejected and nothing is written, and so is one whose
+	 * policy is missing or unverified — the account then serves nothing until a
+	 * verified policy arrives.
 	 */
 	@Command
 	fun syncVaultData(invoke: Invoke) {
 		val args = invoke.parseArgs(SyncVaultDataArgs::class.java)
-		ensureVaultStateManagerInitialized()
 		Log.d(TAG, "syncVaultData called")
 
 		pluginScope.launch {
 			try {
-				// Parse JSON string
-				val jsonObject = JSONObject(args.dataJson)
-				val userId = jsonObject.optString("userId", "")
-				val email = jsonObject.optString("email", "")
-				val secretKey = jsonObject.optString("secretKey", "")
-				val kdfProfile = jsonObject.optJSONObject("kdfProfile")
-
-				if (userId.isBlank() || email.isBlank() || secretKey.isBlank() || kdfProfile == null) {
-					invoke.reject(
-						"Complete account and KDF profile data is required",
-						"INVALID_PARAMS",
-					)
+				val parsed = CredentialReplicaSnapshots.parse(args.dataJson, snapshotLogger)
+				if (parsed is ReplicaSnapshotParse.Rejected) {
+					invoke.reject(parsed.reason, "INVALID_PARAMS")
 					return@launch
 				}
 
-				val kdfSchemaVersion = kdfProfile.optInt("schemaVersion", -1)
-				val kdfAlgorithm = kdfProfile.optString("algorithm", "")
-				val kdfIterations = kdfProfile.optInt("iterations", -1)
-				if (
-					kdfSchemaVersion != 1 ||
-					kdfAlgorithm != "pbkdf2-sha256" ||
-					kdfIterations !in 600_000..1_200_000
-				) {
-					invoke.reject("Invalid KDF profile", "INVALID_PARAMS")
-					return@launch
-				}
-
-				val vaultKeysJson = jsonObject.optJSONArray("vaultKeys") ?: JSONArray()
-				val itemsJson = jsonObject.optJSONArray("items") ?: JSONArray()
-
-				// Convert JSONArray to List<Map<String, Any>>
-				val vaultKeysData = (0 until vaultKeysJson.length()).map { i ->
-					val obj = vaultKeysJson.getJSONObject(i)
-					obj.keys().asSequence().associateWith { key -> obj.get(key) }
-				}
-
-				val itemsData = (0 until itemsJson.length()).map { i ->
-					val obj = itemsJson.getJSONObject(i)
-					obj.keys().asSequence().associateWith { key -> obj.get(key) }
-				}
-
+				val snapshot = (parsed as ReplicaSnapshotParse.Parsed).snapshot
 				Log.d(
 					TAG,
-					"syncVaultData: Syncing ${vaultKeysData.size} vault keys and " +
-						"${itemsData.size} items for user $userId",
+					"syncVaultData: Syncing ${snapshot.vaultKeys.size} vault keys and " +
+						"${snapshot.items.size} items",
 				)
 
-				withContext(Dispatchers.IO) {
-					// Real account synchronization always replaces nullable
-					// placeholder profile metadata with a complete profile.
-					val existingAuthData = database.authDataDao().getByUserId(userId)
-					val authData = if (existingAuthData == null) {
-						AuthDataEntity(
-							email = email,
-							userId = userId,
-							secretKey = secretKey,
-							srpSalt = "",
-							publicKey = "",
-							encryptedPrivateKey = "",
-							encryptedPrivateKeyIv = "",
-							kdfSchemaVersion = kdfSchemaVersion,
-							kdfAlgorithm = kdfAlgorithm,
-							kdfIterations = kdfIterations,
-						)
-					} else {
-						existingAuthData.copy(
-							email = email,
-							secretKey = secretKey,
-							kdfSchemaVersion = kdfSchemaVersion,
-							kdfAlgorithm = kdfAlgorithm,
-							kdfIterations = kdfIterations,
-						)
+				when (val outcome = vault.replaceReplica(snapshot)) {
+					is ReplicaUpdateResult.Rejected ->
+						invoke.reject(outcome.reason, "INVALID_PARAMS")
+
+					is ReplicaUpdateResult.Applied -> {
+						val result = JSObject()
+						result.put("vaultKeys", outcome.vaultKeys)
+						result.put("items", outcome.items)
+						result.put("domains", outcome.domains)
+						result.put("deletedVaultKeys", outcome.deletedVaultKeys)
+						result.put("deletedItems", outcome.deletedItems)
+
+						Log.d(TAG, "syncVaultData complete: $result")
+						resolveValue(invoke, result)
 					}
-					database.authDataDao().insert(authData)
-
-					// Parse and insert vault keys
-					val vaultKeys = vaultKeysData.mapNotNull { keyData ->
-						try {
-							VaultKeyEntity(
-								vaultId = keyData["vaultId"] as? String ?: return@mapNotNull null,
-								userId = userId,
-								vaultName = keyData["vaultName"] as? String ?: return@mapNotNull null,
-								vaultType = keyData["vaultType"] as? String ?: return@mapNotNull null,
-								encryptedKey = keyData["encryptedKey"] as? String
-									?: return@mapNotNull null,
-								encryptionIv = keyData["encryptionIv"] as? String
-									?: return@mapNotNull null,
-								encryptionAlgorithm = keyData["encryptionAlgorithm"] as? String
-									?: return@mapNotNull null,
-								role = keyData["role"] as? String ?: return@mapNotNull null,
-								syncedAt = System.currentTimeMillis(),
-								keyVersion = (keyData["keyVersion"] as? Number)?.toLong()
-									?: return@mapNotNull null,
-							)
-						} catch (e: Exception) {
-							Log.w(TAG, "Failed to parse vault key: ${keyData["vaultId"]}", e)
-							null
-						}
-					}
-
-					if (vaultKeys.isNotEmpty()) {
-						database.vaultKeyDao().insertAll(vaultKeys)
-						Log.d(TAG, "Inserted ${vaultKeys.size} vault keys")
-					}
-
-					// Parse and insert items
-					val items = itemsData.mapNotNull { itemData ->
-						try {
-							val itemId = itemData["id"] as? String ?: return@mapNotNull null
-							val vaultId = itemData["vaultId"] as? String ?: return@mapNotNull null
-							val category = itemData["category"] as? String ?: return@mapNotNull null
-
-							// Only sync login items
-							if (category != "login") return@mapNotNull null
-
-							@Suppress("UNCHECKED_CAST")
-							val urls = itemData["urls"] as? List<String> ?: emptyList()
-							val primaryDomain = urls.firstOrNull()
-								?.let { DomainMatch.normalizeHost(it) }
-								?.takeIf { it.isNotEmpty() }
-
-							ItemEntity(
-								id = itemId,
-								vaultId = vaultId,
-								userId = userId,
-								category = category,
-								displayTitle = itemData["displayTitle"] as? String ?: "",
-								encryptedData = itemData["encryptedData"] as? String
-									?: return@mapNotNull null,
-								encryptionIv = itemData["encryptionIv"] as? String
-									?: return@mapNotNull null,
-								encryptionAlgorithm = itemData["encryptionAlgorithm"] as? String
-									?: return@mapNotNull null,
-								primaryDomain = primaryDomain,
-								username = itemData["username"] as? String,
-								iconUrl = itemData["iconUrl"] as? String,
-								lastUsedAt = (itemData["lastUsedAt"] as? Number)?.toLong() ?: 0L,
-								syncedAt = System.currentTimeMillis(),
-								createdAt = (itemData["createdAt"] as? Number)?.toLong()
-									?: System.currentTimeMillis(),
-								updatedAt = (itemData["updatedAt"] as? Number)?.toLong()
-									?: System.currentTimeMillis(),
-								isFavorite = itemData["isFavorite"] as? Boolean ?: false,
-								version = (itemData["version"] as? Number)?.toLong()
-									?: return@mapNotNull null,
-								lastModifiedBy = itemData["lastModifiedBy"] as? String,
-								encryptionVersion = (itemData["encryptionVersion"] as? Number)?.toLong()
-									?: return@mapNotNull null,
-								encryptedByUserId = itemData["encryptedByUserId"] as? String
-									?: return@mapNotNull null,
-							)
-						} catch (e: Exception) {
-							Log.w(TAG, "Failed to parse item: ${itemData["id"]}", e)
-							null
-						}
-					}
-
-					if (items.isNotEmpty()) {
-						database.itemDao().insertAll(items)
-						Log.d(TAG, "Inserted ${items.size} items")
-					}
-
-					val itemById = items.associateBy { it.id }
-					val mukForDomainRepair = VaultStateManager.getMasterUnlockKey(userId)
-
-					// Insert domain mappings for each item
-					var totalDomains = 0
-					for (i in 0 until itemsJson.length()) {
-						try {
-							val item = itemsJson.getJSONObject(i)
-							val itemId = item.optString("id", "")
-							if (itemId.isEmpty()) continue
-
-							val category = item.optString("category", "")
-							if (category != "login") continue
-
-							// Parse URLs array from JSON
-							val urlsJson = item.optJSONArray("urls") ?: JSONArray()
-							val urls = (0 until urlsJson.length()).map { index ->
-								urlsJson.getString(index)
-							}
-
-							val domainsByValue = LinkedHashMap<String, ItemDomainEntity>()
-							// Both the host and its registrable domain are indexed, and a
-							// lookup queries both, so the SQL match is exactly
-							// DomainMatch.matches - see the lookupKeys vectors.
-							for (url in urls) {
-								for (domain in DomainMatch.lookupKeys(url)) {
-									if (!domainsByValue.containsKey(domain)) {
-										domainsByValue[domain] = ItemDomainEntity(
-											itemId = itemId,
-											domain = domain,
-											isPrimary = domainsByValue.isEmpty(),
-											fullUrl = url,
-										)
-									}
-								}
-							}
-
-							if (domainsByValue.isEmpty()) {
-								val localItem = itemById[itemId]
-								if (mukForDomainRepair != null && localItem != null) {
-									val recoveredDomains =
-										recoverDomainsFromEncryptedItem(localItem, mukForDomainRepair)
-									for (domain in recoveredDomains) {
-										if (!domainsByValue.containsKey(domain)) {
-											domainsByValue[domain] = ItemDomainEntity(
-												itemId = itemId,
-												domain = domain,
-												isPrimary = domainsByValue.isEmpty(),
-												fullUrl = "https://$domain",
-											)
-										}
-									}
-								}
-							}
-
-							val domains = domainsByValue.values.toList()
-
-							if (domains.isNotEmpty()) {
-								database.itemDomainDao().replaceDomainsForItem(itemId, domains)
-								totalDomains += domains.size
-								Log.d(
-									TAG,
-									"Inserted ${domains.size} domains for item $itemId: " +
-										"${domains.map { it.domain }}",
-								)
-							} else {
-								Log.d(
-									TAG,
-									"Item $itemId still has no domains after repair, skipping domain mapping",
-								)
-							}
-						} catch (e: Exception) {
-							Log.w(TAG, "Failed to process domains for item at index $i", e)
-						}
-					}
-
-					Log.d(TAG, "Inserted $totalDomains domain mappings")
-
-					// Clean up vault keys that are no longer present
-					val incomingVaultIds = vaultKeys.map { it.vaultId }.toSet()
-					val existingVaultIds = database.vaultKeyDao().getVaultIdsByUserId(userId)
-					val vaultKeysToDelete = existingVaultIds - incomingVaultIds
-
-					var deletedVaultKeys = 0
-					for (vaultId in vaultKeysToDelete) {
-						database.vaultKeyDao().delete(vaultId, userId)
-						deletedVaultKeys++
-					}
-
-					// Clean up items that are no longer present
-					val incomingItemIds = items.map { it.id }.toSet()
-					val existingItemIds = database.itemDao().getItemIdsByUserId(userId)
-					val itemsToDelete = existingItemIds - incomingItemIds
-
-					var deletedItems = 0
-					for (itemId in itemsToDelete) {
-						database.itemDao().deleteById(itemId)
-						deletedItems++
-					}
-
-					Log.d(TAG, "Cleanup: Deleted $deletedVaultKeys vault keys, $deletedItems items")
-
-					val result = JSObject()
-					result.put("vaultKeys", vaultKeys.size)
-					result.put("items", items.size)
-					result.put("domains", totalDomains)
-					result.put("deletedVaultKeys", deletedVaultKeys)
-					result.put("deletedItems", deletedItems)
-
-					Log.d(TAG, "syncVaultData complete: $result")
-					resolveValue(invoke, result)
 				}
 			} catch (e: Exception) {
 				Log.e(TAG, "syncVaultData failed", e)
@@ -1191,34 +1002,25 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val args = invoke.parseArgs(UserIdArgs::class.java)
 		pluginScope.launch {
 			try {
-				val userId = args.userId
-				val entities = withContext(Dispatchers.IO) {
-					if (userId.isNullOrBlank()) {
-						database.pendingPasskeyMutationDao().getAll()
-					} else {
-						database.pendingPasskeyMutationDao().getByUserId(userId)
-					}
-				}
-
 				val result = JSArray()
-				for (entity in entities) {
+				for (mutation in vault.queuedVaultWrites(args.userId)) {
 					val row = JSObject()
-					row.put("id", entity.id)
-					row.put("userId", entity.userId)
-					row.put("vaultId", entity.vaultId)
-					row.put("itemId", entity.itemId)
-					row.put("operation", entity.operation)
-					row.put("encryptedData", entity.encryptedData)
-					row.put("encryptionIv", entity.encryptionIv)
-					row.put("encryptionAlgorithm", entity.encryptionAlgorithm)
-					row.put("baseVersion", entity.baseVersion)
-					row.put("encryptionVersion", entity.encryptionVersion)
-					row.put("encryptedByUserId", entity.encryptedByUserId)
-					row.put("createdAt", entity.createdAt)
-					row.put("attemptCount", entity.attemptCount)
+					row.put("id", mutation.id)
+					row.put("userId", mutation.serverUserId)
+					row.put("vaultId", mutation.vaultId)
+					row.put("itemId", mutation.itemId)
+					row.put("operation", mutation.operation)
+					row.put("encryptedData", mutation.encryptedData)
+					row.put("encryptionIv", mutation.encryptionIv)
+					row.put("encryptionAlgorithm", mutation.encryptionAlgorithm)
+					row.put("baseVersion", mutation.baseVersion)
+					row.put("encryptionVersion", mutation.encryptionVersion)
+					row.put("encryptedByUserId", mutation.encryptedByServerUserId)
+					row.put("createdAt", mutation.createdAtMs)
+					row.put("attemptCount", mutation.attemptCount)
 					// JSONObject.put(key, null) *removes* the key, so a null lastError has
 					// to be spelled out — the field is declared on the TypeScript side.
-					row.put("lastError", entity.lastError ?: JSONObject.NULL)
+					row.put("lastError", mutation.lastError ?: JSONObject.NULL)
 					result.put(row)
 				}
 
@@ -1240,11 +1042,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val args = invoke.parseArgs(IdsArgs::class.java)
 		pluginScope.launch {
 			try {
-				if (args.ids.isNotEmpty()) {
-					withContext(Dispatchers.IO) {
-						database.pendingPasskeyMutationDao().deleteByIds(args.ids)
-					}
-				}
+				vault.forgetQueuedVaultWrites(args.ids)
 				resolveValue(invoke, true)
 			} catch (e: Exception) {
 				Log.e(TAG, "Failed to mark pending passkey mutations as applied", e)
@@ -1263,11 +1061,7 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 		val args = invoke.parseArgs(IdsWithErrorArgs::class.java)
 		pluginScope.launch {
 			try {
-				if (args.ids.isNotEmpty()) {
-					withContext(Dispatchers.IO) {
-						database.pendingPasskeyMutationDao().markFailed(args.ids, args.error)
-					}
-				}
+				vault.recordQueuedVaultWriteFailure(args.ids, args.error)
 				resolveValue(invoke, true)
 			} catch (e: Exception) {
 				Log.e(TAG, "Failed to mark pending passkey mutations as failed", e)
@@ -1277,49 +1071,6 @@ class CredentialProviderPlugin(private val activity: Activity) : Plugin(activity
 					e,
 				)
 			}
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// Helpers carried over unchanged
-	// ------------------------------------------------------------------
-
-	private fun collectCandidateDomainsFromItemJson(itemDataJson: JSONObject): List<String> {
-		val domains = LinkedHashSet<String>()
-
-		domains.addAll(DomainMatch.lookupKeys(itemDataJson.optString("url")))
-
-		val urlsJson = itemDataJson.optJSONArray("urls")
-		if (urlsJson != null) {
-			for (index in 0 until urlsJson.length()) {
-				domains.addAll(DomainMatch.lookupKeys(urlsJson.optString(index, "")))
-			}
-		}
-
-		val passkeysJson = itemDataJson.optJSONArray("passkeys")
-		if (passkeysJson != null) {
-			for (index in 0 until passkeysJson.length()) {
-				val passkey = passkeysJson.optJSONObject(index) ?: continue
-				domains.addAll(DomainMatch.lookupKeys(passkey.optString("rpId", "")))
-			}
-		}
-
-		return domains.toList()
-	}
-
-	private suspend fun recoverDomainsFromEncryptedItem(
-		itemEntity: ItemEntity,
-		muk: ByteArray,
-	): List<String> {
-		return try {
-			val vaultKey = database.vaultKeyDao().getByVaultId(itemEntity.vaultId, itemEntity.userId)
-				?: return emptyList()
-			val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
-			val itemDataJson = VaultDecryptor.decryptItemJson(itemEntity, decryptedVaultKey)
-			collectCandidateDomainsFromItemJson(itemDataJson)
-		} catch (e: Exception) {
-			Log.w(TAG, "Failed to recover domains from encrypted item ${itemEntity.id}", e)
-			emptyList()
 		}
 	}
 

@@ -189,11 +189,18 @@ describe("TravelModeEnforcer", () => {
 		const purge = mock(async () => {
 			events.push("purge-mirror");
 		});
+		// A travel-mode failure locks the account; it does not sign it out, so the
+		// quick-unlock material stays.
+		const forgetQuickUnlock = mock(async () => {});
 		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		expect(await enforcer.verifyOrClear(ACCOUNT_ID, undefined, { purge })).toBe(
-			false,
-		);
+		expect(
+			await enforcer.verifyOrClear(ACCOUNT_ID, undefined, {
+				purge,
+				forgetQuickUnlock,
+			}),
+		).toBe(false);
+		expect(forgetQuickUnlock).not.toHaveBeenCalled();
 		expect(purge).toHaveBeenCalledWith([
 			expect.objectContaining({ accountId: ACCOUNT_ID }),
 		]);

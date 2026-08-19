@@ -18,7 +18,12 @@ import { credentialProvider as CredentialProvider } from "./credential-provider"
 import { crypto } from "./crypto";
 import { storage } from "./storage";
 
-/** Mirrors borrowed unlocked keys into Android's separate credential-provider process. */
+/**
+ * Mirrors borrowed unlocked keys into the native live store, so Android's
+ * credential provider and autofill services can decrypt while the app is
+ * unlocked. Live only — the native side keeps nothing on disk, so this has to
+ * run again after every unlock.
+ */
 export async function mirrorBorrowedMasterUnlockKeysToCredentialProvider(
 	accountIds: readonly string[],
 ): Promise<void> {
@@ -38,11 +43,17 @@ export async function mirrorBorrowedMasterUnlockKeysToCredentialProvider(
 			continue;
 		}
 
-		// The separate Android process cannot receive a KeyRef; its frozen bridge accepts base64.
+		// The native bridge cannot receive a KeyRef; it accepts base64.
+		//
+		// Both ids travel. The native side keys live unlock state by `accountId`,
+		// the same key everything above uses, and stamps its local cache rows with
+		// the server `userId`. Resolving the pair here is what keeps a placeholder
+		// id out of native storage.
 		const exported = await crypto.exportKey(masterUnlockKey);
 		try {
 			await CredentialProvider.setMasterUnlockKey(
 				arrayBufferToBase64(exported),
+				accountId,
 				sessionData.userId,
 				autoLockTimeoutMs,
 			);

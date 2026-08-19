@@ -66,6 +66,7 @@ import {
 } from "@/lib/barcode-scanner";
 import { prepareCredentialProviderAfterPasswordUnlock } from "@/lib/credential-provider-password-unlock";
 import { storage } from "@/lib/storage";
+import { resolveVaultRouteAccess } from "@/lib/vault-route-access";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
@@ -120,33 +121,18 @@ export const Route = createFileRoute("/login")({
 			return;
 		}
 
-		const accountsList = context.runtime.accounts.getAccounts();
-		if (accountsList.length === 0) {
+		// The same decision `/` and `/vault` make, read the other way round: `"login"`
+		// means "this device really has no account", which is the one answer that leaves
+		// the user on this screen. Sharing it is also what lets a live native master
+		// unlock key — an unlock done in Bittery's own autofill sheet — count here.
+		const access = await resolveVaultRouteAccess(
+			context.runtime.accounts,
+			storage,
+		);
+		if (access === "login") {
 			return;
 		}
-
-		let activeAccount = context.runtime.accounts.getActiveAccount();
-		if (!activeAccount) {
-			const firstAccount = accountsList[0];
-			if (!firstAccount) {
-				return;
-			}
-			activeAccount = firstAccount.accountId;
-			await context.runtime.accounts.switchAccount(activeAccount);
-		}
-
-		const sessionValid = await storage.isSessionValid(activeAccount);
-		if (sessionValid) {
-			const restored = await context.runtime.accounts.unlockAccount(
-				activeAccount,
-				true,
-			);
-			if (restored) {
-				throw redirect({ to: "/vault" });
-			}
-		}
-
-		throw redirect({ to: "/unlock" });
+		throw redirect({ to: access === "ready" ? "/vault" : "/unlock" });
 	},
 	component: LoginPage,
 	validateSearch: (search: Record<string, unknown>): LoginSearchParams => ({

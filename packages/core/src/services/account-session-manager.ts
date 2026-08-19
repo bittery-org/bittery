@@ -8,6 +8,8 @@
  * account list, and the notifications that tell the app both changed.
  */
 
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import { base64ToArrayBuffer } from "@bittery/shared/crypto";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	findAccountById,
@@ -39,6 +41,13 @@ export interface AccountSessionManagerOptions {
 	 * app, so a platform that mirrors nothing cannot silently forget to answer twice.
 	 */
 	credentialMirror?: CredentialMirror;
+	/**
+	 * Needed only by {@link AccountSessionManager.acceptBorrowedMasterUnlockKey}, which
+	 * has to turn borrowed key bytes into a `KeyRef` and compare them against the
+	 * account's own stored key. Optional so a platform that never borrows — every one
+	 * but Android — constructs the manager unchanged; without it a borrow is refused.
+	 */
+	crypto?: CryptoPort;
 	onActiveChanged?: (active: ActiveAccountId) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
@@ -429,4 +438,148 @@ export class AccountSessionManager {
 		this.emit();
 		return restored;
 	}
+
+	/**
+	 * Adopt a master unlock key some other surface of this device already holds live.
+	 *
+	 * The one caller today is Android: Bittery's own autofill and credential-provider
+	 * activities unlock in the app's process and leave the key in a live, in-memory
+	 * store the app never read, so the app asked for the password again straight after
+	 * the user had authenticated. The key arrives base64-encoded because that is the
+	 * only shape a native bridge can carry — this is the smallest place raw bytes
+	 * exist, and they are blanked before the call returns on every path.
+	 *
+	 * Borrowing is a claim, not a credential, so it earns nothing on its own:
+	 *
+	 * - the id must name an account this device knows;
+	 * - the session must still be valid;
+	 * - the bytes must **be** this account's master unlock key, proved by unwrapping
+	 *   the account's own stored copy and comparing. The unwrap is explicitly
+	 *   prompt-free: a borrow that raised a biometric sheet would be a second
+	 *   authentication for an unlock the user just performed. It refuses while
+	 *   master-password re-entry is due, and a claim that cannot be checked is
+	 *   refused rather than trusted;
+	 * - Travel Mode must verify, through the same {@link verifyUnlockPolicy} every
+	 *   other unlock path uses.
+	 *
+	 * Only then is the key committed. Anything else destroys the imported key and
+	 * leaves the account locked, so a failed borrow costs the caller nothing but a
+	 * `false`.
+	 */
+	async acceptBorrowedMasterUnlockKey(
+		accountId: string,
+		mukBase64: string,
+	): Promise<boolean> {
+		return this.runStateTransition(() =>
+			this.acceptBorrowedMasterUnlockKeyState(accountId, mukBase64),
+		);
+	}
+
+	private async acceptBorrowedMasterUnlockKeyState(
+		accountId: string,
+		mukBase64: string,
+	): Promise<boolean> {
+		const crypto = this.options.crypto;
+		if (!crypto || !accountId || !mukBase64) {
+			return false;
+		}
+		// Same reasoning as `unlockAccountState`: reaffirming an already-verified
+		// unlock must not turn a read into an account-state transition.
+		if (this.initialized && this.isUnlocked(accountId)) {
+			return true;
+		}
+
+		const accounts = await this.storage.getAccountsList();
+		if (!findAccountById(accounts, accountId)) {
+			return false;
+		}
+		if (!(await this.storage.isSessionValid(accountId))) {
+			return false;
+		}
+
+		let borrowed: Uint8Array | null = null;
+		let imported: KeyRef | null = null;
+		let committed = false;
+		try {
+			borrowed = base64ToArrayBuffer(mukBase64);
+			if (borrowed.length === 0) {
+				return false;
+			}
+			imported = await crypto.importKey(borrowed);
+			if (!(await this.borrowedKeyIsTheAccountKey(accountId, borrowed))) {
+				return false;
+			}
+			if (!(await this.verifyUnlockPolicy(accountId))) {
+				return false;
+			}
+			// The store takes ownership from here and destroys it on the next lock.
+			await this.storage.setMasterUnlockKey(imported, accountId);
+			committed = true;
+		} catch (error) {
+			console.error(
+				"[AccountSessionManager] Borrowed master unlock key refused:",
+				accountId,
+				error,
+			);
+			return false;
+		} finally {
+			borrowed?.fill(0);
+			if (imported && !committed) {
+				await crypto.destroyKey(imported).catch(() => undefined);
+			}
+		}
+
+		this.lockState.set(accountId, "unlocked");
+		this.emit();
+		return true;
+	}
+
+	/**
+	 * Whether `borrowed` really is this account's master unlock key.
+	 *
+	 * `decryptStoredMasterUnlockKey` is the only unwrap that hands back a ref the
+	 * caller owns, and `skipBiometric` keeps it silent. It answers `null` when the key
+	 * cannot be recovered without a prompt — including while master-password re-entry
+	 * is due — and an unverifiable claim is a refused claim.
+	 */
+	private async borrowedKeyIsTheAccountKey(
+		accountId: string,
+		borrowed: Uint8Array,
+	): Promise<boolean> {
+		const crypto = this.options.crypto;
+		if (!crypto) {
+			return false;
+		}
+		const stored = await this.storage.decryptStoredMasterUnlockKey(
+			accountId,
+			true,
+		);
+		if (!stored) {
+			return false;
+		}
+		let exported: Uint8Array | undefined;
+		try {
+			exported = await crypto.exportKey(stored);
+			return equalKeyBytes(exported, borrowed);
+		} finally {
+			exported?.fill(0);
+			await crypto.destroyKey(stored).catch(() => undefined);
+		}
+	}
+}
+
+/**
+ * Length is compared first and leaks; the bytes are not. Every byte is read whatever
+ * the first mismatch, so a wrong key cannot be walked into place one position at a
+ * time by timing the answer.
+ */
+function equalKeyBytes(a: Uint8Array, b: Uint8Array): boolean {
+	if (a.length !== b.length) {
+		return false;
+	}
+	let difference = 0;
+	for (let i = 0; i < a.length; i++) {
+		difference |= (a[i] as number) ^ (b[i] as number);
+	}
+	return difference === 0;
 }

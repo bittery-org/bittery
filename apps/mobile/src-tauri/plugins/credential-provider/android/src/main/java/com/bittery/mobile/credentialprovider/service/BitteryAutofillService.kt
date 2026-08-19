@@ -20,9 +20,7 @@ import android.widget.inline.InlinePresentationSpec
 import androidx.annotation.RequiresApi
 import androidx.autofill.inline.UiVersions
 import com.bittery.mobile.credentialprovider.activity.AutofillAuthActivity
-import com.bittery.mobile.credentialprovider.domain.DomainMatch
-import com.bittery.mobile.credentialprovider.state.VaultStateManager
-import com.bittery.mobile.credentialprovider.storage.CredentialDatabase
+import com.bittery.mobile.credentialprovider.vault.NativeCredentialVaults
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,20 +52,14 @@ class BitteryAutofillService : AutofillService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val database: CredentialDatabase by lazy {
-        CredentialDatabase.getInstance(applicationContext)
-    }
+    /** The one vault this process has. It is shared with the app and the activities. */
+    private val vault by lazy { NativeCredentialVaults.of(applicationContext) }
 
-	private val datasetBuilder: AutofillDatasetBuilder by lazy {
-		AutofillDatasetBuilder(applicationContext, database)
-	}
+    private val datasetBuilder: AutofillDatasetBuilder by lazy {
+        AutofillDatasetBuilder(applicationContext, vault)
+    }
 
     private var lastAttributionIntent: PendingIntent? = null
-
-    override fun onCreate() {
-        super.onCreate()
-        VaultStateManager.initialize(applicationContext)
-    }
 
     override fun onFillRequest(
         request: FillRequest,
@@ -96,9 +88,10 @@ class BitteryAutofillService : AutofillService() {
             return
         }
 
-        val webDomain = extractWebDomain(structure)
-        val domain = extractDomain(webDomain)
-        Log.d(TAG, "Autofill domain: $domain (webDomain: $webDomain)")
+        // Passed on as the caller gave it. The vault reduces an origin to the
+        // host it names, so this service holds no domain rule of its own.
+        val domain = extractWebDomain(structure)
+        Log.d(TAG, "Autofill origin: $domain")
 
         serviceScope.launch {
             try {
@@ -137,11 +130,8 @@ class BitteryAutofillService : AutofillService() {
                 }
                 val attributionIntent = createAttributionIntent().also { lastAttributionIntent = it }
 
-                Log.d(
-                    TAG,
-                    "Unlocked users: ${VaultStateManager.getUnlockedUserIds().size}, " +
-                        "Vault unlocked: ${VaultStateManager.isUnlocked()}"
-                )
+                val unlockedAccountCount = vault.unlockedAccountIds().size
+                Log.d(TAG, "Unlocked accounts: $unlockedAccountCount")
 
                 val response = datasetBuilder.buildUnlockedResponse(
                     fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
@@ -156,7 +146,10 @@ class BitteryAutofillService : AutofillService() {
                     return@launch
                 }
 
-                if (!VaultStateManager.isUnlocked()) {
+                // Nothing live — a cold service, an auto-lock or a manual lock. The
+                // response authenticates instead, so the framework launches
+                // AutofillAuthActivity, which can prompt and unwrap from escrow.
+                if (vault.unlockedAccountIds().isEmpty()) {
                     val authResponse = buildAuthenticationResponse(
                         fieldIds = fieldIds,
                         domain = domain,
@@ -368,9 +361,6 @@ class BitteryAutofillService : AutofillService() {
         }
         return null
     }
-
-    private fun extractDomain(origin: String?): String? =
-        DomainMatch.normalizeHost(origin).takeIf { it.isNotEmpty() }
 
     private fun createAttributionIntent(): PendingIntent = datasetBuilder.appLaunchIntent()
 

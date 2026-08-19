@@ -11,7 +11,8 @@ import type {
 	CredentialMirror,
 	LifecycleDeps,
 } from "@bittery/core/services/account-lifecycle";
-import { credentialProvider as CredentialProvider } from "./credential-provider";
+import { credentialProvider } from "./credential-provider";
+import { credentialReplica } from "./credential-replica";
 import { itemCache, storage } from "./storage";
 
 /**
@@ -19,6 +20,11 @@ import { itemCache, storage } from "./storage";
  * Android credential-provider mirror that autofill reads without going through the JS
  * side. Leaving it behind lets another app keep filling credentials while the UI says
  * locked, so it is purged before `AccountStore` drops its own copy.
+ *
+ * The purge is `CredentialReplica.clearAll`, which drops the live keys *and* the
+ * published generations: the replica rows are ciphertext, so losing the keys is what
+ * makes them unreadable, and forgetting the generations makes the next sign-in publish
+ * again rather than trust what a signed-out session left behind.
  *
  * Ported from `apps/mobile/src/services/lifecycle.ts`, where the guard read
  * `Platform.OS === "android" && CredentialProvider.isAvailable()` and the purge itself
@@ -30,10 +36,33 @@ import { itemCache, storage } from "./storage";
  */
 const nativeMukMirror: CredentialMirror = {
 	async purge(): Promise<void> {
-		// `clearAllMasterUnlockKeys` is device-wide, not per-account. The port allows
-		// dropping more than asked — never less — so over-purging is correct here.
-		if (await CredentialProvider.isAvailable()) {
-			await CredentialProvider.clearAllMasterUnlockKeys();
+		await credentialReplica.clearAll();
+	},
+
+	/**
+	 * The biometric escrow, which `purge` deliberately leaves alone.
+	 *
+	 * The escrow is what a lock is meant to be undone by, so only the flows that
+	 * promise a full sign-in reach here. It is a **single slot** on this platform:
+	 * one account's wrapped key, not a map. So a named scope asks the native side
+	 * whether the slot is that account's — signing one account out must not cost
+	 * another the biometric unlock it enrolled — and only `"device"` clears it
+	 * whoever it belongs to. Which account holds the slot never leaves the provider
+	 * process; the comparison happens there.
+	 *
+	 * The availability probe is the whole of the platform check, as it is for
+	 * `purge`: these commands throw where the plugin does not exist.
+	 */
+	async forgetQuickUnlock(scope): Promise<void> {
+		if (!(await credentialProvider.isAvailable())) {
+			return;
+		}
+		if (scope === "device") {
+			await credentialProvider.clearEscrow();
+			return;
+		}
+		for (const ref of scope) {
+			await credentialProvider.clearEscrowForAccount(ref.accountId);
 		}
 	},
 };

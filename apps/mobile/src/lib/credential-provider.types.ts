@@ -8,8 +8,10 @@
 export interface EscrowMukParams {
 	/** The account email this escrow is for */
 	email: string;
-	/** Optional user ID for multi-account MUK storage */
-	userId?: string;
+	/** Local account id. Keys the live unlock state the escrow restores into. */
+	accountId: string;
+	/** Server user id. Stamps the native cache rows that key unlocks. */
+	userId: string;
 	/** Optional escrow timeout in milliseconds (default: master-password re-entry period) */
 	timeoutMs?: number;
 }
@@ -58,4 +60,14 @@ export interface ProviderSupport {
 	component: string;
 	/** How `enabled` was decided, or why it could not be. */
 	detail: string;
+}
+
+/**
+ * The one command the `/vault` route guard needs, named as an interface so the guard can
+ * be driven without a plugin. `null` means "no live key for that account" — which is also
+ * what a host with no credential-provider plugin answers, so a caller cannot tell a locked
+ * vault from a missing bridge, and must not need to.
+ */
+export interface LiveMasterUnlockKeyBorrower {
+	borrowLiveMasterUnlockKey(accountId: string): Promise<string | null>;
 }

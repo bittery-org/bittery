@@ -15,12 +15,14 @@ splitting the set would gate the app against itself and gate nothing else.
 - `allow-clear-all-master-unlock-keys`
 - `allow-is-vault-unlocked`
 - `allow-get-master-unlock-key-base64`
+- `allow-borrow-live-master-unlock-key-base64`
 - `allow-escrow-muk-with-biometric`
 - `allow-retrieve-escrowed-muk`
 - `allow-has-valid-escrow`
 - `allow-has-valid-escrow-for-email`
 - `allow-get-escrow-remaining-time`
 - `allow-clear-escrow`
+- `allow-clear-escrow-for-account`
 - `allow-sync-vault-data`
 - `allow-get-pending-passkey-mutations`
 - `allow-mark-pending-passkey-mutations-applied`
@@ -66,6 +68,32 @@ Enables the authenticate command without any pre-configured scope.
 <td>
 
 Denies the authenticate command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`bittery-credential-provider:allow-borrow-live-master-unlock-key-base64`
+
+</td>
+<td>
+
+Enables the borrow_live_master_unlock_key_base64 command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`bittery-credential-provider:deny-borrow-live-master-unlock-key-base64`
+
+</td>
+<td>
+
+Denies the borrow_live_master_unlock_key_base64 command without any pre-configured scope.
 
 </td>
 </tr>
@@ -144,6 +172,32 @@ Enables the clear_escrow command without any pre-configured scope.
 <td>
 
 Denies the clear_escrow command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`bittery-credential-provider:allow-clear-escrow-for-account`
+
+</td>
+<td>
+
+Enables the clear_escrow_for_account command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`bittery-credential-provider:deny-clear-escrow-for-account`
+
+</td>
+<td>
+
+Denies the clear_escrow_for_account command without any pre-configured scope.
 
 </td>
 </tr>

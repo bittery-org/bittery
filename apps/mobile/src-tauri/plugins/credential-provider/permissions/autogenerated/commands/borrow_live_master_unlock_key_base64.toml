@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-borrow-live-master-unlock-key-base64"
+description = "Enables the borrow_live_master_unlock_key_base64 command without any pre-configured scope."
+commands.allow = ["borrow_live_master_unlock_key_base64"]
+
+[[permission]]
+identifier = "deny-borrow-live-master-unlock-key-base64"
+description = "Denies the borrow_live_master_unlock_key_base64 command without any pre-configured scope."
+commands.deny = ["borrow_live_master_unlock_key_base64"]
