@@ -26,11 +26,11 @@ The important package interfaces are visible in `packages/*/package.json` and th
 
 Evidence:
 
-- [`docs/adr/0001-single-rust-crypto-core-for-every-platform.md`](../../adr/0001-single-rust-crypto-core-for-every-platform.md)
-- [`docs/adr/0005-vault-session-is-a-pure-reducer-that-imports-nothing.md`](../../adr/0005-vault-session-is-a-pure-reducer-that-imports-nothing.md)
-- [`docs/adr/0009-key-material-crosses-seams-as-an-opaque-keyref.md`](../../adr/0009-key-material-crosses-seams-as-an-opaque-keyref.md)
-- [`docs/adr/0012-one-generated-definition-per-cross-language-type.md`](../../adr/0012-one-generated-definition-per-cross-language-type.md)
-- [`packages/storage/CONTEXT.md`](../../../packages/storage/CONTEXT.md)
+- [`docs/adr/0001-single-rust-crypto-core-for-every-platform.md`](../../../legacy/docs/adr/0001-single-rust-crypto-core-for-every-platform.md)
+- [`docs/adr/0005-vault-session-is-a-pure-reducer-that-imports-nothing.md`](../../../legacy/docs/adr/0005-vault-session-is-a-pure-reducer-that-imports-nothing.md)
+- [`docs/adr/0009-key-material-crosses-seams-as-an-opaque-keyref.md`](../../../legacy/docs/adr/0009-key-material-crosses-seams-as-an-opaque-keyref.md)
+- [`docs/adr/0012-one-generated-definition-per-cross-language-type.md`](../../../legacy/docs/adr/0012-one-generated-definition-per-cross-language-type.md)
+- [`packages/storage/CONTEXT.md`](../../../legacy/packages/storage/CONTEXT.md)
 
 ## Architectural pressure
 
@@ -69,4 +69,3 @@ TypeScript/native seam.
 The existing security rules are valuable. Their ownership is too exposed. The greenfield target
 places session, replica, command, crypto, and Sync behavior behind one deep Rust `ClientRuntime`
 interface and leaves UI/platform code as adapters.
-

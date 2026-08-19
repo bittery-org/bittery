@@ -31,7 +31,7 @@ idempotency outcomes, bounded retries, and explicit indeterminate states for unc
 
 **Observed.** Vault-key rotation uses short-lived server-recorded Rotation plans that pin security
 assumptions and revalidate before finalization. Evidence:
-[`docs/adr/0013-rotation-plans-coordinate-vault-key-rotation.md`](../../adr/0013-rotation-plans-coordinate-vault-key-rotation.md).
+[`docs/adr/0013-rotation-plans-coordinate-vault-key-rotation.md`](../../../legacy/docs/adr/0013-rotation-plans-coordinate-vault-key-rotation.md).
 
 ## Crypto and key lifetime
 
@@ -54,4 +54,3 @@ reaches JavaScript” is a convention enforced by callers, not a structural prop
 **Observed.** Native and browser adapters differ significantly. Browser local/extension storage is a
 profile trust boundary rather than an OS keychain. Current adapter complexity is especially high on
 mobile.
-

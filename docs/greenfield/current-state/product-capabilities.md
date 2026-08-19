@@ -6,7 +6,7 @@ All claims refer to the frozen snapshot. Statuses follow [../AUTHORING.md](../AU
 
 **Observed.** Bittery is a zero-knowledge, end-to-end encrypted password manager with Web, Desktop,
 mobile, browser-extension, and shared-server surfaces. The canonical current vocabulary is
-[`CONTEXT.md`](../../../CONTEXT.md).
+[`CONTEXT.md`](../../../legacy/CONTEXT.md).
 
 **Observed.** The product distinguishes a server-side User from a device-local Account. Several
 Accounts may exist on one Device, and one Active account controls the current UI scope.
@@ -22,8 +22,8 @@ greenfield target removes hosted-cloud and billing behavior.
   Evidence: `apps/server/src/domains/auth/`, `apps/server/src/domains/sessions/`, and
   `packages/core/src/services/auth-service.ts`.
 - **Observed:** current encryption derives account material from a master password plus a generated
-  Secret Key. The master password never leaves the Device. Evidence: [`CONTEXT.md`](../../../CONTEXT.md)
-  and [`docs/adr/0001-single-rust-crypto-core-for-every-platform.md`](../../adr/0001-single-rust-crypto-core-for-every-platform.md).
+  Secret Key. The master password never leaves the Device. Evidence: [`CONTEXT.md`](../../../legacy/CONTEXT.md)
+  and [`docs/adr/0001-single-rust-crypto-core-for-every-platform.md`](../../../legacy/docs/adr/0001-single-rust-crypto-core-for-every-platform.md).
 - **Observed:** optional Recovery Key and Emergency Kit concepts provide user-held recovery material.
 - **Observed:** lock, sign out, remove Account, wipe Device, delete account, full sign-in, quick unlock,
   biometric unlock, and master-password re-entry are distinct operations.
@@ -56,7 +56,7 @@ greenfield target removes hosted-cloud and billing behavior.
   fragment and never reaches the Server. Access modes include bearer-link and email-restricted flows,
   plus expiry/one-time semantics.
 - **Observed:** secret invitation, verification, session, and Share tokens are stored only as digests.
-  Evidence: [`docs/adr/0003-secret-tokens-are-stored-only-as-digests.md`](../../adr/0003-secret-tokens-are-stored-only-as-digests.md).
+  Evidence: [`docs/adr/0003-secret-tokens-are-stored-only-as-digests.md`](../../../legacy/docs/adr/0003-secret-tokens-are-stored-only-as-digests.md).
 
 ## Travel mode
 
@@ -93,5 +93,4 @@ greenfield target removes hosted-cloud and billing behavior.
 - **Observed:** email, object storage, Redis, deployment configuration, and release/update concepts
   exist as integrations or operational dependencies.
 - **Proposed:** the current repository contains a proposed coordinated REST/OpenAPI replacement for
-  Qubit RPC. Evidence: [`docs/adr/0011-axum-rest-openapi-replaces-qubit.md`](../../adr/0011-axum-rest-openapi-replaces-qubit.md).
-
+  Qubit RPC. Evidence: [`docs/adr/0011-axum-rest-openapi-replaces-qubit.md`](../../../legacy/docs/adr/0011-axum-rest-openapi-replaces-qubit.md).

@@ -1,57 +1,17 @@
-# Dependencies
-node_modules
-.pnp
-.pnp.js
-
-# Build outputs
-dist
-build
+# Dependencies and build output
+node_modules/
+target/
+dist/
+build/
+.turbo/
+coverage/
 *.tsbuildinfo
 
-# Environment variables
+# Environment and local tools
 .env
-.env.test
-.env*.local
-
-# IDEs and editors
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-.idea
-*.swp
-*.swo
-*~
+.env.*.local
 .DS_Store
-
-# Logs
-logs
+.idea/
+.vscode/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-.pnpm-debug.log*
 
-# Turbo
-.turbo
-
-# Better-T-Stack
-.alchemy
-
-# Testing
-coverage
-.nyc_output
-
-# Misc
-*.tgz
-.cache
-tmp
-temp
-
-.automaker
-test-results
-.pnpm-store
-# Desktop production env is generated at build time (see release.yml)
-apps/desktop/.env.production

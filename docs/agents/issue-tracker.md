@@ -38,6 +38,7 @@ precise decision remains in the map's Not yet specified section.
 
 ## Privacy and durability
 
-`.scratch/` is excluded through this clone's `.git/info/exclude`; normal Git operations must not
-publish it. Local exclusion also means the tracker is not backed up by the Bittery repository. Back
-up long-running maps separately before relying on them as the only record of a decision.
+`.scratch/` is excluded through this repository's shared Git `info/exclude`; normal Git operations
+must not publish it. Local exclusion also means the tracker is not backed up by the Bittery
+repository. Back up long-running maps separately before relying on them as the only record of a
+decision.
