@@ -44,3 +44,20 @@ one generated definition per cross-language type.
 
 Avoid `useEffect`. Comments say *why*, briefly. A dev server is always running; skip builds unless
 asked. `RELEASING.md` for versions, `packages/crypto/core/DEVELOPMENT.md` for crypto.
+
+## Agent skills
+
+### Issue tracker
+
+Issues, Wayfinder maps, specs, and implementation tickets are private local Markdown under
+`.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Local issue status uses the default Matt Pocock skill vocabulary. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Bittery uses the root `CONTEXT.md` as its product glossary and `docs/adr/` for accepted decisions;
+follow any focused context pointers they contain. See `docs/agents/domain.md`.
