@@ -147,6 +147,21 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [0008](../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md),
   [0009](../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md).
 
+- [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
+  envelope, one AEAD, one version byte. `AUTH-015`'s HKDF output is the Account Unlock Key, which wraps a
+  randomly generated **Account Key Set** (X25519 plus Ed25519), so a password change, Secret Key rotation
+  or profile upgrade re-wraps one envelope and touches no Vault key. XChaCha20-Poly1305 is the product's
+  only AEAD, chosen because offline multi-Device writes rule out a coordinated nonce counter and 96 bits
+  is too few; HPKE runs in **export-only** mode so RFC 9180 conformance costs no second AEAD. RSA is gone.
+  Grants are flat and signed: no Team Key over Vault content, so `TEAM-003` and `TEAM-004` survive, and a
+  narrow Team History Key covers Security History alone. `CRYPTO-009` binds each object's identity into
+  its AAD, so relocating ciphertext or substituting a revision becomes **Prevented**, at the cost that no
+  component may ever hand the crypto layer a bare blob. Item revisions are signed inside the ciphertext,
+  which surfaced a seventh adversary class, **Vault Co-member**, amending resolved ticket 04.
+  `PRIVACY-007` gained three fields. ADRs
+  [0010](../../docs/adr/0010-one-envelope-one-suite-and-a-version-byte-that-names-the-whole-format.md),
+  [0011](../../docs/adr/0011-vault-grants-are-flat-signed-and-sealed-to-an-account-key-set.md).
+
 ## Not yet specified
 
 In scope, but not yet sharp enough to phrase as a precise question. Graduates into tickets as the
@@ -163,21 +178,25 @@ frontier reaches it.
 - **Supported OS and browser version matrix.** Depends on tickets 41, 42, and 45.
 - **Security review gate beyond authentication.** Ticket 06 settled the pattern for its own
   construction: a written design note, a cryptographic construction review before general availability,
-  a penetration test after it. Whether one engagement covers the key hierarchy and envelope format too,
-  and what artifact tickets 07 and 08 hand a reviewer, is still open.
+  a penetration test after it. Tickets 07 and 08 have now closed, so the reviewable surface is known:
+  the derivation profiles, the key hierarchy, the envelope, and the grant and revision signatures.
+  Whether one engagement covers all of it, and whether the `AUTH-012` design note grows to hold it or a
+  second note is written, is still open.
 - **Passkey-based Bittery login.** `ITEM-002` makes passkeys a stored capability rather than a login
   method. Whether that ever changes is a later question.
-- **Server equivocation defence.** Ticket 04 classes it Acknowledged for the first release, because
-  detecting a Server that tells one Device a different story from another needs a transparency-log
-  construction. Whether a later release closes it is a separate question.
+- **Server equivocation defence, and key transparency.** Ticket 04 classes equivocation Acknowledged
+  for the first release, because detecting a Server that tells one Device a different story from
+  another needs a transparency-log construction. Ticket 08 added the adjacent case: an operator can
+  substitute the public keys it publishes for an Account, so a Vault grant can be sealed to the
+  operator. `CRYPTO-014` gives out-of-band verification an Account Fingerprint to compare, which is a
+  manual floor rather than a defence. Whether a later release ships a transparency log covering both is
+  one question, not two.
 - **Breached-password blocklist.** `AUTH-021` ships zxcvbn as an advisory meter in the first release and
   defers the common and breached password list to a later one. Two questions come with it and neither is
   sharp yet: whether the list is embedded or looked up online, and whether a hit blocks or warns. An online
   Have I Been Pwned lookup sends a hash prefix of the *master password* to a third party, so the opt-in
   external-integration rule ticket 37 sets governs it. Revisit once 37 closes.
 
-- **Post-quantum posture.** Nothing in the corpus mentions it. Whether the envelope format leaves
-  room for it is a question ticket 08 may sharpen.
 
 ## Out of scope
 

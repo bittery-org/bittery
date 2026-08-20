@@ -29,3 +29,17 @@ client verifies a grant it did not witness.
 
 `PRIVACY-011` holds a Co-tenant User to a stricter bar than the operator: they learn nothing about a
 Vault they are not a member of, including its existence.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-005` freezes the signed grant message's field list: purpose label, format version, Server
+identity, Vault identifier, key epoch, granter Account identifier, recipient Account identifier,
+recipient Account Fingerprint, and **granted role**. This ticket supplies the role enum that the last
+field carries; the field itself is no longer negotiable.
+
+`CRYPTO-006` makes grants flat, so a Team is an authorization grouping plus a name plus a Team History
+Key, and never a key that opens Vault content. That is what keeps `TEAM-003` and `TEAM-004` true.
+Departure therefore rotates only the Vaults the departing member was actually granted.
+
+`CRYPTO-014` defines an Account Fingerprint and binds it into every grant. Whether any screen shows it,
+and what a User is told about comparing it out of band, is this ticket's call together with ticket 47.

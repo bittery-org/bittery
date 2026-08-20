@@ -26,3 +26,14 @@ Produces: `AUDIT-001` rewrite into testable requirements.
 `AUDIT-001` is now settled in shape by ADR 0003: an Operator Log administrators read, and a Security
 History encrypted to the owning User or Team. This ticket decides the event taxonomy, the retention
 defaults for each stream, and how the two write paths stay consistent, not whether the split exists.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-010` gives Security History two key contexts: `0x30` under a **User History Key** for a
+personal Account, and `0x31` under the **Team History Key** for a Team. `CRYPTO-006` scopes the Team
+History Key to Security History and nothing else, deliberately, so that reading a Team's history never
+implies decryption access to its Vaults.
+
+This ticket owns who holds the Team History Key: every member, or Team Owners and Admins only.
+Departure rotates it, which is cheap because it protects only a log. `CRYPTO-012` makes Security
+History's actor field provable rather than claimed, which is the point of signing revisions at all.

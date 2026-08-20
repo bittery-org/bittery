@@ -53,3 +53,15 @@ completes, and the enrolment UI must account for that wait.
 Device state holds the pinned profile identifier. `AUTH-018` requires an upgrade offer at the end of a
 full sign-in when the Server publishes a stronger profile, so enrolment is one of the two moments that
 offer can appear.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-001` settles what enrolment actually transports: the **Account Key Set**, not a set of Vault
+keys. Vault keys seal to the Account encryption key, never to a Device key, so a new Device that holds
+the Account Key Set can open every Vault the Account was granted without the Server re-wrapping
+anything. `CRYPTO-010` reserves key context `0x03` for the Account Key Set under a Device Unlock
+Wrapper key, which is where the enrolled Device parks it.
+
+A Device key pair still exists, but only for the `AUTH-011` Device credential on ordinary traffic. It
+never receives Vault content. `CRYPTO-014`'s Account Fingerprint is the natural thing for a QR
+enrolment to display and confirm.

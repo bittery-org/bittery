@@ -29,6 +29,11 @@ _Avoid_: stolen device attacker, local attacker
 A User of the same deployment who is not a member of the Vault in question.
 _Avoid_: other tenant, neighbour account, same-server user
 
+**Vault Co-member**:
+A legitimate member of a Vault, acting outside their remit. Holding the Vault key is enough to write
+an Item revision or claim authorship, so signatures rather than encryption are what answer them.
+_Avoid_: insider, rogue member, malicious colleague
+
 **Compromised Client Build**:
 A released client binary or bundle that is not the one the published source produces.
 _Avoid_: supply chain attack, poisoned build
@@ -122,3 +127,73 @@ _Avoid_: KDF policy, parameter list, profile table
 The key-derivation profile an Account was created under, which governs its derivation until its owner
 accepts an upgrade. A client derives under it whatever a Server publishes.
 _Avoid_: current profile, active profile, account KDF
+
+## Cryptographic format
+
+**Envelope**:
+The single container every persisted ciphertext is written in. It carries a format version, a key
+context, a key epoch, and either a nonce or an HPKE encapsulated key, followed by ciphertext and its
+tag. There is one envelope in the product, in two shapes chosen by key context.
+_Avoid_: blob, ciphertext record, payload, sealed box
+
+**Format version**:
+The single byte naming an envelope's entire cryptographic suite: AEAD, KEM, KDF, signature algorithm,
+hash, and byte layout together. It indexes a closed, ordered, append-only registry compiled into every
+client, so no algorithm is ever negotiated. Distinct from the key-derivation profile, which governs
+the memory-hard step only.
+_Avoid_: suite id, cipher version, algorithm identifier, crypto version
+
+**Key context**:
+The byte identifying which key an envelope was encrypted under and what kind of object it holds. It
+selects the envelope shape and the fields of the binding tuple. Its table is closed.
+_Avoid_: envelope type, purpose byte, record kind
+
+**Binding tuple**:
+The identity of the object an envelope belongs to, which a decoder reconstructs from where it found
+the envelope and authenticates as additional data. Moving ciphertext elsewhere therefore fails to
+decrypt. A Share link snapshot binds the link, never the Item it came from.
+_Avoid_: context header, associated data, metadata
+
+**Account Unlock Key**:
+The symmetric key that HKDF-Expand produces from the single Argon2id run, which wraps the Account Key
+Set and nothing else. It is what earlier requirements called the Vault-unlock material.
+_Avoid_: master key, master unlock key, vault-unlock material, MUK
+
+**Account Key Set**:
+The randomly generated X25519 encryption key pair and Ed25519 Account Signing Key pair belonging to an
+Account, stored as one envelope wrapped by the Account Unlock Key. Every ceremony that changes a
+credential re-wraps this one object and leaves every Vault key untouched.
+_Avoid_: account keypair, identity key, user keys
+
+**Account Signing Key**:
+The Ed25519 key pair inside the Account Key Set, which signs Vault grants and Item revisions. Distinct
+from the Authentication Key, which the Server holds and which rotates without touching Vault data.
+_Avoid_: identity key, signing identity, author key
+
+**Vault key**:
+The symmetric key of one Vault generation, sealed individually to each member's Account encryption
+key. It encrypts Item revisions directly and wraps Attachment keys. No Team-level key sits above it.
+_Avoid_: vault secret, shared key, collection key
+
+**Key epoch**:
+The generation of a Vault key, carried in every envelope encrypted under it. A rotation starts a new
+epoch for new writes; older ciphertext stays readable under its own epoch until it is rewritten, or
+forever.
+_Avoid_: key version, rotation number, generation
+
+**Vault grant**:
+A Vault key sealed to one member's Account encryption key, together with the signature of the member
+who granted it. A client accepts no grant whose signature does not verify; a Server authorization
+record grants nothing.
+_Avoid_: share, permission, access record, membership
+
+**Team History Key**:
+The one key a Team owns. It protects that Team's Security History and never touches Vault content, so
+Team administration stays separate from decryption access.
+_Avoid_: team key, org key, group key
+
+**Account Fingerprint**:
+A hash over an Account's identifier and both public keys, bound into every grant signature and
+displayable for out-of-band comparison. It gives two people something to check when neither can trust
+the Server that published the keys.
+_Avoid_: safety number, key hash, verification code

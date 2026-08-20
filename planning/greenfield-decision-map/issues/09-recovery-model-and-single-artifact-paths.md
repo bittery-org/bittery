@@ -40,3 +40,16 @@ recovery route against a 600,000-iteration main route is the defect this closes.
 `AUTH-019` makes the Emergency Kit the primary carrier of the **key-derivation profile identifier**.
 Without it, a fresh Device must walk the profile registry downward, paying one Argon2id run per
 attempt, so Kit contents are load-bearing for recovery latency as well as correctness.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-002` gives this ticket exactly one object to protect. A Recovery Key wraps the **Account Key
+Set** under key context `0x02` and nothing else, so "what does a Recovery Key open" has a single
+answer, and revoking one is a question about that envelope rather than about every Vault key. Master
+password change is the same operation: re-wrap one envelope, leave every grant intact.
+
+`CRYPTO-011` reserves the label `bittery/1/recovery-unlock` for deriving the wrapping key from the
+Recovery Key, and `AUTH-020` already binds recovery artifacts to a 128-bit floor with no memory-hard
+step, because the Recovery Key is machine-generated. The Emergency Kit must now also print or carry
+enough to reconstruct the Account Fingerprint (`CRYPTO-014`), if out-of-band verification is to work
+for a User who has lost every Device.

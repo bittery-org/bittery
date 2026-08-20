@@ -19,3 +19,14 @@ Decide:
 - Attachment names, which `ITEM-003` encrypts.
 
 Produces: `ATTACH-001` promotion to first-release requirements and a storage specification.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-013` settles the framing: an Attachment is a sequence of independent envelopes, one per chunk,
+each binding the Attachment identifier, its chunk index, and the **total chunk count**. Binding the
+count is what makes truncation fail to decrypt rather than read as a short file. Chunking cannot move
+above the format, because an AEAD tag verifies only once a whole message is present.
+
+Chunk size, resumability, pinning, and lifecycle remain this ticket's. `CRYPTO-001` keeps the
+per-Attachment key wrapped by the Vault key (context `0x21`), and `PRIVACY-007` already exposes chunk
+count and total byte size, so the binding leaks nothing new.

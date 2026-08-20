@@ -75,3 +75,20 @@ Notes appended to tickets 10, 19, 21, 22, 24, 25, 27, 29 and 30. Ticket 05 inher
 delivery half of the Compromised Client Build class, and ticket 20 inherits the search-index leakage
 question, both already in their bodies.
 
+
+### Amended by ticket 08, key hierarchy and canonical envelope format
+
+`PRIVACY-001` grew from six adversary classes to **seven**. Signing Item revisions and Vault grants
+defends against a legitimate member of a shared Vault acting outside their remit, whom the six classes
+had no name for; `PRIVACY-011`'s Co-tenant User is explicitly someone you share nothing with, so it
+could not be stretched to cover them. The class is **Vault Co-member**, and it arrived with its two
+controls (`CRYPTO-005`, `CRYPTO-012`) already decided.
+
+`PRIVACY-004` lost two entries to `PRIVACY-003`'s Prevented tier. `CRYPTO-009` binds an object's
+identity into the additional authenticated data of its envelope, so relocating ciphertext between
+Items and substituting one revision for another now fail to decrypt rather than being noticed
+afterwards. Dropping a revision stays Detectable through the revision chain.
+
+`PRIVACY-007` gained three fields: the wrapped Account Key Set on an Account, a granter identifier and
+grant signature on every wrapped Vault key, and a wrapped Team History Key per reader. `PRIVACY-006`
+makes the list closed, so each is a deliberate amendment.

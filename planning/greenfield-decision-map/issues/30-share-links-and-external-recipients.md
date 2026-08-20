@@ -30,3 +30,14 @@ be independent ciphertext with no shared identifier.
 
 `PRIVACY-007` puts Share-link existence, expiry, view count, maximum views, and ciphertext length in
 Server-visible plaintext.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-009` carries a carve-out written for this ticket: a Share link snapshot binds the **Share link
+identifier** into its additional authenticated data and never the source Item identifier, because
+binding the Item would defeat `PRIVACY-010` unlinkability. `CRYPTO-010` reserves key context `0x40`
+and `CRYPTO-011` reserves the HKDF label `bittery/1/share-link` for deriving the snapshot key from the
+link secret.
+
+If a later feature wants a Share link to remember which Item it came from, that association must live
+inside ciphertext. There is no plaintext field for it and `PRIVACY-006` will not grow one.

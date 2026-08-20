@@ -18,3 +18,14 @@ Decide:
 - Whether an extension and a desktop app on the same machine share one wrapper or hold separate ones.
 
 Produces: an interface specification, per-platform `ARCH-STORE-*` requirements, and seed scenario 11.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-010` reserves key context `0x03` and `CRYPTO-011` reserves the HKDF label
+`bittery/1/device-unlock`, so the Device Unlock Wrapper wraps the **Account Key Set** envelope, not a
+master key and not Vault keys. That fixes what quick unlock must reconstitute and what a Lock must
+destroy.
+
+Because `CRYPTO-002` makes the Account Key Set random rather than derived, a quick unlock path that
+recovers it does not need the master password anywhere in its chain, and an `AUTH-018` profile upgrade
+does not invalidate the wrapper.

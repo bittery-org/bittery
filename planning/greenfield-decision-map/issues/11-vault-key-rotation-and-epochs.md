@@ -32,3 +32,16 @@ profile and some under the new.
 The upgrade is offered at the end of a full sign-in, while the master password is in hand, and the User
 may decline it. So an Account can sit on an old profile indefinitely, and the rotation model must treat
 that as a normal steady state rather than a transient.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-008` puts a `u32` **key epoch** in every envelope header, so this ticket's rotation can be
+lazy by construction: a new epoch governs new writes, and ciphertext under an older epoch stays
+readable until it is rewritten, or forever. `CRYPTO-015` requires that an epoch naming a key the
+client does not hold be reported distinctly from a tag failure, so a client fetches the missing grant
+instead of alarming the User.
+
+`CRYPTO-006` makes grants flat, so rotating a Vault key costs one HPKE seal per current member of that
+Vault, proportional to the Vault rather than to any Team above it. Decide whether re-encrypting
+existing ciphertext under a new epoch is ever mandatory: a departed member already read epoch N, so
+the honest answer may be that it never is.

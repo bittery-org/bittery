@@ -18,3 +18,13 @@ Decide:
 - Whether search covers Secure Note bodies and custom fields.
 
 Produces: an index specification, a `PRIVACY-*` bound, and an input to performance budgets.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-011` reserves the HKDF label `bittery/1/search-index`, so an index key derived rather than
+generated has a home. Note the `CRYPTO-011` rule the label table follows: a key that protects data is
+generated randomly, and a label exists only where a key is derived from a secret that already exists.
+If this ticket generates its index key instead, drop the reservation rather than leaving a dead label.
+
+Whatever the index persists is subject to `CRYPTO-009`, so an index entry must bind its own identity
+or it can be relocated.

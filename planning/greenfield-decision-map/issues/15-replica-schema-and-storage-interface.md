@@ -18,3 +18,14 @@ Decide:
 - Whether the same schema serves a constrained credential-provider runtime.
 
 Produces: a schema specification, an adapter conformance contract, and seed scenarios 5 and 10.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-009` is a hard constraint on this ticket's interface: the additional authenticated data of
+every envelope includes a binding tuple the decoder **reconstructs from where it found the blob**, so
+no component may hand the cryptographic layer a bare blob. Every read and write path must carry the
+object's identity (Vault identifier, Item identifier, revision number, or Attachment identifier and
+chunk index) alongside the bytes. An interface that returns `Vec<u8>` and nothing else cannot decrypt.
+
+`CRYPTO-008` also means the replica stores envelopes verbatim, header included, so the schema needs no
+separate columns for nonce, epoch, or algorithm.

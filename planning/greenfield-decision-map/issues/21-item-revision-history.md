@@ -29,3 +29,15 @@ a checkpoint hash at the prune boundary, or an explicit signed pruning record.
 
 `PRIVACY-008` removes stored wall-clock times, so revision ordering uses sequence numbers and the
 displayed date comes from inside the ciphertext.
+
+### Inherited from ticket 08, key hierarchy and canonical envelope format
+
+`CRYPTO-012` settles two things this ticket inherits. The revision chain hash is
+`SHA-256(previous chain hash || envelope bytes)`, computed over ciphertext so a Server can check
+continuity without decrypting. And every revision carries an Ed25519 signature by its author's Account
+Signing Key, placed **inside** the ciphertext, so retention pruning must not silently break either the
+chain or the ability to verify an old author's key.
+
+`CRYPTO-009` binds the revision number into the envelope's AAD, so revisions cannot be renumbered
+after the fact. Any retention scheme that renumbers rather than tombstones would make old revisions
+undecryptable.
