@@ -33,10 +33,23 @@ carries a user-chosen label the operator reads.
 ordinary request runs on a Device credential this ticket defines: its shape, its lifetime, how it is
 issued at the end of a successful full sign-in, and what forces a Device back to a full sign-in.
 
-Device state must hold the **Authentication profile identifier** under `AUTH-010`, because there is no
+Device state must hold the **key-derivation profile identifier** under `AUTH-010`, because there is no
 pre-login exchange that could supply it.
 
 `AUTH-014` requires that a protocol-version rotation be a specified path: each client re-derives and
 re-registers its Authentication Key at next full sign-in while the Server refuses the superseded version.
 Decide how an enrolled Device with a live Device credential is driven back to a full sign-in when that
 happens.
+
+### Inherited from ticket 07, key derivation profiles
+
+`AUTH-019` fixes how a Device with no local state learns the Account's **pinned key-derivation
+profile**: from the Emergency Kit, which prints it, or by attempting the Server's published profile and
+then each older registry entry in descending order. There is no Server endpoint and no per-Account
+profile stored Server-side, because that would reinstate the account-existence oracle ADR 0007 closed.
+Each walk attempt costs one Argon2id run, so enrolment must report a wrong password only after the walk
+completes, and the enrolment UI must account for that wait.
+
+Device state holds the pinned profile identifier. `AUTH-018` requires an upgrade offer at the end of a
+full sign-in when the Server publishes a stronger profile, so enrolment is one of the two moments that
+offer can appear.

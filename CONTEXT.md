@@ -105,8 +105,20 @@ canonical message binding the nonce, the Server, the Account, the protocol versi
 label.
 _Avoid_: challenge token, login token, nonce (unqualified)
 
-**Authentication profile**:
-The identifier of the published key-derivation parameters an Authentication Key was derived under. It
-is not secret. Devices hold it locally and the Emergency Kit prints it, because the Server cannot
-supply it before a full sign-in begins.
-_Avoid_: KDF version, work factor, difficulty
+**Key-derivation profile**:
+The identifier of one frozen set of Argon2id parameters. One profile governs both the Authentication
+Key and the Vault-unlock material, because a single memory-hard run produces both. It is not secret.
+Devices hold it locally and the Emergency Kit prints it, because the Server cannot supply it before a
+full sign-in begins.
+_Avoid_: Authentication profile, KDF version, work factor, difficulty
+
+**Profile registry**:
+The closed, ordered, append-only table of key-derivation profiles compiled into every client. A Server
+names one entry and supplies no parameters. An entry is never removed, because it is the only route to
+the Vault keys of every Account pinned to it.
+_Avoid_: KDF policy, parameter list, profile table
+
+**Pinned profile**:
+The key-derivation profile an Account was created under, which governs its derivation until its owner
+accepts an upgrade. A client derives under it whatever a Server publishes.
+_Avoid_: current profile, active profile, account KDF

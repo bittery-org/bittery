@@ -29,3 +29,11 @@ including whatever the asset protocol needs, without loosening `script-src` past
 
 `ACCOUNT-001` makes Desktop the surface that carries multi-Server, All Accounts, and cross-Server
 Collections, since the Web client cannot. That raises this ticket's weight for ticket 36.
+
+### Inherited from ticket 07, key derivation profiles
+
+`AUTH-016` fixes key derivation at Argon2id with **64 MiB of memory**, and `AUTH-017` makes the profile
+registry append-only, so this number never falls. Any surface that performs a full sign-in must be able
+to allocate 64 MiB plus overhead for the duration of that derivation. If this surface cannot, it must
+not perform a full sign-in at all and must enrol by some other route, which is a decision this ticket
+owns rather than one it inherits.

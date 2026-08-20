@@ -187,9 +187,10 @@ The product never claims cross-Server atomic movement.
 `AUTH-003 MUST` A full sign-in is a signature challenge-response. Argon2id runs over the master
 password, HKDF-Extract mixes in the Secret Key, and HKDF-Expand under an authentication label produces
 the 32-byte seed of an Ed25519 Authentication Key. The Server stores the 32-byte public key and no other
-password-derived value. No password-derived secret ever reaches the Server, at rest or on the wire. The
-Vault-unlock derivation is a second, independent memory-hard run, satisfying `AUTH-002`. ADR 0006
-records why OPAQUE, SRP-6a, and an authentication hash were rejected.
+password-derived value. No password-derived secret ever reaches the Server, at rest or on the wire. A
+second HKDF-Expand label over the same Argon2id run produces the Vault-unlock material, and those
+labels are what satisfy `AUTH-002`; `AUTH-015` fixes the single-run rule. ADR 0006 records why
+OPAQUE, SRP-6a, and an authentication hash were rejected.
 
 `AUTH-009 MUST` The signed message is canonical and length-prefixed, and binds a purpose label, the
 protocol version, the Server identity, the Account identifier, and a single-use Sign-in Challenge issued
@@ -199,7 +200,7 @@ another Server, which `ACCOUNT-001` makes a live case for installed clients.
 `AUTH-010 MUST` The authentication salt derives from the Secret Key on the client. The Server stores no
 salt, sends no salt, and exposes no endpoint that reveals whether an Account exists before a full sign-in
 begins. Key-derivation parameters are Server-wide and published in the Server descriptor, not per
-Account, so no Device can be handed weaker parameters than another. The Authentication profile
+Account, so no Device can be handed weaker parameters than another. The key-derivation profile
 identifier is held in Device state and printed on the Emergency Kit. ADR 0007.
 
 `AUTH-011 MUST` The full sign-in protocol authenticates Device enrolment and full sign-in only. An
@@ -220,6 +221,56 @@ pending external review, following the documentation-only disclosure rule `PRIVA
 a new version, having each client re-derive and re-register its Authentication Key at next full sign-in,
 and refusing the superseded version at the Server is a specified path, not an implied one. No Vault data
 moves and nothing is decrypted.
+
+`AUTH-015 MUST` A full sign-in performs exactly one memory-hard run. Argon2id runs once over the
+master password, HKDF-Extract mixes in the Secret Key, and HKDF-Expand under distinct labels produces
+the Authentication Key seed and the Vault-unlock material. Those labels are the domain separation
+`AUTH-002` requires; a second Argon2id run would add no entropy, no new secret, and no independence,
+and would double the cost on browser WASM, which is the weakest supported build. ADR 0008.
+
+`AUTH-016 MUST` The first key-derivation profile is Argon2id version `0x13` with 64 MiB of memory,
+3 passes, 1 lane, a 16-byte salt, and a 32-byte output. One lane, because a browser Worker is
+single-threaded unless the operator sets cross-origin isolation headers, and more lanes would give a
+single-threaded build no speedup while covering less memory per lane. Argon2id's optional secret
+parameter is unused. The salt is HKDF-Expand output derived from the Secret Key under a label that
+carries the profile identifier, and binds nothing else, so no life event and no operator change can
+silently invalidate a key. Parameters are the normative contract; the product states no wall-clock
+budget. A measurement on the weakest supported build is recorded in the design note `AUTH-012`
+requires before a registry entry is frozen.
+
+`AUTH-017 MUST` Key-derivation profiles are a closed, ordered, append-only registry compiled into
+every client. A Server descriptor names one entry and publishes no parameters. A client refuses an
+identifier it does not hold, reporting that the client needs updating, and never derives under
+parameters a Server supplies. No entry is ever removed or altered, because the pinned profile is the
+only route to an Account's Vault keys and retiring one would permanently lock out every Account still
+on it. ADR 0009.
+
+`AUTH-018 MUST` An Account is pinned to the profile it was created under, and a client derives under
+the pinned profile whatever a Server publishes. Where the published profile is stronger, the client
+offers an upgrade at the end of a full sign-in, while the master password is still in hand; the User
+may decline and is offered it again. An upgrade re-derives both HKDF outputs and re-wraps what the
+Vault-unlock material protects, which is the master password change path and not a new mechanism.
+Where the published profile is weaker than the pinned one, the client derives under the pinned profile
+and records the divergence in Security History. A downgrade attempt is Detectable.
+
+`AUTH-019 MUST` A Device holding no local state learns the pinned profile from the Emergency Kit,
+which prints it, or by attempting the published profile and then each older registry entry in
+descending order. A Server exposes no endpoint that returns an Account's profile and stores no
+per-Account profile, so this requirement adds nothing to the `PRIVACY-007` plaintext allowlist. The
+cost is one derivation per attempt, so a genuinely wrong password is reported only after the walk
+completes.
+
+`AUTH-020 MUST` The memory-hard step governs every derivation path that consumes a user-chosen
+secret, recovery included. A path uses HKDF alone only where every secret it consumes is
+machine-generated with at least 128 bits of entropy, which is why the Secret Key is not stretched. No
+path derives under a profile weaker than the Account's pinned profile, and no path carries its own
+parameters. ADR 0008.
+
+`AUTH-021 MUST` The master password is encoded as UTF-8 after NFKD normalization, with no trimming of
+leading or trailing whitespace, no case folding, and an empty password refused. Its minimum length is
+10 characters and no composition rule is imposed. The client shows an advisory strength estimate and
+offers a generated passphrase; the estimate never blocks. A Server cannot enforce master password
+policy, because no Server ever sees a master password, so an administrator has no lever here.
 
 `AUTH-004 MUST` Adding a Device supports trusted-device QR enrollment, master password plus Secret Key,
 and Emergency Kit recovery. The Server alone cannot provision decryption keys.

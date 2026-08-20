@@ -20,3 +20,15 @@ Decide:
 - What an observer learns from the fact that a rotation happened.
 
 Produces: a `VAULT-ROTATION-*` requirement family, a disposition row that currently does not exist, and seed scenarios covering the offline-epoch case.
+
+### Inherited from ticket 07, key derivation profiles
+
+`AUTH-018` makes a key-derivation profile upgrade re-derive both HKDF outputs and **re-wrap everything
+the Vault-unlock material protects**. That is the master password change path, so this ticket owns it
+rather than inventing a second mechanism. The upgrade must be **resumable**: an interruption partway
+through the re-wrap must not strand an Account between two profiles, with some wrappers under the old
+profile and some under the new.
+
+The upgrade is offered at the end of a full sign-in, while the master password is in hand, and the User
+may decline it. So an Account can sit on an old profile indefinitely, and the rotation model must treat
+that as a normal steady state rather than a transient.

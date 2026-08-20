@@ -18,16 +18,19 @@ Issues, Wayfinder maps, specs, and tickets are version-controlled Markdown under
 
 ### Wayfinder questions
 
-Ask every decision question through the `AskUserQuestion` tool or whats available to you. Do not ask decision questions as
-prose in a chat message.
+Ask every decision question through the `AskUserQuestion` tool, or the equivalent your harness
+offers. A decision put as prose in a chat message has not been asked.
 
-Each question must stand alone. Never point back to an earlier question by number or label. Restate
-the decision it builds on, in full, inside the question you ask now. The maintainer answers one
-screen at a time and cannot see the earlier round.
+Each question stands alone. The maintainer answers one screen at a time and cannot see the earlier
+round, so restate in full any decision this one builds on rather than naming it by number or label.
 
-Give each question the context needed to answer it: what is already settled, why this question
-follows from it, what each option means in concrete terms, and what each option costs. Prefer more
-detail over less. A question the maintainer must ask you to explain is a failed question.
+Recommend an answer. Put the option you recommend first and end its label with `(Recommended)`. When
+the choice is genuinely too close to call, say so in the question and give the trade-off instead.
+
+Write plain English. Short sentences, common words, one idea per sentence. Explain a technical term
+the first time it appears in a round. Say what is settled, what the choice is, and what each option
+costs, then stop: around six lines of question text, and one or two sentences per option. A question
+the maintainer has to read twice is a failed question.
 
 ### Triage labels
 

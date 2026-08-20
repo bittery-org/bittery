@@ -20,7 +20,7 @@ Decide:
 Produces: `AUTH-001` and `AUTH-006` rewrites, ceremony specifications, and glossary precision on Recovery Key versus Emergency Kit.
 ### Inherited from ticket 06, password authentication protocol
 
-`AUTH-010` requires the **Authentication profile identifier** to be printed on the Emergency Kit
+`AUTH-010` requires the **key-derivation profile identifier** to be printed on the Emergency Kit
 alongside the Secret Key. Without it, a user restoring from the Kit after a Server-wide parameter change
 cannot derive the right Authentication Key, and the Server cannot tell them which parameters to use
 without reintroducing an account-existence oracle. Fold it into whatever the Kit's layout becomes.
@@ -28,3 +28,15 @@ without reintroducing an account-existence oracle. Fold it into whatever the Kit
 Recovery paths that change the master password or the Secret Key necessarily re-derive and re-register
 the Authentication Key, because `AUTH-003` binds both secrets into it. That re-registration is an
 authenticated write and needs its place in each recovery flow.
+
+### Inherited from ticket 07, key derivation profiles
+
+`AUTH-020` sets an entropy floor this ticket must satisfy. A derivation path may skip the memory-hard
+step only where **every secret it consumes is machine-generated with at least 128 bits**. If the
+Emergency Kit or a Recovery Key falls below that, it must be stretched under the Account's pinned
+profile instead, and no path may ever use a weaker profile. The frozen product's 100,000-iteration
+recovery route against a 600,000-iteration main route is the defect this closes.
+
+`AUTH-019` makes the Emergency Kit the primary carrier of the **key-derivation profile identifier**.
+Without it, a fresh Device must walk the profile registry downward, paying one Argon2id run per
+attempt, so Kit contents are load-bearing for recovery latency as well as correctness.

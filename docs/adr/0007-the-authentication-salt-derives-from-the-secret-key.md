@@ -42,7 +42,9 @@ exists. Ticket 07 inherits the pinning and upgrade rules.
 
 An Account whose Authentication Key predates a parameter change must record which parameters it used.
 That is the Authentication profile: not a secret, held in Device state and printed on the Emergency Kit
-beside the Secret Key it already carries. Ticket 09 owns the Emergency Kit contents and ticket 10 owns
+beside the Secret Key it already carries. [ADR
+0008](0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md) collapsed the two derivations
+into one run, so there is a single profile per Account and the term is now **key-derivation profile**. Ticket 09 owns the Emergency Kit contents and ticket 10 owns
 Device state.
 
 Rotating the Secret Key changes the salt, so it re-derives the Authentication Key. That is already true

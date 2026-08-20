@@ -129,6 +129,24 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [0006](../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md),
   [0007](../../docs/adr/0007-the-authentication-salt-derives-from-the-secret-key.md).
 
+- [Key derivation profiles and downgrade resistance](issues/07-key-derivation-profiles-and-downgrade-resistance.md):
+  one Argon2id run, not two. HKDF-Expand labels already carry the `AUTH-002` domain separation, so the
+  second memory-hard run bought nothing and cost double on browser WASM; `AUTH-003` is amended. Profile 1
+  is Argon2id `0x13`, 64 MiB, 3 passes, 1 lane, with a 16-byte salt derived from the Secret Key. Parameters
+  are the contract and there is no wall-clock budget or CI time gate. `AUTH-017` makes profiles a closed,
+  ordered, **append-only** registry compiled into every client: the descriptor names an entry and publishes
+  no parameters, an unknown identifier is a hard refusal, and nothing is ever retired because retiring one
+  destroys every Account pinned to it. The pinned profile always governs; a stronger published profile is a
+  declinable upgrade offer at full sign-in, a weaker one is derived past and reported in Security History as
+  **Detectable**. A fresh Device finds its profile from the Emergency Kit or by walking the registry
+  downward, so no Server endpoint and no per-Account profile Server-side, leaving `PRIVACY-007` unchanged.
+  `AUTH-020` stretches only paths consuming a user-chosen secret, which deletes the frozen product's
+  100k-iteration recovery door by removing the stretch rather than tuning it, and binds recovery artifacts
+  to a 128-bit floor. Master password bytes are NFKD UTF-8 with a 10-character floor and an advisory zxcvbn
+  meter. ADRs
+  [0008](../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md),
+  [0009](../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md).
+
 ## Not yet specified
 
 In scope, but not yet sharp enough to phrase as a precise question. Graduates into tickets as the
@@ -152,6 +170,12 @@ frontier reaches it.
 - **Server equivocation defence.** Ticket 04 classes it Acknowledged for the first release, because
   detecting a Server that tells one Device a different story from another needs a transparency-log
   construction. Whether a later release closes it is a separate question.
+- **Breached-password blocklist.** `AUTH-021` ships zxcvbn as an advisory meter in the first release and
+  defers the common and breached password list to a later one. Two questions come with it and neither is
+  sharp yet: whether the list is embedded or looked up online, and whether a hit blocks or warns. An online
+  Have I Been Pwned lookup sends a hash prefix of the *master password* to a third party, so the opt-in
+  external-integration rule ticket 37 sets governs it. Revisit once 37 closes.
+
 - **Post-quantum posture.** Nothing in the corpus mentions it. Whether the envelope format leaves
   room for it is a question ticket 08 may sharpen.
 

@@ -17,3 +17,11 @@ Decide:
 - What the binding must support that the desktop and web hosts do not need.
 
 Explicitly out: iOS and Android UI, unlock UX, and platform-specific product behaviour. Those belong to a later map.
+
+### Inherited from ticket 07, key derivation profiles
+
+`AUTH-016` fixes key derivation at Argon2id with **64 MiB of memory**, and `AUTH-017` makes the profile
+registry append-only, so this number never falls. Any surface that performs a full sign-in must be able
+to allocate 64 MiB plus overhead for the duration of that derivation. If this surface cannot, it must
+not perform a full sign-in at all and must enrol by some other route, which is a decision this ticket
+owns rather than one it inherits.
