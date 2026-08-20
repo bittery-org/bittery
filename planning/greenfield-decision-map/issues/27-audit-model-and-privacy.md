@@ -37,3 +37,14 @@ implies decryption access to its Vaults.
 This ticket owns who holds the Team History Key: every member, or Team Owners and Admins only.
 Departure rotates it, which is cheap because it protects only a log. `CRYPTO-012` makes Security
 History's actor field provable rather than claimed, which is the point of signing revisions at all.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+Five events now require a Security History entry: a master password change (`AUTH-025`), a Secret Key
+rotation (`AUTH-027`), a Recovery Key creation and revocation (`AUTH-006`, `AUTH-030`), and a recovery
+sign-in (`AUTH-026`). The recovery sign-in is the compromise-shaped one, so its entry is the one a
+User must be able to find after the fact.
+
+`PRIVACY-007` gained the recovery authentication record and the Account Private Object ciphertext, so
+the Operator Log's event categories must be able to describe an Account-secret change without naming
+which secret changed.

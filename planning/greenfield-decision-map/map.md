@@ -162,6 +162,38 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [0010](../../docs/adr/0010-one-envelope-one-suite-and-a-version-byte-that-names-the-whole-format.md),
   [0011](../../docs/adr/0011-vault-grants-are-flat-signed-and-sealed-to-an-account-key-set.md).
 
+- [Extension Local Network Access and private-address classification](issues/52-extension-local-network-access-facts.md):
+  the Extension reaches a LAN Server **without a prompt on both engines today**, and on neither engine is
+  that a promise. Chromium maps `chrome-extension://` to the loopback address space on purpose but says
+  only that it has no plans to gate extensions *currently*; Firefox leaves a `moz-extension://` initiator
+  at `Unknown` by accident, diverging from the specification with no test covering it. **Content scripts
+  are gated on both engines** and neither vendor documents it, so the background host should own all
+  network I/O. `host_permissions` is not an exemption and no local-network extension permission exists.
+  `100.64.0.0/10` is classified **local**, not public, contradicting the ticket's premise, so the overlay
+  route earns its place by supplying `HOST-007`'s secure context rather than by dodging the gate.
+  `HOST-008`'s recommended route is prompt-free, as is every other `HOST-001` shape. A denial is a bare
+  `TypeError` indistinguishable from an unreachable Server. The Desktop webview is not gated today, but
+  Tauri's `tauri://localhost` origin classifies as public and WebView2 has no permission kind to answer
+  with. Firefox shipped the gate in **147**, not 149, and default-on in **153**, not 151. Full findings in
+  [research/extension-local-network-access.md](research/extension-local-network-access.md).
+
+- [Recovery model and single-artifact paths](issues/09-recovery-model-and-single-artifact-paths.md):
+  `AUTH-001` is rewritten as a closed list of **unlock routes**, each consuming two independent factors:
+  master password with Secret Key, Recovery Key with Secret Key, enrolled Device with its local
+  authorization. The recovery labels consume the Recovery Key **and** the Secret Key, so a stolen
+  recovery sheet is inert and the Emergency Kit splits into two documents. `AUTH-023` blocks the end of
+  Account creation until the Kit is saved. `AUTH-026` gives recovery its own credential under
+  `bittery/1/recovery-auth/1`, keeping the no-enumeration rule, and ends only after a new master
+  password, a Secret Key rotation, a new Recovery Key, both sheets, and the sign-out of every other
+  Device. `AUTH-025` requires the current password to change it, even on an unlocked Device.
+  `AUTH-027` makes Secret Key rotation propagate through a new **Account Private Object**, key context
+  `0x12`. `AUTH-028` downgrades "revoked" to **forward protection only** and rules out Account Key Set
+  rotation for the first release, so the Account Fingerprint is stable for life. `AUTH-029` renders the
+  route list as a screen. Peer and administrator-assisted recovery are out of scope. ADRs
+  [0012](../../docs/adr/0012-every-route-to-the-account-keys-consumes-two-factors.md),
+  [0013](../../docs/adr/0013-rotating-a-wrapping-secret-is-forward-protection-only.md),
+  [0014](../../docs/adr/0014-the-current-secret-key-is-stored-sealed-to-the-account-key-set.md).
+
 ## Not yet specified
 
 In scope, but not yet sharp enough to phrase as a precise question. Graduates into tickets as the
@@ -191,6 +223,11 @@ frontier reaches it.
   operator. `CRYPTO-014` gives out-of-band verification an Account Fingerprint to compare, which is a
   manual floor rather than a defence. Whether a later release ships a transparency log covering both is
   one question, not two.
+- **Account Key Set rotation.** `AUTH-028` rules it out of the first release, because `CRYPTO-005` binds
+  the Account Fingerprint into every grant signature so every granter would have to re-issue, and
+  `CRYPTO-012` needs a retained history of signing keys or every past revision becomes unverifiable.
+  A later release may want it, and it sits next to the transparency-log question above: both are about an
+  operator who keeps or substitutes key material, and one construction may answer both.
 - **Breached-password blocklist.** `AUTH-021` ships zxcvbn as an advisory meter in the first release and
   defers the common and breached password list to a later one. Two questions come with it and neither is
   sharp yet: whether the list is embedded or looked up online, and whether a hit blocks or warns. An online
@@ -215,6 +252,9 @@ Ruled beyond this destination. These never graduate; they would need the destina
   guarantees a clean reset. User-facing migration is handled as import in ticket 33.
 - **Exhaustive current-state cataloguing.** Superseded by the verification report; individual tickets
   pull narrow legacy evidence when a decision genuinely hangs on current behavior.
+- **Peer-held, delegated, and administrator-assisted recovery.** Ruled out in ticket 09 and stated in
+  `AUTH-005`. The threat model makes the operator an adversary, so an administrator can never restore
+  access, and a peer-held scheme is a separate feature with its own sharing, interface, and trust story.
 - **Marketing application and documentation site as products.**
 
 ## Tickets

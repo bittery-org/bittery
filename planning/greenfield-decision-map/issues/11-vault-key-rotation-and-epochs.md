@@ -45,3 +45,15 @@ instead of alarming the User.
 Vault, proportional to the Vault rather than to any Team above it. Decide whether re-encrypting
 existing ciphertext under a new epoch is ever mandatory: a departed member already read epoch N, so
 the honest answer may be that it never is.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+`AUTH-028` rules out Account Key Set rotation for the first release, so rotation in this product is
+Vault-scoped only. Nothing in the recovery model asks for a Vault key to move: a password change, a
+Secret Key rotation, a Recovery Key revocation and a recovery sign-in all re-wrap the Account Key Set
+and leave every grant intact.
+
+The reason Account Key Set rotation is out is worth carrying here: `CRYPTO-005` binds the Account
+Fingerprint into every grant signature, so new Account keys would force every granter to re-issue, and
+`CRYPTO-012` would need a retained history of signing keys or every past revision becomes
+unverifiable. A Vault key epoch design must not quietly acquire the same property.

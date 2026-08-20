@@ -29,3 +29,15 @@ destroy.
 Because `CRYPTO-002` makes the Account Key Set random rather than derived, a quick unlock path that
 recovers it does not need the master password anywhere in its chain, and an `AUTH-018` profile upgrade
 does not invalidate the wrapper.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+`AUTH-001` makes the Device Unlock Wrapper one of exactly three unlock routes, and it must consume
+**two independent factors**: possession of the enrolled Device plus the local authorization the
+wrapper requires. A quick unlock that opens the Account Key Set from Device state alone would add a
+fourth route without amending `AUTH-001`, and `AUTH-029` renders that as a defect on a screen.
+
+`AUTH-025` leaves the key context `0x03` envelope valid through a master password change, so quick
+unlock survives one. This ticket owns what happens to that envelope when a Device is signed out by
+`AUTH-026` recovery or by the optional sign-out on `AUTH-025` and `AUTH-027`, within `AUTH-008`'s
+limit on Devices that never reconnect.

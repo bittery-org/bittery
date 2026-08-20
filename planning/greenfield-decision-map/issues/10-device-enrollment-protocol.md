@@ -65,3 +65,17 @@ Wrapper key, which is where the enrolled Device parks it.
 A Device key pair still exists, but only for the `AUTH-011` Device credential on ordinary traffic. It
 never receives Vault content. `CRYPTO-014`'s Account Fingerprint is the natural thing for a QR
 enrolment to display and confirm.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+`AUTH-004` now names the three enrolment inputs as trusted-device QR, master password plus Secret Key,
+and the `AUTH-026` recovery sign-in. A fresh Device reads the Server address, the Account email, the
+Secret Key, the profile identifier and the Account Fingerprint from the Emergency Kit, and `AUTH-024`
+gives it a check symbol to validate before any derivation runs.
+
+Enrolment must deliver the `AUTH-027` Account Private Object alongside the Account Key Set, or a
+Device enrolled before a Secret Key rotation will never learn the current Secret Key.
+
+`AUTH-026` ends a recovery by signing out every other Device, and `AUTH-025` and `AUTH-027` offer the
+same sign-out with it off by default. What "sign out every other Device" does to a Device that is
+offline is this ticket's to specify, inside `AUTH-008`'s existing limit.

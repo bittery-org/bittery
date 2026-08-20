@@ -50,6 +50,8 @@ decrypt rather than being noticed afterwards.
 `PRIVACY-005 MUST` Five attacks are Acknowledged. Denial of service. Withholding data from a client.
 Server equivocation between two Devices of one Account. Every field on the `PRIVACY-007` list.
 Serving a substituted Web client bundle to a single targeted User, which `PRIVACY-015` states plainly.
+Reopening an Account Key Set from a backed-up wrapping after the matching secret was revoked or
+rotated, which `AUTH-028` states plainly.
 
 `PRIVACY-006 MUST` `PRIVACY-007` is a closed list. Any field the Server holds in plaintext that
 `PRIVACY-007` does not name is a defect. A repository check fails on any plaintext Server schema
@@ -58,7 +60,10 @@ column absent from the list.
 `PRIVACY-007 MUST` Server-visible plaintext is exactly:
 
 - **Account** — identifier, email address, status, password-authentication record, public keys,
-  wrapped Account Key Set. The wrapped Account Key Set is served only after a full sign-in succeeds.
+  wrapped Account Key Set, the recovery authentication record and the recovery-wrapped Account Key Set
+  where a Recovery Key exists, and the Account Private Object ciphertext. Either wrapped Account Key
+  Set is served only after the matching sign-in succeeds. Whether a Recovery Key exists is therefore
+  operator-visible, and `AUTH-006` says so.
 - **Device** — identifier, user-chosen name, public key, enrollment sequence number.
 - **Vault and Team** — identifier, name, owning User or Team, membership with role, wrapped Vault
   keys each with its granter Account identifier and grant signature, wrapped Team History Key per
@@ -189,7 +194,12 @@ The product never claims cross-Server atomic movement.
 
 ## Authentication, recovery, and Devices
 
-`AUTH-001 MUST` Master password and high-entropy Secret Key jointly protect account encryption.
+`AUTH-001 MUST` Every route to an Account's keys consumes two independent factors, and the routes are
+a closed list: master password plus Secret Key; Recovery Key plus Secret Key; an enrolled Device plus
+the local authorization its Device Unlock Wrapper requires. No route consumes one artifact alone. A
+new route is an amendment to this requirement, not a feature, and `AUTH-029` renders this list as a
+screen so an unlisted route shows up as a defect. On the first two routes one factor is human-chosen
+and one is machine-generated, which is what `AUTH-020`'s entropy floor prices. ADR 0012.
 
 `AUTH-002 MUST` Password authentication and Vault-key derivation are domain-separated systems.
 
@@ -282,19 +292,104 @@ offers a generated passphrase; the estimate never blocks. A Server cannot enforc
 policy, because no Server ever sees a master password, so an administrator has no lever here.
 
 `AUTH-004 MUST` Adding a Device supports trusted-device QR enrollment, master password plus Secret Key,
-and Emergency Kit recovery. The Server alone cannot provision decryption keys.
+and the `AUTH-026` recovery sign-in. The Server alone cannot provision decryption keys.
 
-`AUTH-005 MUST` Losing all trusted Devices, Secret Keys, and Recovery material is unrecoverable by an
-administrator.
+`AUTH-005 MUST` Losing every enrolled Device, the Secret Key, and the Recovery Key is unrecoverable by
+an administrator and by anyone else. The product ships no peer-held, delegated, or
+administrator-assisted recovery, so `AUTH-001`'s closed list is the whole set of ways back in.
 
-`AUTH-006 MUST` Optional Recovery Keys remain user-held, rotatable, revocable, and capable of changing
-the master password without Server decryption.
+`AUTH-006 MUST` A Recovery Key is optional, user-held, and machine-generated with at least 128 bits.
+Account creation offers one and the interface keeps offering while none exists; no Server setting
+requires or forbids one, because a Server cannot enforce a policy over a secret it never sees. The
+wrapping key is HKDF over the Recovery Key **and the Secret Key together** under
+`bittery/1/recovery-unlock`, so the recovery sheet alone opens nothing. The Server holds the key
+context `0x02` envelope and one recovery authentication record, serving the envelope only after an
+`AUTH-026` recovery sign-in succeeds. Whether an Account has a Recovery Key is therefore
+operator-visible, and `PRIVACY-007` names it.
+
+`AUTH-030 MUST` Revoking a Recovery Key deletes the key context `0x02` envelope and the recovery
+authentication record, and writes a Security History entry. That ends the route for every holder
+except one who already kept a copy of the envelope, which `AUTH-028` states rather than implies. The
+interface offers an `AUTH-027` Secret Key rotation immediately afterwards, because rotating the second
+factor is what makes a kept copy useless to anyone who never held the old Secret Key. Replacing a
+Recovery Key is a revoke followed by a create; the product exposes both verbs.
 
 `AUTH-007 MUST` Biometrics provide local authorization to use device-bound wrapping capability. They
 are not Server authentication or recovery credentials.
 
 `AUTH-008 MUST` Revocation takes effect when an offline Device reconnects. The product never claims
 remote erasure of a Device that never reconnects.
+
+`AUTH-022 MUST` The **Emergency Kit** is one sheet holding the Server address, the Account email
+address, the Secret Key, the key-derivation profile identifier, and the Account Fingerprint. It
+carries no Recovery Key, no master password, and no field for writing one, and it prints a line
+telling the holder not to add one. A **Recovery sheet** is a separate document, produced when a
+Recovery Key is created, carrying the Recovery Key and the same Account and Server identification,
+with instructions to store it away from the Kit. Two documents are what keeps `AUTH-001` true inside a
+filing cabinet, where one page carrying both factors would not be.
+
+`AUTH-023 MUST` Account creation does not complete until the Emergency Kit is printed or saved and the
+User confirms it. Both routes exist on every surface. The save route writes an unencrypted file and
+says so where the User clicks, naming the download location as the exposure. The product ships no
+passphrase-protected Kit file, because a second forgettable human secret inside the disaster path is
+worse than a plain file the User is told to move.
+
+`AUTH-024 MUST` The Secret Key is 16 bytes from a cryptographic random source, generated on the client
+at Account creation, and reaching a Server only inside the `AUTH-027` Account Private Object. A
+Recovery Key is generated the same way. Both are written as a version prefix, `SK1` and `RK1`
+respectively, then Crockford Base32 in groups of five characters, then one Crockford check symbol over
+the whole code. Distinct prefixes stop the two sheets being confused. A client validates the check
+symbol before any derivation runs, so a mistyped code is reported as a mistyped code and never as a
+wrong password after a slow derivation. Each sheet carries the same code as a QR for scanning. The
+encoding, the grouping, and the check symbol are conformance fixtures under `AUTH-012`.
+
+`AUTH-025 MUST` Changing the master password requires the current password on every surface, including
+a Device that is already unlocked and holds the Account Key Set. Requiring it is what stops brief
+access to an unlocked Device becoming a permanent lockout of its owner. The client derives the new
+Account Unlock Key under the pinned profile, or the stronger profile `AUTH-018` offers, unwraps the key
+context `0x01` envelope with the old key, re-wraps it with the new one, and derives the new
+Authentication Key. The Server applies the new envelope and the new authentication public key as one
+atomic write or neither. No Vault key moves, no grant changes, the salt is unchanged because the Secret
+Key is unchanged, and the key context `0x02` and `0x03` envelopes stay valid, so the Recovery Key and
+every other Device keep working. The change offers signing out every other Device, **off by default**,
+because a Device the User distrusts is revoked by name and a routine password change should not
+log out a phone. A Security History entry records it.
+
+`AUTH-026 MUST` A recovery sign-in is the `AUTH-003` challenge-response run with a recovery
+authentication key, derived by HKDF from the Recovery Key and the Secret Key together under
+`bittery/1/recovery-auth/1`, which carries the authentication protocol version exactly as the
+authentication label does. There is no pre-login request, so `AUTH-010`'s no-enumeration rule is
+unchanged. On success the Server serves the key context `0x02` envelope and the client opens the
+Account Key Set. The client shows no Vault content until the flow completes, and it completes only
+when a new master password is set, the Secret Key is rotated under `AUTH-027`, a new Recovery Key is
+issued, both sheets are produced, and every other Device is signed out. Recovery is a
+compromise-shaped event, so every secret that was carried to it is replaced; reprinting a Kit whose
+Secret Key had not changed would be theatre. A Security History entry records the recovery.
+
+`AUTH-027 MUST` The Secret Key is rotatable. A rotation derives a new salt and a new Account Unlock
+Key, re-wraps the key context `0x01` envelope, re-wraps the key context `0x02` envelope where a
+Recovery Key exists, re-registers the Authentication Key and the recovery authentication record, and
+produces a new Emergency Kit, as one atomic Server write or none. The current Secret Key is also held
+in an **Account Private Object**, key context `0x12`, sealed to the Account's own encryption key, so an
+enrolled Device picks up a rotation on its next sync rather than needing re-enrolment. Without it a
+User with several Devices leaves the rotation half-done. The Server holds that object as ciphertext it
+cannot read, and it widens nothing: whoever opens it already holds the Account Key Set. Rotation offers
+signing out every other Device, off by default, on the same reasoning as `AUTH-025`.
+
+`AUTH-028 MUST` Rotating or revoking a wrapping secret is **forward protection only**. An adversary
+holding a copy of a wrapped envelope, which operator backups contain, plus the matching old secrets,
+still opens the same Account Key Set. Only a new Account Key Set ends that, and the first release
+generates none, because a new key pair changes the Account Fingerprint that `CRYPTO-005` binds into
+every Vault grant signature, so every granter would have to re-issue. The stated remedy for a confirmed
+Account Key Set compromise is exporting into a fresh Account. Requirements, product documentation, and
+the `AUTH-029` screen say this in these terms rather than implying that revocation is complete.
+ADR 0013.
+
+`AUTH-029 MUST` One screen lists every live route into the Account, built from real state: each
+enrolled Device with the local authorization it uses, whether a Recovery Key exists, when the Emergency
+Kit was last produced, and the two factors each route consumes. Every route is revocable from that
+screen. It is generated from `AUTH-001`'s closed list, so a route the product grows without amending
+`AUTH-001` is visible as a defect rather than invisible.
 
 ## Cryptographic format
 
@@ -372,23 +467,26 @@ and so on. Moving ciphertext between Items, or serving one revision in place of 
 fails to decrypt rather than succeeding silently, which raises those attacks from Detectable to
 Prevented. No component may hand the cryptographic layer a blob without its context. A Share link
 snapshot binds the Share link identifier and never the source Item identifier, or `PRIVACY-010`
-unlinkability would fail.
+unlinkability would fail. An Account-scoped envelope, key contexts `0x01`, `0x02`, `0x03` and `0x12`,
+binds the Account identifier, so no wrapping of one Account's key material is accepted for another.
 
 `CRYPTO-010 MUST` Key contexts are a closed table, and the byte selects the envelope shape:
 `0x00` reserved and never valid; `0x01` Account Key Set under the Account Unlock Key; `0x02` Account
 Key Set under a Recovery Key; `0x03` Account Key Set under a Device Unlock Wrapper key; `0x10` Vault
 key sealed to an Account encryption key; `0x11` Team History Key sealed to an Account encryption key;
-`0x20` Item revision under a Vault key; `0x21` Attachment key under a Vault key; `0x22` Attachment
-chunk under an Attachment key; `0x30` Security History under a User History Key; `0x31` Security
-History under a Team History Key; `0x40` Share link snapshot under a Share link key. The context byte
-is plaintext and adds nothing to `PRIVACY-007`, because the Server already knows which table it read a
-blob from.
+`0x12` Account Private Object sealed to the Account's own encryption key; `0x20` Item revision under a
+Vault key; `0x21` Attachment key under a Vault key; `0x22` Attachment chunk under an Attachment key;
+`0x30` Security History under a User History Key; `0x31` Security History under a Team History Key;
+`0x40` Share link snapshot under a Share link key. The context byte is plaintext and adds nothing to
+`PRIVACY-007`, because the Server already knows which table it read a blob from.
 
 `CRYPTO-011 MUST` A key that protects data is generated randomly; an HKDF label exists only where a
 key is derived from a secret that already exists. The label registry is closed and its members are the
 ASCII byte strings `bittery/1/kdf-salt/1`, `bittery/1/auth-key/1`, `bittery/1/account-unlock`,
-`bittery/1/recovery-unlock`, `bittery/1/device-unlock`, `bittery/1/share-link`, and
-`bittery/1/search-index`, used verbatim as HKDF-Expand `info` with no terminator. The key-derivation
+`bittery/1/recovery-unlock`, `bittery/1/recovery-auth/1`, `bittery/1/device-unlock`,
+`bittery/1/share-link`, and `bittery/1/search-index`, used verbatim as HKDF-Expand `info` with no
+terminator. The two recovery labels consume the Recovery Key and the Secret Key together, which is
+what makes `AUTH-001`'s two-factor rule hold on the recovery route. The key-derivation
 profile identifier rides in the salt label per `AUTH-016`, and the authentication protocol version
 rides in the authentication label, so `AUTH-014` rotation is a label change and nothing more. A
 repository check asserts the table is pairwise distinct, because a collision would make two keys equal

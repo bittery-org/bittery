@@ -43,3 +43,14 @@ Departure therefore rotates only the Vaults the departing member was actually gr
 
 `CRYPTO-014` defines an Account Fingerprint and binds it into every grant. Whether any screen shows it,
 and what a User is told about comparing it out of band, is this ticket's call together with ticket 47.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+`AUTH-028` fixes the Account Fingerprint for the life of an Account in the first release, because no
+Account Key Set rotation ships. This ticket can treat a recipient's fingerprint as stable: a grant
+signed under `CRYPTO-005` never needs re-issuing because the recipient changed their password, rotated
+their Secret Key, revoked a Recovery Key, or recovered their Account.
+
+The converse is the constraint. Any departure or authorization design that would require an Account's
+keys to change must be flagged here, because the product has no ceremony for it and `AUTH-028` says so
+in the requirements.

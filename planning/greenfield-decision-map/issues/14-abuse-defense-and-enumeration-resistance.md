@@ -32,3 +32,13 @@ guessing. Registration, invitation, and Share-link endpoints keep their own enum
 
 One user-facing consequence to price: a user with the right password but the wrong or missing Secret Key
 fails identically to a user with the wrong password. Decide what the client says.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+`AUTH-026` adds a second authentication path, the recovery sign-in, using the same challenge-response
+under a different HKDF label. It needs the same rate limiting and the same silence as a full sign-in:
+there is no pre-login request, so no enumeration oracle appears, and this ticket must keep it that way.
+
+`AUTH-030` revocation and `AUTH-027` rotation are authenticated writes that delete or replace the
+material a locked-out User depends on. Their abuse limits belong here, along with what a Server does
+when recovery sign-ins fail repeatedly for one Account.

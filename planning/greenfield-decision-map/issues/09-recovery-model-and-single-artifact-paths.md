@@ -1,7 +1,7 @@
 # Recovery model and single-artifact paths
 
 Type: grilling
-Status: ready-for-human
+Status: resolved
 Blocked by: 08
 
 ## Question
@@ -53,3 +53,75 @@ Recovery Key, and `AUTH-020` already binds recovery artifacts to a 128-bit floor
 step, because the Recovery Key is machine-generated. The Emergency Kit must now also print or carry
 enough to reconstruct the Account Fingerprint (`CRYPTO-014`), if out-of-band verification is to work
 for a User who has lost every Device.
+
+## Answer
+
+Promoted to a rewritten [`AUTH-001`](../../../docs/greenfield/target/product.md) and `AUTH-006`, new
+`AUTH-022` through `AUTH-030`, amendments to `AUTH-004`, `AUTH-005`, `CRYPTO-009`, `CRYPTO-010`,
+`CRYPTO-011`, `PRIVACY-005` and `PRIVACY-007`, three ADRs, and seven new
+[`CONTEXT.md`](../../../CONTEXT.md) terms.
+
+**One rule replaces the joint-protection claim.** `AUTH-001` now says every route to the Account keys
+consumes **two independent factors**, and names the closed list: master password with Secret Key,
+Recovery Key with Secret Key, enrolled Device with its local authorization. No exception clause is
+needed, because there is no exception. The rejected alternative was an entropy rule allowing a single
+machine-generated 128-bit artifact to stand alone; it is correct about guessing and blind to a
+photographed sheet of paper. ADR 0012.
+
+**A Recovery Key alone opens nothing.** `bittery/1/recovery-unlock` consumes the Recovery Key **and**
+the Secret Key. One extra HKDF input makes a stolen recovery sheet inert, and makes revocation a real
+defence against a thief rather than only against a well-behaved Server.
+
+**The Kit splits into two sheets.** `AUTH-022`: the Emergency Kit carries the Server address, the
+Account email, the Secret Key, the key-derivation profile identifier, and the Account Fingerprint,
+with no Recovery Key, no master password, and a printed line against writing one. The Recovery Key
+gets its own sheet. `AUTH-023` refuses to finish Account creation until the Kit is saved or printed,
+and states that the saved file is unencrypted; a passphrase-protected Kit file was rejected as a
+second forgettable human secret inside the disaster path.
+
+**Recovery gets its own credential, not a back door.** `AUTH-026` runs the same `AUTH-003`
+challenge-response under `bittery/1/recovery-auth/1`, so there is still no pre-login request and no
+enumeration oracle. The Server serves the key context `0x02` envelope only after it succeeds. The
+flow shows no Vault content until a new master password is set, the Secret Key is rotated, a new
+Recovery Key is issued, both sheets are produced, and every other Device is signed out. Recovery
+replaces every secret carried to it; reprinting a Kit whose Secret Key had not changed would be
+theatre.
+
+**Master password change requires the current password,** including on an unlocked Device that
+already holds the Account Key Set (`AUTH-025`). That is what stops brief access to a borrowed laptop
+becoming a permanent lockout of its owner. The ceremony is one atomic write: re-wrap key context
+`0x01`, re-register the Authentication Key. The salt is unchanged, so contexts `0x02` and `0x03`
+survive and no other Device or Recovery Key is disturbed. Signing out other Devices is offered and
+**off by default**.
+
+**Secret Key rotation is supported and propagates.** `AUTH-027` adds an **Account Private Object**,
+key context `0x12`, sealed to the Account's own encryption key, holding the current Secret Key. An
+enrolled Device picks up a rotation on its next sync instead of being re-enrolled by hand. The Secret
+Key now exists on a Server as ciphertext, which widens nothing, because whoever opens the object
+already holds the Account Key Set. ADR 0014.
+
+**"Revoked" is downgraded to the truth.** `AUTH-030` deletes the recovery envelope and the recovery
+authentication record and writes a Security History entry, then offers a Secret Key rotation.
+`AUTH-028` states that rotating or revoking a wrapping secret is **forward protection only**: a
+backed-up envelope plus the matching old secrets still opens the same Account Key Set. Only a new
+Account Key Set ends that, and the first release ships none, because `CRYPTO-005` binds the Account
+Fingerprint into every grant signature so every granter would have to re-issue, and `CRYPTO-012` would
+need a retained history of signing keys or every past revision becomes unverifiable. The remedy for a
+confirmed compromise is export into a fresh Account. `PRIVACY-005` gained the matching Acknowledged
+attack. ADR 0013.
+
+**Printed secrets are checkable.** `AUTH-024`: 16 random bytes, prefix `SK1` or `RK1`, Crockford
+Base32 in groups of five, one Crockford check symbol, and a QR on each sheet. The client validates the
+check symbol before any derivation runs, so a typing error is never reported as a wrong password after
+a slow Argon2id run.
+
+**Users are shown their live routes.** `AUTH-029` renders `AUTH-001`'s closed list as one screen built
+from real state, with every route revocable from it. A route the product grows without amending
+`AUTH-001` shows up there as a defect.
+
+**Recovery Keys stay optional and stay the User's.** `AUTH-006`: offered hard at Account creation,
+never required or forbidden by a Server, because a Server cannot enforce a policy over a secret it
+never sees. Whether one exists is operator-visible, so `PRIVACY-007` names it.
+
+**Ruled out of scope:** peer-held, delegated, and administrator-assisted recovery. `AUTH-005` now says
+so, which makes `AUTH-001`'s closed list the whole set of ways back in.

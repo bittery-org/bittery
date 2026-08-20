@@ -21,3 +21,14 @@ Decide:
 - Error and recovery journeys, especially for the honest limitations the security decisions produce.
 
 Produces: the journey inventory that acceptance scenarios and UI specifications are written against.
+
+### Inherited from ticket 09, recovery model and single-artifact paths
+
+Three journeys are now fixed in outline and need their per-surface detail here. `AUTH-023` blocks the
+end of Account creation until the Emergency Kit is printed or saved. `AUTH-026` runs recovery as a
+single flow that shows no Vault content until a new master password, a Secret Key rotation, a new
+Recovery Key, both sheets, and the sign-out of every other Device are done. `AUTH-029` is one screen
+listing every live unlock route with each one revocable from it.
+
+`AUTH-028` sets the words: revocation and rotation are **forward protection**, not erasure, and the
+interface must not let a User read a deletion as an erasure.
