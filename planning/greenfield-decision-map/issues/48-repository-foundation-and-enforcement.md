@@ -18,3 +18,16 @@ Decide:
 - Where the MIT licence file goes and what headers, if any, source files carry.
 
 Produces: the repository-foundation specification that `CLAUDE.md` currently defers, and the build and test commands the checks section is waiting on.
+## Comments
+
+### Inherited from ticket 05, client delivery trust and transport
+
+Three new CI obligations arrive from this ticket, alongside the `PRIVACY-006` plaintext schema check.
+
+`PRIVACY-016` requires a reproducible Web client build whose content hash is published with each
+release, and the Server must serve that byte-exact bundle. The check has to compare what a Server
+would serve against the published hash.
+
+`HOST-009` and `ARCH-HOST-001` fix Content Security Policy strings for the Web client, the Desktop
+webview, and Extension pages. A check should assert the served header and the extension manifest match
+the requirement text, since a silently loosened policy is invisible otherwise.

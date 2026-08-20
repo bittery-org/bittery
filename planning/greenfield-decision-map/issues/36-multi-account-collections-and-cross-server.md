@@ -18,3 +18,14 @@ Decide:
 - What is genuinely deferred versus what must exist in the engine now.
 
 Produces: `ACCOUNT-*` refinement and an engine model, plus seed scenario 9.
+## Comments
+
+### Inherited from ticket 05, client delivery trust and transport
+
+`ACCOUNT-001` now restricts multi-Server to installed clients. This ticket's scope is Desktop and
+Extension only; the Web client's widest scope is the Server that served it. Decide what the Web client
+shows a user who has several Servers configured on their Desktop client, if anything.
+
+[ADR 0005](../../../docs/adr/0005-the-web-client-is-bound-to-the-server-that-served-it.md) holds the
+reasoning. A project-operated Web client origin was considered as a way to give Web full multi-Server
+parity, and rejected.

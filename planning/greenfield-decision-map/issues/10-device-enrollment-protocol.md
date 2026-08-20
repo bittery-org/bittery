@@ -27,3 +27,16 @@ Produces: an enrollment protocol specification, `AUTH-004` refinement, and seed 
 an Account must be told when a Device is enrolled, and the notification cannot depend on the Server
 choosing to deliver it. `PRIVACY-007` puts the Device name in Server-visible plaintext, so enrollment
 carries a user-chosen label the operator reads.
+### Inherited from ticket 06, password authentication protocol
+
+`AUTH-011` makes the full sign-in protocol authenticate **enrolment and full sign-in only**. Every
+ordinary request runs on a Device credential this ticket defines: its shape, its lifetime, how it is
+issued at the end of a successful full sign-in, and what forces a Device back to a full sign-in.
+
+Device state must hold the **Authentication profile identifier** under `AUTH-010`, because there is no
+pre-login exchange that could supply it.
+
+`AUTH-014` requires that a protocol-version rotation be a specified path: each client re-derives and
+re-registers its Authentication Key at next full sign-in while the Server refuses the superseded version.
+Decide how an enrolled Device with a live Device credential is driven back to a full sign-in when that
+happens.

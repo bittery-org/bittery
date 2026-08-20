@@ -71,6 +71,16 @@ valuable interface, separate compilation target, or enforced dependency directio
 - **Android:** Kotlin/Compose with UniFFI, Keystore, SQLite, WorkManager, and Credential Manager/
   Autofill integration.
 
+`ARCH-HOST-001 MUST` Every webview-hosted surface runs under a Content Security Policy. The Web client
+uses the `HOST-009` policy verbatim. The Desktop webview uses the same policy; a null or absent policy
+is a defect. Extension pages declare `script-src 'self' 'wasm-unsafe-eval'` under
+`content_security_policy.extension_pages`, which is the strictest policy Chromium and Firefox permit
+for MV3 and is the minimum under which the WASM engine instantiates.
+
+`ARCH-HOST-002 MUST` The Web client talks only to the Server that served it. It is same-origin with
+its Server, so no Server sends cross-origin resource sharing headers and no deployment configures an
+origin allowlist. `ACCOUNT-001` owns the product rule this enforces.
+
 All platforms share engine behavior, protocol types, fixtures, localization source, and design tokens.
 Native feature UI is not shared.
 

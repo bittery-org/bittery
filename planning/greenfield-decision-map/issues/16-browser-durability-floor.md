@@ -19,3 +19,13 @@ Decide from the result:
 - Whether the shared fixture corpus is genuinely shared, or splits by host class.
 
 Produces: a prototype under `planning/greenfield-decision-map/prototypes/`, an `ARCH-STORE-001` rewrite, and a fixture-corpus decision.
+## Comments
+
+### Inherited from ticket 05, client delivery trust and transport
+
+`HOST-007` makes a secure context a precondition for the Web client, so the Origin Private File
+System and `StorageManager.persist()` are guaranteed available. The prototype no longer has to plan
+for their absence, and the non-secure-origin branch of ticket 01's findings is closed.
+
+`HOST-009` pins `worker-src 'self'` and forbids `'unsafe-inline'`, so the prototype's Worker and WASM
+loading must work under that policy rather than assume a permissive page.

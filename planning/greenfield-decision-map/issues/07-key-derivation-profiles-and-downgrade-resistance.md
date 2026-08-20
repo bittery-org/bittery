@@ -18,3 +18,19 @@ Decide:
 - The combined cost of two KDFs on a low-end device, and whether that changes `AUTH-002`.
 
 Produces: `AUTH-*` requirements at parameter level, a versioned profile format, and negative test vectors.
+### Inherited from ticket 06, password authentication protocol
+
+`AUTH-010` makes key-derivation parameters **Server-wide and published in the Server descriptor**,
+never per Account. There is no pre-login exchange left to carry per-Account parameters, and removing
+them also removes the vector where a Malicious Operator hands one Device weaker parameters than
+another. This ticket owns what the published profile contains, how the client pins it, and what a
+parameter upgrade looks like when it necessarily applies to every Account at once.
+
+`AUTH-003` fixes **two independent Argon2id runs per full sign-in**, one producing the Authentication
+Key and one producing Vault-unlock material. Profile selection must be priced against double cost on
+the weakest hardware, which is browser WASM. `AUTH-011` bounds how often that cost is paid: enrolment
+and full sign-in only.
+
+The Authentication profile identifier is not secret and lives in Device state and on the Emergency Kit,
+because the Server cannot supply it before a full sign-in begins. Decide whether the Vault-unlock
+profile is carried the same way or separately.

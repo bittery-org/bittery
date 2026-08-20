@@ -18,3 +18,13 @@ Decide:
 - What the UI tells a user about the strength of each recovery artifact.
 
 Produces: `AUTH-001` and `AUTH-006` rewrites, ceremony specifications, and glossary precision on Recovery Key versus Emergency Kit.
+### Inherited from ticket 06, password authentication protocol
+
+`AUTH-010` requires the **Authentication profile identifier** to be printed on the Emergency Kit
+alongside the Secret Key. Without it, a user restoring from the Kit after a Server-wide parameter change
+cannot derive the right Authentication Key, and the Server cannot tell them which parameters to use
+without reintroducing an account-existence oracle. Fold it into whatever the Kit's layout becomes.
+
+Recovery paths that change the master password or the Secret Key necessarily re-derive and re-register
+the Authentication Key, because `AUTH-003` binds both secrets into it. That re-registration is an
+authenticated write and needs its place in each recovery flow.

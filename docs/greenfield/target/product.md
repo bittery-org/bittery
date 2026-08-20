@@ -34,13 +34,15 @@ a client accepts. A member holding the Vault key grants access by wrapping that 
 authorization record never grants access. Server-side access control is an availability and abuse
 control only.
 
-`PRIVACY-004 MUST` Four Malicious Operator attacks are Detectable. Enrolling a Device without every
+`PRIVACY-004 MUST` Five Malicious Operator attacks are Detectable. Enrolling a Device without every
 existing Device of that Account being told. Presenting Vault membership that no member signed.
 Replaying Server state older than a client already accepted. Dropping or reordering an Item revision,
-which a per-Item revision chain exposes.
+which a per-Item revision chain exposes. Serving every User a Web client bundle that is not the
+published release, which `PRIVACY-016` makes checkable by any third party.
 
-`PRIVACY-005 MUST` Four attacks are Acknowledged. Denial of service. Withholding data from a client.
+`PRIVACY-005 MUST` Five attacks are Acknowledged. Denial of service. Withholding data from a client.
 Server equivocation between two Devices of one Account. Every field on the `PRIVACY-007` list.
+Serving a substituted Web client bundle to a single targeted User, which `PRIVACY-015` states plainly.
 
 `PRIVACY-006 MUST` `PRIVACY-007` is a closed list. Any field the Server holds in plaintext that
 `PRIVACY-007` does not name is a defect. A repository check fails on any plaintext Server schema
@@ -75,7 +77,8 @@ sole exception.
 
 `PRIVACY-012 MUST` Released client builds are reproducible and their signatures are published, so a
 substituted build is Detectable by a third party. The product never claims that a running client
-detects its own compromise.
+detects its own compromise. `PRIVACY-016` extends this to the Web client bundle, which is re-fetched
+on every load rather than installed once.
 
 `PRIVACY-013 MUST` Product documentation states the `PRIVACY-007` list in plain language, naming Vault
 names, Team names, Device names, email addresses, and the Vault membership graph as readable by the
@@ -83,6 +86,17 @@ operator.
 
 `PRIVACY-014 MUST` Server request logs carry a documented default retention bound. Unbounded request
 logging reintroduces the wall-clock history that `PRIVACY-008` removes.
+
+`PRIVACY-015 MUST` The Web client's guarantee is per-load trust in its serving operator. That operator
+ships the code that handles the master password on every load, and can serve different code to one
+User. `ADMIN-001`'s Prevented verbs therefore describe installed clients; on the Web client the same
+operator attack is Acknowledged. Product documentation states this. Matching `PRIVACY-013`, no in-app
+screen and no signup interstitial states it.
+
+`PRIVACY-016 MUST` Each release publishes the content hash of its Web client bundle alongside the
+`PRIVACY-012` signatures. A Server serves the byte-exact published bundle for the version it declares,
+and exposes the served bundle's hash at a documented well-known path. A substitution served to every
+User is therefore Detectable by a third party. A substitution served to one User stays Acknowledged.
 
 ## Self-hosting
 
@@ -102,24 +116,56 @@ SMTP.
 `HOST-006 MUST` No client or Server contacts an external service by default. Every integration is
 separately enabled and documents its disclosure.
 
+`HOST-007 MUST` The Web client is served only from a secure context. A Server refuses to serve the Web
+client over a non-secure origin and returns a page stating the requirement. A non-secure origin
+withholds `crypto.subtle`, the Origin Private File System, Service Workers, the Cache API, and
+`StorageManager.persist()`, so the Web client cannot meet its storage and cryptographic obligations
+there. `http://localhost` and `127.0.0.0/8` are secure contexts; RFC 1918 addresses and `*.local`
+names are not. This answers the Network Attacker class.
+
+`HOST-008 MUST` The product ships no certificate authority, no certificate generation, and no
+certificate renewal. Documentation gives a supported route to a secure context for each `HOST-001`
+deployment shape: a private overlay network that issues publicly-trusted certificates for its own
+names, a publicly-trusted certificate for an internet-reachable name, an operator-supplied private
+certificate authority, and a loopback forward for single-machine use.
+
+`HOST-009 MUST` A Server serves the Web client under exactly this Content Security Policy:
+
+```text
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:;
+connect-src 'self'; worker-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none';
+form-action 'none'; object-src 'none'
+```
+
+`'wasm-unsafe-eval'` is required or the engine cannot instantiate. `'unsafe-inline'` and
+`'unsafe-eval'` are defects, so every style and script is external or hashed. `connect-src 'self'` is
+achievable only because `ACCOUNT-001` binds the Web client to its serving Server.
+
 ## Administration and registration
 
 `ADMIN-001 MUST` Administrators control admission, suspension, quotas, retention, and deletion of
 encrypted server data. They cannot decrypt or impersonate Users, and cannot reset cryptographic
 secrets. Enrolling a replacement Device is Detectable, not Prevented. `PRIVACY-002` defines these
-words, and `PRIVACY-007` bounds what an administrator sees.
+words, and `PRIVACY-007` bounds what an administrator sees. These Prevented verbs describe installed
+clients. On the Web client, `PRIVACY-015` downgrades "cannot decrypt" to Acknowledged, because the
+administrator serves the code that handles the master password.
 
 `ADMIN-002 MUST` Registration supports configurable open, invitation-only, and closed modes.
 Administrator-created enrollment is an invitation; administrators never choose user secrets.
 
 ## Accounts, Servers, and unified use
 
-`ACCOUNT-001 MUST` One client can configure Accounts from several independent Servers.
+`ACCOUNT-001 MUST` One installed client can configure Accounts from several independent Servers. An
+installed client is a released, signed Desktop or Extension build. The Web client configures only
+Accounts of the Server that served it, one or many, because a page served by Server A must never hold
+Server B's Vault keys.
 
 `ACCOUNT-002 MUST` Local Account identity is scoped by stable Server identity and User identity, not
 email or URL alone.
 
-`ACCOUNT-003 MUST` The active scope may be one Account, one local Collection, or All Accounts.
+`ACCOUNT-003 MUST` The active scope may be one Account, one local Collection, or All Accounts. Local
+Collections and All Accounts are installed-client scopes; the Web client's widest scope is the Server
+that served it.
 
 `ACCOUNT-004 MUST` Browse, search, Favorites, recent Items, autofill, and Sentinel follow the active
 scope. Aggregated results expose their Vault and Account/Server provenance.
@@ -138,8 +184,42 @@ The product never claims cross-Server atomic movement.
 
 `AUTH-002 MUST` Password authentication and Vault-key derivation are domain-separated systems.
 
-`AUTH-003 SHOULD` RFC 9807 OPAQUE is the intended password-authentication protocol. Exact suite and
-record encoding remain OPEN until conformance and security-review gates pass.
+`AUTH-003 MUST` A full sign-in is a signature challenge-response. Argon2id runs over the master
+password, HKDF-Extract mixes in the Secret Key, and HKDF-Expand under an authentication label produces
+the 32-byte seed of an Ed25519 Authentication Key. The Server stores the 32-byte public key and no other
+password-derived value. No password-derived secret ever reaches the Server, at rest or on the wire. The
+Vault-unlock derivation is a second, independent memory-hard run, satisfying `AUTH-002`. ADR 0006
+records why OPAQUE, SRP-6a, and an authentication hash were rejected.
+
+`AUTH-009 MUST` The signed message is canonical and length-prefixed, and binds a purpose label, the
+protocol version, the Server identity, the Account identifier, and a single-use Sign-in Challenge issued
+by the Server. Binding the Server identity is what stops a hostile Server relaying a challenge from
+another Server, which `ACCOUNT-001` makes a live case for installed clients.
+
+`AUTH-010 MUST` The authentication salt derives from the Secret Key on the client. The Server stores no
+salt, sends no salt, and exposes no endpoint that reveals whether an Account exists before a full sign-in
+begins. Key-derivation parameters are Server-wide and published in the Server descriptor, not per
+Account, so no Device can be handed weaker parameters than another. The Authentication profile
+identifier is held in Device state and printed on the Emergency Kit. ADR 0007.
+
+`AUTH-011 MUST` The full sign-in protocol authenticates Device enrolment and full sign-in only. An
+enrolled Device authenticates ordinary traffic with its Device credential. Every surface uses the same
+protocol and the same Server endpoint, including the Web client, so no weaker authentication path exists
+to steer a client onto.
+
+`AUTH-012 MUST` The construction ships with a written design note and conformance test vectors. The
+vectors enter the conformance fixture corpus, proving the Rust core, the WASM build, and the Server
+produce and verify byte-identical results.
+
+`AUTH-013 MUST` An external cryptographic review of the design note is a gate before general
+availability, and precedes any penetration test of the running system. Beta release ahead of that review
+is permitted. Product documentation states that the authentication protocol is a bespoke construction
+pending external review, following the documentation-only disclosure rule `PRIVACY-013` sets.
+
+`AUTH-014 MUST` The authentication protocol version is rotatable without touching Vault data. Publishing
+a new version, having each client re-derive and re-register its Authentication Key at next full sign-in,
+and refusing the superseded version at the Server is a specified path, not an implied one. No Vault data
+moves and nothing is decrypted.
 
 `AUTH-004 MUST` Adding a Device supports trusted-device QR enrollment, master password plus Secret Key,
 and Emergency Kit recovery. The Server alone cannot provision decryption keys.

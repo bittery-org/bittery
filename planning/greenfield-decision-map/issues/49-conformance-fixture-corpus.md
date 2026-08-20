@@ -18,3 +18,12 @@ Decide:
 - Where the twelve seed scenarios land, and which are replaced.
 
 Produces: the corpus specification and the resolution of the seed scenario list.
+### Inherited from ticket 06, password authentication protocol
+
+`AUTH-012` hands this ticket the **authentication vectors**: Argon2id output, HKDF-Extract and
+HKDF-Expand steps, the Ed25519 seed, the canonical length-prefixed signed message, and the signature.
+The construction is bespoke, so cross-implementation agreement between the Rust core, the WASM build,
+and the Server is proven by fixtures rather than by an RFC's published vectors.
+
+The canonical encoding of the signed message is the sharp edge: the corpus must include cases that would
+catch an ambiguous encoding, where two different field sets could produce the same byte string.

@@ -18,3 +18,17 @@ Decide:
 - Whether any bot defense beyond throttling is in scope, given no external services by default.
 
 Produces: an `ABUSE-*` requirement family and disposition rows for a subsystem currently unclassified.
+### Inherited from ticket 06, password authentication protocol
+
+Enumeration on the sign-in path is **gone by construction**, not by defence. `AUTH-010` derives the salt
+from the Secret Key, so the Server exposes no endpoint that reveals whether an Account exists before a
+full sign-in begins. There is no decoy-salt response to make indistinguishable, in content or in timing.
+
+What remains for this ticket: the Sign-in Challenge endpoint is unauthenticated and hands out nonces, so
+it needs issuance limits and a challenge lifetime. Online guessing is weaker than usual because
+`AUTH-003` binds the Secret Key into the credential, so an attacker holding only a leaked password cannot
+produce a valid signature at all; rate limiting bounds resource abuse more than it bounds credential
+guessing. Registration, invitation, and Share-link endpoints keep their own enumeration questions.
+
+One user-facing consequence to price: a user with the right password but the wrong or missing Secret Key
+fails identically to a user with the wrong password. Decide what the client says.

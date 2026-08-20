@@ -103,6 +103,31 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [0001](../../docs/adr/0001-server-visible-plaintext-is-a-closed-allowlist.md),
   [0002](../../docs/adr/0002-the-server-stores-sequence-numbers-not-timestamps.md),
   [0003](../../docs/adr/0003-audit-splits-into-an-operator-log-and-a-security-history.md).
+- [Client delivery trust and transport requirements](issues/05-client-delivery-trust-and-transport.md):
+  a secure context is a `MUST` for the Web client (`HOST-007`) and the product ships no certificate
+  tooling (`HOST-008`), with a private overlay network the recommended LAN route. No HSTS, because the
+  client already refuses a non-secure origin and an operator certificate mistake would lock users out.
+  `ACCOUNT-001` now restricts multi-Server to installed clients, so the Web client is bound to the
+  Server that served it: no CORS anywhere, and `connect-src 'self'`. SRI was rejected as useless
+  against a serving operator; `PRIVACY-016` publishes the bundle hash instead, making fleet-wide
+  substitution Detectable and targeted substitution Acknowledged. `PRIVACY-015` states the Web client's
+  per-load trust in requirements and documentation only. `HOST-009` fixes an exact Content Security
+  Policy that also binds the Desktop webview. ADRs
+  [0004](../../docs/adr/0004-the-web-client-requires-a-secure-context-and-the-operator-supplies-the-certificate.md),
+  [0005](../../docs/adr/0005-the-web-client-is-bound-to-the-server-that-served-it.md).
+
+- [Password authentication protocol and its fallback](issues/06-password-authentication-protocol.md):
+  OPAQUE and SRP-6a both rejected. No augmented PAKE removes the offline dictionary attack, and the
+  Secret Key already makes it cost ~128 bits, so OPAQUE's pre-computation resistance bought nothing for
+  its dependency risk. The frozen SRP-6a is 1,703 lines of hand-written Rust with its own big-integer
+  module whose modexp is documented as not constant-time. `AUTH-003` is now a signature
+  challenge-response: Argon2id, HKDF, Ed25519, signing a canonical message that binds purpose, version,
+  Server identity, Account, and a single-use challenge. The salt derives from the Secret Key, so there is
+  no pre-login request and no enumeration oracle, at the price of Server-wide published KDF parameters.
+  One protocol on every surface; it runs at enrolment and full sign-in only. A cryptographic construction
+  review gates general availability, ahead of any pentest. ADRs
+  [0006](../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md),
+  [0007](../../docs/adr/0007-the-authentication-salt-derives-from-the-secret-key.md).
 
 ## Not yet specified
 
@@ -115,10 +140,13 @@ frontier reaches it.
   documentation `ARCH-SERVER-004` implies. Shape depends on ticket 23.
 - **Second-cut scope.** All Accounts aggregation UI, Collections, and cross-Server copy have their
   engine model decided in ticket 36, but their product and UI decisions wait for the first release
-  to close.
+  to close. Ticket 05 settled that these are installed-client features only, so the surface is Desktop
+  and Extension.
 - **Supported OS and browser version matrix.** Depends on tickets 41, 42, and 45.
-- **Security review gate.** Whether an external cryptographic review happens, when, and against what
-  artifact. Sharpens once tickets 06, 07, and 08 have produced something reviewable.
+- **Security review gate beyond authentication.** Ticket 06 settled the pattern for its own
+  construction: a written design note, a cryptographic construction review before general availability,
+  a penetration test after it. Whether one engagement covers the key hierarchy and envelope format too,
+  and what artifact tickets 07 and 08 hand a reviewer, is still open.
 - **Passkey-based Bittery login.** `ITEM-002` makes passkeys a stored capability rather than a login
   method. Whether that ever changes is a later question.
 - **Server equivocation defence.** Ticket 04 classes it Acknowledged for the first release, because
@@ -193,7 +221,7 @@ number wins.
 | [38](issues/38-clientruntime-interface.md) | grilling | ClientRuntime interface | 15, 17 |
 | [39](issues/39-binding-strategy-native-and-wasm.md) | prototype | Binding strategy across native and WASM | 38 |
 | [40](issues/40-web-host-worker-and-effect.md) | grilling | Web host: Worker, adapters, and the Effect decision | 39 |
-| [41](issues/41-extension-architecture.md) | grilling | Extension architecture for Chromium and Firefox | 03, 39, 40 |
+| [41](issues/41-extension-architecture.md) | grilling | Extension architecture for Chromium and Firefox | 03, 39, 40, 52 |
 | [42](issues/42-desktop-architecture-and-ipc.md) | grilling | Desktop architecture and the extension IPC | 39, 41 |
 | [43](issues/43-mobile-architecture-seams.md) | grilling | Mobile architecture seams | 13, 39 |
 | [44](issues/44-design-system-on-base-ui.md) | prototype | Design system on Base UI | 40 |
@@ -204,3 +232,4 @@ number wins.
 | [49](issues/49-conformance-fixture-corpus.md) | grilling | Conformance fixture corpus | 08, 15, 39 |
 | [50](issues/50-performance-budgets.md) | grilling | Performance budgets | 20, 38 |
 | [51](issues/51-first-release-cut-and-implementation-gate.md) | grilling | First-release cut and the implementation gate | most of the map |
+| [52](issues/52-extension-local-network-access-facts.md) | research | Extension Local Network Access and private-address classification | — |

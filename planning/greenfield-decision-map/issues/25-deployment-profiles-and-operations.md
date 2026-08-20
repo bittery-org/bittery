@@ -26,3 +26,13 @@ Produces: `HOST-002` refinement and a deployment specification.
 `PRIVACY-014` requires a documented default retention bound on Server request logs. Unbounded request
 logging carries wall-clock times and request paths, which reintroduces exactly the history
 `PRIVACY-008` removes from the database. Set the default here, and state what a request log contains.
+
+### Inherited from ticket 05, client delivery trust and transport
+
+`HOST-008` puts certificate management wholly in operator hands and rules out shipping any
+certificate authority or tooling. The four supported routes to a secure context land in this ticket's
+deployment documentation, with a private overlay network as the recommended LAN route.
+
+`HOST-007` means a deployment profile that cannot reach a secure context serves no Web client at all.
+Decide what such a profile tells the operator, and whether the single-node profile does anything to
+help (a documented reverse-proxy recipe, for instance) short of issuing certificates.

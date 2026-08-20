@@ -68,3 +68,45 @@ _Avoid_: user audit log, activity feed, account history
 The hash linking each Item revision to the one before it, so that dropping or reordering a revision
 is Detectable.
 _Avoid_: history hash, version chain, merkle log
+
+## Clients
+
+**Installed client**:
+A released, signed Desktop or Extension build. It is obtained once from a published artifact, so its
+integrity does not depend on any Server. Only an installed client holds Accounts from more than one
+Server.
+_Avoid_: native client, app, desktop app
+
+**Web client**:
+The browser client a Server serves at its own origin. It is re-fetched on every load from that
+Server, so it holds only that Server's Accounts and its integrity depends on that operator per load.
+_Avoid_: web app, browser client, PWA
+
+**Serving operator**:
+The operator of the Server that delivered the running Web client. For an installed client there is no
+serving operator.
+_Avoid_: host, page owner
+
+## Authentication
+
+**Full sign-in**:
+The exchange that proves possession of the master password and the Secret Key to a Server. It runs at
+Device enrolment and whenever a Device has no valid Device credential. Ordinary traffic never uses it.
+_Avoid_: login, log in, authentication (as a noun for this specific exchange)
+
+**Authentication Key**:
+The Ed25519 key pair derived from the master password and the Secret Key. Its private half exists only
+in memory during a full sign-in; the Server holds the public half and nothing else.
+_Avoid_: auth key, login key, verifier, password verifier
+
+**Sign-in Challenge**:
+The single-use nonce a Server issues to begin a full sign-in. The client returns a signature over a
+canonical message binding the nonce, the Server, the Account, the protocol version, and a purpose
+label.
+_Avoid_: challenge token, login token, nonce (unqualified)
+
+**Authentication profile**:
+The identifier of the published key-derivation parameters an Authentication Key was derived under. It
+is not secret. Devices hold it locally and the Emergency Kit prints it, because the Server cannot
+supply it before a full sign-in begins.
+_Avoid_: KDF version, work factor, difficulty

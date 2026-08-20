@@ -18,3 +18,14 @@ Decide:
 - Whether the release gate keeps a requirement ID so CI can enforce it.
 
 Produces: an `ARCH-WEB-*` requirement family and a dependency decision with a named fallback.
+## Comments
+
+### Inherited from ticket 05, client delivery trust and transport
+
+`HOST-009` fixes the Web client's Content Security Policy exactly, and it constrains bundling: no
+inline script and no inline style, so everything is external or hashed; `worker-src 'self'`;
+`script-src 'self' 'wasm-unsafe-eval'`, which is mandatory or the WASM engine cannot instantiate.
+Verify the chosen bundler emits nothing inline before the choice is locked.
+
+`ARCH-HOST-002` makes the Web client same-origin with its Server, so `connect-src 'self'` holds and
+the web host never needs a configurable Server URL at runtime.
