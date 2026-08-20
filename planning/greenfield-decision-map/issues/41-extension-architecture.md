@@ -27,12 +27,8 @@ directive at `'none'`, `'self'` and `'wasm-unsafe-eval'`, and impose
 `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` as the floor, so there is nothing to choose
 beyond declaring it. Without `'wasm-unsafe-eval'` the engine does not instantiate.
 
-Unresolved and relevant here: Chrome 142 and later, and Firefox from 149 (strict) rolling out from
-151, gate requests from a public origin to RFC 1918 addresses, loopback, and `.local` names behind a
-user permission prompt; Firefox 154 extended it to WebSockets on 2026-08-17. Whether an extension
-background context is subject to that gate, and whether `100.64.0.0/10` (overlay networks) counts as
-private, are both unsettled. This decides whether an Extension can reach a LAN Server without a
-prompt. Worth a research ticket before this session runs.
+Local Network Access was unresolved when this comment was written. Ticket 52 has now settled the
+facts; see the comment below.
 
 ### Inherited from ticket 07, key derivation profiles
 
@@ -41,3 +37,33 @@ registry append-only, so this number never falls. Any surface that performs a fu
 to allocate 64 MiB plus overhead for the duration of that derivation. If this surface cannot, it must
 not perform a full sign-in at all and must enrol by some other route, which is a decision this ticket
 owns rather than one it inherits.
+
+### Inherited from ticket 52, Local Network Access facts
+
+[Ticket 52](52-extension-local-network-access-facts.md) resolved. Findings in
+[research/extension-local-network-access.md](../research/extension-local-network-access.md).
+
+A background context reaches a LAN Server **without a prompt on both engines today**, because
+Chromium maps `chrome-extension://` to the loopback address space and Firefox leaves a
+`moz-extension://` initiator at `Unknown`. Neither is a contract. Chrome says it has no plans "to
+apply LNA restrictions to extensions" *currently*, and the mechanism already failed in Chrome 138 and
+139. Firefox's exemption is a specification divergence with no test covering it, and Bugzilla shows an
+engineer intending to write the real check.
+
+Two decisions land in this ticket as a result:
+
+- **Content scripts are gated.** They inherit the host page's client security state on both engines,
+  so a content script on a public page is blocked from a LAN Server exactly as that page would be.
+  Undocumented by either vendor. This is an argument for the background host owning **all** network
+  I/O, with content scripts as message-passing clients that never open a socket. Read alongside
+  ticket 03: `storage.session` is already unreachable from a Firefox content script, so both facts
+  point the same way.
+- **Withdrawal behaviour.** If either engine removes its exemption, every LAN and overlay deployment
+  breaks with a bare `TypeError` that is indistinguishable from an unreachable Server. The only
+  discriminator is `navigator.permissions.query({name: "local-network"})`, which works on both
+  engines. Whether the Extension probes that to give an honest error is this ticket's call.
+
+`host_permissions` is not an exemption and no local-network extension permission exists on either
+engine, so there is nothing to declare in the manifest. `100.64.0.0/10` is classified **local**, not
+public, so the overlay route changes nothing about the gate; it earns its place by supplying the
+secure context `HOST-007` demands.

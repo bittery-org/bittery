@@ -37,3 +37,24 @@ registry append-only, so this number never falls. Any surface that performs a fu
 to allocate 64 MiB plus overhead for the duration of that derivation. If this surface cannot, it must
 not perform a full sign-in at all and must enrol by some other route, which is a decision this ticket
 owns rather than one it inherits.
+
+### Inherited from ticket 52, Local Network Access facts
+
+[Ticket 52](52-extension-local-network-access-facts.md) resolved. Findings in
+[research/extension-local-network-access.md](../research/extension-local-network-access.md).
+
+The Desktop webview is **not** gated today. Microsoft holds Local Network Access off for WebView2 and
+has published a breaking-change notice saying so, and WebKit has the flag at `status: unstable` with
+`default: false` and the check algorithm unlanded. Apple's TN3179 confirms that `WKWebView` traffic
+does not trip the macOS app-level local network prompt, so no `NSLocalNetworkUsageDescription` is
+needed. Linux has no OS-level gate.
+
+The latent risk is the **page origin**. Tauri serves from `tauri://localhost` or
+`http://tauri.localhost`, and Chromium's documented rule is that an unhandled scheme gets `kUnknown`,
+"which is equivalent to public". `CoreWebView2PermissionKind` has no local-network value, so a
+WebView2 host cannot answer the prompt even if it wanted to. If WebView2 enables the feature before
+Microsoft adds that permission kind, a Desktop client on a LAN deployment breaks with no in-app
+remedy. Two escapes exist and this ticket picks one or neither: route Server traffic through Tauri's
+`plugin-http`, which uses Rust `reqwest` and bypasses the webview network stack entirely, or pass
+`--disable-features=` through `AdditionalBrowserArguments`, which is a per-application switch rather
+than a user setting.
