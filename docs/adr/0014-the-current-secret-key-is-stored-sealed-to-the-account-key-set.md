@@ -1,6 +1,8 @@
 # The current Secret Key is stored sealed to the Account Key Set
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 09 on 2026-08-20.
 
 The Secret Key had one home: paper, and whatever local state each Device kept. That is fine until it
 rotates. `AUTH-027` makes rotation cheap in cryptographic terms, one re-wrap and one re-registration,

@@ -45,6 +45,12 @@ promotes the relevant ones into `docs/greenfield/target/` as its ticket resolves
   tree.
 - **Build order is Rust core, then server and sync, then the clients around them.** The all-or-nothing
   implementation gate becomes per-slice; ticket 51 settles the exact form.
+- **Cryptography is being reopened before specifications begin.** Prefer, in order: constructions
+  standardized in final RFCs and implemented by mature reviewed libraries; the smallest protocol,
+  primitive, format, and migration surface that meets the threat model; and bespoke construction only
+  where a recorded requirement cannot be met by a standard design. "More layers" is not treated as
+  "more secure". Ticket 53 sharpens this into an acceptance policy before tickets 06 through 09 are
+  decided again.
 
 ### Working discipline
 
@@ -79,6 +85,11 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
 
 <!-- one line per closed ticket, linking the ticket that holds the detail -->
 
+Tickets 07 through 09 remain reopened after the 2026-08-20 consistency audit. Their summaries below
+record the previously accepted answers as history, not current decisions. The promoted requirements
+and ADRs they produced remain visibly present but are candidate material under review; specifications
+must not rely on them until the tickets resolve again.
+
 - [Browser storage durability facts](issues/01-browser-storage-durability-facts.md): no browser engine
   gives a web app a real on-disk acknowledgement, so `SYNC-001`'s durability MUST is unobtainable in a
   browser as written. Safari's seven-day cap is unchanged in 26.6; an MV3 service worker cannot host an
@@ -94,42 +105,46 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   autofill secrets must travel by message, no passkey-provider API on any engine, and one manifest
   can serve both. Full findings in [research/firefox-mv3.md](research/firefox-mv3.md).
 - [Threat model and server-visible plaintext](issues/04-threat-model-and-server-visible-plaintext.md):
-  six adversary classes, and every operator attack classed Prevented, Detectable, or Acknowledged.
-  Server-side authorization is an availability control, never a secrecy boundary. `PRIVACY-007` is a
-  closed, CI-enforced plaintext list: Vault, Team and Device names, email, and the membership graph
-  are readable; wall-clock timestamps are not stored at all; ciphertext is unpadded; Share links are
-  unlinkable. Audit splits into an operator-readable log and a Security History encrypted to its
-  User or Team. Per-Item revision chaining is a new obligation. ADRs
+  precise content secrecy replaces "zero knowledge". The field-level plaintext registry stays closed
+  but provisional until protocol/schema freeze. Names, email, membership and roles, sizes, addresses,
+  operational timestamps and activity chronology are readable; ciphertext is unpadded. Detectable
+  means the User's own client catches the attack. Web substitution and Compromised Endpoints are
+  Acknowledged. One operator-readable log replaces encrypted Security History; clients remember
+  accepted revisions instead of hash-chaining them. Initial recipient keys require out-of-band
+  fingerprint verification, and Account signatures authenticate grants, roles and revisions. ADRs
   [0001](../../docs/adr/0001-server-visible-plaintext-is-a-closed-allowlist.md),
-  [0002](../../docs/adr/0002-the-server-stores-sequence-numbers-not-timestamps.md),
-  [0003](../../docs/adr/0003-audit-splits-into-an-operator-log-and-a-security-history.md).
+  [0015](../../docs/adr/0015-the-server-may-store-operational-timestamps.md), and
+  [0016](../../docs/adr/0016-there-is-one-operator-readable-audit-log.md).
 - [Client delivery trust and transport requirements](issues/05-client-delivery-trust-and-transport.md):
-  a secure context is a `MUST` for the Web client (`HOST-007`) and the product ships no certificate
-  tooling (`HOST-008`), with a private overlay network the recommended LAN route. No HSTS, because the
-  client already refuses a non-secure origin and an operator certificate mistake would lock users out.
-  `ACCOUNT-001` now restricts multi-Server to installed clients, so the Web client is bound to the
-  Server that served it: no CORS anywhere, and `connect-src 'self'`. SRI was rejected as useless
-  against a serving operator; `PRIVACY-016` publishes the bundle hash instead, making fleet-wide
-  substitution Detectable and targeted substitution Acknowledged. `PRIVACY-015` states the Web client's
-  per-load trust in requirements and documentation only. `HOST-009` fixes an exact Content Security
-  Policy that also binds the Desktop webview. ADRs
+  a secure context is mandatory and the operator supplies certificates. Secure responses send one-year
+  HSTS for the exact host, without subdomains or preload; the first HTTP visit remains unprotected. The
+  Web client is same-origin and bound to its serving Server, so no CORS surface exists and multi-Server
+  remains installed-client only. Exact CSP remains. Published bundle hashes verify releases and
+  deployments but do not detect bytes a Malicious Operator served; all Web substitution is
+  Acknowledged and the Web limitation appears in documentation and contextual UI. ADRs
   [0004](../../docs/adr/0004-the-web-client-requires-a-secure-context-and-the-operator-supplies-the-certificate.md),
   [0005](../../docs/adr/0005-the-web-client-is-bound-to-the-server-that-served-it.md).
 
-- [Password authentication protocol and its fallback](issues/06-password-authentication-protocol.md):
-  OPAQUE and SRP-6a both rejected. No augmented PAKE removes the offline dictionary attack, and the
-  Secret Key already makes it cost ~128 bits, so OPAQUE's pre-computation resistance bought nothing for
-  its dependency risk. The frozen SRP-6a is 1,703 lines of hand-written Rust with its own big-integer
-  module whose modexp is documented as not constant-time. `AUTH-003` is now a signature
-  challenge-response: Argon2id, HKDF, Ed25519, signing a canonical message that binds purpose, version,
-  Server identity, Account, and a single-use challenge. The salt derives from the Secret Key, so there is
-  no pre-login request and no enumeration oracle, at the price of Server-wide published KDF parameters.
-  One protocol on every surface; it runs at enrolment and full sign-in only. A cryptographic construction
-  review gates general availability, ahead of any pentest. ADRs
-  [0006](../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md),
-  [0007](../../docs/adr/0007-the-authentication-salt-derives-from-the-secret-key.md).
+- [Cryptographic design acceptance policy](issues/53-cryptographic-design-acceptance-policy.md):
+  security properties are the hard filter; final RFC constructions with mature reviewed libraries
+  then win, followed by global simplicity. Use one mechanism per job and complete registered modes.
+  Bespoke, non-final-standard, export-only, and second-mechanism choices carry an exception burden.
+  Dependencies must be maintained, conformant, WASM-capable, transparent about unsafe code, and
+  reviewed or broadly interoperable; Bittery owns no arithmetic. Integrated design review,
+  implementation review, and a penetration test block general availability. ADR
+  [0017](../../docs/adr/0017-standard-cryptographic-constructions-and-global-simplicity-win.md).
 
-- [Key derivation profiles and downgrade resistance](issues/07-key-derivation-profiles-and-downgrade-resistance.md):
+- [Password authentication protocol and its fallback](issues/06-password-authentication-protocol.md):
+  full sign-in is RFC 9807 OPAQUE-3DH with ristretto255/SHA-512 and Argon2id, initially on pinned
+  `opaque-ke` 4.0.1. Both password factors and stable Account/Server identities enter one canonical
+  input; RFC bytes sit behind one-byte protocol and profile identifiers. The export key yields the
+  Account Unlock Key and the session key confirms one Device-credential issuance. Version migration
+  atomically replaces the registration and wrapper; no fallback protocol or operator bypass exists.
+  Server setup is mandatory backup material. RFC and Bittery vectors run on Rust and WASM, and
+  integrated external review blocks general availability. ADR
+  [0006](../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md).
+
+- **REOPENED:** [Key derivation profiles and downgrade resistance](issues/07-key-derivation-profiles-and-downgrade-resistance.md):
   one Argon2id run, not two. HKDF-Expand labels already carry the `AUTH-002` domain separation, so the
   second memory-hard run bought nothing and cost double on browser WASM; `AUTH-003` is amended. Profile 1
   is Argon2id `0x13`, 64 MiB, 3 passes, 1 lane, with a 16-byte salt derived from the Secret Key. Parameters
@@ -147,7 +162,7 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [0008](../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md),
   [0009](../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md).
 
-- [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
+- **REOPENED:** [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
   envelope, one AEAD, one version byte. `AUTH-015`'s HKDF output is the Account Unlock Key, which wraps a
   randomly generated **Account Key Set** (X25519 plus Ed25519), so a password change, Secret Key rotation
   or profile upgrade re-wraps one envelope and touches no Vault key. XChaCha20-Poly1305 is the product's
@@ -177,7 +192,7 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   with. Firefox shipped the gate in **147**, not 149, and default-on in **153**, not 151. Full findings in
   [research/extension-local-network-access.md](research/extension-local-network-access.md).
 
-- [Recovery model and single-artifact paths](issues/09-recovery-model-and-single-artifact-paths.md):
+- **REOPENED:** [Recovery model and single-artifact paths](issues/09-recovery-model-and-single-artifact-paths.md):
   `AUTH-001` is rewritten as a closed list of **unlock routes**, each consuming two independent factors:
   master password with Secret Key, Recovery Key with Secret Key, enrolled Device with its local
   authorization. The recovery labels consume the Recovery Key **and** the Secret Key, so a stolen
@@ -316,3 +331,4 @@ number wins.
 | [50](issues/50-performance-budgets.md) | grilling | Performance budgets | 20, 38 |
 | [51](issues/51-first-release-cut-and-implementation-gate.md) | grilling | First-release cut and the implementation gate | most of the map |
 | [52](issues/52-extension-local-network-access-facts.md) | research | Extension Local Network Access and private-address classification | — |
+| [53](issues/53-cryptographic-design-acceptance-policy.md) | grilling | Cryptographic design acceptance policy | 04 |

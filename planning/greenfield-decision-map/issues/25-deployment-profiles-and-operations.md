@@ -21,6 +21,11 @@ Produces: `HOST-002` refinement and a deployment specification.
 
 ## Comments
 
+### Superseded by ticket 04's reopened answer
+
+Wall-clock operational history is deliberately Server-visible. This ticket still sets documented log
+retention, but no longer treats timestamps as reintroducing a forbidden database history.
+
 ### Inherited from ticket 04, threat model and server-visible plaintext
 
 `PRIVACY-014` requires a documented default retention bound on Server request logs. Unbounded request
@@ -36,3 +41,10 @@ deployment documentation, with a private overlay network as the recommended LAN 
 `HOST-007` means a deployment profile that cannot reach a secure context serves no Web client at all.
 Decide what such a profile tells the operator, and whether the single-node profile does anything to
 help (a documented reverse-proxy recipe, for instance) short of issuing certificates.
+
+### Inherited from the reopened password authentication decision
+
+Both deployment profiles must share Sign-in-attempt state across Server processes and atomically consume
+it without sticky routing. Redis may accelerate this path but cannot own its correctness. Both profiles
+must back up and restore the Server-wide OPAQUE seed and static 3DH key with the matching registration
+records and Account Key Set wrappers.

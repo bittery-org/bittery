@@ -2,6 +2,8 @@
 
 Status: accepted
 
+Reconfirmed by Wayfinder ticket 05 on 2026-08-20.
+
 `ACCOUNT-001` let one client hold Accounts from several independent Servers, and `ACCOUNT-003` and
 `ACCOUNT-006` built All Accounts and cross-Server Collections on top. Applied to the Web client that
 means a page served by Server A holds Server B's Vault keys. Server A's operator takes Server B's

@@ -1,6 +1,8 @@
 # Memory-hard work is spent once, and only on human secrets
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 07 on 2026-08-20.
 
 `AUTH-003` said the Vault-unlock derivation was "a second, independent memory-hard run". It is not a
 second run. One Argon2id run covers the master password, HKDF-Extract mixes in the Secret Key, and

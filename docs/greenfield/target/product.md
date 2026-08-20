@@ -10,8 +10,10 @@ cloud product.
 `PROD-FOUNDATION-002 MUST` Normal enrollment and synchronization require a Server. Once initialized,
 ordinary Vault use remains offline-first.
 
-`PROD-FOUNDATION-003 MUST` A deployment supports multiple Users and Teams while preserving zero
-knowledge against its administrator.
+`PROD-FOUNDATION-003 MUST` A deployment supports multiple Users and Teams. With a conforming
+installed client, an operator cannot decrypt Vault content. This is a content-secrecy promise, not a
+"zero knowledge" claim; `PRIVACY-007` names the Server-visible data and `PRIVACY-015` states the Web
+client's weaker guarantee.
 
 `PROD-FOUNDATION-004 MUST` Billing, plans, subscriptions, Stripe, commercial entitlements, and
 hosted-cloud operational branches are absent from the product.
@@ -22,63 +24,72 @@ ciphertext, Attachments, databases, or protocols.
 ## Threat model and privacy
 
 `PRIVACY-001 MUST` The product names seven adversary classes: Curious Operator, Malicious Operator,
-Network Attacker, Device Thief, Co-tenant User, Vault Co-member, and Compromised Client Build. Every
-security requirement states which class it answers. A Vault Co-member is a legitimate member of a
-Vault, acting outside their remit; `CRYPTO-005` and `CRYPTO-012` are the controls that answer them, by
-making a Vault grant and an Item revision provably authored rather than merely claimed.
+Network Attacker, locked Device Thief, Co-tenant User, Vault Co-member, and Compromised Endpoint.
+Every security requirement states which class it answers. A poisoned build is one route to a
+Compromised Endpoint; reproducible-build checks verify releases but do not protect a running endpoint.
 
-`PRIVACY-002 MUST` Each attack available to a Malicious Operator is classed Prevented, Detectable, or
-Acknowledged. A Prevented attack cannot succeed. A Detectable attack is reported to the User by their
-own client. An Acknowledged attack is stated in product documentation and not defended against.
+`PRIVACY-002 MUST` Each named attack is classed Prevented, Detectable, or Acknowledged. Prevented means
+the attack cannot succeed against a conforming client. Detectable means that same client catches and
+reports the attack. Acknowledged means Bittery neither prevents nor reliably detects it and documents
+the limitation. External auditability or a published hash alone never makes an attack Detectable.
 
-`PRIVACY-003 MUST` A Malicious Operator cannot read Item content, and cannot forge a Vault grant that
-a client accepts. A member holding the Vault key grants access by sealing that key to the recipient
-and signing the grant, which `CRYPTO-005` specifies. A Server authorization record never grants
-access. Server-side access control is an availability and abuse control only.
+`PRIVACY-003 MUST` With a conforming installed client, a Curious or Malicious Operator cannot decrypt
+Vault content. A member grants access by sealing the Vault key to a recipient key that was verified out
+of band and signing the grant. Account-level signatures authenticate grants, role changes, and Item
+revisions. Server authorization records limit availability and abuse but grant no cryptographic access.
 
-`PRIVACY-004 MUST` Five Malicious Operator attacks are Detectable. Enrolling a Device without every
-existing Device of that Account being told. Presenting Vault membership that no member signed.
-Replaying Server state older than a client already accepted. Dropping an Item revision, which a
-per-Item revision chain exposes. Serving every User a Web client bundle that is not the published
-release, which `PRIVACY-016` makes checkable by any third party.
+`PRIVACY-004 MUST` A client detects and reports authenticated state older than the highest revision it
+has already accepted, a changed public key after out-of-band verification, and a grant, role change, or
+Item revision whose Account signature is invalid or unauthorized by the signed role state. The client
+does not claim to detect a revision no client ever observed. There is no mandatory per-Item revision
+chain or first-release transparency log.
 
-Two attacks that would otherwise sit on this list are Prevented instead, because `CRYPTO-009` binds an
-object's identity into the additional authenticated data of its envelope: moving ciphertext from one
-Item to another, and serving one revision of an Item in place of a different one. Both fail to
-decrypt rather than being noticed afterwards.
+`PRIVACY-005 MUST` The following are Acknowledged: denial of service; withholding data no client has
+already observed; Server equivocation between clients; every field and chronology on `PRIVACY-007`;
+targeted or fleet-wide Web-client substitution by its serving operator; malware, a compromised OS or
+browser, runtime injection, or control of an unlocked client; and reopening long-lived Account keys
+from a backed-up wrapping plus the matching old secrets. Product documentation must not imply that
+published hashes, audit logs, revocation, or remote sign-out prevent these attacks.
 
-`PRIVACY-005 MUST` Five attacks are Acknowledged. Denial of service. Withholding data from a client.
-Server equivocation between two Devices of one Account. Every field on the `PRIVACY-007` list.
-Serving a substituted Web client bundle to a single targeted User, which `PRIVACY-015` states plainly.
-Reopening an Account Key Set from a backed-up wrapping after the matching secret was revoked or
-rotated, which `AUTH-028` states plainly.
+`PRIVACY-006 MUST` `PRIVACY-007` is a field-level closed registry. While Wayfinding remains open the
+registry is explicitly provisional, and every decision adding Server-visible state amends it. The
+public protocol and Server schema gate freezes it. From that gate onward, a release-blocking repository
+check fails on any plaintext Server schema field absent from the registry.
 
-`PRIVACY-006 MUST` `PRIVACY-007` is a closed list. Any field the Server holds in plaintext that
-`PRIVACY-007` does not name is a defect. A repository check fails on any plaintext Server schema
-column absent from the list.
+`PRIVACY-007 MUST` The provisional Server-visible plaintext registry is:
 
-`PRIVACY-007 MUST` Server-visible plaintext is exactly:
+- **Server and protocol** — Server identity, supported protocol versions, published configuration,
+  key-derivation policy, migration state, and instance status.
+- **Account** — identifier, email address, status, authentication records, public keys, wrapped Account
+  keys, recovery-record existence and wrappers, encrypted Account-private objects, and operational
+  timestamps.
+- **Authentication and abuse control** — Sign-in attempt identifier, OPAQUE state, versions,
+  consumption and expiry;
+  Device credential or session identifier, authentication material, scope, expiry and revocation;
+  source address; and rate-limit keys, counters and windows.
+- **Device** — identifier, user-chosen name, public key, enrollment order, status, and operational
+  timestamps.
+- **Invitation** — identifier, email address, inviter, target Team or Vault, role, status, expiry, and
+  operational timestamps.
+- **Vault and Team** — identifier, name, owning User or Team, complete membership and roles, signed
+  role state, wrapped Vault keys with granter and recipient identifiers and grant signatures, current
+  key epoch, and operational timestamps.
+- **Item** — identifier, owning Vault, ciphertext, ciphertext length, revision number, Account
+  signature, tombstone marker, retention time, and operational timestamps.
+- **Attachment** — identifier, owning Item, chunk count, total byte size, wrapped Attachment key,
+  upload state, retention time, and operational timestamps.
+- **Share link** — identifier, expiry, view count, maximum views, ciphertext, ciphertext length, and
+  operational timestamps.
+- **Sync and command processing** — per-Vault sequence records carrying Item identifier and operation
+  kind, cursor and retention state, idempotency key and outcome, and operational timestamps.
+- **Operator Log** — actor Account or administrator identifier, event category, affected Server-visible
+  identifiers, sequence number, source address, byte counts, and timestamp.
+- **Quota and storage** — Item count per Vault, stored byte count per Account, and pending-upload state.
 
-- **Account** — identifier, email address, status, password-authentication record, public keys,
-  wrapped Account Key Set, the recovery authentication record and the recovery-wrapped Account Key Set
-  where a Recovery Key exists, and the Account Private Object ciphertext. Either wrapped Account Key
-  Set is served only after the matching sign-in succeeds. Whether a Recovery Key exists is therefore
-  operator-visible, and `AUTH-006` says so.
-- **Device** — identifier, user-chosen name, public key, enrollment sequence number.
-- **Vault and Team** — identifier, name, owning User or Team, membership with role, wrapped Vault
-  keys each with its granter Account identifier and grant signature, wrapped Team History Key per
-  reader, current key epoch.
-- **Item** — identifier, owning Vault, ciphertext, ciphertext length, revision sequence number,
-  revision chain hash, tombstone marker, day-resolution retention bucket.
-- **Attachment** — identifier, owning Item, chunk count, total byte size, wrapped Attachment key.
-- **Share link** — identifier, expiry, view count, maximum views, ciphertext, ciphertext length.
-- **Sync** — per-Vault sequence stream carrying Item identifier and operation kind.
-- **Operator Log** — Account identifier, event category, sequence number, source address, byte counts.
-- **Quota** — Item count per Vault, stored byte count per Account.
-
-`PRIVACY-008 MUST` The Server holds no wall-clock creation or modification time for an Item, a Vault,
-or an Attachment. Ordering uses per-Vault sequence numbers. Real times are sealed inside ciphertext.
-Retention uses the day-resolution bucket that `PRIVACY-007` names.
+`PRIVACY-008 MUST` The Server may store ordinary wall-clock timestamps for Server records, retention,
+expiry, access, audit, and operations. User-authored Item timestamps remain encrypted. Documentation
+states that the operator can observe the activity chronology; the design adds no sequence-only or
+day-bucket machinery merely to obscure time.
 
 `PRIVACY-009 MUST` Ciphertext is not padded. Ciphertext length is Server-visible.
 
@@ -89,28 +100,27 @@ created from.
 its existence, and nothing about a User they share no Team with. Invitation address lookup is the
 sole exception.
 
-`PRIVACY-012 MUST` Released client builds are reproducible and their signatures are published, so a
-substituted build is Detectable by a third party. The product never claims that a running client
-detects its own compromise. `PRIVACY-016` extends this to the Web client bundle, which is re-fetched
-on every load rather than installed once.
+`PRIVACY-012 MUST` Released installed-client builds are reproducible and their signatures and content
+hashes are published. These let a person verify a release artifact; they do not prove which bytes a
+User ran and do not make endpoint compromise or substitution Detectable under `PRIVACY-002`.
 
-`PRIVACY-013 MUST` Product documentation states the `PRIVACY-007` list in plain language, naming Vault
-names, Team names, Device names, email addresses, and the Vault membership graph as readable by the
-operator.
+`PRIVACY-013 MUST` Product documentation states the `PRIVACY-007` list and observable chronology in
+plain language, leading with Vault, Team and Device names, email addresses, the complete membership and
+role graph, sizes, source addresses, and access times as readable by the operator.
 
-`PRIVACY-014 MUST` Server request logs carry a documented default retention bound. Unbounded request
-logging reintroduces the wall-clock history that `PRIVACY-008` removes.
+`PRIVACY-014 MUST` Server request and Operator Logs carry documented default retention bounds. They are
+operator-controlled administrative evidence and never a security boundary.
 
 `PRIVACY-015 MUST` The Web client's guarantee is per-load trust in its serving operator. That operator
-ships the code that handles the master password on every load, and can serve different code to one
-User. `ADMIN-001`'s Prevented verbs therefore describe installed clients; on the Web client the same
-operator attack is Acknowledged. Product documentation states this. Matching `PRIVACY-013`, no in-app
-screen and no signup interstitial states it.
+ships the code that handles the master password and can serve different code to one User. The
+installed-client content-secrecy promise does not apply against that serving operator. Full security
+documentation and a concise non-blocking notice in the Web client's security or Account information
+state this; no recurring warning interstitial is required.
 
-`PRIVACY-016 MUST` Each release publishes the content hash of its Web client bundle alongside the
-`PRIVACY-012` signatures. A Server serves the byte-exact published bundle for the version it declares,
-and exposes the served bundle's hash at a documented well-known path. A substitution served to every
-User is therefore Detectable by a third party. A substitution served to one User stays Acknowledged.
+`PRIVACY-016 MUST` Each release publishes the content hash of its Web client bundle. A conforming
+Server serves that byte-exact bundle for the version it declares. The hash supports release and
+deployment verification only: a Malicious Operator can report the expected hash while serving other
+bytes, so targeted and fleet-wide substitution are both Acknowledged.
 
 ## Self-hosting
 
@@ -135,7 +145,10 @@ client over a non-secure origin and returns a page stating the requirement. A no
 withholds `crypto.subtle`, the Origin Private File System, Service Workers, the Cache API, and
 `StorageManager.persist()`, so the Web client cannot meet its storage and cryptographic obligations
 there. `http://localhost` and `127.0.0.0/8` are secure contexts; RFC 1918 addresses and `*.local`
-names are not. This answers the Network Attacker class.
+names are not. Every secure Web-client response sends
+`Strict-Transport-Security: max-age=31536000` without `includeSubDomains` and without preload. HSTS
+protects navigation after the browser has received the policy; the product does not claim it protects
+the first HTTP visit. This answers the Network Attacker class.
 
 `HOST-008 MUST` The product ships no certificate authority, no certificate generation, and no
 certificate renewal. Documentation gives a supported route to a secure context for each `HOST-001`
@@ -158,11 +171,11 @@ achievable only because `ACCOUNT-001` binds the Web client to its serving Server
 ## Administration and registration
 
 `ADMIN-001 MUST` Administrators control admission, suspension, quotas, retention, and deletion of
-encrypted server data. They cannot decrypt or impersonate Users, and cannot reset cryptographic
-secrets. Enrolling a replacement Device is Detectable, not Prevented. `PRIVACY-002` defines these
-words, and `PRIVACY-007` bounds what an administrator sees. These Prevented verbs describe installed
-clients. On the Web client, `PRIVACY-015` downgrades "cannot decrypt" to Acknowledged, because the
-administrator serves the code that handles the master password.
+encrypted server data. They cannot decrypt Vault content through a conforming installed client whose
+recipient keys were verified, cannot reset cryptographic secrets, and cannot create a cryptographic
+Vault grant. A Server-issued credential alone carries no decryption key. `PRIVACY-007` bounds what an
+administrator sees. On the Web client, `PRIVACY-015` makes the serving operator's access to secrets
+Acknowledged because that operator supplies the running code.
 
 `ADMIN-002 MUST` Registration supports configurable open, invitation-only, and closed modes.
 Administrator-created enrollment is an invitation; administrators never choose user secrets.
@@ -201,95 +214,90 @@ new route is an amendment to this requirement, not a feature, and `AUTH-029` ren
 screen so an unlisted route shows up as a defect. On the first two routes one factor is human-chosen
 and one is machine-generated, which is what `AUTH-020`'s entropy floor prices. ADR 0012.
 
-`AUTH-002 MUST` Password authentication and Vault-key derivation are domain-separated systems.
+`AUTH-002 MUST` OPAQUE's session key and export key have separate jobs. The session key authorizes one
+Device-credential issuance and is then erased. HKDF-Expand-SHA-512 derives the 32-byte Account Unlock
+Key from the export key with `bittery/opaque/account-unlock/1` as `info`; that key wraps the Account Key
+Set and nothing else. Neither output is reused for the other's job.
 
-`AUTH-003 MUST` A full sign-in is a signature challenge-response. Argon2id runs over the master
-password, HKDF-Extract mixes in the Secret Key, and HKDF-Expand under an authentication label produces
-the 32-byte seed of an Ed25519 Authentication Key. The Server stores the 32-byte public key and no other
-password-derived value. No password-derived secret ever reaches the Server, at rest or on the wire. A
-second HKDF-Expand label over the same Argon2id run produces the Vault-unlock material, and those
-labels are what satisfy `AUTH-002`; `AUTH-015` fixes the single-run rule. ADR 0006 records why
-OPAQUE, SRP-6a, and an authentication hash were rejected.
+`AUTH-003 MUST` A full sign-in is OPAQUE-3DH as specified by RFC 9807. Authentication protocol version
+`0x01` fixes OPRF `ristretto255-SHA512`, 3DH over ristretto255, HKDF-SHA-512, HMAC-SHA-512, SHA-512,
+and Argon2id as the application key-stretching function. The exact Argon2id parameters are named by the
+key-derivation profile. Every surface uses this one protocol. The initial implementation pins
+`opaque-ke` exactly at 4.0.1; crate serialization is never a persisted or public format. ADR 0006.
 
-`AUTH-009 MUST` The signed message is canonical and length-prefixed, and binds a purpose label, the
-protocol version, the Server identity, the Account identifier, and a single-use Sign-in Challenge issued
-by the Server. Binding the Server identity is what stops a hostile Server relaying a challenge from
-another Server, which `ACCOUNT-001` makes a live case for installed clients.
+`AUTH-009 MUST` OPAQUE's password input is the ASCII bytes `bittery/opaque-input/1`, then the stable
+Account identifier, stable Server identifier, and NFKD UTF-8 master password, each prefixed by its
+unsigned 16-bit big-endian byte length, then the raw 16-byte Secret Key. Empty or longer-than-65,535-byte
+variable fields and a Secret Key of any other length are rejected before OPAQUE. The Account and Server
+identifiers are also the OPAQUE client and server identities; the Account identifier is the credential
+identifier. Email is lookup-only. Ticket 23 must define how the stable Server identity is obtained,
+pinned, restored, and changed before relay resistance can be claimed.
 
-`AUTH-010 MUST` The authentication salt derives from the Secret Key on the client. The Server stores no
-salt, sends no salt, and exposes no endpoint that reveals whether an Account exists before a full sign-in
-begins. Key-derivation parameters are Server-wide and published in the Server descriptor, not per
-Account, so no Device can be handed weaker parameters than another. The key-derivation profile
-identifier is held in Device state and printed on the Emergency Kit. ADR 0007.
+`AUTH-010 MUST` Every OPAQUE message and stored registration record is the one-byte authentication
+protocol version, the one-byte key-derivation profile, then the RFC 9807 bytes. `0x00` is invalid in
+both append-only registries. OPAQUE context is the ASCII bytes `bittery/opaque-context/1`, those two
+identifier bytes, and the ASCII bytes `ristretto255-SHA512`. A mismatch fails authentication. Message
+kind comes from the protocol endpoint and is not repeated inside the payload. No CBOR, delimiter-based
+text, variable-length integer, or Rust-native encoding exists at this boundary.
 
-`AUTH-011 MUST` The full sign-in protocol authenticates Device enrolment and full sign-in only. An
-enrolled Device authenticates ordinary traffic with its Device credential. Every surface uses the same
-protocol and the same Server endpoint, including the Web client, so no weaker authentication path exists
-to steer a client onto.
+`AUTH-011 MUST` A full sign-in authenticates Device enrolment only. Ordinary traffic uses a Device
+credential. After KE3 succeeds, HKDF-Expand-SHA-512 derives a one-use confirmation key from the OPAQUE
+session key with `bittery/opaque/device-credential/1` as `info`; HMAC-SHA-512 under that key authenticates
+the canonical Device-credential issuance request. The Server issues the credential only in that
+exchange's final atomic transaction, then both parties erase the session and confirmation keys.
 
-`AUTH-012 MUST` The construction ships with a written design note and conformance test vectors. The
-vectors enter the conformance fixture corpus, proving the Rust core, the WASM build, and the Server
-produce and verify byte-identical results.
+`AUTH-012 MUST` One OPRF seed and one static 3DH Server key exist per Server and authentication-protocol
+version. They are root authentication secrets and mandatory backup material. KE1 creates a short-lived
+Sign-in attempt addressed by a random 128-bit identifier. The Server retains the OPAQUE state, Account,
+both version bytes, and expiry and atomically consumes it on the first KE3 submission, success or
+failure. The state is shared across Server processes; correctness never depends on sticky routing or
+Redis. Ticket 14 fixes expiry, fake-response behavior, and abuse limits.
 
-`AUTH-013 MUST` An external cryptographic review of the design note is a gate before general
-availability, and precedes any penetration test of the running system. Beta release ahead of that review
-is permitted. Product documentation states that the authentication protocol is a bespoke construction
-pending external review, following the documentation-only disclosure rule `PRIVACY-013` sets.
+`AUTH-013 MUST` CI runs every applicable RFC 9807 Appendix C vector plus Bittery-profile positive and
+negative vectors against Rust and WASM. Independent cross-implementation testing is not a release
+requirement. External cryptographic review covers the pinned OPAQUE dependency, Bittery profile, byte
+encodings, integration, and Account Key Set wrapping before general availability, followed by a
+penetration test of the running product. Beta may precede that review only under `CRYPTO-POLICY-006`.
+The public security whitepaper, protocol documentation, ADR, and review materials state that RFC 9807
+is a final IRTF Informational RFC, not an Internet Standards Track specification; routine UI does not.
 
-`AUTH-014 MUST` The authentication protocol version is rotatable without touching Vault data. Publishing
-a new version, having each client re-derive and re-register its Authentication Key at next full sign-in,
-and refusing the superseded version at the Server is a specified path, not an implied one. No Vault data
-moves and nothing is decrypted.
+`AUTH-014 MUST` Authentication-protocol versions form a client-compiled, one-byte, append-only registry
+with no negotiation or automatic fallback. Devices pin the Account's version and the Emergency Kit
+prints it. A migration accepts the old version until an eligible client authenticates with it or an
+enrolled Device authorizes replacement, then atomically stores the new OPAQUE registration and new
+Account Key Set wrapper before deleting the old pair. The User saves the updated Emergency Kit before
+commit. If the old version is unsafe to execute, only an enrolled Device or an independently valid
+recovery route may authorize replacement; the operator has no bypass. No alternate protocol is
+pre-approved: a library failure blocks release until an RFC-conformant implementation passes the gate,
+and rejection of OPAQUE reopens this decision.
 
-`AUTH-015 MUST` A full sign-in performs exactly one memory-hard run. Argon2id runs once over the
-master password, HKDF-Extract mixes in the Secret Key, and HKDF-Expand under distinct labels produces
-the Authentication Key seed and the Vault-unlock material. Those labels are the domain separation
-`AUTH-002` requires; a second Argon2id run would add no entropy, no new secret, and no independence,
-and would double the cost on browser WASM, which is the weakest supported build. ADR 0008.
+`AUTH-015 MUST` A full sign-in performs exactly one memory-hard run: the Argon2id key-stretching
+function inside OPAQUE. OPAQUE produces both its session key and client-only export key; `AUTH-002`
+narrows and separates their uses without another password derivation. The exact Argon2id profile and
+upgrade policy remain owned by ticket 07. ADR 0008.
 
-`AUTH-016 MUST` The first key-derivation profile is Argon2id version `0x13` with 64 MiB of memory,
-3 passes, 1 lane, a 16-byte salt, and a 32-byte output. One lane, because a browser Worker is
-single-threaded unless the operator sets cross-origin isolation headers, and more lanes would give a
-single-threaded build no speedup while covering less memory per lane. Argon2id's optional secret
-parameter is unused. The salt is HKDF-Expand output derived from the Secret Key under a label that
-carries the profile identifier, and binds nothing else, so no life event and no operator change can
-silently invalidate a key. Parameters are the normative contract; the product states no wall-clock
-budget. A measurement on the weakest supported build is recorded in the design note `AUTH-012`
-requires before a registry entry is frozen.
+`AUTH-016 OPEN` Ticket 07 fixes the first RFC 9807 Argon2id profile at actual parameter and output-byte
+altitude after measuring the weakest supported Rust/WASM client. The earlier 64 MiB profile and
+Secret-Key-derived salt were reopened and are not requirements.
 
-`AUTH-017 MUST` Key-derivation profiles are a closed, ordered, append-only registry compiled into
-every client. A Server descriptor names one entry and publishes no parameters. A client refuses an
-identifier it does not hold, reporting that the client needs updating, and never derives under
-parameters a Server supplies. No entry is ever removed or altered, because the pinned profile is the
-only route to an Account's Vault keys and retiring one would permanently lock out every Account still
-on it. ADR 0009.
+`AUTH-017 OPEN` Ticket 07 decides the finite profile registry, pinning, and representation rules within
+`AUTH-010`'s one-byte field. The earlier unbounded append-only registry was reopened.
 
-`AUTH-018 MUST` An Account is pinned to the profile it was created under, and a client derives under
-the pinned profile whatever a Server publishes. Where the published profile is stronger, the client
-offers an upgrade at the end of a full sign-in, while the master password is still in hand; the User
-may decline and is offered it again. An upgrade re-derives both HKDF outputs and re-wraps what the
-Vault-unlock material protects, which is the master password change path and not a new mechanism.
-Where the published profile is weaker than the pinned one, the client derives under the pinned profile
-and records the divergence in Security History. A downgrade attempt is Detectable.
+`AUTH-018 OPEN` Ticket 07 decides when an Account may upgrade its OPAQUE key-derivation profile and how
+the User experiences it. Any accepted upgrade must use `AUTH-014`'s atomic replacement of the OPAQUE
+registration and Account Key Set wrapper.
 
-`AUTH-019 MUST` A Device holding no local state learns the pinned profile from the Emergency Kit,
-which prints it, or by attempting the published profile and then each older registry entry in
-descending order. A Server exposes no endpoint that returns an Account's profile and stores no
-per-Account profile, so this requirement adds nothing to the `PRIVACY-007` plaintext allowlist. The
-cost is one derivation per attempt, so a genuinely wrong password is reported only after the walk
-completes.
+`AUTH-019 OPEN` Ticket 07 decides how a fresh Device obtains the pinned profile without a registry walk,
+silent Server downgrade, or unbounded work. `AUTH-014` already makes the Emergency Kit one authoritative
+carrier.
 
-`AUTH-020 MUST` The memory-hard step governs every derivation path that consumes a user-chosen
-secret, recovery included. A path uses HKDF alone only where every secret it consumes is
-machine-generated with at least 128 bits of entropy, which is why the Secret Key is not stretched. No
-path derives under a profile weaker than the Account's pinned profile, and no path carries its own
-parameters. ADR 0008.
+`AUTH-020 OPEN` Tickets 07 and 09 decide which non-password recovery paths perform memory-hard work.
+They may not create a weaker password route or a second OPAQUE profile.
 
 `AUTH-021 MUST` The master password is encoded as UTF-8 after NFKD normalization, with no trimming of
-leading or trailing whitespace, no case folding, and an empty password refused. Its minimum length is
-10 characters and no composition rule is imposed. The client shows an advisory strength estimate and
-offers a generated passphrase; the estimate never blocks. A Server cannot enforce master password
-policy, because no Server ever sees a master password, so an administrator has no lever here.
+leading or trailing whitespace, no case folding, and an empty password refused. Ticket 07 still owns
+the minimum, what a character count means, and the strength guidance. A Server cannot enforce master
+password policy because it never sees a master password.
 
 `AUTH-004 MUST` Adding a Device supports trusted-device QR enrollment, master password plus Secret Key,
 and the `AUTH-026` recovery sign-in. The Server alone cannot provision decryption keys.
@@ -308,7 +316,7 @@ context `0x02` envelope and one recovery authentication record, serving the enve
 operator-visible, and `PRIVACY-007` names it.
 
 `AUTH-030 MUST` Revoking a Recovery Key deletes the key context `0x02` envelope and the recovery
-authentication record, and writes a Security History entry. That ends the route for every holder
+authentication record, and writes an Operator Log entry. That ends the route for every holder
 except one who already kept a copy of the envelope, which `AUTH-028` states rather than implies. The
 interface offers an `AUTH-027` Secret Key rotation immediately afterwards, because rotating the second
 factor is what makes a kept copy useless to anyone who never held the old Secret Key. Replacing a
@@ -347,29 +355,22 @@ encoding, the grouping, and the check symbol are conformance fixtures under `AUT
 a Device that is already unlocked and holds the Account Key Set. Requiring it is what stops brief
 access to an unlocked Device becoming a permanent lockout of its owner. The client derives the new
 Account Unlock Key under the pinned profile, or the stronger profile `AUTH-018` offers, unwraps the key
-context `0x01` envelope with the old key, re-wraps it with the new one, and derives the new
-Authentication Key. The Server applies the new envelope and the new authentication public key as one
-atomic write or neither. No Vault key moves, no grant changes, the salt is unchanged because the Secret
-Key is unchanged, and the key context `0x02` and `0x03` envelopes stay valid, so the Recovery Key and
-every other Device keep working. The change offers signing out every other Device, **off by default**,
+context `0x01` envelope with the old key, re-wraps it with the new one, and creates the new OPAQUE
+registration. The Server applies the new wrapper and registration as one atomic write or neither. No
+Vault key moves or grant changes, and the key context `0x02` and `0x03` envelopes stay valid, so the
+Recovery Key and every other Device keep working. The change offers signing out every other Device,
+**off by default**,
 because a Device the User distrusts is revoked by name and a routine password change should not
-log out a phone. A Security History entry records it.
+log out a phone. An Operator Log entry records it.
 
-`AUTH-026 MUST` A recovery sign-in is the `AUTH-003` challenge-response run with a recovery
-authentication key, derived by HKDF from the Recovery Key and the Secret Key together under
-`bittery/1/recovery-auth/1`, which carries the authentication protocol version exactly as the
-authentication label does. There is no pre-login request, so `AUTH-010`'s no-enumeration rule is
-unchanged. On success the Server serves the key context `0x02` envelope and the client opens the
-Account Key Set. The client shows no Vault content until the flow completes, and it completes only
-when a new master password is set, the Secret Key is rotated under `AUTH-027`, a new Recovery Key is
-issued, both sheets are produced, and every other Device is signed out. Recovery is a
-compromise-shaped event, so every secret that was carried to it is replaced; reprinting a Kit whose
-Secret Key had not changed would be theatre. A Security History entry records the recovery.
+`AUTH-026 OPEN` Ticket 09 re-decides recovery authentication and its atomic authorization order. It
+must not reuse the superseded signature challenge-response, and if it authorizes replacement of an
+unsafe OPAQUE version it is an independent route under `AUTH-014`, never an operator reset.
 
-`AUTH-027 MUST` The Secret Key is rotatable. A rotation derives a new salt and a new Account Unlock
-Key, re-wraps the key context `0x01` envelope, re-wraps the key context `0x02` envelope where a
-Recovery Key exists, re-registers the Authentication Key and the recovery authentication record, and
-produces a new Emergency Kit, as one atomic Server write or none. The current Secret Key is also held
+`AUTH-027 MUST` The Secret Key is rotatable. A rotation creates a new OPAQUE registration and Account
+Unlock Key, re-wraps the key context `0x01` envelope, re-wraps the key context `0x02` envelope where a
+Recovery Key exists, replaces any recovery authentication record, and produces a new Emergency Kit,
+as one atomic Server write or none. The current Secret Key is also held
 in an **Account Private Object**, key context `0x12`, sealed to the Account's own encryption key, so an
 enrolled Device picks up a rotation on its next sync rather than needing re-enrolment. Without it a
 User with several Devices leaves the rotation half-done. The Server holds that object as ciphertext it
@@ -393,10 +394,43 @@ screen. It is generated from `AUTH-001`'s closed list, so a route the product gr
 
 ## Cryptographic format
 
+### Design policy
+
+`CRYPTO-POLICY-001 MUST` A candidate design first satisfies the accepted threat model. Among
+candidates that do, prefer complete constructions standardized in final RFCs and available through
+mature reviewed implementations; then prefer the smallest total implementation, protocol-state,
+persisted-format, and migration surface. Performance breaks later ties and never silently weakens a
+security property.
+
+`CRYPTO-POLICY-002 MUST` A bespoke construction or primitive without a final RFC is permitted only
+where a documented mandatory security property has no suitable final-RFC construction. The exception
+records an alternatives comparison, mature implementation support, conformance vectors, and an
+independent cryptographic review before beta. Convenience, consistency with an earlier design, and
+avoiding a dependency are insufficient.
+
+`CRYPTO-POLICY-003 MUST` Use one mechanism per security job, one canonical encoding, and one migration
+path. A second primitive, registry, envelope shape, or state machine requires a recorded requirement
+the first cannot satisfy. Complexity is counted across the whole product rather than justified one
+ticket at a time.
+
+`CRYPTO-POLICY-004 MUST` Use a standard protocol's complete registered mode and specified wire
+semantics. Export-only use or custom recombination satisfies the `CRYPTO-POLICY-002` exception gate.
+A composition is not standards-based merely because each primitive inside it has a standard.
+
+`CRYPTO-POLICY-005 MUST` A cryptographic dependency has active maintenance, RFC and test-vector
+conformance, supported WASM operation, documented unsafe code, and vulnerability monitoring, plus
+either meaningful independent review or broad interoperable deployment. Bittery implements no
+cryptographic arithmetic. Reducing dependency count never justifies owning a primitive.
+
+`CRYPTO-POLICY-006 MUST` Beta may precede integrated external review only when labeled non-production
+and making no reviewed-cryptography claim. Independent review of the complete design and
+implementation, followed by penetration testing of the running product, blocks general availability.
+The stricter before-beta exception gate in `CRYPTO-POLICY-002` still applies.
+
 `CRYPTO-001 MUST` The key hierarchy is fixed and has exactly these levels. `AUTH-015`'s single
 Argon2id run and HKDF-Expand produce the **Account Unlock Key**. That key wraps the **Account Key
-Set**. The Account Key Set's encryption key receives sealed **Vault keys** and the sealed **Team
-History Key**. A Vault key encrypts Item revisions directly and wraps **Attachment keys**. An
+Set**. The Account Key Set's encryption key receives sealed **Vault keys**. A Vault key encrypts Item
+revisions directly and wraps **Attachment keys**. An
 Attachment key encrypts that Attachment's chunks. No other level exists, and no key wraps a key that
 this requirement does not name.
 
@@ -415,7 +449,7 @@ and reconcile later, so a coordinated sequence cannot exist. A 96-bit random non
 birthday bound near 2^32 messages under a key that covers every Item, every revision, and every
 Attachment chunk for the life of a Vault.
 
-`CRYPTO-004 MUST` A Vault key or a Team History Key is sealed to a recipient's X25519 encryption key
+`CRYPTO-004 MUST` A Vault key is sealed to a recipient's X25519 encryption key
 using HPKE (RFC 9180) in **export-only** mode, suite `DHKEM(X25519, HKDF-SHA256)` with `HKDF-SHA256`
 and AEAD identifier `0xFFFF`. The HPKE context exports a 32-byte key and a 24-byte nonce, which feed
 the `CRYPTO-003` envelope. Export-only mode is what keeps the product at one AEAD, because RFC 9180
@@ -427,15 +461,15 @@ Key over a canonical, length-prefixed message binding a purpose label, the forma
 identity, the Vault identifier, the key epoch, the granter's Account identifier, the recipient's
 Account identifier, the recipient's Account Fingerprint, and the granted role. A client accepts no
 grant whose signature does not verify, which is what makes `PRIVACY-004`'s unsigned-membership attack
-Detectable. The Account Signing Key is distinct from the `AUTH-003` Authentication Key, because
-`AUTH-014` rotates the Authentication Key without touching Vault data and a shared key would orphan
-every past grant on rotation.
+Detectable. The Account Signing Key is distinct from OPAQUE's authentication material, which never
+signs product data and may migrate without touching Vault data; a shared key would orphan every past
+grant on rotation.
 
 `CRYPTO-006 MUST` Vault grants are flat. Every Vault key is sealed straight to each member's Account
-encryption key, and no key opens more Vaults than its holder was granted. A Team owns one **Team
-History Key**, sealed to each reader, which protects that Team's Security History and nothing else. A
-Team key that wrapped Vault keys would contradict `TEAM-003`, by making every member a decryptor of
-every Team Vault, and `TEAM-004`, by making one departure rotate every Vault the Team owns.
+encryption key, and no key opens more Vaults than its holder was granted. A Team owns no cryptographic
+key of its own. A Team key that wrapped Vault keys would contradict `TEAM-003`, by making every member
+a decryptor of every Team Vault, and `TEAM-004`, by making one departure rotate every Vault the Team
+owns.
 
 `CRYPTO-007 MUST` A single **format version** byte identifies the whole cryptographic suite, indexing
 a closed, ordered, append-only registry compiled into every client. The registry entry names the AEAD,
@@ -473,11 +507,10 @@ binds the Account identifier, so no wrapping of one Account's key material is ac
 `CRYPTO-010 MUST` Key contexts are a closed table, and the byte selects the envelope shape:
 `0x00` reserved and never valid; `0x01` Account Key Set under the Account Unlock Key; `0x02` Account
 Key Set under a Recovery Key; `0x03` Account Key Set under a Device Unlock Wrapper key; `0x10` Vault
-key sealed to an Account encryption key; `0x11` Team History Key sealed to an Account encryption key;
-`0x12` Account Private Object sealed to the Account's own encryption key; `0x20` Item revision under a
-Vault key; `0x21` Attachment key under a Vault key; `0x22` Attachment chunk under an Attachment key;
-`0x30` Security History under a User History Key; `0x31` Security History under a Team History Key;
-`0x40` Share link snapshot under a Share link key. The context byte is plaintext and adds nothing to
+key sealed to an Account encryption key; `0x12` Account Private Object sealed to the Account's own
+encryption key; `0x20` Item revision under a Vault key; `0x21` Attachment key under a Vault key;
+`0x22` Attachment chunk under an Attachment key; `0x40` Share link snapshot under a Share link key.
+The context byte is plaintext and adds nothing to
 `PRIVACY-007`, because the Server already knows which table it read a blob from.
 
 `CRYPTO-011 MUST` A key that protects data is generated randomly; an HKDF label exists only where a
@@ -494,11 +527,9 @@ and nothing else in the design would catch it.
 
 `CRYPTO-012 MUST` Each Item revision carries an Ed25519 signature by its author's Account Signing Key,
 placed **inside the ciphertext**. Holding a Vault key is otherwise enough to write a revision
-attributed to another member, which would make Security History's actor a claim rather than a proof. A
-plaintext signature would let an operator attribute every revision to an author, and revision
-authorship is not on the `PRIVACY-007` list. The `PRIVACY-004` revision chain hash is
-`SHA-256(previous chain hash || envelope bytes)`, computed over ciphertext so a Server can check
-continuity without decrypting anything.
+attributed to another member. A plaintext signature would let an operator attribute every revision to
+an author, and revision authorship is not on the `PRIVACY-007` list. Clients remember the highest
+authenticated revision they accepted; there is no mandatory revision chain.
 
 `CRYPTO-013 MUST` An Attachment is a sequence of independent envelopes, one per chunk, each binding
 the Attachment identifier, its chunk index, and the **total chunk count** in its `CRYPTO-009` tuple.
@@ -593,12 +624,11 @@ local projection.
 `SYNC-004 MUST` Sync represents accepted, queued, rejected, conflicted, indeterminate, and failed
 operation states explicitly.
 
-`AUDIT-001 MUST` Audit history splits in two. The Operator Log is readable by administrators and holds
-only the `PRIVACY-007` Operator Log fields. The Security History records the actor, Vault, Item, and
-object of each security, membership, Vault grant, Share-link, and session event, is encrypted to the
-owning User or Team, and is unreadable by an administrator. Both carry configurable retention.
+`AUDIT-001 MUST` The product has one Operator Log, readable by administrators and limited to the
+`PRIVACY-007` Operator Log fields. It records administrative, operational, security, membership, Vault
+grant, Share-link, and session events with configurable retention. A Malicious Operator can alter or
+delete it, so no Prevented or Detectable security guarantee depends on the log.
 
 `TRAVEL-001 MUST` Travel mode securely evicts disallowed Vault ciphertext, indexes, and accessible
 keys after policy receipt. It makes no impossible promise about Devices that remain offline or storage
 forensics/backups.
-

@@ -1,6 +1,8 @@
 # Every route to the account keys consumes two factors
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 09 on 2026-08-20.
 
 `AUTH-001` used to say the master password and the Secret Key "jointly protect account encryption",
 and the corpus then defined paths that defeated the claim with one artifact: a Recovery Key holding a

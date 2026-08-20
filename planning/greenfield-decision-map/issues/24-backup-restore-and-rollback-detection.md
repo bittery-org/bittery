@@ -29,3 +29,11 @@ a restored backup from silently resurrecting deleted Items and revoked Vault acc
 `PRIVACY-005` acknowledges Server equivocation between two Devices of one Account as undefended in the
 first release. Confirm that a high-water mark per Device does not accidentally imply cross-Device
 agreement the design cannot deliver.
+
+### Inherited from the reopened password authentication decision
+
+One OPRF seed and static 3DH key per Server and authentication-protocol version are root authentication
+secrets. A database backup without them cannot authenticate a fresh Device or reproduce OPAQUE's export
+key to unwrap the Account Key Set. Restore validation must prove the setup, registrations, wrappers, and
+active version pair are restored together. Enrolled Devices remain locally usable through their Device
+Unlock Wrappers, but that is not a substitute for a complete Server backup.

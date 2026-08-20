@@ -1,39 +1,37 @@
 # Key derivation profiles and downgrade resistance
 
 Type: grilling
-Status: resolved
+Status: ready-for-human
 Blocked by: 04, 06
 
 ## Question
 
-Format altitude. The frozen product uses PBKDF2-HMAC-SHA256 at 600,000 iterations, with `argon2` present only as a reserved comment, and derives the recovery path at **100,000** iterations outside the KDF profile: a 6x weaker route to the same master key. See [current-state verification](../research/current-state-verification.md). `AUTH-002` domain-separates authentication from Vault-key derivation, so a full sign-in runs two expensive KDFs on the weakest devices.
+Format altitude. The frozen product uses PBKDF2-HMAC-SHA256 at 600,000 iterations, with `argon2` present only as a reserved comment, and derives the recovery path at **100,000** iterations outside the KDF profile: a 6x weaker route to the same master key. See [current-state verification](../research/current-state-verification.md). Ticket 06 now fixes one Argon2id key-stretching function inside RFC 9807 OPAQUE; its client-only export key yields the Account Unlock Key.
 
 Decide:
 
-- Argon2id parameters per platform class, or a reasoned choice of something else, with a benchmark budget that is measured rather than asserted.
-- Unicode normalisation and encoding of the password before derivation.
-- The profile record: how parameters are represented, versioned, and upgraded.
-- Downgrade resistance. The frozen client pins parameters after first use so they cannot be silently weakened; this has no successor requirement. Decide whether pinning is a `MUST` and what happens on a legitimate upgrade.
-- Whether every derivation path, recovery included, is governed by one profile with no exceptions.
-- The combined cost of two KDFs on a low-end device, and whether that changes `AUTH-002`.
+- Exact Argon2id parameters and output length, with measurements on the weakest Rust/WASM client rather than an asserted wall-clock budget.
+- The finite one-byte profile registry and how a fresh Device discovers its pinned entry without trusting the Server, walking an unbounded registry, or silently falling back.
+- Downgrade resistance and legitimate upgrade. An upgrade replaces the OPAQUE registration and Account Key Set wrapper atomically under `AUTH-014`.
+- Whether every derivation path, recovery included, is governed by one profile with no weaker exception.
+- Master-password minimum and strength guidance, including what a character count means. NFKD UTF-8 bytes are already fixed by ticket 06.
 
 Produces: `AUTH-*` requirements at parameter level, a versioned profile format, and negative test vectors.
 ### Inherited from ticket 06, password authentication protocol
 
-`AUTH-010` makes key-derivation parameters **Server-wide and published in the Server descriptor**,
-never per Account. There is no pre-login exchange left to carry per-Account parameters, and removing
-them also removes the vector where a Malicious Operator hands one Device weaker parameters than
-another. This ticket owns what the published profile contains, how the client pins it, and what a
-parameter upgrade looks like when it necessarily applies to every Account at once.
+`AUTH-003` fixes **one Argon2id run inside RFC 9807 OPAQUE**, not a separate authentication and unlock
+derivation. OPAQUE's export key feeds the labeled HKDF expansion that produces the Account Unlock Key.
+This ticket chooses the Argon2id parameters and output length as an RFC 9807 application profile and
+prices them on browser WASM.
 
-`AUTH-003` fixes **two independent Argon2id runs per full sign-in**, one producing the Authentication
-Key and one producing Vault-unlock material. Profile selection must be priced against double cost on
-the weakest hardware, which is browser WASM. `AUTH-011` bounds how often that cost is paid: enrolment
-and full sign-in only.
+The profile identifier is one byte, `0x00` is invalid, and it appears in every OPAQUE header and in the
+authenticated context. Device state and the Emergency Kit pin it before KE1. A profile upgrade changes
+the OPAQUE registration and export key, so it must use `AUTH-014`'s atomic replacement of the
+registration record and Account Key Set wrapper. No registry walk or Server-selected fallback has been
+approved; this ticket must define a finite discovery and upgrade rule without creating one.
 
-The Authentication profile identifier is not secret and lives in Device state and on the Emergency Kit,
-because the Server cannot supply it before a full sign-in begins. Decide whether the Vault-unlock
-profile is carried the same way or separately.
+Ticket 06 fixed NFKD UTF-8 as the master-password bytes and unsigned 16-bit length encoding. This ticket
+still owns the password policy, what its character count means, and the exact Argon2id profile.
 
 
 ## Answer
@@ -132,3 +130,17 @@ administrator has no lever here, which the administration work must state rather
 - **Extension, Desktop, and mobile architecture:** any surface performing a full sign-in must allocate
   64 MiB. The registry is append-only, so this does not bend later.
 - **Administration:** master password policy is unenforceable Server-side.
+
+## Reopened 2026-08-20
+
+The profile discovery algorithm is incorrect under its own adversary model. `AUTH-019` tries the
+Server-published profile and then only older entries. If an Account is pinned to a newer profile than
+a malicious or misconfigured Server publishes, a fresh Device never tries the valid profile and the
+Account is locked out.
+
+The second pass must also decide a finite complexity bound for registry walks and migrations. Password
+policy must define what "10 characters" counts. Ticket 06 has now fixed compatibility normalization as
+NFKD UTF-8 for the OPAQUE input; do not reopen that byte choice here.
+
+Resolve after ticket 06. Apply ticket 53's preference for standard KDF use and a small migration
+surface; the previous registry is not binding.

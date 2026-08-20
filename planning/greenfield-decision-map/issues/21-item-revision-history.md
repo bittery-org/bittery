@@ -21,6 +21,11 @@ Produces: `ITEM-005` promotion to a defined requirement, plus a retention decisi
 
 ## Comments
 
+### Superseded by ticket 04's reopened answer
+
+There is no mandatory per-Item revision chain, and ordinary Server timestamps are allowed. Decide
+revision retention and user-visible history without inheriting the old chain-pruning or no-time rules.
+
 ### Inherited from ticket 04, threat model and server-visible plaintext
 
 `PRIVACY-004` hash-chains Item revisions so that dropping or reordering one is Detectable. Bounded

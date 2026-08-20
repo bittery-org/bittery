@@ -21,6 +21,12 @@ Produces: `AUDIT-001` rewrite into testable requirements.
 
 ## Comments
 
+### Superseded by ticket 04's reopened answer
+
+There is one operator-readable audit log and no encrypted Security History, User History Key, or Team
+History Key. The log is operator-controlled evidence and no security guarantee depends on it. This
+ticket now owns its exact event taxonomy, fields, retention, access, export, and redaction only.
+
 ### Inherited from ticket 04, threat model and server-visible plaintext
 
 `AUDIT-001` is now settled in shape by ADR 0003: an Operator Log administrators read, and a Security

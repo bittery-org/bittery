@@ -20,24 +20,22 @@ Decide:
 Produces: an `ABUSE-*` requirement family and disposition rows for a subsystem currently unclassified.
 ### Inherited from ticket 06, password authentication protocol
 
-Enumeration on the sign-in path is **gone by construction**, not by defence. `AUTH-010` derives the salt
-from the Secret Key, so the Server exposes no endpoint that reveals whether an Account exists before a
-full sign-in begins. There is no decoy-salt response to make indistinguishable, in content or in timing.
+Full sign-in now uses RFC 9807 OPAQUE. A Server-wide setup permits the RFC's indistinguishable fake
+credential responses, but ticket 06 deliberately leaves the policy to this ticket: require or reject
+fake responses, define their timing obligations, and account for the global OPRF seed's blast radius.
 
-What remains for this ticket: the Sign-in Challenge endpoint is unauthenticated and hands out nonces, so
-it needs issuance limits and a challenge lifetime. Online guessing is weaker than usual because
-`AUTH-003` binds the Secret Key into the credential, so an attacker holding only a leaked password cannot
-produce a valid signature at all; rate limiting bounds resource abuse more than it bounds credential
-guessing. Registration, invitation, and Share-link endpoints keep their own enumeration questions.
+KE1 creates a Server-side Sign-in attempt under a random 128-bit identifier. This ticket fixes attempt
+expiry, concurrent-attempt bounds, fake-record behavior, and limits for KE1, KE2, and failed or abandoned
+KE3 exchanges. The attempt is atomically consumed on the first KE3 submission, success or failure.
+Registration is ceremony-bound and has no general public replacement endpoint.
 
 One user-facing consequence to price: a user with the right password but the wrong or missing Secret Key
 fails identically to a user with the wrong password. Decide what the client says.
 
 ### Inherited from ticket 09, recovery model and single-artifact paths
 
-`AUTH-026` adds a second authentication path, the recovery sign-in, using the same challenge-response
-under a different HKDF label. It needs the same rate limiting and the same silence as a full sign-in:
-there is no pre-login request, so no enumeration oracle appears, and this ticket must keep it that way.
+Ticket 09 will decide the recovery authentication mechanism again. It needs equivalent rate limiting
+and enumeration analysis, but must not silently inherit the superseded signature challenge-response.
 
 `AUTH-030` revocation and `AUTH-027` rotation are authenticated writes that delete or replace the
 material a locked-out User depends on. Their abuse limits belong here, along with what a Server does

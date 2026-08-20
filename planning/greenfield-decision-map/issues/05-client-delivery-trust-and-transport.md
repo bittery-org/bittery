@@ -100,3 +100,35 @@ Notes appended to tickets 16, 23, 25, 36, 37, 40, 41, 42 and 48.
   `worker-src` at `'none'`, `'self'` and `'wasm-unsafe-eval'`, and impose
   `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` as the floor. Source:
   `https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy`.
+
+## Reopened 2026-08-20
+
+The consistency audit found two security claims that do not hold:
+
+- Refusing to run the real Web client on HTTP is not stronger than HSTS. On an initial HTTP request a
+  Network Attacker controls the refusal page and can replace it with a credential-collection page.
+  HSTS protects a different boundary and must be evaluated on that boundary.
+- A published bundle hash plus a Server-reported hash does not detect what bytes that Server served to
+  Users. Keep release hashes if useful, but do not classify substitution as Detectable without an
+  independent observation mechanism.
+
+The Verified facts section is also stale after ticket 52: its Firefox rollout versions and its
+unresolved treatment of `100.64.0.0/10` are superseded by ticket 52 and must not feed a specification.
+Resolve this ticket again after ticket 04 fixes the guarantee vocabulary.
+
+## Answer to reopened pass
+
+Resolved again on 2026-08-20. Secure-context enforcement, operator-supplied certificates, same-origin
+Web Accounts, no Server CORS surface, exact CSP, and the installed-client multi-Server boundary remain.
+
+The Server now sends `Strict-Transport-Security: max-age=31536000` on every secure Web-client response,
+without `includeSubDomains` and without preload. Secure-context refusal does not protect an initial
+HTTP response; HSTS protects later navigation after the browser has received the policy.
+
+Ticket 04 removed the false bundle-detection claim. Published hashes verify releases and deployments,
+but a Malicious Operator can report the expected hash while serving other bytes. Both targeted and
+fleet-wide Web substitution are Acknowledged, and no well-known self-reported hash is a security
+mechanism. The Web limitation is disclosed in documentation and contextual UI.
+
+ADR 0004 is amended and accepted again. ADR 0005 is accepted again. Ticket 52 is the authoritative
+Local Network Access evidence; the stale fact block above remains only as history.

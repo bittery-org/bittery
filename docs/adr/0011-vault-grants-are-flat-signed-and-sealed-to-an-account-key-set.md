@@ -1,6 +1,8 @@
 # Vault grants are flat, signed, and sealed to an Account Key Set
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 08 on 2026-08-20.
 
 `AUTH-015` ends at "Vault-unlock material" and says nothing about what that material protects. This
 ADR records the shape underneath it: `CRYPTO-001` and `CRYPTO-002` put a randomly generated **Account

@@ -1,6 +1,8 @@
 # Rotating a wrapping secret is forward protection only
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 09 on 2026-08-20.
 
 `CRYPTO-002` makes the Account Key Set random and long-lived, wrapped by whatever the User unlocks
 with. That is what makes a password change cheap: re-wrap one envelope and leave every Vault key and

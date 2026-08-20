@@ -2,7 +2,7 @@
 
 Type: grilling
 Status: resolved
-Blocked by: 04
+Blocked by: 04, 53
 
 ## Question
 
@@ -63,3 +63,69 @@ not find a flaw in how the two secrets combine. Conformance vectors go to ticket
 makes version rotation a specified path so a rejected review is a scheduled migration.
 
 Notes appended to tickets 07, 09, 10, 14, 23 and 49.
+
+## Reopened 2026-08-20
+
+The maintainer requested a second pass biased toward final RFC standards, mature reviewed libraries,
+low complexity, and security. The previous answer is historical evidence, not a constraint.
+
+The pass must correct two specific defects. `AUTH-014` deadlocks protocol rotation if the Server
+refuses the old version before a client can authenticate and register the new key. `AUTH-009` also
+claims relay resistance before ticket 23 defines how a client authenticates, pins, restores, and
+changes Server identity. Specify migration and identity prerequisites rather than assuming them.
+
+Reconsider standard PAKEs, the signature challenge-response, and any simpler standard alternative
+under ticket 53's acceptance policy. A bespoke construction is not the default merely because its
+primitive operations are standard.
+
+## Answer — second pass 2026-08-20
+
+Promoted to rewritten [`AUTH-002`](../../../docs/greenfield/target/product.md), `AUTH-003`, and
+`AUTH-009` through `AUTH-015`; accepted [ADR 0006](../../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md);
+superseded [ADR 0007](../../../docs/adr/0007-the-authentication-salt-derives-from-the-secret-key.md);
+and revised authentication language in [`CONTEXT.md`](../../../CONTEXT.md).
+
+**Full sign-in uses OPAQUE-3DH from RFC 9807.** Protocol version `0x01` fixes OPRF
+`ristretto255-SHA512`, 3DH over ristretto255, HKDF-SHA-512, HMAC-SHA-512, SHA-512, and Argon2id.
+Ticket 07 owns the exact Argon2id profile. `opaque-ke` is initially pinned exactly at 4.0.1. RFC 9807
+is final but IRTF Informational rather than Internet Standards Track; the public security and protocol
+documents and review material say so, while routine UI does not.
+
+**Both factors and both stable identities enter one canonical OPAQUE input.** It is the ASCII label
+`bittery/opaque-input/1`, then unsigned 16-bit big-endian length-prefixed Account identifier, Server
+identifier, and NFKD UTF-8 master password, then the raw 16-byte Secret Key. Account and Server
+identifiers are also OPAQUE identities; Account identity is the credential identifier and email is
+lookup-only. Ticket 23 must define Server-identity trust before relay resistance is claimed.
+
+**The public format is RFC bytes behind a two-byte header.** The first byte is the append-only
+authentication version and the second the key-derivation profile; zero is invalid. The authenticated
+context binds the Bittery context label, both bytes, and fixed suite name. No CBOR, textual delimiter,
+variable integer, crate serialization, version negotiation, or automatic fallback exists here.
+
+**OPAQUE supplies authentication and Account unlocking without a second password derivation.** A
+labeled HKDF-Expand-SHA-512 narrows the 64-byte client-only export key into the 32-byte Account Unlock
+Key. A separately labeled confirmation key from the session key authenticates one Device-credential
+issuance, after which both sides erase the session material. Ordinary traffic uses the Device
+credential.
+
+**Server state is explicit and shared.** One OPRF seed and static 3DH key exist per Server and protocol
+version. They are root authentication secrets and mandatory backup material. A random 128-bit Sign-in
+attempt identifies short-lived Server-side OPAQUE state, atomically consumed by the first KE3. No
+sticky session, Redis correctness dependency, general registration endpoint, or sealed continuation
+format was accepted.
+
+**Migration cannot deadlock or downgrade.** A client pins the authentication version and the Emergency
+Kit prints it. A normal migration authenticates the old version or uses an enrolled Device, then
+atomically installs the new OPAQUE registration and Account Key Set wrapper before deleting the old
+pair. The updated Kit is saved before commit. If the old version is unsafe, only an enrolled Device or
+independently valid recovery route may authorize replacement; otherwise the Account is unrecoverable.
+The operator has no bypass.
+
+**There is no alternate authentication protocol.** A library defect blocks release until an RFC-
+conformant implementation passes. Rejection of OPAQUE itself reopens the decision rather than activating
+a rushed fallback. CI runs RFC Appendix C and Bittery-profile vectors on Rust and WASM; integrated
+external review blocks general availability, but independent cross-implementation execution is not a
+separate release gate.
+
+Updated handoffs in tickets 07, 08, 09, 10, 14, 22, 23, 24, 25, and 49. No fog graduated and no new
+ticket was necessary.

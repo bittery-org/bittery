@@ -1,69 +1,55 @@
-# Password authentication is a signature challenge-response, not a PAKE
+# Password authentication uses OPAQUE RFC 9807
 
 Status: accepted
 
-`AUTH-003` named RFC 9807 OPAQUE as the intended protocol with its suite left open. The product runs a
-signature challenge-response instead. Argon2id runs over the master password, HKDF-Extract mixes in the
-Secret Key, and HKDF-Expand produces the seed for an Ed25519 Authentication Key. The Server stores the
-public half. At each full sign-in the client signs a canonical, length-prefixed message binding a
-purpose label, the protocol version, the Server identity, the Account identifier, and a single-use
-Sign-in Challenge.
-
-The reasoning starts from what a password-authenticated key exchange actually buys. No augmented PAKE
-removes the offline dictionary attack against a stolen Server database; conceding that attack is the
-definition of the category. OPAQUE's distinguishing property is pre-computation resistance, because its
-oblivious-PRF step means the client never receives a salt. `AUTH-001` binds the Secret Key into the
-credential, so any offline grind already costs roughly 128 bits on top of the password, and the Server
-holds Vault ciphertext derived from the same two secrets and grindable at identical cost. The property
-OPAQUE sells was therefore already held, and held better, by the Secret Key.
+Bittery full sign-in uses OPAQUE-3DH from RFC 9807 with ristretto255, SHA-512, and Argon2id. The
+master password, Secret Key, stable Account identity, and stable Server identity form the canonical
+OPAQUE input. The client-only export key is expanded into the Account Unlock Key, so one registered
+protocol supplies both authentication and the wrapping key without a second password derivation.
 
 ## Considered options
 
-**OPAQUE, RFC 9807, on `opaque-ke` 4.0.1** was rejected on cost against that marginal gain. RFC 9807 is
-Informational on the IRTF stream and its own text says the results "might not be suitable for
-deployment". `opaque-ke` is effectively single-vendor with no credible alternative Rust implementation,
-carried a five-month commit gap at the time of the decision, and its only audit is NCC Group, June 2021,
-against version 0.5.0: four years and three major versions before the RFC sync. It would also have been
-the product's hardest component to review and its least replaceable dependency.
+**The earlier Ed25519 signature challenge-response** was rejected on the second pass. It was smaller
+and the 128-bit Secret Key already made a stolen password database impractical to grind, so OPAQUE's
+pre-computation resistance added little to the stated threat model. The exchange was nevertheless a
+Bittery composition of Argon2id, HKDF, Ed25519, a canonical signed message, registration, and migration.
+Under ADR 0017, locally smaller code does not beat a complete final-RFC construction unless a mandatory
+property requires the exception. None did.
 
-**Reusing the frozen product's SRP-6a** was rejected, and the frozen implementation is the reason. It is
-1,703 lines of hand-written Rust under `legacy/packages/crypto/core/crates/bittery-crypto-core/src/srp6a/`,
-including its own big-integer module, whose source records that the modular exponentiation is not
-constant-time because `num_bigint::BigUint::modpow` uses a variable-window algorithm. That is a secret
-exponent in a variable-time routine. Adopting it means adopting bespoke big-integer arithmetic, which is
-a larger review liability than the construction it would replace, not a smaller one. SRP is also less
-standard than it appears: the CFRG's PAKE selection passed it over in favour of OPAQUE and CPace, TLS 1.3
-removed SRP entirely, and it has no security proof. It would additionally have restored the pre-login
-salt fetch this decision removes, and lost the pre-computation resistance that [ADR
-0007](0007-the-authentication-salt-derives-from-the-secret-key.md) obtains for free.
+**The frozen product's SRP-6a** remains rejected. Its 1,703-line implementation contains hand-written
+big-integer arithmetic and variable-time modular exponentiation over a secret exponent. Reusing it
+would violate the no-product-arithmetic policy and adopt a protocol the CFRG PAKE process passed over.
 
-**Sending a KDF-derived authentication hash**, as Bitwarden does, was rejected because the value on the
-wire and at rest is password-equivalent. A Malicious Operator running modified Server code harvests it
-silently, which contradicts the class ticket 04 spent its budget defending against.
+**An authentication hash or shared HMAC key** remains rejected because the value held by the Server is
+password-equivalent. A Malicious Operator could harvest it directly.
 
-**HMAC over the challenge** was rejected for the same reason at rest: the Server would hold the key it
-verifies with.
-
-**ECDSA over P-256** was rejected. Nothing outside the Rust core ever verifies, so P-256 buys no
-interoperability and costs randomness at signing time and a nonce-reuse failure mode Ed25519 does not
-have.
+**P-256/SHA-256 OPAQUE** was considered only to obtain a 32-byte export key. Bittery has no external
+P-256 interoperability requirement, while `opaque-ke` defaults to the RFC's ristretto255/SHA-512
+configuration. A labeled HKDF expansion is the ordinary application use of a 64-byte export key and
+does not justify changing the group.
 
 ## Consequences
 
-The construction is bespoke, and that is the cost this decision accepts. It is mitigated three ways.
-The exchange itself is conventional: challenge-response against a registered public key is the shape of
-SSH public-key authentication and WebAuthn. The novel part is the derivation alone, which is three steps
-over separately audited primitives, and the product writes no big-integer arithmetic of its own.
-`AUTH-013` makes an external cryptographic review of the written design note a gate before general
-availability, ahead of any penetration test, because a design flaw found once Accounts exist is the
-expensive one. `AUTH-012` requires the design note and conformance vectors now, so ticket 49's fixture
-corpus proves the Rust core, the WASM build, and the Server agree byte for byte.
+Authentication protocol version `0x01` fixes OPRF `ristretto255-SHA512`, 3DH over ristretto255,
+HKDF-SHA-512, HMAC-SHA-512, SHA-512, and Argon2id with parameters supplied by a one-byte profile. RFC
+messages and registration records remain RFC bytes behind a two-byte Bittery version header; neither
+CBOR nor Rust serialization enters the public format. Stable Account and Server identities appear both
+in the canonical OPRF input and as OPAQUE identities. Ticket 23 must define the Server-identity trust
+ceremony before the product claims relay resistance.
 
-Because the protocol version is bound into both the signed message and the Server-side record, a
-rejected version is a scheduled migration rather than a crisis: publish a new version, let each client
-re-derive and re-register at next full sign-in, and refuse the old version at the Server. No Vault data
-moves and nothing is decrypted. `AUTH-014` makes that path normative rather than implied.
+The initial dependency is pinned exactly to `opaque-ke` 4.0.1. CI runs the applicable RFC 9807 vectors
+and Bittery-profile vectors on Rust and WASM. Independent review of the pinned dependency, profile,
+encodings, integration, and Account Key Set wrapping blocks general availability. No second protocol is
+kept as a fallback: an implementation defect blocks release until an interoperable implementation
+passes, and rejection of OPAQUE itself reopens this decision.
 
-Every surface authenticates identically, so the Server has exactly one authentication implementation and
-no weaker path exists to steer a client onto. The Web client pays the full derivation cost for a
-property `PRIVACY-015` says it cannot hold; that is accepted as the price of a single Server path.
+OPAQUE's export key makes fresh-Device recovery depend on the Server's OPRF evaluation. The Server-wide
+OPRF seed and static 3DH key are therefore root authentication secrets and mandatory backup material.
+An enrolled Device remains independently usable through its local wrapper. Authentication and profile
+migration atomically replace the registration record and Account Key Set wrapper before deleting the
+old pair; an unsafe old version may be replaced only through an enrolled Device or an independent
+recovery route, never an operator bypass.
+
+RFC 9807 is final but is an IRTF Informational RFC, not an Internet Standards Track specification. The
+security whitepaper, protocol documentation, this ADR, and review material say so; routine product UI
+does not.

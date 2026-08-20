@@ -1,7 +1,7 @@
 # Key hierarchy and canonical envelope format
 
 Type: grilling
-Status: resolved
+Status: ready-for-human
 Blocked by: 04, 07
 
 ## Question
@@ -99,3 +99,27 @@ post-quantum fog entry is cleared: content is symmetric, so harvest-now-decrypt-
 the X25519-sealed Vault keys, and a hybrid KEM would arrive as a new format version rather than a new
 field.
 
+## Reopened 2026-08-20
+
+The maintainer requested a full simplicity and standards pass before persisted bytes are frozen.
+Reconsider the hierarchy and format from zero under ticket 53's acceptance policy.
+
+In particular, compare the previous HPKE export-only plus separately exported XChaCha20-Poly1305
+construction with using an RFC 9180 authenticated-encryption suite directly. Count custom labels,
+registries, envelope shapes, encoders, migration paths, and negative-test obligations as security and
+maintenance cost. XChaCha20-Poly1305's lack of a final RFC and the bespoke composition are accepted
+costs only if a concrete requirement rules out a simpler standardized construction.
+
+The external cryptographic review gate must cover the final derivation, hierarchy, envelope, grant,
+revision, recovery, and rotation construction as one system, not authentication alone.
+
+### Inherited from the reopened password authentication decision
+
+OPAQUE's 64-byte export key is now the sole password-derived source for the Account Unlock Key.
+`AUTH-002` fixes the narrowing operation as HKDF-Expand-SHA-512 with
+`bittery/opaque/account-unlock/1` as `info` and a 32-byte output. This ticket decides the wrapper that
+consumes that key; it must not add a second password derivation or reuse the OPAQUE session key.
+
+Changing the OPAQUE protocol, profile, master password, Secret Key, or stable Server identity changes
+the export key. Each such ceremony re-wraps the Account Key Set in the same atomic transaction that
+replaces the OPAQUE registration. Vault keys must remain untouched.

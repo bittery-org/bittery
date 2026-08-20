@@ -23,23 +23,26 @@ Produces: an enrollment protocol specification, `AUTH-004` refinement, and seed 
 
 ### Inherited from ticket 04, threat model and server-visible plaintext
 
+**Superseded by ticket 04's reopened answer:** silent enrollment is not Detectable when a Malicious
+Operator equivocates between Devices. This ticket must make a Server-issued Device credential
+insufficient to obtain Account keys and must state which enrollment facts a client can detect from
+state it actually receives.
+
 `PRIVACY-004` makes silent Device enrollment Detectable, not merely audited. Every existing Device of
 an Account must be told when a Device is enrolled, and the notification cannot depend on the Server
 choosing to deliver it. `PRIVACY-007` puts the Device name in Server-visible plaintext, so enrollment
 carries a user-chosen label the operator reads.
 ### Inherited from ticket 06, password authentication protocol
 
-`AUTH-011` makes the full sign-in protocol authenticate **enrolment and full sign-in only**. Every
-ordinary request runs on a Device credential this ticket defines: its shape, its lifetime, how it is
-issued at the end of a successful full sign-in, and what forces a Device back to a full sign-in.
+`AUTH-011` makes OPAQUE full sign-in authenticate **Device enrolment only**. It derives a one-use
+confirmation key from the OPAQUE session key with `bittery/opaque/device-credential/1`; HMAC-SHA-512
+under that key must cover this ticket's canonical issuance payload. Credential issuance and successful
+KE3 processing commit atomically, after which the session and confirmation keys are erased.
 
-Device state must hold the **key-derivation profile identifier** under `AUTH-010`, because there is no
-pre-login exchange that could supply it.
-
-`AUTH-014` requires that a protocol-version rotation be a specified path: each client re-derives and
-re-registers its Authentication Key at next full sign-in while the Server refuses the superseded version.
-Decide how an enrolled Device with a live Device credential is driven back to a full sign-in when that
-happens.
+Device state holds both one-byte version identifiers. An enrolled Device is also an independent route
+that may authorize atomic OPAQUE record-and-wrapper replacement when the old protocol is unsafe to run.
+This ticket must define that authorization without turning the Device credential into a general root-
+credential replacement endpoint.
 
 ### Inherited from ticket 07, key derivation profiles
 
@@ -79,3 +82,10 @@ Device enrolled before a Secret Key rotation will never learn the current Secret
 `AUTH-026` ends a recovery by signing out every other Device, and `AUTH-025` and `AUTH-027` offer the
 same sign-out with it off by default. What "sign out every other Device" does to a Device that is
 offline is this ticket's to specify, inside `AUTH-008`'s existing limit.
+
+### Inherited from the 2026-08-20 consistency audit
+
+Recovery must revoke every other Device before any of them can receive the new Account Private Object
+that carries the rotated Secret Key. Specify the atomic Server transition, authorization check, Sync
+visibility, and behavior of an already-running or offline Device. Ticket 09 is reopened, so its final
+object and ceremony may change.

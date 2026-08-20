@@ -20,6 +20,11 @@ Decide:
 Produces: the repository-foundation specification that `CLAUDE.md` currently defers, and the build and test commands the checks section is waiting on.
 ## Comments
 
+### Superseded in part by ticket 04's reopened answer
+
+The Web bundle hash remains a reproducible-release and deployment-conformance check. It is not a
+substitution-detection mechanism and no check may describe it as proof of bytes delivered to Users.
+
 ### Inherited from ticket 05, client delivery trust and transport
 
 Three new CI obligations arrive from this ticket, alongside the `PRIVACY-006` plaintext schema check.

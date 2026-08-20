@@ -18,15 +18,24 @@ Decide:
 - Where the twelve seed scenarios land, and which are replaced.
 
 Produces: the corpus specification and the resolution of the seed scenario list.
+
+The first-release gate must not require unshipped Swift and Kotlin bindings to execute the corpus.
+Define a first-release Rust/WASM obligation and a fixture format that later native bindings must adopt;
+this corrects the unconditional wording in `docs/greenfield/target/architecture.md`.
+
+Ticket 53 also hands this ticket the integrated cryptographic review surface and acceptance-policy
+fixtures. Reopened tickets 06 through 09 may replace all previously listed vectors.
 ### Inherited from ticket 06, password authentication protocol
 
-`AUTH-012` hands this ticket the **authentication vectors**: Argon2id output, HKDF-Extract and
-HKDF-Expand steps, the Ed25519 seed, the canonical length-prefixed signed message, and the signature.
-The construction is bespoke, so cross-implementation agreement between the Rust core, the WASM build,
-and the Server is proven by fixtures rather than by an RFC's published vectors.
+`AUTH-013` hands this ticket every applicable RFC 9807 Appendix C real and fake vector plus Bittery-
+profile positive and negative vectors. Rust and WASM must consume the same fixture bytes. Independent
+cross-implementation execution is not a release requirement; external review separately covers the
+pinned `opaque-ke` implementation and its integration.
 
-The canonical encoding of the signed message is the sharp edge: the corpus must include cases that would
-catch an ambiguous encoding, where two different field sets could produce the same byte string.
+The Bittery vectors pin the two-byte header, canonical OPRF input, Account and Server identities,
+authenticated context, Argon2id profile, KE1 through KE3, registration record bytes, export-key HKDF,
+and session-key confirmation MAC. Negative cases cover every rejected length, zero or unknown version,
+context mismatch, malformed RFC payload, replayed attempt, and second KE3 submission.
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 

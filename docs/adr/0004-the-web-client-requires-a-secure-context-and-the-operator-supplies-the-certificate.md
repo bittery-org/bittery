@@ -2,6 +2,8 @@
 
 Status: accepted
 
+Reconfirmed with an HSTS amendment by Wayfinder ticket 05 on 2026-08-20.
+
 `HOST-001` calls LAN-only deployment first-class, and nothing in the corpus mentioned transport at
 all. A plain `http://` origin is not a secure context, and a browser then withholds `crypto.subtle`,
 the Origin Private File System, Service Workers, the Cache API, and `StorageManager.persist()`. The
@@ -32,14 +34,12 @@ operator-supplied private certificate authority, and a loopback forward for one 
 route is the recommended one for a LAN, because it delivers a real name and a real certificate with
 no certificate installation.
 
-The Server sends no HTTP Strict-Transport-Security header, and no requirement asks for one. Under
-`HOST-007` the Web client already refuses to run from a non-secure origin, which is the stronger
-guarantee; the header would only cover the first navigation to a typed `http://` address. Against
-that narrow gain sits a sharp footgun: a browser records the header only over a connection whose
-certificate already validates, so an operator who once had a valid certificate and later moves to one
-the browser distrusts locks every user out for the remaining lifetime, with the certificate warning
-bypass deliberately removed. Since `HOST-008` puts certificate management entirely in operator hands,
-that mistake is likely enough to outweigh the benefit.
+The earlier decision to omit HSTS was wrong: refusing to run the real client over HTTP does not stop a
+Network Attacker from replacing the refusal page. Every secure Web-client response therefore sends
+`Strict-Transport-Security: max-age=31536000`, scoped to the exact host with no `includeSubDomains` and
+no preload. This protects later navigation after the browser receives the policy while avoiding an
+irreversible preload or policy over unrelated subdomains. The first HTTP visit remains unprotected and
+the documentation says so.
 
 Secure context is now guaranteed for the Web client, so the Origin Private File System and
 `StorageManager.persist()` are available to it. The browser durability work no longer has to plan for

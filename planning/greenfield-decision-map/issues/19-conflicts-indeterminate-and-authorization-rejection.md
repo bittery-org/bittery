@@ -21,6 +21,11 @@ Produces: `SYNC-004`, `OFFLINE-003`, and `ITEM-004` refinement, plus seed scenar
 
 ## Comments
 
+### Superseded by ticket 04's reopened answer
+
+There is no mandatory per-Item revision chain. Each client remembers the highest authenticated
+revision it accepted. This ticket owns conflict behavior but no longer needs to preserve a hash chain.
+
 ### Inherited from ticket 04, threat model and server-visible plaintext
 
 `PRIVACY-004` adds a per-Item revision chain. Decide how the chain survives an offline edit that lands

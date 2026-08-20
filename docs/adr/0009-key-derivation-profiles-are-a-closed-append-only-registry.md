@@ -1,6 +1,8 @@
 # Key-derivation profiles are a closed, append-only registry
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 07 on 2026-08-20.
 
 [ADR 0007](0007-the-authentication-salt-derives-from-the-secret-key.md) made key-derivation
 parameters Server-wide and published in the Server descriptor, because there is no pre-login exchange

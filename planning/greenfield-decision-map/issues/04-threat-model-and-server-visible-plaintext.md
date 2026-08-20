@@ -92,3 +92,105 @@ afterwards. Dropping a revision stays Detectable through the revision chain.
 `PRIVACY-007` gained three fields: the wrapped Account Key Set on an Account, a granter identifier and
 grant signature on every wrapped Vault key, and a wrapped Team History Key per reader. `PRIVACY-006`
 makes the list closed, so each is a deliberate amendment.
+
+## Reopened 2026-08-20
+
+The consistency audit found that the promoted threat model overclaims and is incomplete:
+
+- `PROD-FOUNDATION-003` still promises undefined "zero knowledge" while `PRIVACY-007` deliberately
+  exposes identities, names, membership, sizes, access patterns, and source addresses.
+- `PRIVACY-016` calls fleet-wide Web bundle substitution Detectable by a third party, while
+  `PRIVACY-002` defines Detectable as the User's own client catching and reporting the attack. A
+  malicious Server can also report the published hash while serving different bytes.
+- The closed plaintext list omits state already required for Sign-in Challenges, Device credentials,
+  protocol versions, authorization, invitations, rate limiting, Server identity, and idempotency.
+- Compromised Client Build does not state the disposition of malware, a compromised browser or OS,
+  runtime injection, or an unofficial malicious build.
+- `PRIVACY-005` says five Acknowledged attacks and lists six.
+
+Resolve again before ticket 53 sets the cryptographic acceptance policy. The new answer must use
+claims that a conformance test or a named detection mechanism can actually prove.
+
+## Decisions in reopened pass
+
+- **Top-level operator guarantee:** use a precise content-secrecy promise. A conforming installed
+  client prevents an operator from decrypting Vault content. Do not use "zero knowledge" as the
+  product or specification umbrella term. State Server-visible data and the weaker Web-client trust
+  model as separate, explicit limits.
+- **Detectable means client-detected:** the User's own conforming client must catch and report the
+  attack. Published build hashes are release-verification data, not evidence of what a serving
+  operator delivered to a User. Fleet-wide and targeted Web bundle substitution are both
+  Acknowledged unless a later independent mechanism gives the User's client a real detection path.
+- **Plaintext registry lifecycle:** keep a field-level closed allowlist, but mark it provisional while
+  Wayfinding is open. Every downstream ticket that introduces Server-readable state must amend it
+  explicitly. Freeze the registry only after the public protocol and Server schema close, then make
+  the schema check release-blocking.
+- **Endpoint-compromise boundary:** protect persisted secrets against a Device Thief while the Device
+  is locked. Malware, a compromised OS or browser, runtime injection, and an attacker controlling an
+  unlocked client are Acknowledged. Build reproducibility is a supply-chain verification property and
+  is not presented as resistance to a compromised running endpoint.
+- **Readable names:** Vault, Team, and Device names remain Server-visible plaintext. This is accepted
+  to keep administration, support, membership management, and protocol behavior simple. Operator
+  disclosure must name these fields prominently rather than burying them under the content-secrecy
+  promise.
+- **Readable relationship graph:** the Server may read complete Vault and Team membership and roles.
+  Server authorization uses it for availability and abuse control; cryptographic grants still decide
+  who can decrypt. Documentation must disclose the graph plainly.
+- **Operational timestamps:** the Server may store ordinary wall-clock timestamps for Server records,
+  retention, expiry, access, and operations. User-authored Item timestamps remain encrypted, but the
+  observable activity chronology is disclosed. Do not build special sequence-only or day-bucket
+  machinery merely to obscure time.
+- **No ciphertext padding:** exact ciphertext and Attachment sizes remain Server-visible and are
+  documented. The persisted format carries no padding buckets, padding policy, or padding migration.
+- **One audit system:** keep one operator-readable audit log for administrative and operational
+  events. It is evidence controlled by the operator, not a security boundary. Do not create a second
+  encrypted Security History or a Team History Key; client detection must come from authenticated
+  protocol state.
+- **Rollback floor:** each client remembers the highest authenticated Item revision it has accepted
+  and rejects older state. Do not require a per-Item revision chain. A revision never shown to any
+  client may be withheld without detection, matching the Acknowledged withholding limit; cross-Device
+  equivocation remains Acknowledged unless a later transparency design changes it.
+- **Disclosure surfaces:** state the Web client's weaker serving-operator guarantee in full security
+  documentation and in a concise, non-blocking notice in the Web client's security or Account
+  information. Do not hide it in documentation alone or require a recurring warning interstitial.
+- **Recipient-key authentication:** before the first Vault grant, an installed client requires the
+  sender to compare or scan the recipient's Account fingerprint out of band. A changed key requires
+  verification again. Do not claim malicious-operator content secrecy for an unverified recipient key,
+  and do not build key transparency in the first release.
+- **Cryptographic authorship:** use one Account-level signing key for Vault grants, role changes, and
+  Item revisions. Clients validate an action against the signed role state and reject unauthorized
+  actions. Do not introduce per-Device signing keys merely for finer attribution; ticket 08 must
+  choose a standard signature scheme and specify Account signing-key lifecycle and history.
+- **Adversary taxonomy:** use seven explicit classes: Curious Operator, Malicious Operator, Network
+  Attacker, locked Device Thief, Co-tenant User, Vault Co-member, and Compromised Endpoint. A poisoned
+  build is one route to endpoint compromise; reproducible-build checks remain verification controls,
+  not a separate runtime guarantee.
+- **Guarantee tiers:** retain Prevented, Detectable, and Acknowledged with strict meanings. Prevented
+  means the attack cannot succeed against a conforming client. Detectable means that client catches
+  and reports it. Acknowledged means Bittery neither prevents nor reliably detects it and documents
+  the limitation.
+
+## Answer to reopened pass
+
+Resolved again on 2026-08-20. The promoted requirements now promise **content secrecy** for conforming
+installed clients using verified recipient keys, never undefined "zero knowledge". The seven-adversary
+model and strict three-tier vocabulary are in `CONTEXT.md` and `PRIVACY-001` through `PRIVACY-005`.
+
+The plaintext registry remains field-level and closed but provisional until the protocol and Server
+schema freeze. Names, email, the complete membership and role graph, sizes, source addresses,
+operational timestamps, and activity chronology are deliberately Server-readable and prominently
+disclosed. Ciphertext remains unpadded.
+
+One operator-readable log replaces the encrypted Security History. It is never a security boundary,
+which removes the Team History Key. Clients remember accepted authenticated revisions rather than
+maintaining a per-Item revision chain. Account-level signatures remain required for grants, role
+changes, and Item revisions. The first recipient key is verified out of band; first-release key
+transparency is rejected.
+
+Web substitution is Acknowledged whether targeted or fleet-wide. Published hashes verify release
+artifacts but do not prove what a Server delivered. The Web limitation is documented and shown in a
+non-blocking security/account notice. Locked Device theft is in scope; a Compromised Endpoint is
+Acknowledged.
+
+Promoted to `PROD-FOUNDATION-003`, `PRIVACY-001` through `PRIVACY-016`, `ADMIN-001`, `AUDIT-001`,
+`CONTEXT.md`, amended ADR 0001, and new ADRs 0015 and 0016. ADRs 0002 and 0003 are superseded.

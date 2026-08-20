@@ -1,6 +1,6 @@
 # The Server stores sequence numbers, not timestamps
 
-Status: accepted
+Status: superseded by ADR-0015
 
 The Server needs to order changes so that synchronization works, and a per-Vault monotonic sequence
 number does that as well as a wall-clock timestamp does. It records no behaviour. `PRIVACY-008`

@@ -1,6 +1,8 @@
 # One envelope, one suite, and a version byte that names the whole format
 
-Status: accepted
+Status: proposed
+
+Previously accepted; reopened by Wayfinder ticket 08 on 2026-08-20.
 
 Every byte of Bittery ciphertext is written against the decision this ADR records, which makes it the
 most expensive one on the greenfield map to reverse. `CRYPTO-003` fixes XChaCha20-Poly1305 as the only

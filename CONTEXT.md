@@ -1,7 +1,8 @@
 # Bittery
 
 A self-hosted, open-source password manager. Users hold Items in Vaults, share Vaults through Teams,
-and synchronize through a Server that cannot read what it stores.
+and synchronize through a Server that cannot decrypt Vault content used by a conforming installed
+client. The Server does read the fields in the provisional plaintext registry.
 
 This glossary grows lazily. Terms arrive as Wayfinder tickets resolve them, so absence means
 undecided, not unimportant.
@@ -22,7 +23,7 @@ An attacker who controls the path between a client and a Server.
 _Avoid_: man in the middle, MITM
 
 **Device Thief**:
-Someone in physical possession of an enrolled Device.
+Someone in physical possession of an enrolled Device while it is locked.
 _Avoid_: stolen device attacker, local attacker
 
 **Co-tenant User**:
@@ -34,9 +35,10 @@ A legitimate member of a Vault, acting outside their remit. Holding the Vault ke
 an Item revision or claim authorship, so signatures rather than encryption are what answer them.
 _Avoid_: insider, rogue member, malicious colleague
 
-**Compromised Client Build**:
-A released client binary or bundle that is not the one the published source produces.
-_Avoid_: supply chain attack, poisoned build
+**Compromised Endpoint**:
+An attacker controlling an unlocked client, its runtime, browser, or operating system. A poisoned
+build is one route to this compromise.
+_Avoid_: Compromised Client Build, malware attacker, poisoned build
 
 ## Guarantee tiers
 
@@ -54,25 +56,21 @@ _Avoid_: accepted risk, out of scope, residual risk
 
 ## Privacy
 
+**Content secrecy**:
+The promise that a Curious or Malicious Operator cannot decrypt Vault content handled by a conforming
+installed client using verified recipient keys. It does not hide Server-visible fields or apply to a
+Web client's serving operator.
+_Avoid_: zero knowledge, end-to-end encryption (when used without its limits)
+
 **Server-visible plaintext**:
-The closed set of fields a Server holds unencrypted, enumerated by `PRIVACY-007`. Anything absent
-from that set is a defect.
+The field-level closed registry of data a Server holds unencrypted, enumerated by `PRIVACY-007`. It is
+provisional during Wayfinding and becomes release-enforced when the protocol and schema freeze.
 _Avoid_: metadata, leakage surface, clear fields
 
 **Operator Log**:
-The audit stream an administrator can read. Carries Account identifiers and event categories, never
-the Vault or Item an event touched.
+The one audit stream an administrator can read. It contains only registered Server-visible fields and
+is operator-controlled administrative evidence, never a security boundary.
 _Avoid_: admin log, system log, server audit
-
-**Security History**:
-The audit stream encrypted to a User or Team, naming the actor and object of each event. An
-administrator cannot read it.
-_Avoid_: user audit log, activity feed, account history
-
-**Revision chain**:
-The hash linking each Item revision to the one before it, so that dropping or reordering a revision
-is Detectable.
-_Avoid_: history hash, version chain, merkle log
 
 ## Clients
 
@@ -99,22 +97,20 @@ The exchange that proves possession of the master password and the Secret Key to
 Device enrolment and whenever a Device has no valid Device credential. Ordinary traffic never uses it.
 _Avoid_: login, log in, authentication (as a noun for this specific exchange)
 
-**Authentication Key**:
-The Ed25519 key pair derived from the master password and the Secret Key. Its private half exists only
-in memory during a full sign-in; the Server holds the public half and nothing else.
-_Avoid_: auth key, login key, verifier, password verifier
+**OPAQUE registration**:
+The RFC 9807 record by which a Server verifies a full sign-in without learning either password factor.
+It belongs to one Account, Server, authentication-protocol version, and key-derivation profile.
+_Avoid_: Authentication Key, verifier, password record, login key
 
-**Sign-in Challenge**:
-The single-use nonce a Server issues to begin a full sign-in. The client returns a signature over a
-canonical message binding the nonce, the Server, the Account, the protocol version, and a purpose
-label.
-_Avoid_: challenge token, login token, nonce (unqualified)
+**Sign-in attempt**:
+The short-lived, single-use Server record carrying one OPAQUE exchange from KE1 through KE3. Its
+random identifier correlates HTTP messages but grants no authority by itself.
+_Avoid_: Sign-in Challenge, challenge token, login session
 
 **Key-derivation profile**:
-The identifier of one frozen set of Argon2id parameters. One profile governs both the Authentication
-Key and the Vault-unlock material, because a single memory-hard run produces both. It is not secret.
-Devices hold it locally and the Emergency Kit prints it, because the Server cannot supply it before a
-full sign-in begins.
+The one-byte identifier of a frozen set of Argon2id parameters used as OPAQUE's key-stretching
+function. It is not secret. Devices hold it locally and the Emergency Kit prints it because it is part
+of the authenticated OPAQUE context before a full sign-in begins.
 _Avoid_: Authentication profile, KDF version, work factor, difficulty
 
 **Profile registry**:
@@ -147,8 +143,8 @@ _Avoid_: recovery code, reset code, backup key, recovery password
 
 **Emergency Kit**:
 The document a client produces at Account creation, holding the Server address, the Account email
-address, the Secret Key, the key-derivation profile identifier, and the Account Fingerprint. It never
-carries a Recovery Key or a master password.
+address, the Secret Key, the authentication-protocol version, the key-derivation profile identifier,
+and the Account Fingerprint. It never carries a Recovery Key or a master password.
 _Avoid_: Recovery Kit, backup file, account kit
 
 **Recovery sheet**:
@@ -189,8 +185,8 @@ decrypt. A Share link snapshot binds the link, never the Item it came from.
 _Avoid_: context header, associated data, metadata
 
 **Account Unlock Key**:
-The symmetric key that HKDF-Expand produces from the single Argon2id run, which wraps the Account Key
-Set and nothing else. It is what earlier requirements called the Vault-unlock material.
+The 32-byte symmetric key that labeled HKDF-Expand derives from OPAQUE's client-only export key. It
+wraps the Account Key Set and nothing else.
 _Avoid_: master key, master unlock key, vault-unlock material, MUK
 
 **Account Key Set**:
@@ -201,7 +197,7 @@ _Avoid_: account keypair, identity key, user keys
 
 **Account Signing Key**:
 The Ed25519 key pair inside the Account Key Set, which signs Vault grants and Item revisions. Distinct
-from the Authentication Key, which the Server holds and which rotates without touching Vault data.
+from OPAQUE's ephemeral authentication keys and Server-held registration record.
 _Avoid_: identity key, signing identity, author key
 
 **Vault key**:
@@ -220,11 +216,6 @@ A Vault key sealed to one member's Account encryption key, together with the sig
 who granted it. A client accepts no grant whose signature does not verify; a Server authorization
 record grants nothing.
 _Avoid_: share, permission, access record, membership
-
-**Team History Key**:
-The one key a Team owns. It protects that Team's Security History and never touches Vault content, so
-Team administration stays separate from decryption access.
-_Avoid_: team key, org key, group key
 
 **Account Private Object**:
 The small container sealed to an Account's own encryption key, holding the current Secret Key. It is

@@ -2,12 +2,15 @@
 
 Status: accepted
 
+Reconfirmed with amendments by Wayfinder ticket 04 on 2026-08-20.
+
 Bittery claimed zero knowledge against its administrator before anything defined what the Server was
 allowed to learn, so two implementers could draw the ciphertext boundary in different places and
 neither build could be shown to violate a requirement. `PRIVACY-007` now enumerates the exact
-plaintext field set, and `PRIVACY-006` makes it closed: any plaintext column the list does not name
-is a defect, and a repository check fails on one. The headline claim becomes something a test can
-break.
+plaintext field set, and `PRIVACY-006` makes it closed. The registry stays provisional while protocol
+and schema decisions are open; each decision must amend it explicitly. The final protocol/schema gate
+freezes it and activates the release-blocking repository check. The headline claim then becomes
+something a test can break without pretending an unfinished schema is already complete.
 
 ## Considered options
 

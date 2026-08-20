@@ -1,7 +1,7 @@
 # Recovery model and single-artifact paths
 
 Type: grilling
-Status: resolved
+Status: ready-for-human
 Blocked by: 08
 
 ## Question
@@ -125,3 +125,29 @@ never sees. Whether one exists is operator-visible, so `PRIVACY-007` names it.
 
 **Ruled out of scope:** peer-held, delegated, and administrator-assisted recovery. `AUTH-005` now says
 so, which makes `AUTH-001`'s closed list the whole set of ways back in.
+
+## Reopened 2026-08-20
+
+The promoted answer incorrectly says the password and recovery routes each combine one human-chosen
+and one machine-generated factor. Recovery Key and Secret Key are both machine-generated. The next
+answer must distinguish two independently generated secrets from two independently stored or
+different-category authentication factors.
+
+The recovery ceremony must also define an atomic authorization order. It currently rotates the Secret
+Key, publishes it in an Account Private Object decryptable by the long-lived Account Key Set, and
+signs out every other Device. A Device being revoked must not receive the post-recovery object before
+revocation takes effect. State what protection is and is not possible against a Malicious Operator
+that gives this ciphertext to a Device already holding the Account Key Set.
+
+Resolve after ticket 08, keeping recovery no more complex than the threat model requires.
+
+### Inherited from the reopened password authentication decision
+
+The Emergency Kit now carries the one-byte authentication-protocol version as well as the one-byte
+key-derivation profile. A password or Secret Key change replaces the OPAQUE registration and the
+export-key-wrapped Account Key Set atomically. The replacement ceremony must produce and require the
+updated Kit before the old pair is deleted.
+
+If an old OPAQUE version is unsafe to execute, an enrolled Device may authorize replacement and this
+ticket must decide whether its independent recovery route may do the same. Without one of those routes,
+the Account is unrecoverable; the operator has no reset or migration bypass.

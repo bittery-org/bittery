@@ -1,6 +1,6 @@
 # Audit splits into an Operator Log and a Security History
 
-Status: accepted
+Status: superseded by ADR-0016
 
 Audit is a bigger leak than the database it describes. The database is a snapshot; audit is a movie.
 A single readable audit log would give an administrator a running record of who shares which secret
