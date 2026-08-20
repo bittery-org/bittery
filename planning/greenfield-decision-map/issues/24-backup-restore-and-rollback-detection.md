@@ -1,0 +1,31 @@
+# Backup, restore, and rollback detection
+
+Type: grilling
+Status: ready-for-human
+Blocked by: 18, 23
+
+## Question
+
+`HOST-004` requires backup and automated restore and never says the archive is encrypted or that restore is rollback-detectable. An operator restoring last month's backup resurrects deleted Items, revoked sessions, revoked Share links, and superseded key epochs, and rewrites the audit history that `ADMIN-001` exists to constrain. Seed 12 tests only the happy path. See [corpus review, Significant #5](../research/corpus-review.md).
+
+Decide:
+
+- Whether clients must detect server rollback, via a monotonic server epoch, a signed cursor, or a client-pinned high-water mark, and whether they refuse or warn.
+- Whether the backup archive must be encrypted with operator-held material distinct from the running Server's secrets.
+- What restore does to authorization state that the security model treats as irreversible.
+- Whether the audit log is tamper-evident against the operator, and if not, whether the product says so.
+- Restore validation: what an automated test must prove.
+
+Produces: `HOST-004` rewrite, a rollback-detection requirement, and a replacement for seed scenario 12.
+
+## Comments
+
+### Inherited from ticket 04, threat model and server-visible plaintext
+
+`PRIVACY-004` makes rollback Detectable a MUST, not an option. Each client keeps a high-water mark of
+accepted Server state and reports a Server that presents older state. This is the mechanism that stops
+a restored backup from silently resurrecting deleted Items and revoked Vault access.
+
+`PRIVACY-005` acknowledges Server equivocation between two Devices of one Account as undefended in the
+first release. Confirm that a high-water mark per Device does not accidentally imply cross-Device
+agreement the design cannot deliver.

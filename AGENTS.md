@@ -13,8 +13,21 @@ searches explicitly because `.ignore` excludes it from default search.
 
 ### Issue tracker
 
-Issues, Wayfinder maps, specs, and tickets are private local Markdown under `.scratch/`. See
+Issues, Wayfinder maps, specs, and tickets are version-controlled Markdown under `planning/`. See
 `docs/agents/issue-tracker.md`.
+
+### Wayfinder questions
+
+Ask every decision question through the `AskUserQuestion` tool or whats available to you. Do not ask decision questions as
+prose in a chat message.
+
+Each question must stand alone. Never point back to an earlier question by number or label. Restate
+the decision it builds on, in full, inside the question you ask now. The maintainer answers one
+screen at a time and cannot see the earlier round.
+
+Give each question the context needed to answer it: what is already settled, why this question
+follows from it, what each option means in concrete terms, and what each option costs. Prefer more
+detail over less. A question the maintainer must ask you to explain is a failed question.
 
 ### Triage labels
 

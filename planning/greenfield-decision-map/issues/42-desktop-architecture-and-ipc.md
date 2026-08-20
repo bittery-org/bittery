@@ -1,0 +1,20 @@
+# Desktop architecture and the extension IPC
+
+Type: grilling
+Status: ready-for-human
+Blocked by: 39, 41
+
+## Question
+
+First-release scope, settled: Desktop is a **full vault-browsing client plus Sentinel, Share links, and import/export**. Account lifecycle, teams, invitations, and admin stay on Web. Today's desktop is a vault-browsing shell with 4 unit tests and no e2e coverage, so most of this is new.
+
+The frozen desktop-to-extension IPC is worth mining and worth distrusting: 1291 lines of hand-rolled peer identity with `SO_PEERCRED` plus executable-path verification, 0700 socket dirs, an explicit Windows SDDL because the NPFS default DACL grants Everyone, an asymmetric policy (app `Required`, host `BestEffort`), and a known dead extension-origin allowlist. The extension's biometric-transfer "signature" is `btoa(challenge:boundTo)`, a binding tag rather than a signature. See [current-state verification](../research/current-state-verification.md).
+
+Decide:
+
+- Tauri v2 boundaries: what the renderer may never touch.
+- Native runtime ownership and where the replica and keys live.
+- The desktop-to-extension protocol: transport, peer authentication, lock authority, and what crosses it.
+- Whether biometric material transfer exists at all, and if so what actually signs it.
+- CSP for the webview, which is currently `null`.
+- Native messaging installation per OS, and how the extension identity is bound.
