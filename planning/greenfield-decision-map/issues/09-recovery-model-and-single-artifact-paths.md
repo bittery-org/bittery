@@ -38,8 +38,9 @@ profile instead, and no path may ever use a weaker profile. The frozen product's
 recovery route against a 600,000-iteration main route is the defect this closes.
 
 `AUTH-019` makes the Emergency Kit the primary carrier of the **key-derivation profile identifier**.
-Without it, a fresh Device must walk the profile registry downward, paying one Argon2id run per
-attempt, so Kit contents are load-bearing for recovery latency as well as correctness.
+Trusted-device enrollment is the other carrier. A fresh Device never accepts a Server-selected pin
+and never walks the registry; a missing, stale, or unsupported Kit field refuses full sign-in with
+recovery guidance. The profile remains a separate field beside the stable `SK1` Secret Key code.
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 

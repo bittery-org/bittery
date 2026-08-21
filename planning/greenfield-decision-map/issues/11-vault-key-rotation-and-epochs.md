@@ -23,15 +23,15 @@ Produces: a `VAULT-ROTATION-*` requirement family, a disposition row that curren
 
 ### Inherited from ticket 07, key derivation profiles
 
-`AUTH-018` makes a key-derivation profile upgrade re-derive both HKDF outputs and **re-wrap everything
-the Vault-unlock material protects**. That is the master password change path, so this ticket owns it
-rather than inventing a second mechanism. The upgrade must be **resumable**: an interruption partway
-through the re-wrap must not strand an Account between two profiles, with some wrappers under the old
-profile and some under the new.
+`AUTH-018` makes a key-derivation profile upgrade create the new OPAQUE registration and re-wrap the
+single Account Key Set envelope under the new Account Unlock Key. The User first saves the updated Kit;
+the Server then atomically commits the two records, and the client records the new pin after confirmation.
+There is no dual registration or partial Server migration. This is Account credential replacement, not
+Vault key rotation, so this ticket must not add a second plan or resumable Vault-wide re-wrap.
 
 The upgrade is offered at the end of a full sign-in, while the master password is in hand, and the User
-may decline it. So an Account can sit on an old profile indefinitely, and the rotation model must treat
-that as a normal steady state rather than a transient.
+may decline it. An Account can therefore sit on an old profile indefinitely, which is a normal steady
+state rather than a rotation transient.
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 

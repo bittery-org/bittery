@@ -1,7 +1,7 @@
 # Key derivation profiles and downgrade resistance
 
 Type: grilling
-Status: ready-for-human
+Status: resolved
 Blocked by: 04, 06
 
 ## Question
@@ -144,3 +144,105 @@ NFKD UTF-8 for the OPAQUE input; do not reopen that byte choice here.
 
 Resolve after ticket 06. Apply ticket 53's preference for standard KDF use and a small migration
 surface; the previous registry is not binding.
+
+## Answer — second pass 2026-08-21
+
+Resolved with the maintainer and promoted to `AUTH-015` through `AUTH-021` in
+[`docs/greenfield/target/product.md`](../../../docs/greenfield/target/product.md), accepted ADRs
+[0008](../../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md) and
+[0009](../../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md), and the
+[`CONTEXT.md`](../../../CONTEXT.md) definitions of Profile registry and Pinned profile. Local benchmark
+evidence is recorded in
+[`research/key-derivation-profile-benchmark.md`](../research/key-derivation-profile-benchmark.md).
+
+### Profile `0x01`
+
+Profile `0x01` is Argon2id version `0x13`, 65,536 KiB, three passes, four lanes, a 16-byte all-zero
+salt, a 64-byte output, and no optional secret or associated data. This is RFC 9106's
+memory-constrained recommendation adapted to RFC 9807's `T = Nh` ristretto255/SHA-512 configuration.
+The earlier one-lane, Secret-Key-derived-salt, 32-byte profile is rejected: it departed further from
+the standards and the one-lane comparison showed no consistent WASM benefit.
+
+A throwaway RustCrypto 0.5.3 benchmark completed at 64 MiB in native Rust and Rust-generated WASM.
+Native samples were about 118 ms; Node WASM samples were 182–308 ms. This proves allocation in the
+available environment, not performance on a weakest Device or either browser. Release therefore gates
+on successful allocation and repeated vector completion on the approved low-end Rust/WASM baseline for
+every full-sign-in client, including Chromium and Firefox. Time and peak memory are reported; there is
+no cryptographic time threshold, and the Performance budgets decision owns user-visible limits.
+
+### Finite monotonic registry
+
+The complete profile identifier space is `0x01` through `0xFF`; `0x00` is invalid. Entries are
+immutable and never removed or reused. A higher entry is admitted only when integrated review finds it
+no weaker on every accepted security dimension. A construction that is incomparable with an existing
+profile requires a new authentication-protocol version rather than a misleading larger number.
+
+Each Account occupies exactly one entry. Migration moves directly to one higher entry through the
+atomic OPAQUE-registration and Account-Key-Set-wrapper replacement already fixed by Password
+authentication protocol and its fallback. There is no registry window, retirement state, dual
+registration, or search. The one-byte space is the hard complexity bound.
+
+### Client-carried discovery, not a walk
+
+The pinned profile is authoritative client-carried state. An enrolled Device stores it, trusted-device
+enrollment transports it, and the Emergency Kit prints it as a separate field beside the stable `SK1`
+Secret Key code. A fresh Device must get the pin from one of those carriers before KE1. It never asks a
+per-Account Server endpoint, accepts a Server-selected pin, or tries registry entries.
+
+This deliberately makes a standalone Secret Key or stale Kit insufficient for fresh full sign-in. The
+alternative is worse: the first-pass downward walk could not find a valid pin newer than a false Server
+preference, an exhaustive walk grows, and a bounded window eventually strands Accounts. Missing,
+stale, and unsupported pins refuse with recovery guidance rather than a wrong-password report.
+
+### Upgrade and downgrade
+
+A Server descriptor may advertise one deployment-preferred identifier but no parameters. After full
+sign-in, a client offers it only if it is compiled, deployment-supported, and greater than the pin.
+The User may defer indefinitely. Acceptance updates the registration, wrapper, client pin, and
+Emergency Kit without pretending those cross-system writes are one transaction: the User first saves
+the updated Kit, the Server then atomically replaces the registration and wrapper, and the client
+records the new pin after confirmation.
+
+A lower or unknown preference never changes derivation and produces a persistent local security
+warning. Registration data inconsistent with the pin fails authentication under the authenticated
+OPAQUE context and never triggers fallback. Blocking merely on the descriptor mismatch was rejected:
+the pin already preserves cryptographic security, while blocking would add another operator-controlled
+denial-of-service switch.
+
+### Memory-hard work follows entropy
+
+Every route consuming any human-chosen secret runs the Account's pinned profile. HKDF-only is allowed
+only when every consumed secret is independently machine-generated with at least 128 bits. This removes
+the frozen product's 100,000-iteration recovery door without wasting Argon2id on random secrets or
+creating route-specific parameters.
+
+### Master-password policy
+
+The OPAQUE bytes remain NFKD UTF-8 without trimming or case folding. The minimum is 15 Unicode code
+points in the entered string before normalization. There is no separate character maximum beyond the
+unsigned 16-bit bound of 65,535 normalized UTF-8 bytes, and there are no composition or periodic-change
+rules.
+
+Every client bundles the same versioned common-and-compromised-password blocklist. Rejection compares
+the complete candidate and entry after NFKD plus Unicode Default Case Folding under the Unicode data
+version pinned by that blocklist; it checks no substring or Account-specific contextual value. The
+comparison does not alter the OPAQUE input. There is no online lookup, administrator knob, or mandatory
+estimator score. Clients show an advisory strength estimate and offer generated passphrases.
+
+### Handed to other decisions
+
+- **Key hierarchy and canonical envelope format:** the Account Unlock Key comes from OPAQUE's export
+  key; there is no KDF salt label or second password derivation for an envelope to inherit.
+- **Recovery model and single-artifact paths:** both recovery secrets must retain their independent
+  128-bit generation floor to qualify for HKDF-only work.
+- **Device enrollment protocol:** a fresh Device receives the separate pin from the Emergency Kit or
+  trusted enrollment; no wrong-password registry walk exists.
+- **Vault key rotation and epochs:** a profile migration atomically replaces one registration and one
+  Account Key Set wrapper; it is not a Vault rotation plan.
+- **Administration, registration, and retention:** all master-password acceptance behavior is local;
+  the operator has no policy or per-Account profile diagnostic.
+- **Extension architecture for Chromium and Firefox**, **Desktop architecture and the extension IPC**,
+  and **Mobile architecture seams:** any surface performing full sign-in must pass the 64 MiB capability
+  gate or relinquish that route.
+
+The breached-password blocklist fog entry is cleared. No new decision ticket surfaced.

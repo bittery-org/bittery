@@ -47,15 +47,14 @@ credential replacement endpoint.
 ### Inherited from ticket 07, key derivation profiles
 
 `AUTH-019` fixes how a Device with no local state learns the Account's **pinned key-derivation
-profile**: from the Emergency Kit, which prints it, or by attempting the Server's published profile and
-then each older registry entry in descending order. There is no Server endpoint and no per-Account
-profile stored Server-side, because that would reinstate the account-existence oracle ADR 0007 closed.
-Each walk attempt costs one Argon2id run, so enrolment must report a wrong password only after the walk
-completes, and the enrolment UI must account for that wait.
+profile**: the Emergency Kit prints it and trusted-device enrollment transports it. There is no Server
+endpoint, Server-selected pin, fallback, or registry walk. A missing, stale, or unsupported pin refuses
+full sign-in with recovery guidance, and the profile remains a separate field beside the stable `SK1`
+Secret Key code.
 
 Device state holds the pinned profile identifier. `AUTH-018` requires an upgrade offer at the end of a
-full sign-in when the Server publishes a stronger profile, so enrolment is one of the two moments that
-offer can appear.
+full sign-in when the Server advertises a compiled, deployment-supported, stronger profile, so enrolment
+is one of the moments that offer can appear. The User may defer.
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 

@@ -114,14 +114,15 @@ of the authenticated OPAQUE context before a full sign-in begins.
 _Avoid_: Authentication profile, KDF version, work factor, difficulty
 
 **Profile registry**:
-The closed, ordered, append-only table of key-derivation profiles compiled into every client. A Server
-names one entry and supplies no parameters. An entry is never removed, because it is the only route to
-the Vault keys of every Account pinned to it.
+The closed, ordered registry of key-derivation profiles compiled into every client. It contains the
+immutable identifiers `0x01` through `0xFF`; no entry is removed or reused, and `0x00` is invalid. A
+higher identifier is admitted only when review finds it no weaker on every accepted security dimension.
 _Avoid_: KDF policy, parameter list, profile table
 
 **Pinned profile**:
 The key-derivation profile an Account was created under, which governs its derivation until its owner
-accepts an upgrade. A client derives under it whatever a Server publishes.
+accepts an upgrade. Its authoritative identifier is client-carried in Device state, trusted-device
+enrollment, or the Emergency Kit; a Server cannot supply or alter it.
 _Avoid_: current profile, active profile, account KDF
 
 **Secret Key**:

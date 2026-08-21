@@ -85,10 +85,10 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
 
 <!-- one line per closed ticket, linking the ticket that holds the detail -->
 
-Tickets 07 through 09 remain reopened after the 2026-08-20 consistency audit. Their summaries below
-record the previously accepted answers as history, not current decisions. The promoted requirements
-and ADRs they produced remain visibly present but are candidate material under review; specifications
-must not rely on them until the tickets resolve again.
+Tickets 08 and 09 remain reopened after the 2026-08-20 consistency audit. Their summaries below record
+the previously accepted answers as history, not current decisions. The promoted requirements and ADRs
+they produced remain visibly present but are candidate material under review; specifications must not
+rely on them until the tickets resolve again.
 
 - [Browser storage durability facts](issues/01-browser-storage-durability-facts.md): no browser engine
   gives a web app a real on-disk acknowledgement, so `SYNC-001`'s durability MUST is unobtainable in a
@@ -144,21 +144,16 @@ must not rely on them until the tickets resolve again.
   integrated external review blocks general availability. ADR
   [0006](../../docs/adr/0006-password-authentication-is-a-signature-challenge-response-not-a-pake.md).
 
-- **REOPENED:** [Key derivation profiles and downgrade resistance](issues/07-key-derivation-profiles-and-downgrade-resistance.md):
-  one Argon2id run, not two. HKDF-Expand labels already carry the `AUTH-002` domain separation, so the
-  second memory-hard run bought nothing and cost double on browser WASM; `AUTH-003` is amended. Profile 1
-  is Argon2id `0x13`, 64 MiB, 3 passes, 1 lane, with a 16-byte salt derived from the Secret Key. Parameters
-  are the contract and there is no wall-clock budget or CI time gate. `AUTH-017` makes profiles a closed,
-  ordered, **append-only** registry compiled into every client: the descriptor names an entry and publishes
-  no parameters, an unknown identifier is a hard refusal, and nothing is ever retired because retiring one
-  destroys every Account pinned to it. The pinned profile always governs; a stronger published profile is a
-  declinable upgrade offer at full sign-in, a weaker one is derived past and reported in Security History as
-  **Detectable**. A fresh Device finds its profile from the Emergency Kit or by walking the registry
-  downward, so no Server endpoint and no per-Account profile Server-side, leaving `PRIVACY-007` unchanged.
-  `AUTH-020` stretches only paths consuming a user-chosen secret, which deletes the frozen product's
-  100k-iteration recovery door by removing the stretch rather than tuning it, and binds recovery artifacts
-  to a 128-bit floor. Master password bytes are NFKD UTF-8 with a 10-character floor and an advisory zxcvbn
-  meter. ADRs
+- [Key derivation profiles and downgrade resistance](issues/07-key-derivation-profiles-and-downgrade-resistance.md):
+  profile `0x01` is RFC 9106's memory-constrained Argon2id shape at 64 MiB, 3 passes, 4 lanes, zero
+  16-byte salt, and a 64-byte OPAQUE output. The finite `0x01`–`0xFF` registry is immutable and
+  monotonically ordered. Device state, trusted enrollment, or the Emergency Kit supplies the separate
+  authoritative pin; no Server selection or registry walk exists. A reviewed stronger Server preference
+  is a declinable post-sign-in upgrade, while a lower or unknown preference warns without changing the
+  pin. Only routes containing a human-chosen secret pay memory-hard work. Master passwords require 15
+  entered Unicode code points and a local blocking common/compromised-password list, plus advisory
+  guidance. Capability, not elapsed time, gates the supported Rust/WASM baselines. Benchmark
+  [evidence](research/key-derivation-profile-benchmark.md). ADRs
   [0008](../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md),
   [0009](../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md).
 
@@ -225,10 +220,10 @@ frontier reaches it.
 - **Supported OS and browser version matrix.** Depends on tickets 41, 42, and 45.
 - **Security review gate beyond authentication.** Ticket 06 settled the pattern for its own
   construction: a written design note, a cryptographic construction review before general availability,
-  a penetration test after it. Tickets 07 and 08 have now closed, so the reviewable surface is known:
-  the derivation profiles, the key hierarchy, the envelope, and the grant and revision signatures.
-  Whether one engagement covers all of it, and whether the `AUTH-012` design note grows to hold it or a
-  second note is written, is still open.
+  a penetration test after it. Ticket 07 has fixed the derivation profile, but ticket 08 remains reopened,
+  so the final key hierarchy, envelope, grant, and revision surface is not known yet. Once it closes,
+  decide whether one engagement covers the integrated surface and whether `AUTH-012`'s design note grows
+  to hold it or a second note is written.
 - **Passkey-based Bittery login.** `ITEM-002` makes passkeys a stored capability rather than a login
   method. Whether that ever changes is a later question.
 - **Server equivocation defence, and key transparency.** Ticket 04 classes equivocation Acknowledged
@@ -243,13 +238,6 @@ frontier reaches it.
   `CRYPTO-012` needs a retained history of signing keys or every past revision becomes unverifiable.
   A later release may want it, and it sits next to the transparency-log question above: both are about an
   operator who keeps or substitutes key material, and one construction may answer both.
-- **Breached-password blocklist.** `AUTH-021` ships zxcvbn as an advisory meter in the first release and
-  defers the common and breached password list to a later one. Two questions come with it and neither is
-  sharp yet: whether the list is embedded or looked up online, and whether a hit blocks or warns. An online
-  Have I Been Pwned lookup sends a hash prefix of the *master password* to a third party, so the opt-in
-  external-integration rule ticket 37 sets governs it. Revisit once 37 closes.
-
-
 ## Out of scope
 
 Ruled beyond this destination. These never graduate; they would need the destination redrawn.

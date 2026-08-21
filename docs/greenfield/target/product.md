@@ -273,31 +273,63 @@ and rejection of OPAQUE reopens this decision.
 
 `AUTH-015 MUST` A full sign-in performs exactly one memory-hard run: the Argon2id key-stretching
 function inside OPAQUE. OPAQUE produces both its session key and client-only export key; `AUTH-002`
-narrows and separates their uses without another password derivation. The exact Argon2id profile and
-upgrade policy remain owned by ticket 07. ADR 0008.
+narrows and separates their uses without another password derivation. No other derivation repeats this
+work unless `AUTH-020` says its human-chosen input requires it. ADR 0008.
 
-`AUTH-016 OPEN` Ticket 07 fixes the first RFC 9807 Argon2id profile at actual parameter and output-byte
-altitude after measuring the weakest supported Rust/WASM client. The earlier 64 MiB profile and
-Secret-Key-derived salt were reopened and are not requirements.
+`AUTH-016 MUST` Key-derivation profile `0x01` is Argon2id version `0x13`, memory cost 65,536 KiB,
+three passes, four lanes, a 16-byte all-zero salt, a 64-byte output, and no optional secret or
+associated data. These values are the RFC 9106 memory-constrained profile adapted to RFC 9807's
+SHA-512 output size; clients accept no parameters from a Server. Before release, Rust and WASM on
+every supported low-end client baseline MUST allocate the memory and pass the same positive and
+negative profile vectors repeatedly. The design record reports elapsed time and peak memory but sets
+no cryptographic wall-clock threshold; ticket 50 owns user-visible performance budgets. A capability
+failure reopens either this profile or the supported baseline. Measurements and their limits are in
+[the profile benchmark](../../../planning/greenfield-decision-map/research/key-derivation-profile-benchmark.md).
 
-`AUTH-017 OPEN` Ticket 07 decides the finite profile registry, pinning, and representation rules within
-`AUTH-010`'s one-byte field. The earlier unbounded append-only registry was reopened.
+`AUTH-017 MUST` Key-derivation profiles form one closed, ordered registry compiled into every client.
+`0x00` is invalid; `0x01` through `0xFF` are the complete finite identifier space. An admitted entry is
+immutable and is never removed or reused. A higher identifier may be admitted only after the integrated
+cryptographic review finds it no weaker than every lower entry on every accepted security dimension;
+an incomparable construction requires a new authentication-protocol version. Each Account has exactly
+one pinned profile and a migration moves directly from that entry to one higher entry, with no registry
+walk, active window, retirement state, or reused identifier. ADR 0009.
 
-`AUTH-018 OPEN` Ticket 07 decides when an Account may upgrade its OPAQUE key-derivation profile and how
-the User experiences it. Any accepted upgrade must use `AUTH-014`'s atomic replacement of the OPAQUE
-registration and Account Key Set wrapper.
+`AUTH-018 MUST` A Server descriptor MAY advertise one deployment-preferred profile identifier but no
+parameters. After a full sign-in, a client offers an upgrade only when that entry is compiled into the
+client, greater than the Account's pinned profile, and advertised as supported by the deployment. The
+User may defer without losing access and is offered the upgrade again after a later full sign-in.
+Acceptance uses `AUTH-014`'s atomic replacement of the OPAQUE registration and Account Key Set wrapper,
+requires the User to save the updated Emergency Kit before commit, records the new client pin only
+after the Server confirms the replacement, and leaves no dual-registration or partially migrated
+Server state.
 
-`AUTH-019 OPEN` Ticket 07 decides how a fresh Device obtains the pinned profile without a registry walk,
-silent Server downgrade, or unbounded work. `AUTH-014` already makes the Emergency Kit one authoritative
-carrier.
+`AUTH-019 MUST` The pinned profile identifier is authoritative client-carried state. An enrolled Device
+stores it; trusted-device enrollment transports it; and the Emergency Kit prints it as a separate
+one-byte field beside, not inside, the stable `SK1` Secret Key code. A Device with no local state MUST
+obtain the pin from the Kit or trusted enrollment before KE1 and MUST NOT query a per-Account Server
+endpoint, accept a Server-selected pin, or try any registry entry. A missing, stale, or unsupported pin
+refuses full sign-in with recovery guidance. A descriptor preference lower than the pin or unknown to
+the client is ignored and produces a persistent local security warning. Registration data inconsistent
+with the pin fails authentication under `AUTH-010`; it never triggers fallback. ADR 0009.
 
-`AUTH-020 OPEN` Tickets 07 and 09 decide which non-password recovery paths perform memory-hard work.
-They may not create a weaker password route or a second OPAQUE profile.
+`AUTH-020 MUST` Every derivation route that consumes any human-chosen secret performs its memory-hard
+work under the Account's pinned profile. A route may use HKDF without Argon2id only when every secret
+it consumes is independently machine-generated with at least 128 bits. No route owns separate
+parameters, silently selects a weaker profile, or stretches a random secret merely because the route
+is named recovery. ADR 0008.
 
-`AUTH-021 MUST` The master password is encoded as UTF-8 after NFKD normalization, with no trimming of
-leading or trailing whitespace, no case folding, and an empty password refused. Ticket 07 still owns
-the minimum, what a character count means, and the strength guidance. A Server cannot enforce master
-password policy because it never sees a master password.
+`AUTH-021 MUST` The cryptographic master-password input is UTF-8 after NFKD normalization, with no
+trimming and no case folding. Account creation and password change require at least 15 Unicode code
+points in the entered string before normalization; the only maximum is `AUTH-009`'s 65,535-byte bound
+on the normalized UTF-8 input. Clients accept spaces and Unicode, impose no composition rule or
+periodic change, show an advisory strength estimate, and offer a generated passphrase. Every client
+ships the same versioned common-and-compromised-password blocklist and rejects a candidate only when
+the complete candidate, after NFKD and Unicode Default Case Folding, equals an entry processed the
+same way. The blocklist version pins the Unicode data version used for that comparison.
+There are no substring checks, contextual entries, mandatory estimator score, external lookup, or
+administrator policy. The rejection comparison never changes the OPAQUE bytes. Canonicalization and
+positive and negative blocklist cases are conformance fixtures. A Server cannot enforce this policy
+because it never sees a master password.
 
 `AUTH-004 MUST` Adding a Device supports trusted-device QR enrollment, master password plus Secret Key,
 and the `AUTH-026` recovery sign-in. The Server alone cannot provision decryption keys.
@@ -515,15 +547,15 @@ The context byte is plaintext and adds nothing to
 
 `CRYPTO-011 MUST` A key that protects data is generated randomly; an HKDF label exists only where a
 key is derived from a secret that already exists. The label registry is closed and its members are the
-ASCII byte strings `bittery/1/kdf-salt/1`, `bittery/1/auth-key/1`, `bittery/1/account-unlock`,
+ASCII byte strings `bittery/opaque/account-unlock/1`,
 `bittery/1/recovery-unlock`, `bittery/1/recovery-auth/1`, `bittery/1/device-unlock`,
 `bittery/1/share-link`, and `bittery/1/search-index`, used verbatim as HKDF-Expand `info` with no
 terminator. The two recovery labels consume the Recovery Key and the Secret Key together, which is
-what makes `AUTH-001`'s two-factor rule hold on the recovery route. The key-derivation
-profile identifier rides in the salt label per `AUTH-016`, and the authentication protocol version
-rides in the authentication label, so `AUTH-014` rotation is a label change and nothing more. A
-repository check asserts the table is pairwise distinct, because a collision would make two keys equal
-and nothing else in the design would catch it.
+what makes `AUTH-001`'s two-factor rule hold on the recovery route. OPAQUE's authenticated context,
+not an HKDF label or salt, binds the authentication-protocol version and key-derivation profile under
+`AUTH-010`; profile `0x01` uses the fixed zero salt in `AUTH-016`. A repository check asserts the label
+table is pairwise distinct, because a collision would make two keys equal and nothing else in the
+design would catch it.
 
 `CRYPTO-012 MUST` Each Item revision carries an Ed25519 signature by its author's Account Signing Key,
 placed **inside the ciphertext**. Holding a Vault key is otherwise enough to write a revision
