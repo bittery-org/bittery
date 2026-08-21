@@ -1,6 +1,9 @@
 # Dependencies and build output
 node_modules/
 target/
+!docs/greenfield/target/
+docs/greenfield/target/*
+!docs/greenfield/target/cryptographic-format.md
 dist/
 build/
 .turbo/
@@ -14,4 +17,3 @@ coverage/
 .idea/
 .vscode/
 *.log
-

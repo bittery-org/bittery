@@ -27,7 +27,8 @@ Produces: an interface specification and `ARCH-ENGINE-*` refinement.
 `CRYPTO-009` forbids any component from handing the cryptographic layer a blob without its context, so
 the `ClientRuntime` boundary must carry object identity through every read and write that touches
 ciphertext. This is the same constraint ticket 15 inherits, one layer up: a runtime method that moves
-bytes without their Vault, Item, revision, or chunk identity cannot decrypt them.
+bytes without stable Server identity and the typed Account, Device, Vault, Item, revision, Attachment,
+chunk, grant, or Share path cannot decrypt them.
 
 `CRYPTO-007`'s closed format registry is compiled into the core, so nothing in this interface exposes
 algorithm selection to a host.

@@ -24,6 +24,7 @@ consistency review accepts them. No agent may implement an `OPEN` topic by infer
 | Existing product baseline | Catalog pass 1 | [current-state/README.md](current-state/README.md) |
 | Product target | Candidate | [target/product.md](target/product.md) |
 | Architecture target | Candidate | [target/architecture.md](target/architecture.md) |
+| Cryptographic format `0x01` | Accepted | [target/cryptographic-format.md](target/cryptographic-format.md) |
 | Candidate decisions | Candidate | [decisions/0001-foundation-candidates.md](decisions/0001-foundation-candidates.md) |
 | Feature dispositions | In progress | [feature-disposition.md](feature-disposition.md) |
 | Acceptance scenarios | Format defined | [scenarios/README.md](scenarios/README.md) |
@@ -53,4 +54,3 @@ Implementation may begin only when:
 5. Every open question is answered or explicitly deferred outside the release.
 6. Every `MUST` requirement has a traceable acceptance scenario.
 7. Candidate decisions have passed a consistency review and are Accepted or Deferred.
-

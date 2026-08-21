@@ -13,12 +13,10 @@ These topics require new bounded grilling sessions. Research conclusions are inp
 
 ## Cryptographic formats
 
-- Exact OPAQUE ciphersuite, record encoding, identity binding, and selected `opaque-ke` release.
-- Argon2id profile selection, benchmark budgets, Unicode password encoding, and profile upgrades.
-- XChaCha20-Poly1305 versus AES-256-GCM for each new at-rest format.
-- Canonical envelope encoding, suite allowlists, HKDF labels, key epochs, and negative vectors.
-- Recovery wrapping hierarchy, password changes, Secret Key changes, and Device enrollment protocol.
-- External cryptographic review gate.
+- Recovery two-factor construction, atomic authorization order, and any derivation labels it proves
+  necessary.
+- Device enrollment protocol and Device Unlock Wrapper construction.
+- Vault-key rotation lifecycle and the operational threshold below the AES-256-GCM-SIV usage ceiling.
 
 ## Local security
 
@@ -53,4 +51,3 @@ These topics require new bounded grilling sessions. Research conclusions are inp
 - Extension background lifetime and desktop integration protocol.
 - Native AutoFill/Credential Manager projections and unlock experience.
 - Performance budgets and representative Vault sizes/devices.
-

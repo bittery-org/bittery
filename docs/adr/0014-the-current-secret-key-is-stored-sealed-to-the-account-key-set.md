@@ -17,7 +17,10 @@ Devices disagree about the current Secret Key.
 
 So `AUTH-027` puts the current Secret Key in an **Account Private Object**, key context `0x12`, sealed
 to the Account's own X25519 encryption key. An enrolled Device holds the Account Key Set, so it opens
-the object and picks up the rotation on its next sync.
+the object and picks up the rotation on its next sync. Ticket 08 subsequently fixed the object's
+authorship: its canonical payload and monotonic generation carry an Ed25519 signature inside the HPKE
+ciphertext. Base-mode HPKE alone would let a Malicious Operator construct replacement ciphertext to
+the public key.
 
 This does put the Secret Key on a Server for the first time, as ciphertext. It widens nothing:
 whoever can open the object already holds the Account Key Set, which opens every Vault key the Account

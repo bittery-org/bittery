@@ -39,14 +39,19 @@ context mismatch, malformed RFC payload, replayed attempt, and second KE3 submis
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 
-`CRYPTO-015` enumerates every rejection rule the corpus must prove, and states that each has a negative
-fixture: unknown format version, key context `0x00` or unknown, a context whose envelope shape does not
-match the bytes, a non-zero epoch where the context has none, a blob shorter than header plus tag,
-trailing bytes after the tag, tag mismatch with no partial plaintext, and strict RFC 8032 Ed25519
-verification rejecting non-canonical `S` and small-order points. Nonce reuse is explicitly **not**
-detectable and must not have a fixture implying otherwise.
+`CRYPTO-015` enumerates every rejection rule the corpus must prove: unknown format or context, wrong
+body shape, nonzero forbidden epoch, short or trailing data, oversized or noncanonical tuples,
+authentication failure, public-key mismatch, malformed or low-order keys, noncanonical Ed25519
+signatures, and usage-limit overflow. Each rule has a negative fixture, no failure emits partial
+plaintext, and authenticity failures expose one outcome. Nonce reuse is explicitly **not** detectable.
 
-`CRYPTO-011` requires a check that the HKDF label table is pairwise distinct, and `AUTH-012`'s vectors
-must pin the exact label bytes, because a collision would make two keys equal and nothing else in the
-design would catch it. `CRYPTO-009`'s binding tuple needs positive and negative vectors per key
-context, since a relocated blob must fail.
+The shared crypto seed contains RFC 8452 AES-256-GCM-SIV, RFC 9180 Appendix A.2 HPKE, RFC 8032
+Ed25519, and applicable Wycheproof vectors. Each key context has a positive vector plus relocation,
+wrong-context, and field-reordering negatives. The fixture pins every `CRYPTO-011` domain label and
+asserts pairwise distinctness; it pins the signed grant's exact HPKE body, the signed Item body, the
+signed Account Private Object, the full Account Fingerprint, and the Attachment manifest. Rust and
+WASM consume identical fixture bytes.
+
+`CRYPTO-016` allows compatible manifest ranges but makes the committed lockfile resolution the
+released and reviewed baseline. Fixture CI runs on every automated crypto update, which never
+auto-merges; this ticket must expose the resolved dependency versions in corpus-run output.

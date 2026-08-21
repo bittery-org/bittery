@@ -27,29 +27,19 @@ There is one operator-readable audit log and no encrypted Security History, User
 History Key. The log is operator-controlled evidence and no security guarantee depends on it. This
 ticket now owns its exact event taxonomy, fields, retention, access, export, and redaction only.
 
-### Inherited from ticket 04, threat model and server-visible plaintext
-
-`AUDIT-001` is now settled in shape by ADR 0003: an Operator Log administrators read, and a Security
-History encrypted to the owning User or Team. This ticket decides the event taxonomy, the retention
-defaults for each stream, and how the two write paths stay consistent, not whether the split exists.
-
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 
-`CRYPTO-010` gives Security History two key contexts: `0x30` under a **User History Key** for a
-personal Account, and `0x31` under the **Team History Key** for a Team. `CRYPTO-006` scopes the Team
-History Key to Security History and nothing else, deliberately, so that reading a Team's history never
-implies decryption access to its Vaults.
-
-This ticket owns who holds the Team History Key: every member, or Team Owners and Admins only.
-Departure rotates it, which is cheap because it protects only a log. `CRYPTO-012` makes Security
-History's actor field provable rather than claimed, which is the point of signing revisions at all.
+`CRYPTO-006` confirms there is no User, Team, or Security History key and reserves no encrypted-log
+context. This ticket designs only the operator-readable log fixed by ticket 04 and ADR 0016. Item and
+grant signatures authenticate client-consumed product state; they do not turn the Operator Log into a
+security boundary.
 
 ### Inherited from ticket 09, recovery model and single-artifact paths
 
-Five events now require a Security History entry: a master password change (`AUTH-025`), a Secret Key
+Five events are candidates for an Operator Log entry: a master password change (`AUTH-025`), a Secret Key
 rotation (`AUTH-027`), a Recovery Key creation and revocation (`AUTH-006`, `AUTH-030`), and a recovery
-sign-in (`AUTH-026`). The recovery sign-in is the compromise-shaped one, so its entry is the one a
-User must be able to find after the fact.
+sign-in (`AUTH-026`). Ticket 04 makes that log operator-controlled evidence, so this ticket must not
+claim that a User can rely on finding any entry after a Malicious Operator acts.
 
 `PRIVACY-007` gained the recovery authentication record and the Account Private Object ciphertext, so
 the Operator Log's event categories must be able to describe an Account-secret change without naming

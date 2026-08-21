@@ -37,11 +37,10 @@ displayed date comes from inside the ciphertext.
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 
-`CRYPTO-012` settles two things this ticket inherits. The revision chain hash is
-`SHA-256(previous chain hash || envelope bytes)`, computed over ciphertext so a Server can check
-continuity without decrypting. And every revision carries an Ed25519 signature by its author's Account
-Signing Key, placed **inside** the ciphertext, so retention pruning must not silently break either the
-chain or the ability to verify an old author's key.
+`CRYPTO-012` makes every revision an Ed25519-signed canonical unsigned body plus its signature, both
+inside ciphertext. Ticket 04's reopened answer removed the mandatory revision chain, so retention has
+no chain-pruning problem. It must still preserve the historical Account public keys needed to verify
+old authors, or state why first-release stable Account Key Sets make that unnecessary.
 
 `CRYPTO-009` binds the revision number into the envelope's AAD, so revisions cannot be renumbered
 after the fact. Any retention scheme that renumbers rather than tombstones would make old revisions

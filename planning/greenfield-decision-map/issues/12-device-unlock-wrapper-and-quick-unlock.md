@@ -21,10 +21,10 @@ Produces: an interface specification, per-platform `ARCH-STORE-*` requirements, 
 
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 
-`CRYPTO-010` reserves key context `0x03` and `CRYPTO-011` reserves the HKDF label
-`bittery/1/device-unlock`, so the Device Unlock Wrapper wraps the **Account Key Set** envelope, not a
-master key and not Vault keys. That fixes what quick unlock must reconstitute and what a Lock must
-destroy.
+`CRYPTO-010` reserves key context `0x03`, so the Device Unlock Wrapper wraps the **Account Key Set**
+envelope, not a master key and not Vault keys. `CRYPTO-011` reserves no Device derivation label: add
+one only if the chosen platform construction actually derives a key. This fixes what quick unlock must
+reconstitute and what a Lock must destroy without pre-deciding the wrapper mechanism.
 
 Because `CRYPTO-002` makes the Account Key Set random rather than derived, a quick unlock path that
 recovers it does not need the master password anywhere in its chain, and an `AUTH-018` profile upgrade

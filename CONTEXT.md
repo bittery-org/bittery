@@ -231,9 +231,14 @@ record grants nothing.
 _Avoid_: share, permission, access record, membership
 
 **Account Private Object**:
-The small container sealed to an Account's own encryption key, holding the current Secret Key. It is
-how an enrolled Device learns that the Secret Key rotated without being re-enrolled.
+The small signed container sealed to an Account's own encryption key, holding the current Secret Key.
+It is how an enrolled Device learns that the Secret Key rotated without being re-enrolled.
 _Avoid_: account blob, private settings, key store
+
+**Attachment manifest**:
+The ordered list inside a signed Item revision that commits to each Attachment's wrapped key, size,
+chunk count, and chunk-envelope digests.
+_Avoid_: attachment index, file list, upload manifest
 
 **Account Fingerprint**:
 A hash over an Account's identifier and both public keys, bound into every grant signature and

@@ -29,4 +29,7 @@ above the format, because an AEAD tag verifies only once a whole message is pres
 
 Chunk size, resumability, pinning, and lifecycle remain this ticket's. `CRYPTO-001` keeps the
 per-Attachment key wrapped by the Vault key (context `0x21`), and `PRIVACY-007` already exposes chunk
-count and total byte size, so the binding leaks nothing new.
+count and total byte size, so the binding leaks nothing new. The signed Item revision commits to each
+wrapped-key envelope and the ordered SHA-256 digest of every chunk envelope; this ticket must define
+when that manifest becomes final during upload and how resumable work is promoted atomically. Its
+chunk-size choice cannot exceed `CRYPTO-003`'s 32 MiB plaintext-per-envelope ceiling.

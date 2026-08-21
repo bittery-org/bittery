@@ -74,8 +74,8 @@ check fails on any plaintext Server schema field absent from the registry.
 - **Vault and Team** — identifier, name, owning User or Team, complete membership and roles, signed
   role state, wrapped Vault keys with granter and recipient identifiers and grant signatures, current
   key epoch, and operational timestamps.
-- **Item** — identifier, owning Vault, ciphertext, ciphertext length, revision number, Account
-  signature, tombstone marker, retention time, and operational timestamps.
+- **Item** — identifier, owning Vault, ciphertext, ciphertext length, revision number, tombstone
+  marker, retention time, and operational timestamps.
 - **Attachment** — identifier, owning Item, chunk count, total byte size, wrapped Attachment key,
   upload state, retention time, and operational timestamps.
 - **Share link** — identifier, expiry, view count, maximum views, ciphertext, ciphertext length, and
@@ -339,14 +339,13 @@ and the `AUTH-026` recovery sign-in. The Server alone cannot provision decryptio
 an administrator and by anyone else. The product ships no peer-held, delegated, or
 administrator-assisted recovery, so `AUTH-001`'s closed list is the whole set of ways back in.
 
-`AUTH-006 MUST` A Recovery Key is optional, user-held, and machine-generated with at least 128 bits.
+`AUTH-006 OPEN` A Recovery Key is optional, user-held, and machine-generated with at least 128 bits.
 Account creation offers one and the interface keeps offering while none exists; no Server setting
 requires or forbids one, because a Server cannot enforce a policy over a secret it never sees. The
-wrapping key is HKDF over the Recovery Key **and the Secret Key together** under
-`bittery/1/recovery-unlock`, so the recovery sheet alone opens nothing. The Server holds the key
-context `0x02` envelope and one recovery authentication record, serving the envelope only after an
-`AUTH-026` recovery sign-in succeeds. Whether an Account has a Recovery Key is therefore
-operator-visible, and `PRIVACY-007` names it.
+Server holds the key context `0x02` envelope and one recovery authentication record, serving the
+envelope only after an `AUTH-026` recovery sign-in succeeds. Ticket 09 decides the final two-factor
+construction, including whether it derives a wrapping key and therefore adds a new `CRYPTO-011`
+label. Whether an Account has a Recovery Key is operator-visible, and `PRIVACY-007` names it.
 
 `AUTH-030 MUST` Revoking a Recovery Key deletes the key context `0x02` envelope and the recovery
 authentication record, and writes an Operator Log entry. That ends the route for every holder
@@ -407,8 +406,9 @@ as one atomic Server write or none. The current Secret Key is also held
 in an **Account Private Object**, key context `0x12`, sealed to the Account's own encryption key, so an
 enrolled Device picks up a rotation on its next sync rather than needing re-enrolment. Without it a
 User with several Devices leaves the rotation half-done. The Server holds that object as ciphertext it
-cannot read, and it widens nothing: whoever opens it already holds the Account Key Set. Rotation offers
-signing out every other Device, off by default, on the same reasoning as `AUTH-025`.
+cannot read. `CRYPTO-012` requires a signed canonical payload and monotonically increasing object
+generation, because HPKE Base mode alone authenticates no sender. Rotation offers signing out every
+other Device, off by default, on the same reasoning as `AUTH-025`.
 
 `AUTH-028 MUST` Rotating or revoking a wrapping secret is **forward protection only**. An adversary
 holding a copy of a wrapped envelope, which operator backups contain, plus the matching old secrets,
@@ -545,135 +545,129 @@ and making no reviewed-cryptography claim. Independent review of the complete de
 implementation, followed by penetration testing of the running product, blocks general availability.
 The stricter before-beta exception gate in `CRYPTO-POLICY-002` still applies.
 
-`CRYPTO-001 MUST` The key hierarchy is fixed and has exactly these levels. `AUTH-015`'s single
-Argon2id run and HKDF-Expand produce the **Account Unlock Key**. That key wraps the **Account Key
-Set**. The Account Key Set's encryption key receives sealed **Vault keys**. A Vault key encrypts Item
-revisions directly and wraps **Attachment keys**. An
-Attachment key encrypts that Attachment's chunks. No other level exists, and no key wraps a key that
-this requirement does not name.
+`CRYPTO-001 MUST` The key hierarchy has exactly these levels. `AUTH-002` derives the **Account Unlock
+Key**, which wraps one random **Account Key Set**. That set's X25519 public key receives sealed **Vault
+keys**, while its Ed25519 **Account Signing Key** authenticates grants and authored objects. A Vault
+key encrypts Item revisions directly and wraps random **Attachment keys**. An Attachment key encrypts
+that Attachment's chunks. Recovery and Device unlock may wrap the same Account Key Set; they do not
+introduce another content-key level. No Team key opens Vault content. ADR 0011.
 
-`CRYPTO-002 MUST` The Account Key Set is an X25519 encryption key pair and an Ed25519 **Account
-Signing Key** pair, both generated from a cryptographic random source at Account creation and never
-derived from the master password. It is stored as one envelope wrapped by the Account Unlock Key, and
-a Server serves it only after a full sign-in succeeds, never before, so `AUTH-010`'s no-enumeration
-rule holds. Because the Account Key Set is random rather than derived, a master password change, a
-Secret Key rotation, and an `AUTH-018` profile upgrade re-wrap one envelope and leave every Vault key
-and every existing grant untouched.
+`CRYPTO-002 MUST` The Account Key Set plaintext is exactly a 32-byte X25519 static secret followed by
+a 32-byte Ed25519 signing seed. Both are generated from a cryptographic random source at Account
+creation and never derived from a password. Public keys are derived after unwrap and MUST match the
+Server-visible copies before use. A Server serves the wrapped set only after the corresponding sign-in
+or Device ceremony succeeds. A credential or protocol change re-wraps this one object and leaves every
+Vault key, public key, Account Fingerprint, and existing grant untouched.
 
-`CRYPTO-003 MUST` XChaCha20-Poly1305 is the only authenticated encryption algorithm in the product,
-for content and for key wrapping alike, with a 192-bit nonce drawn from a cryptographic random source
-for every message. A counter-based nonce is impossible here: Devices write offline under one Vault key
-and reconcile later, so a coordinated sequence cannot exist. A 96-bit random nonce would place the
-birthday bound near 2^32 messages under a key that covers every Item, every revision, and every
-Attachment chunk for the life of a Vault.
+`CRYPTO-003 MUST` Every persisted symmetric envelope uses AES-256-GCM-SIV as specified by RFC 8452,
+with a fresh uniformly random 96-bit nonce and a 128-bit tag. Devices do not coordinate nonce counters.
+Nonce repetition is never intentional, but does not cause the catastrophic confidentiality and
+authenticity failure of AES-GCM or ChaCha20-Poly1305. One key protects at most 2^32 envelopes and one
+envelope contains at most 32 MiB (2^25 bytes) of plaintext, a joint policy inside RFC 8452's
+random-nonce bounds. XChaCha20-Poly1305 and ordinary AES-GCM are absent. ADR 0010.
 
-`CRYPTO-004 MUST` A Vault key is sealed to a recipient's X25519 encryption key
-using HPKE (RFC 9180) in **export-only** mode, suite `DHKEM(X25519, HKDF-SHA256)` with `HKDF-SHA256`
-and AEAD identifier `0xFFFF`. The HPKE context exports a 32-byte key and a 24-byte nonce, which feed
-the `CRYPTO-003` envelope. Export-only mode is what keeps the product at one AEAD, because RFC 9180
-registers no XChaCha20-Poly1305 suite. The exported nonce is not transmitted. RSA is absent from the
-product.
+`CRYPTO-004 MUST` Every HPKE envelope uses RFC 9180 Base mode, including a Vault key sealed to a
+recipient and the Account Private Object sealed to its own Account. The suite is
+`DHKEM(X25519, HKDF-SHA256)` (`0x0020`), `HKDF-SHA256` (`0x0001`), and
+`ChaCha20Poly1305` (`0x0003`). The implementation emits and consumes the registered
+`enc || ciphertext` wire semantics. HPKE `info` is the exact ASCII bytes
+`bittery/envelope/hpke/1`; the envelope header and binding tuple are HPKE AAD. Export-only mode,
+custom exporter labels, and RSA are absent.
 
-`CRYPTO-005 MUST` A Vault grant carries an Ed25519 signature by the granting member's Account Signing
-Key over a canonical, length-prefixed message binding a purpose label, the format version, the Server
-identity, the Vault identifier, the key epoch, the granter's Account identifier, the recipient's
-Account identifier, the recipient's Account Fingerprint, and the granted role. A client accepts no
-grant whose signature does not verify, which is what makes `PRIVACY-004`'s unsigned-membership attack
-Detectable. The Account Signing Key is distinct from OPAQUE's authentication material, which never
-signs product data and may migrate without touching Vault data; a shared key would orphan every past
-grant on rotation.
+`CRYPTO-005 MUST` A Vault grant carries a strict RFC 8032 Ed25519 signature outside its HPKE body.
+The signed canonical bytes are the label `bittery/sign/vault-grant/1`, format version, stable Server
+identity, Vault identifier, key epoch, granter Account identifier, recipient Account identifier,
+recipient Account Fingerprint, granted role, and the exact HPKE `enc || ciphertext`. A client accepts
+neither altered policy fields nor a substituted sealed Vault key. OPAQUE authentication material never
+signs product data.
 
-`CRYPTO-006 MUST` Vault grants are flat. Every Vault key is sealed straight to each member's Account
-encryption key, and no key opens more Vaults than its holder was granted. A Team owns no cryptographic
-key of its own. A Team key that wrapped Vault keys would contradict `TEAM-003`, by making every member
-a decryptor of every Team Vault, and `TEAM-004`, by making one departure rotate every Vault the Team
-owns.
+`CRYPTO-006 MUST` Vault grants are flat. Every Vault key is sealed directly to each member's Account
+encryption key, and no Team-wide key opens Vault content. Team membership alone therefore grants no
+decryption capability, and a departure rotates only Vaults the member could open. There is no User,
+Team, or Security History key; `AUDIT-001` defines one operator-readable log.
 
-`CRYPTO-007 MUST` A single **format version** byte identifies the whole cryptographic suite, indexing
-a closed, ordered, append-only registry compiled into every client. The registry entry names the AEAD,
-the KEM, the KDF, the signature algorithm, the hash, and the byte layout together. There is no
-negotiation, no per-field algorithm agility, and no field a Server can influence, so the format has no
-downgrade surface. An unknown version is a hard refusal reporting that the client needs updating.
-Version `0x01` is XChaCha20-Poly1305, HPKE export-only over `DHKEM(X25519, HKDF-SHA256)`, Ed25519, and
-SHA-256. This registry is separate from the `AUTH-017` key-derivation profile registry and governed
-the same way. ADR 0010.
+`CRYPTO-007 MUST` One **format version** byte identifies the whole cryptographic suite and byte
+layout through a closed, ordered, append-only client registry. There is no negotiation, separate
+algorithm field, operator choice, or downgrade path. Version `0x01` names AES-256-GCM-SIV, the
+`CRYPTO-004` HPKE suite, Ed25519, SHA-256, and the layouts in `CRYPTO-008`. An unknown version is a
+hard client-update outcome. The exact registry is specified in
+[`cryptographic-format.md`](cryptographic-format.md).
 
-`CRYPTO-008 MUST` Every persisted ciphertext is one envelope in one of two shapes, chosen by its key
-context byte, with all integers big-endian:
+`CRYPTO-008 MUST` Every envelope begins `format_version:u8 | key_context:u8 | key_epoch:u32be` and
+then has exactly one context-selected body:
 
-- **Symmetric**: format version `u8`, key context `u8`, key epoch `u32`, 24-byte nonce, then
-  ciphertext followed by the 16-byte tag. The header is 30 bytes.
-- **Sealed**: format version `u8`, key context `u8`, key epoch `u32`, the 32-byte HPKE encapsulated
-  key, then ciphertext followed by the 16-byte tag. The header is 38 bytes, because `CRYPTO-004`
-  exports the nonce rather than transmitting it.
+- **Symmetric:** `nonce[12] | AES-256-GCM-SIV ciphertext | tag[16]`.
+- **HPKE:** `enc[32] | ChaCha20-Poly1305 ciphertext | tag[16]`.
 
-The key epoch is present in every envelope and MUST be zero in a key context that has no epochs. It is
-how `CRYPTO-001`'s decoder selects a Vault key generation, which is what makes the lazy rotation in
-the Vault key epoch work possible.
+No inner length, optional field, or trailing byte exists. The epoch is zero in a context without
+Vault-key generations. A nonzero epoch selects the exact Vault key generation needed to open the
+envelope; ticket 11 owns rotation lifecycle rather than this representation.
 
-`CRYPTO-009 MUST` The additional authenticated data of every envelope is the header bytes verbatim,
-followed by a binding tuple the decoder **reconstructs from where it found the blob**, each field
-`u16` length-prefixed in a fixed per-context order: Vault identifier and Item identifier and revision
-number for an Item revision, Attachment identifier and chunk index and total chunk count for a chunk,
-and so on. Moving ciphertext between Items, or serving one revision in place of another, therefore
-fails to decrypt rather than succeeding silently, which raises those attacks from Detectable to
-Prevented. No component may hand the cryptographic layer a blob without its context. A Share link
-snapshot binds the Share link identifier and never the source Item identifier, or `PRIVACY-010`
-unlinkability would fail. An Account-scoped envelope, key contexts `0x01`, `0x02`, `0x03` and `0x12`,
-binds the Account identifier, so no wrapping of one Account's key material is accepted for another.
+`CRYPTO-009 MUST` Envelope AAD is the complete header bytes verbatim followed by a canonical binding
+tuple reconstructed from the object's typed storage location. Byte strings are `u16be` length-prefixed;
+integers have their context-fixed width; field order is immutable. Every tuple starts with stable Server
+identity and then binds the natural object path: Account and optionally Device for Account wrappers;
+Vault, granter, recipient, fingerprint and role for a grant; Vault, Item and revision for an Item;
+Vault, Item and Attachment for an Attachment key; those fields plus chunk index and total count for a
+chunk; and Share-link identifier only for a Share snapshot. The epoch is already in the header. No API
+may decrypt a context-free blob. A Share snapshot never binds its source Item.
 
-`CRYPTO-010 MUST` Key contexts are a closed table, and the byte selects the envelope shape:
-`0x00` reserved and never valid; `0x01` Account Key Set under the Account Unlock Key; `0x02` Account
-Key Set under a Recovery Key; `0x03` Account Key Set under a Device Unlock Wrapper key; `0x10` Vault
-key sealed to an Account encryption key; `0x12` Account Private Object sealed to the Account's own
-encryption key; `0x20` Item revision under a Vault key; `0x21` Attachment key under a Vault key;
-`0x22` Attachment chunk under an Attachment key; `0x40` Share link snapshot under a Share link key.
-The context byte is plaintext and adds nothing to
-`PRIVACY-007`, because the Server already knows which table it read a blob from.
+`CRYPTO-010 MUST` Key contexts are a closed one-byte table: `0x00` invalid; `0x01` Account Key Set
+under the Account Unlock Key; `0x02` Account Key Set under a recovery wrapping key; `0x03` Account Key
+Set under a Device Unlock Wrapper key; `0x10` Vault key sealed to an Account; `0x12` Account Private
+Object sealed to its Account; `0x20` Item revision under a Vault key; `0x21` Attachment key under a
+Vault key; `0x22` Attachment chunk under an Attachment key; and `0x40` Share snapshot under its Share
+key. The table fixes object purpose and symmetric versus HPKE body shape. Gaps are reserved, unknown
+values fail, and later tickets do not reuse an entry for a different job.
 
-`CRYPTO-011 MUST` A key that protects data is generated randomly; an HKDF label exists only where a
-key is derived from a secret that already exists. The label registry is closed and its members are the
-ASCII byte strings `bittery/opaque/account-unlock/1`,
-`bittery/1/recovery-unlock`, `bittery/1/recovery-auth/1`, `bittery/1/device-unlock`,
-`bittery/1/share-link`, and `bittery/1/search-index`, used verbatim as HKDF-Expand `info` with no
-terminator. The two recovery labels consume the Recovery Key and the Secret Key together, which is
-what makes `AUTH-001`'s two-factor rule hold on the recovery route. OPAQUE's authenticated context,
-not an HKDF label or salt, binds the authentication-protocol version and key-derivation profile under
-`AUTH-010`; profile `0x01` uses the fixed zero salt in `AUTH-016`. A repository check asserts the label
-table is pairwise distinct, because a collision would make two keys equal and nothing else in the
-design would catch it.
+`CRYPTO-011 MUST` Domain labels are a closed registry of exact ASCII bytes:
+`bittery/envelope/hpke/1`, `bittery/sign/vault-grant/1`,
+`bittery/sign/item-revision/1`, `bittery/sign/account-private-object/1`, and
+`bittery/account-fingerprint/1`. Labels are length-prefixed where they enter canonical signed or
+hashed bytes and are never NUL-terminated. This ticket adds no custom HKDF derivation. The only current
+derivation label remains `AUTH-002`'s `bittery/opaque/account-unlock/1`; another ticket adds a literal
+only when its accepted design actually derives a new key. CI asserts pairwise label distinctness.
 
-`CRYPTO-012 MUST` Each Item revision carries an Ed25519 signature by its author's Account Signing Key,
-placed **inside the ciphertext**. Holding a Vault key is otherwise enough to write a revision
-attributed to another member. A plaintext signature would let an operator attribute every revision to
-an author, and revision authorship is not on the `PRIVACY-007` list. Clients remember the highest
-authenticated revision they accepted; there is no mandatory revision chain.
+`CRYPTO-012 MUST` Ed25519 signs canonical protected bytes directly, never an application-level hash
+of those bytes. An Item revision signs its label, format version, Server, Vault, Item, revision number,
+author, and unsigned canonical revision body; body and signature are then encrypted together. An
+Account Private Object signs its label, format version, Server, Account, object generation, and
+canonical Secret Key payload; that signature stays inside the HPKE ciphertext. Verification is strict,
+and no plaintext from an unsigned or invalid object reaches a caller.
 
-`CRYPTO-013 MUST` An Attachment is a sequence of independent envelopes, one per chunk, each binding
-the Attachment identifier, its chunk index, and the **total chunk count** in its `CRYPTO-009` tuple.
-Binding the count is what makes a truncated Attachment fail to decrypt instead of reading as a short
-file. Chunking cannot live above the format, because an AEAD tag verifies only once the whole message
-is present and a client would have to buffer an entire Attachment before trusting a byte of it.
-`PRIVACY-007` already exposes chunk count, so this binding reveals nothing new.
+`CRYPTO-013 MUST` Each Attachment chunk is an independent envelope binding Attachment identifier,
+chunk index, and total chunk count, so trusted streaming does not require buffering the whole file and
+truncation or reordering fails. The signed Item revision also commits to its ordered Attachment
+manifest: each Attachment identifier, wrapped-key envelope bytes, chunk count, total byte size, and
+SHA-256 digest of every stored chunk envelope. A Vault Co-member can hold the Attachment key but cannot
+replace a signed author's Attachment without detection.
 
-`CRYPTO-014 MUST` An **Account Fingerprint** is `SHA-256` over a length-prefixed tuple of a domain
-label, the Account identifier, the X25519 encryption public key, and the Ed25519 Account Signing
-public key, displayed as hex groups. `CRYPTO-005` binds it into every grant signature. It is defined
-here rather than later because the signed grant message's field list is frozen by this requirement,
-and adding a bound field afterwards would leave two signed forms every verifier must carry. An
-operator substituting a recipient's public keys stays Acknowledged until a transparency-log
-construction exists; the fingerprint gives out-of-band verification something to compare.
+`CRYPTO-014 MUST` An **Account Fingerprint** is SHA-256 over the length-prefixed label
+`bittery/account-fingerprint/1`, Account identifier, X25519 public key, and Ed25519 public key. The full
+32 bytes display as grouped lowercase hexadecimal and are never truncated. `CRYPTO-005` binds the
+fingerprint into every grant. Public-key substitution by a Malicious Operator remains Acknowledged
+unless Users compare fingerprints out of band; the fingerprint is not key transparency.
 
-`CRYPTO-015 MUST` A decoder refuses, before returning any plaintext: an unknown format version,
-reporting that the client needs updating; key context `0x00` or an unknown context; a context whose
-envelope shape does not match the bytes present; a non-zero epoch in a context without epochs; a blob
-shorter than its header plus tag, checked before any cryptographic operation runs; trailing bytes
-after the tag; and any tag mismatch, with no partial plaintext ever emitted. An epoch naming a Vault
-key the client does not hold is reported distinctly from a tag failure, so the client fetches the
-grant rather than alarming the User. Ed25519 verification is strict per RFC 8032, rejecting
-non-canonical `S` values and small-order points. Nonce reuse is **not** detectable by the format and
-the product says so rather than implying a check exists. Every rule here has a negative fixture in the
-`AUTH-012` conformance corpus.
+`CRYPTO-015 MUST` Before returning plaintext, a decoder rejects an unknown version or context, a
+wrong context/body shape, nonzero epoch where forbidden, short or trailing data, oversized or
+non-canonical tuple fields, authentication failure, public-key mismatch, invalid or non-canonical
+signature, malformed or low-order public-key input, and an exceeded usage limit. All authenticity
+failures map to one non-oracular outcome. A missing known Vault epoch is the only distinct recoverable
+outcome, so a client may fetch its grant. No failure emits partial plaintext. Every rule has a negative
+fixture and every context has positive, relocation, and wrong-context fixtures.
+
+`CRYPTO-016 MUST` Rust manifests may use compatible ranges beginning with `aes-gcm-siv` 0.12,
+`hpke` 0.14, and `ed25519-dalek` 3.0, but released artifacts resolve exact versions through a committed
+lockfile. Automated updates open reviewable changes and never auto-merge. Each update runs the RFC,
+Wycheproof, and Bittery fixture corpus; changed cryptographic code receives proportional security
+review before release. Independent targeted review of the pinned AES-256-GCM-SIV path blocks beta,
+and `CRYPTO-POLICY-006` still gates general availability on integrated review and penetration testing.
+
+`CRYPTO-017 MUST` Writers emit only the one current format. Readers accept every version compiled
+into their closed registry. A format transition is one explicit, resumable, idempotent
+decrypt-validate-reencrypt migration. Bittery never dual-writes formats, negotiates algorithms, or
+allows a Server to select a suite. Unknown versions are preserved but not opened until a supporting
+client is installed.
 
 ## Vaults, Teams, and sharing
 

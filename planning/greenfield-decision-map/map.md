@@ -85,10 +85,10 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
 
 <!-- one line per closed ticket, linking the ticket that holds the detail -->
 
-Tickets 08 and 09 remain reopened after the 2026-08-20 consistency audit. Their summaries below record
-the previously accepted answers as history, not current decisions. The promoted requirements and ADRs
-they produced remain visibly present but are candidate material under review; specifications must not
-rely on them until the tickets resolve again.
+Ticket 09 remains reopened after the 2026-08-20 consistency audit. Its summary below records the
+previously accepted answer as history, not a current decision. Its promoted requirements and ADRs
+remain visibly present but are candidate material under review; specifications must not rely on them
+until the ticket resolves again.
 
 - [Browser storage durability facts](issues/01-browser-storage-durability-facts.md): no browser engine
   gives a web app a real on-disk acknowledgement, so `SYNC-001`'s durability MUST is unobtainable in a
@@ -161,18 +161,16 @@ rely on them until the tickets resolve again.
   layered subject, source, and Server-capacity controls conceal public existence without hard-locking
   Accounts; PostgreSQL is the default authority and durable Redis is a selectable alternative.
 
-- **REOPENED:** [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
-  envelope, one AEAD, one version byte. `AUTH-015`'s HKDF output is the Account Unlock Key, which wraps a
-  randomly generated **Account Key Set** (X25519 plus Ed25519), so a password change, Secret Key rotation
-  or profile upgrade re-wraps one envelope and touches no Vault key. XChaCha20-Poly1305 is the product's
-  only AEAD, chosen because offline multi-Device writes rule out a coordinated nonce counter and 96 bits
-  is too few; HPKE runs in **export-only** mode so RFC 9180 conformance costs no second AEAD. RSA is gone.
-  Grants are flat and signed: no Team Key over Vault content, so `TEAM-003` and `TEAM-004` survive, and a
-  narrow Team History Key covers Security History alone. `CRYPTO-009` binds each object's identity into
-  its AAD, so relocating ciphertext or substituting a revision becomes **Prevented**, at the cost that no
-  component may ever hand the crypto layer a bare blob. Item revisions are signed inside the ciphertext,
-  which surfaced a seventh adversary class, **Vault Co-member**, amending resolved ticket 04.
-  `PRIVACY-007` gained three fields. ADRs
+- [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
+  fixed envelope grammar and one version byte name the whole standard suite. AES-256-GCM-SIV with
+  random nonces protects symmetric state; complete RFC 9180 HPKE Base mode seals flat Vault grants;
+  Ed25519 signs the exact grant body, Item revisions, and Account Private Objects. The stable random
+  Account Key Set, direct Item encryption, per-Attachment keys, typed object binding, `u32` epochs, and
+  full Account Fingerprint survive. Signed Item revisions now commit to Attachment manifests. The old
+  XChaCha and export-only composition, Team History Key, speculative HKDF labels, and unauthenticated
+  sealed-key body are gone. Targeted review of the pinned AES-GCM-SIV path blocks beta; integrated
+  review and penetration testing block general availability. Format
+  [specification](../../docs/greenfield/target/cryptographic-format.md); ADRs
   [0010](../../docs/adr/0010-one-envelope-one-suite-and-a-version-byte-that-names-the-whole-format.md),
   [0011](../../docs/adr/0011-vault-grants-are-flat-signed-and-sealed-to-an-account-key-set.md).
 
@@ -222,12 +220,6 @@ frontier reaches it.
   to close. Ticket 05 settled that these are installed-client features only, so the surface is Desktop
   and Extension.
 - **Supported OS and browser version matrix.** Depends on tickets 41, 42, and 45.
-- **Security review gate beyond authentication.** Ticket 06 settled the pattern for its own
-  construction: a written design note, a cryptographic construction review before general availability,
-  a penetration test after it. Ticket 07 has fixed the derivation profile, but ticket 08 remains reopened,
-  so the final key hierarchy, envelope, grant, and revision surface is not known yet. Once it closes,
-  decide whether one engagement covers the integrated surface and whether `AUTH-012`'s design note grows
-  to hold it or a second note is written.
 - **Passkey-based Bittery login.** `ITEM-002` makes passkeys a stored capability rather than a login
   method. Whether that ever changes is a later question.
 - **Server equivocation defence, and key transparency.** Ticket 04 classes equivocation Acknowledged

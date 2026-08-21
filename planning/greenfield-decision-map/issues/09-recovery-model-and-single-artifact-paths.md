@@ -49,11 +49,16 @@ Set** under key context `0x02` and nothing else, so "what does a Recovery Key op
 answer, and revoking one is a question about that envelope rather than about every Vault key. Master
 password change is the same operation: re-wrap one envelope, leave every grant intact.
 
-`CRYPTO-011` reserves the label `bittery/1/recovery-unlock` for deriving the wrapping key from the
-Recovery Key, and `AUTH-020` already binds recovery artifacts to a 128-bit floor with no memory-hard
-step, because the Recovery Key is machine-generated. The Emergency Kit must now also print or carry
-enough to reconstruct the Account Fingerprint (`CRYPTO-014`), if out-of-band verification is to work
-for a User who has lost every Device.
+`CRYPTO-011` deliberately reserves no recovery derivation label. This ticket must first decide whether
+its final construction derives a wrapping or authentication key; only then may it add the exact literal
+to the closed registry. `AUTH-020` still binds machine-generated recovery artifacts to a 128-bit floor.
+The Emergency Kit must carry enough to reconstruct the Account Fingerprint (`CRYPTO-014`) if
+out-of-band verification is to work for a User who has lost every Device.
+
+The Account Private Object in context `0x12` is HPKE Base ciphertext containing a signed canonical
+payload. This ticket supplies its monotonically increasing object generation and atomic publication
+order. A revoked Device that already holds the Account Key Set can still open and sign such an object;
+the threat model must state that limit rather than treating the signature as Device revocation.
 
 ## Answer
 

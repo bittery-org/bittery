@@ -23,9 +23,10 @@ Produces: `ITEM-*` refinement and the canonical Item schema.
 ### Inherited from ticket 08, key hierarchy and canonical envelope format
 
 `CRYPTO-008` and `CRYPTO-012` bound this ticket's plaintext layout from outside. An Item revision's
-plaintext is whatever this ticket defines, plus an Ed25519 signature carried **inside** the ciphertext.
-The signature covers the plaintext bytes as encrypted, so the Item document needs no canonical
-serialization for signing to be sound, though it may want one for other reasons.
+plaintext is one canonical unsigned body plus an Ed25519 signature carried **inside** the ciphertext.
+The signature covers the exact canonical unsigned bytes, so this ticket must define one serialization
+rather than treating object-key order or host encoding as irrelevant. The body also contains the
+ordered Attachment manifest fixed by `CRYPTO-013`.
 
 `CRYPTO-001` puts Item content directly under the Vault key with no per-Item key, so nothing in the
 Item model may assume a key of its own. Attachments do have one (`CRYPTO-010`, context `0x21`).

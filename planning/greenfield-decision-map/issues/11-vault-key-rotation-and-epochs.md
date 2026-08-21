@@ -46,6 +46,11 @@ Vault, proportional to the Vault rather than to any Team above it. Decide whethe
 existing ciphertext under a new epoch is ever mandatory: a departed member already read epoch N, so
 the honest answer may be that it never is.
 
+`CRYPTO-003` limits one AES-256-GCM-SIV key to 2^32 envelopes. This ticket must set a much earlier
+rotation threshold and account for concurrent offline writes without pretending they share a nonce
+counter. Reaching the threshold is a format safety event, not an operator-configurable performance
+setting.
+
 ### Inherited from ticket 09, recovery model and single-artifact paths
 
 `AUTH-028` rules out Account Key Set rotation for the first release, so rotation in this product is
