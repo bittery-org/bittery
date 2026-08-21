@@ -13,11 +13,13 @@ Decide:
 - What happens to a durably-accepted operation rejected for authorization: preserved as a local-only artifact the user can copy out, discarded with an audit entry, or converted to a Conflict copy.
 - Whether `OFFLINE-003` becomes a `MUST` with a mandatory maximum revalidation window.
 - Conflict-copy semantics: how it is named, where it appears, and how a user resolves it.
-- Indeterminate outcomes: how a client resolves "committed but response lost" without duplicating.
+- Domain reconciliation after the generic byte-identical lost-response retry has recovered its
+  canonical outcome.
 - The superseded-epoch case handed over from [vault key rotation](11-vault-key-rotation-and-epochs.md).
 - What the UI says in each case, in plain words.
 
-Produces: `SYNC-004`, `OFFLINE-003`, and `ITEM-004` refinement, plus seed scenarios 3, 4, and 6.
+Produces: `SYNC-004`, `OFFLINE-003`, and `ITEM-004` refinement, plus seed scenarios 4 and 6 and any
+Domain-specific refinement of the accepted seed scenario 3.
 
 ## Comments
 
@@ -34,3 +36,24 @@ or starts a new one, and the choice decides whether tampering stays Detectable a
 
 `PRIVACY-003` demotes Server-side authorization to an availability control, so an authorization
 rejection never protects secrecy. A rejected operation is a lost write, not a leak.
+
+### Inherited from Vault key rotation and epochs
+
+`VAULT-ROTATION-008` settles the still-authorized case: a superseded-epoch operation is opened and
+re-sealed under the current epoch without becoming a Conflict copy. This ticket owns only the case in
+which the Device cannot obtain the new grant because authorization was removed, including how its
+already-durable local edit remains visible or exportable.
+
+Rotation finalization itself already resolves a lost response by querying the signed epoch statement
+and byte-identically retrying one idempotency identifier. This ticket should use the same semantic
+shape for ordinary operations without reopening the rotation decision.
+
+### Inherited from Operation state machine and crash safety
+
+[`operations.md`](../../../docs/greenfield/target/operations.md) now fixes `queued`, `indeterminate`,
+`committed`, `rejected`, `conflicted`, `failed`, and `discarded`; the durable pre-send intent;
+byte-identical automatic retry; Account-lifetime exactly-once outcomes; dependency blocking; and the
+generic user phrases. A lost response therefore needs no manual recovery and seed scenario 3 is
+accepted. This ticket still owns the registered rejection/conflict outcome bodies, what unique local
+work becomes, export and Conflict-copy flows, dependent-operation reconciliation, and the exact
+object-level explanatory copy. It may not add a second operation identity or weaken automatic retry.

@@ -45,3 +45,10 @@ old authors, or state why first-release stable Account Key Sets make that unnece
 `CRYPTO-009` binds the revision number into the envelope's AAD, so revisions cannot be renumbered
 after the fact. Any retention scheme that renumbers rather than tombstones would make old revisions
 undecryptable.
+
+### Inherited from Vault key rotation and epochs
+
+Rotation never rewrites retained revisions. `VAULT-ROTATION-009` keeps every historical epoch and its
+grants while a retained revision references it, then permits collection only when no retained
+Vault-key envelope does. This ticket's count and age policy therefore determines key-epoch retention
+indirectly; it must not expire a grant before the revision it opens.

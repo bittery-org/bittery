@@ -1,0 +1,69 @@
+id: REPLICA-RUNTIME-010
+durability_profile: browser-transactional
+requirements:
+  - ARCH-STORE-014
+  - ARCH-STORE-016
+  - ARCH-STORE-018
+  - ARCH-STORE-022
+  - SYNC-001
+given:
+  replica:
+    server: server-A
+    account: account-A
+    commit_sequence: 70
+    active_base:
+      generation: base-4
+      cursor: cursor-4
+    local_overlay: []
+  keys_and_session:
+    state: unlocked
+    live_account_keys: present
+    live_projection: item-A-cleartext
+  server:
+    reachable: false
+  operation_log: []
+  cursor: cursor-4
+  connectivity: offline
+  persistent_origin_storage: not-granted
+  storage_origin_present_after_restart: true
+when:
+  - command_or_event: prepare offline Item edit operation-L2 outside a storage transaction
+  - command_or_event: submit one guarded commit containing operation-L2, its immutable envelope,
+      its overlay head, and its defined derived updates
+  - inject_failure: each of
+      - before the first physical mutation
+      - between every physical mutation attempted by the adapter
+      - after backend commit before commit acknowledgement
+      - after acknowledgement before projection publication
+  - command_or_event: terminate the Web Worker or Extension background runtime without graceful close
+  - command_or_event: restart and open the same origin store
+then:
+  visible_projection:
+    before_unlock: locked projection only
+    live_account_keys: absent
+    prior_cleartext_projection: invalid
+    after_unlock: reflects exactly the durable old or durable new commit
+  durable_replica:
+    allowed_results:
+      - commit_sequence: 70
+        operation-L2: absent
+        overlay_effect: absent
+      - commit_sequence: 71
+        operation-L2: queued
+        overlay_effect: present
+    forbidden:
+      - operation without its overlay effect
+      - overlay effect without its operation
+      - a partially replaced head
+      - a changed base generation or cursor
+    durability_note: this scenario proves transaction atomicity while the origin store remains;
+      it does not prove a physical-disk acknowledgement or survival of origin removal
+  operation_state:
+    operation-L2: absent or queued exactly as selected by the recovered commit sequence
+  server_state:
+    changed: false
+  emitted_events:
+    - no unlocked projection before fresh authorization
+    - one operation-accepted invalidation only when commit_sequence 71 is recovered
+    - when commit_sequence 71 is recovered, Unsynced operation count 1 and its age remain visible
+      until Server Sync proves the matching commit

@@ -2,7 +2,7 @@
 
 Type: grilling
 Status: ready-for-human
-Blocked by: 15, 17
+Blocked by: 12, 15, 17
 
 ## Question
 
@@ -32,3 +32,13 @@ chunk, grant, or Share path cannot decrypt them.
 
 `CRYPTO-007`'s closed format registry is compiled into the core, so nothing in this interface exposes
 algorithm selection to a host.
+
+## Comments
+
+### Inherited from Device Unlock Wrapper and quick unlock
+
+[Device Unlock Wrapper and quick unlock](12-device-unlock-wrapper-and-quick-unlock.md) fixes the
+quick-unlock boundary before this interface chooses its exact FFI shape. A public unlock operation
+accepts an authorization intent and returns only account-scoped capabilities and projections. A
+client binding never receives a wrapping key or Account Key Set. Lock zeroizes those core-held values
+before emitting the high-priority locked projection.

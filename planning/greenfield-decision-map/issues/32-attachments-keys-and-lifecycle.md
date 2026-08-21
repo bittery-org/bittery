@@ -33,3 +33,14 @@ count and total byte size, so the binding leaks nothing new. The signed Item rev
 wrapped-key envelope and the ordered SHA-256 digest of every chunk envelope; this ticket must define
 when that manifest becomes final during upload and how resumable work is promoted atomically. Its
 chunk-size choice cannot exceed `CRYPTO-003`'s 32 MiB plaintext-per-envelope ceiling.
+
+### Inherited from Vault key rotation and epochs
+
+A Vault-key rotation rewrites no existing Attachment-key envelope, Item manifest, or Attachment
+chunk. Each remains under the epoch it already names, and historical grants remain while it is
+retained. A newly created Attachment key consumes one context `0x21` reservation from the current
+Vault epoch; context `0x22` chunk envelopes spend the Attachment key's separate `CRYPTO-003` limit.
+
+Compromise or replacement of one Attachment key does not trigger Vault rotation. This ticket still
+owns whether that Attachment is re-encrypted under a fresh key and how such a replacement becomes a
+new signed manifest revision.

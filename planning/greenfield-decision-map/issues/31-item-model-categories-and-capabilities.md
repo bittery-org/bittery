@@ -30,3 +30,12 @@ ordered Attachment manifest fixed by `CRYPTO-013`.
 
 `CRYPTO-001` puts Item content directly under the Vault key with no per-Item key, so nothing in the
 Item model may assume a key of its own. Attachments do have one (`CRYPTO-010`, context `0x21`).
+
+### Inherited from Search and autofill index
+
+The Item schema must classify every user-authored field as secret or non-secret for indexing. Secure
+Note bodies, Custom Field names and non-secret values, and Attachment names are searchable; passwords,
+TOTP seeds, passkey private material, recovery material, secret-classified Custom Field values, and
+Attachment bytes are not. New fields default to not searchable until the closed classification admits
+them. URL storage preserves every User-confirmed exact website/application association while the
+shared matcher derives registrable-site candidates from canonical hosts.

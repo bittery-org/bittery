@@ -1,0 +1,55 @@
+id: SYNC-OFFLINE-001
+requirements:
+  - SYNC-001
+  - SYNC-004
+  - ARCH-STORE-016
+given:
+  replica:
+    server: server-A
+    account: account-A
+    commit_sequence: 20
+    local_overlay: []
+  keys_and_session:
+    state: unlocked
+  server:
+    reachable: false
+  operation_log: []
+  connectivity: offline
+when:
+  - command_or_event: prepare Item edit operation-A with accepted sequence 4 outside storage
+  - command_or_event: submit one guarded commit containing the immutable OperationRequest,
+      queued control row, Item envelope, overlay head, and defined derived updates
+  - inject_failure: each of
+      - before the first physical mutation
+      - between every physical mutation attempted by the adapter
+      - after backend commit before acknowledgement
+      - after acknowledgement before projection publication
+      - after projection publication before any send-intent commit
+  - command_or_event: terminate and reopen the runtime against the same extant Replica
+then:
+  visible_projection:
+    after_unlock: exactly the durable old Item or the durable optimistic edit
+    user_status_when_present: Saved on this device; Waiting to sync
+  durable_replica:
+    allowed_results:
+      - commit_sequence: 20
+        operation-A: absent
+        overlay_effect: absent
+      - commit_sequence: 21
+        operation-A:
+          state: queued
+          accepted_sequence: 4
+          attempt_count: 0
+        overlay_effect: present
+    forbidden:
+      - operation without overlay effect
+      - overlay effect without operation
+      - indeterminate before a durable send intent
+  operation_state:
+    operation-A: absent or queued exactly as selected by recovered commit sequence
+  server_state:
+    changed: false
+  emitted_events:
+    - local acceptance is acknowledged only for recovered commit sequence 21
+    - when accepted, Unsynced operation count 1 and age survive termination
+

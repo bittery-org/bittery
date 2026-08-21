@@ -1,8 +1,6 @@
 # The current Secret Key is stored sealed to the Account Key Set
 
-Status: proposed
-
-Previously accepted; reopened by Wayfinder ticket 09 on 2026-08-20.
+Status: accepted
 
 The Secret Key had one home: paper, and whatever local state each Device kept. That is fine until it
 rotates. `AUTH-027` makes rotation cheap in cryptographic terms, one re-wrap and one re-registration,
@@ -57,3 +55,9 @@ is versioned for that.
 A recovery sign-in rotates the Secret Key under `AUTH-026`, so the object is written on the one path
 where the User may have no other Device at all. It must therefore be created at Account creation, not
 lazily at first rotation.
+
+Recovery revokes every old Device and session in the same transaction that publishes the replacement
+object. Ordinary Secret Key rotation preserves trusted Devices by default and atomically applies any
+Device revocations the User selected. This ordering constrains an honest Server only. A Malicious
+Operator can still send the new ciphertext to a revoked Device that already holds the long-lived
+Account Key Set; preventing that requires Account Key Set or per-Device key rotation.

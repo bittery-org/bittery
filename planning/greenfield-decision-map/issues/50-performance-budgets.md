@@ -18,3 +18,11 @@ Decide:
 - Whether the extension and the desktop carry the same numbers as Web.
 
 Produces: a `PERF-*` requirement family with measurable acceptance.
+
+### Inherited from Search and autofill index
+
+Measure the warm path from Account unlock through decrypting and loading a valid opaquely encrypted
+Search Snapshot. Measure the cold path separately: browse appears progressively, domain matching has
+priority, and search/autofill remains explicitly incomplete until ready. This ticket owns the reference
+Vault's Item count, searchable text volume and URL count, device classes, percentiles, numeric budgets,
+and release response; it must not collapse warm and rebuild latency into one misleading number.

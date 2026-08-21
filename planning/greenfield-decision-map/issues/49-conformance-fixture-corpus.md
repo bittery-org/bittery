@@ -55,3 +55,22 @@ WASM consume identical fixture bytes.
 `CRYPTO-016` allows compatible manifest ranges but makes the committed lockfile resolution the
 released and reviewed baseline. Fixture CI runs on every automated crypto update, which never
 auto-merges; this ticket must expose the resolved dependency versions in corpus-run output.
+
+### Inherited from Browser durability floor
+
+The storage corpus has one host-independent semantic core plus mandatory Durability profiles; this
+shape is settled, while this ticket still owns the fixture encoding and runner. Every adapter proves
+the same typed-state, atomicity, isolation and Sync invariants. `native-crash-durable` adds forced
+termination and reopen across its strongest persistence barrier. `browser-transactional` adds Worker
+or background-runtime termination with the Origin intact, lost acknowledgement after commit,
+best-effort persistence denial and whole-Origin removal. Origin removal must yield an absent Replica,
+never partial recovery or a false claim that an Unsynced operation reached the Server.
+
+### Inherited from Search and autofill index
+
+The shared corpus gains semantic and cryptographic vectors for Unicode normalization and case folding;
+exact/prefix/substring ranking; field exclusions; full ICANN and PRIVATE Public Suffix boundaries;
+IDNA, IP, localhost and application matching; Account and Collection scopes; snapshot relocation,
+chunk omission/reorder/duplication, stale source, interrupted asynchronous checkpoint, progressive
+completeness, locked-Sync invalidation, removal, and Travel rekeying. Rust and WASM run the same first-
+release vectors; later native bindings adopt them.

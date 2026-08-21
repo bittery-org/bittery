@@ -1,0 +1,48 @@
+id: SYNC-IDEMPOTENCY-002
+requirements:
+  - SYNC-004
+  - ARCH-SERVER-001
+given:
+  replica:
+    server: server-A
+    account: account-A
+    operation-A:
+      state: indeterminate
+      operation_id: 16 fixed bytes
+      request_fingerprint: fingerprint-A
+      exact_request_bytes: request-A
+  server:
+    account: account-A
+    operation_outcome_ledger: empty
+    item_revision: 7
+  connectivity: online
+when:
+  - command_or_event: deliver two concurrent Device-authenticated copies of request-A
+  - inject_failure: at every boundary inside the atomic command writer
+  - command_or_event: retry request-A after Server restart with the same Account and Operation ID
+  - command_or_event: attempt the same Operation ID with request-B and fingerprint-B
+then:
+  visible_projection:
+    item_revision: exactly 8 after reconciliation
+  durable_replica:
+    operation-A:
+      state: committed
+      overlay_effect: absent
+  operation_state:
+    operation-A: committed exactly once
+  server_state:
+    item_revision: exactly 8
+    domain_writer_count: 1
+    sync_event_count: 1
+    audit_record_count: 1
+    ledger:
+      key: [account-A, operation-A]
+      value: one byte-identical committed OperationOutcome for fingerprint-A
+      retention: until account-A deletion
+    mismatched_fingerprint_attempt: rejected without mutation
+  emitted_events:
+    - one caller receives the committed outcome and any concurrent caller receives in-progress or
+      the same stored outcome
+    - every later identical retry receives the same canonical outcome
+    - no HTTP response body is the idempotency record
+

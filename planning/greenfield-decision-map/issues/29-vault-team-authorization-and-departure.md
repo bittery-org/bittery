@@ -54,3 +54,14 @@ their Secret Key, revoked a Recovery Key, or recovered their Account.
 The converse is the constraint. Any departure or authorization design that would require an Account's
 keys to change must be flagged here, because the product has no ceremony for it and `AUTH-028` says so
 in the requirements.
+
+### Inherited from Vault key rotation and epochs
+
+Access loss immediately removes honest-Server authorization, creates a non-expiring Rotation
+requirement, and blocks only affected Vault writes. Any remaining authorized unlocked client may
+finish one atomic consecutive-epoch cutover; exact role authority belongs here. The departure flow may
+not add bulk Item or Attachment re-encryption, an operator override, or timeout rollback.
+
+This ticket must also decide whether a newly added member receives grants for every still-referenced
+historical epoch or only the current epoch. Rotation guarantees that those old grants remain available
+while ciphertext references them, but does not choose the membership policy.

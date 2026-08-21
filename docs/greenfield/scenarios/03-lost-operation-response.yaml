@@ -1,0 +1,55 @@
+id: SYNC-INDETERMINATE-003
+requirements:
+  - SYNC-004
+  - ARCH-SERVER-001
+given:
+  replica:
+    server: server-A
+    account: account-A
+    commit_sequence: 30
+    operation-A:
+      state: queued
+      attempt_count: 0
+      exact_request_bytes: request-A
+      request_fingerprint: fingerprint-A
+      overlay_effect: item-A-revision-8
+  server:
+    account: account-A
+    item-A-revision: 7
+    operation_outcome_ledger: empty
+  connectivity: online
+when:
+  - command_or_event: guarded commit queued to indeterminate, attempt count 1, before network I/O
+  - command_or_event: send request-A
+  - command_or_event: atomically commit Item revision 8, Sync event, audit record, and outcome-A
+  - inject_failure: lose the response and terminate the client before local reconciliation
+  - command_or_event: reopen locked and retry the exact request-A after backoff
+  - command_or_event: receive the stored outcome-A
+  - command_or_event: guarded commit installs the canonical result and commit marker, sets committed,
+      and removes the overlay effect
+  - inject_failure: before, during, and after that guarded commit
+then:
+  visible_projection:
+    before_reconciliation: item-A-revision-8 from the optimistic overlay; Waiting to sync
+    after_successful_reconciliation: item-A-revision-8 from canonical remote state; Synced
+  durable_replica:
+    allowed_before_reconciliation:
+      operation-A: indeterminate
+      overlay_effect: present
+    allowed_after_reconciliation:
+      operation-A: committed or cleanup-eligible
+      overlay_effect: absent
+      canonical_item_revision: 8
+    forbidden:
+      - a new Operation ID for the retry
+      - committed beside the old overlay effect
+      - loss of the optimistic edit before canonical installation
+  operation_state:
+    operation-A: indeterminate until one atomic committed reconciliation
+  server_state:
+    item-A-revision: exactly 8
+    domain_writer_count: 1
+    outcome-A: retained under [account-A, operation-A]
+  emitted_events:
+    - no manual intervention is required
+    - the lost response never causes a second Domain mutation

@@ -2,7 +2,7 @@
 
 Type: grilling
 Status: ready-for-human
-Blocked by: 03, 39, 40, 52
+Blocked by: 03, 12, 39, 40, 52
 
 ## Question
 
@@ -67,3 +67,29 @@ Two decisions land in this ticket as a result:
 engine, so there is nothing to declare in the manifest. `100.64.0.0/10` is classified **local**, not
 public, so the overlay route changes nothing about the gate; it earns its place by supplying the
 secure context `HOST-007` demands.
+
+### Inherited from Browser durability floor
+
+The Extension uses IndexedDB transactions with the explicit `durability: "strict"` hint and declares
+`browser-transactional`; OPFS and an offscreen database host are not requirements. Chromium and
+Firefox manifests require `unlimitedStorage`, interpreted only to the protection each engine
+documents. Extension removal, explicit clearing, browser policy and physical storage exhaustion are
+not covered. Unsynced operation count and age remain visible, and Bittery-controlled destructive
+local actions follow `ARCH-STORE-025`.
+
+### Inherited from Device Unlock Wrapper and quick unlock
+
+[Device Unlock Wrapper and quick unlock](12-device-unlock-wrapper-and-quick-unlock.md) makes
+memory-hard password quick unlock the Extension baseline. WebAuthn PRF is optional and enabled only
+after conformance plus a runtime user-verified output; it has one anchor per stable Server/RP ID, so a
+standalone multi-Server Extension may prompt once per Server. The Extension keeps its own password
+wrapper when Desktop is absent or locked. It may delegate narrow Vault operations to an authenticated
+Desktop IPC, but receives no Desktop Account Key Set or wrapping key.
+
+### Inherited from Search and autofill index
+
+The shared engine fixes candidate matching: exact host ranks first, then parent/child and sibling
+hosts within one registrable domain under the complete ICANN and PRIVATE Public Suffix List; IPs,
+localhost, single-label hosts, and application identifiers are exact-only. This ticket owns the
+narrower browser policy for schemes, ports, paths, frames, field detection, User gesture,
+automatic-versus-manual fill, and save prompts. It may narrow candidates but not broaden them silently.

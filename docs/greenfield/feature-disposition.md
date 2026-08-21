@@ -17,6 +17,7 @@ accounted for before implementation.
 | Implicit Team of one | Remove | Explicit Teams; Users own Personal Vaults |
 | Personal and shared Vaults | Simplify | Personal Vaults and Team Vaults with explicit ownership |
 | Vault-level collaboration | Keep | Primary ongoing sharing mechanism |
+| Vault-key rotation plans | Replace | Forward-only key epochs with a write-blocking rotation requirement and one atomic grant-set cutover |
 | Per-Item Share links | Keep | Encrypted snapshot with richer optional policy |
 | Fixed Item categories | Keep | Fixed categories plus encrypted custom fields |
 | Favorite as plaintext metadata | Replace | Encrypt Favorite |
@@ -31,7 +32,7 @@ accounted for before implementation.
 | React shared core/providers | Replace | Thin UI binding over ClientRuntime |
 | Tauri Desktop | Keep | Thin Tauri shell; native engine owner |
 | Tauri/WebView mobile | Remove | SwiftUI and Kotlin/Compose native clients |
-| Android TypeScript credential projection/key bridge | Replace | Native constrained runtime and shared encrypted replica |
+| Android TypeScript credential projection/key bridge | Replace | Independent constrained Provider core, separate wrappers and sessions, one guarded Replica, and no exported Account-key bridge |
 | Chrome extension | Keep | Background-owned runtime and narrow typed clients |
 | Firefox extension | Keep | Required official target |
 | Safari extension | Defer | Architecture-compatible future target |

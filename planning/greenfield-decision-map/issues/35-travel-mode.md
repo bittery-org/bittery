@@ -18,3 +18,11 @@ Decide:
 - Re-enabling: what has to resync, and how long it takes.
 
 Produces: `TRAVEL-001` refinement and an honesty clause.
+
+### Inherited from Search and autofill index
+
+Policy receipt atomically invalidates volatile index views and removes old Search and Suggestion
+snapshot records and wrapped local keys before a disallowed Vault contributes another result. The
+allowed remainder rebuilds under fresh keys; no pre-policy key is reused. This ticket still owns the
+cross-backend deletion ceremony, policy location, disclosure, observability, and re-enable flow, not
+the settled index cryptography.

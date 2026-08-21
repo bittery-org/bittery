@@ -1,17 +1,15 @@
 # Rotating a wrapping secret is forward protection only
 
-Status: proposed
-
-Previously accepted; reopened by Wayfinder ticket 09 on 2026-08-20.
+Status: accepted
 
 `CRYPTO-002` makes the Account Key Set random and long-lived, wrapped by whatever the User unlocks
 with. That is what makes a password change cheap: re-wrap one envelope and leave every Vault key and
 every grant alone. The same property has a cost nobody had written down. Changing the master password,
-rotating the Secret Key, or revoking a Recovery Key replaces a **wrapping**, never the thing wrapped.
+rotating the Secret Key, or removing a Recovery Key replaces a **wrapping**, never the thing wrapped.
 Anyone holding an old copy of the envelope plus the matching old secrets opens the same Account Key
 Set afterwards, and `HOST-004` backups are exactly where old copies live.
 
-So `AUTH-006`'s old promise of a "revocable" Recovery Key was unenforceable as written, and the same
+So `AUTH-006`'s old promise of a “revocable” Recovery Key was unenforceable as written, and the same
 hole sat under every other rotation the product offers.
 
 `AUTH-028` states the limit rather than closing it. The only real close is generating a new Account
@@ -29,7 +27,7 @@ What rotation does buy is real and worth keeping. The realistic loss is a photog
 misplaced Kit, not an operator with a database backup. Against that adversary, deleting the Server's
 recovery records ends the route immediately, and rotating the Secret Key makes any kept copy of the
 old envelope useless to anyone who never held the old Secret Key. `AUTH-030` therefore offers a Secret
-Key rotation the moment a Recovery Key is revoked.
+Key rotation the moment a Recovery Key is removed.
 
 ## Considered options
 
@@ -42,7 +40,7 @@ authorization work that has not happened yet.
 Vault exists, was rejected as half a feature with a rule that cannot be explained at the moment a User
 needs it.
 
-**Forcing a Secret Key rotation on every Recovery Key revocation** was rejected as too blunt: it voids
+**Forcing a Secret Key rotation on every Recovery Key removal** was rejected as too blunt: it voids
 every printed Kit for what is often a false alarm. It is offered instead, one click away.
 
 **Saying nothing, and letting "revocable" stand,** was rejected. That is the defect this ADR exists to
@@ -51,10 +49,10 @@ close.
 ## Consequences
 
 `PRIVACY-005` gained an Acknowledged attack: reopening an Account Key Set from a backed-up wrapping
-after the matching secret was revoked or rotated.
+after the matching secret was removed or rotated.
 
-Product documentation and the `AUTH-029` routes screen must use the words "forward protection", not
-"revoked", so a User does not read a deletion as an erasure.
+Product documentation and the `AUTH-029` routes screen call the action **Remove Recovery Key** and use
+the words “forward protection,” not “revoked,” so a User does not read deletion as historical erasure.
 
 Account Key Set rotation stays on the map as later-release work, alongside the transparency-log
 question that ticket 04 and ticket 08 also deferred. Both are about an operator who keeps or

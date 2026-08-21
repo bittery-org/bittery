@@ -1,7 +1,7 @@
 # Recovery model and single-artifact paths
 
 Type: grilling
-Status: ready-for-human
+Status: resolved
 Blocked by: 08
 
 ## Question
@@ -157,3 +157,68 @@ updated Kit before the old pair is deleted.
 If an old OPAQUE version is unsafe to execute, an enrolled Device may authorize replacement and this
 ticket must decide whether its independent recovery route may do the same. Without one of those routes,
 the Account is unrecoverable; the operator has no reset or migration bypass.
+
+## Answer — second pass 2026-08-21
+
+Promoted to rewritten [`AUTH-001`](../../../docs/greenfield/target/product.md), `AUTH-006`, and
+`AUTH-022` through `AUTH-030`; the byte-level recovery section in the
+[`cryptographic format`](../../../docs/greenfield/target/cryptographic-format.md); accepted ADRs
+[0012](../../../docs/adr/0012-every-route-to-the-account-keys-consumes-two-factors.md),
+[0013](../../../docs/adr/0013-rotating-a-wrapping-secret-is-forward-protection-only.md),
+[0014](../../../docs/adr/0014-the-current-secret-key-is-stored-sealed-to-the-account-key-set.md),
+and [0018](../../../docs/adr/0018-recovery-authentication-is-independent-of-opaque.md); and revised
+recovery language in [`CONTEXT.md`](../../../CONTEXT.md).
+
+**The closed route list survives; the false factor claim does not.** Remote password and recovery
+routes each combine two separately sourced secrets intended for separate storage. The enrolled-Device
+route combines a Device-held key with its local authorization. Recovery Key and Secret Key are both
+machine-generated secrets, so Bittery no longer calls them different authentication-factor categories.
+
+**Bittery emits separate recovery documents and makes no unverifiable storage claim.** The Emergency
+Kit and Recovery sheet are separate outputs on every surface; no combined file, page, encrypted bundle,
+or password field exists. Account creation still requires the Kit to be saved or printed. The product
+tells the User to store the Recovery sheet elsewhere but cannot claim to know that they did.
+
+**`RK1` is independent of OPAQUE.** One HKDF-Extract-SHA-512 root consumes the Recovery Key and Secret
+Key. Account- and Server-bound labeled expansions yield a `0x02` wrapping key and a deterministic
+Ed25519 signing seed. The Server stores only the versioned public key. This route remains executable
+when the Account's old OPAQUE version is unsafe; an operator reset still does not exist. The narrow
+custom-protocol exception, its vectors, and its integration join the external-review and penetration-
+test gate. ADR 0018.
+
+**Recovery uses two bound signatures, never a bearer reset session.** A five-minute signed challenge
+gates release of the encrypted recovery envelope. Successful proof opens a thirty-minute proven state.
+The second signature covers the same attempt and every canonical replacement field. A failed proof
+consumes the attempt; expiry changes nothing; and a byte-identical committed request can be retried
+idempotently until the deadline. The format specification fixes the HKDF inputs, exact labels, field
+order, widths, lengths, rejection rules, and fixtures.
+
+**Recovery is one atomic cutover after both new documents are saved.** It replaces the OPAQUE
+registration and wrapper, recovery public key and wrapper, signed Account Private Object, and
+Device-credential issuance request; revokes every old Device and session; records the event; and
+consumes the attempt. An honest Server cannot expose the new private object to a Device revoked by
+that transaction. A Malicious Operator can still deliver it to any old Device that already holds the
+long-lived Account Key Set. Preventing that needs Account Key Set or per-Device key rotation and is not
+claimed in the first release.
+
+**Routine password change remains narrow.** It requires the current password, even on an unlocked
+Device, and atomically replaces only the OPAQUE registration and `0x01` wrapper. Other routes survive.
+The User saves a replacement Kit only when the ceremony also changes a version byte printed on it.
+
+**Ordinary Secret Key rotation preserves trusted Devices by default.** The User may select Device and
+session revocations. Those revocations, new authentication and recovery records and wrappers, the new
+Account Private Object, and its monotonic generation check commit atomically after the replacement Kit
+is confirmed saved. Recovery remains the exceptional path that revokes every old Device and session.
+
+**Recovery Keys are removed, not over-promised as revoked.** Remove Recovery Key deletes the live
+wrapper and public-key record, logs the action, and offers Secret Key rotation. The UI calls the result
+forward protection and explains that old copied wrappers and matching secrets are not erased. A true
+Account-key boundary still requires export into a fresh Account. ADR 0013.
+
+**The Account-access screen explains compromise conditions instead of scoring strength.** It names
+each route's inputs, dates, live state, loss or theft consequence, and available actions, and warns
+about separate storage. It never claims knowledge of password quality, physical storage, or platform
+protection it cannot observe.
+
+No fog graduated and no new ticket was needed. [Device enrollment protocol](10-device-enrollment-protocol.md)
+inherits the canonical Device-credential request and honest-Server cutover requirements.

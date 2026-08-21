@@ -85,11 +85,6 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
 
 <!-- one line per closed ticket, linking the ticket that holds the detail -->
 
-Ticket 09 remains reopened after the 2026-08-20 consistency audit. Its summary below records the
-previously accepted answer as history, not a current decision. Its promoted requirements and ADRs
-remain visibly present but are candidate material under review; specifications must not rely on them
-until the ticket resolves again.
-
 - [Browser storage durability facts](issues/01-browser-storage-durability-facts.md): no browser engine
   gives a web app a real on-disk acknowledgement, so `SYNC-001`'s durability MUST is unobtainable in a
   browser as written. Safari's seven-day cap is unchanged in 26.6; an MV3 service worker cannot host an
@@ -136,7 +131,7 @@ until the ticket resolves again.
 
 - [Password authentication protocol and its fallback](issues/06-password-authentication-protocol.md):
   full sign-in is RFC 9807 OPAQUE-3DH with ristretto255/SHA-512 and Argon2id, initially on pinned
-  `opaque-ke` 4.0.1. Both password factors and stable Account/Server identities enter one canonical
+  `opaque-ke` 4.0.1. Both password inputs and stable Account/Server identities enter one canonical
   input; RFC bytes sit behind one-byte protocol and profile identifiers. The export key yields the
   Account Unlock Key and the session key confirms one Device-credential issuance. Version migration
   atomically replaces the registration and wrapper; no fallback protocol or operator bypass exists.
@@ -189,22 +184,93 @@ until the ticket resolves again.
   with. Firefox shipped the gate in **147**, not 149, and default-on in **153**, not 151. Full findings in
   [research/extension-local-network-access.md](research/extension-local-network-access.md).
 
-- **REOPENED:** [Recovery model and single-artifact paths](issues/09-recovery-model-and-single-artifact-paths.md):
-  `AUTH-001` is rewritten as a closed list of **unlock routes**, each consuming two independent factors:
-  master password with Secret Key, Recovery Key with Secret Key, enrolled Device with its local
-  authorization. The recovery labels consume the Recovery Key **and** the Secret Key, so a stolen
-  recovery sheet is inert and the Emergency Kit splits into two documents. `AUTH-023` blocks the end of
-  Account creation until the Kit is saved. `AUTH-026` gives recovery its own credential under
-  `bittery/1/recovery-auth/1`, keeping the no-enumeration rule, and ends only after a new master
-  password, a Secret Key rotation, a new Recovery Key, both sheets, and the sign-out of every other
-  Device. `AUTH-025` requires the current password to change it, even on an unlocked Device.
-  `AUTH-027` makes Secret Key rotation propagate through a new **Account Private Object**, key context
-  `0x12`. `AUTH-028` downgrades "revoked" to **forward protection only** and rules out Account Key Set
-  rotation for the first release, so the Account Fingerprint is stable for life. `AUTH-029` renders the
-  route list as a screen. Peer and administrator-assisted recovery are out of scope. ADRs
-  [0012](../../docs/adr/0012-every-route-to-the-account-keys-consumes-two-factors.md),
+- [Device credential patterns in established password managers](issues/54-device-credential-patterns.md):
+  1Password binds ordinary requests to a fresh SRP-derived session key; Bitwarden uses one-hour Bearer
+  access tokens backed by reusable sliding refresh tokens. Neither has an Account-signed Device Grant.
+  The evidence separates Device admission, ordinary request authentication, Account-key release, and
+  revocation into distinct jobs. Full findings in
+  [research/device-credential-patterns.md](research/device-credential-patterns.md).
+
+- [Recovery model and single-artifact paths](issues/09-recovery-model-and-single-artifact-paths.md):
+  remote routes combine separately sourced secrets intended for separate storage; they are not
+  mislabeled as different factor categories. The Emergency Kit and Recovery sheet are separate outputs.
+  Independent `RK1` recovery derives wrapping and Ed25519 signing keys from both random secrets, uses a
+  five-minute proof plus a thirty-minute directly signed atomic replacement, and remains usable when an
+  old OPAQUE version is unsafe. Recovery revokes every old Device and session in the same commit that
+  publishes the new Account Private Object; this constrains an honest Server but cannot stop a Malicious
+  Operator serving the ciphertext to a Device that already holds the Account Key Set. Routine password
+  change stays narrow, ordinary Secret Key rotation preserves trusted Devices by default, Recovery Key
+  **removal** promises forward protection rather than erasure, and the route UI explains compromise
+  conditions without strength scores. ADRs [0012](../../docs/adr/0012-every-route-to-the-account-keys-consumes-two-factors.md),
   [0013](../../docs/adr/0013-rotating-a-wrapping-secret-is-forward-protection-only.md),
-  [0014](../../docs/adr/0014-the-current-secret-key-is-stored-sealed-to-the-account-key-set.md).
+  [0014](../../docs/adr/0014-the-current-secret-key-is-stored-sealed-to-the-account-key-set.md), and
+  [0018](../../docs/adr/0018-recovery-authentication-is-independent-of-opaque.md).
+
+- [Device enrollment protocol](issues/10-device-enrollment-protocol.md): every route commits one
+  Account-signed Device Grant and proof of the new Device key. Trusted enrollment is a five-minute
+  Server-relayed HPKE transfer with a six-digit display comparison, fresh local approval, signed roster
+  checkpoint, and activation only after a decryption receipt. Device status is an Account-signed
+  monotonic event sequence. Ordinary traffic uses a fixed RFC 9421 Ed25519 profile, short Sessions,
+  replay counters, and authoritative status checks on every request; revocation stops the next honest-
+  Server request but cannot erase keys already held locally. ADR
+  [0019](../../docs/adr/0019-device-admission-is-account-signed-and-every-request-proves-the-device-key.md).
+
+- [Vault key rotation and epochs](issues/11-vault-key-rotation-and-epochs.md): rotation is a
+  forward-only, consecutive epoch cutover for new writes. Access loss and a fixed 2^24-envelope budget
+  create a non-expiring write block; a client installs one complete Account-signed grant set atomically,
+  with no bulk re-encryption or resumable plan. Still-authorized offline edits are re-sealed, historical
+  grants live while referenced, and manual rotation changes nothing until its one command succeeds.
+  ADR [0020](../../docs/adr/0020-vault-key-rotation-is-a-forward-atomic-epoch-cutover.md).
+
+- [Device Unlock Wrapper and quick unlock](issues/12-device-unlock-wrapper-and-quick-unlock.md): every
+  enrolled Device gets memory-hard password quick unlock without Server or Secret Key; copied local
+  state permits only pinned-profile offline guessing. Explicit platform quick unlock is hardware-gated
+  on Secure Enclave Macs or runtime-proven WebAuthn PRF, and unavailable on Windows and Linux. The core
+  exports no Account keys, one ceremony may open independently wrapped matching Accounts, Extension
+  keeps its own fallback beside narrow Desktop delegation, and Device-wide Lock has fixed triggers,
+  minimal disclosure, a ten-minute default, and explicit invalidation and password-migration paths.
+  ADR [0021](../../docs/adr/0021-password-quick-unlock-is-a-memory-hard-local-wrapper.md).
+
+- [Credential-provider process key access](issues/13-credential-provider-key-access.md): iOS and
+  Android use independent constrained Provider cores with separate wrappers and sessions but one
+  enrolled Mobile Device identity. Full Account and Device-credential keys stay inside Rust so the
+  Provider can fill, durably save, and resume Sync; a minimal locked Suggestion Index,
+  shared/exclusive Replica Lease, guarded request counters, and an explicit Compromised Endpoint bound
+  keep the reduced guarantee honest. ADR
+  [0024](../../docs/adr/0024-credential-providers-use-full-account-keys-behind-a-closed-core-interface.md).
+
+- [Replica schema and transactional storage interface](issues/15-replica-schema-and-storage-interface.md):
+  one typed logical Replica per Account separates an immutable remote base from a durable local
+  operation overlay. Snapshot reads and guarded Account-wide commits give every adapter one atomic,
+  serializable contract; bootstrap promotes a complete generation and cursor together. Replica
+  plaintext is a separate closed registry, decrypted data is volatile, durability classes remain
+  honest about browsers, and migration, corruption, removal and wipe preserve unique local work.
+  Schema [specification](../../docs/greenfield/target/replica.md); ADR
+  [0022](../../docs/adr/0022-account-replicas-use-guarded-atomic-commits.md).
+
+- [Browser durability floor](issues/16-browser-durability-floor.md): Web and Extension stay
+  offline-first on IndexedDB `durability: "strict"` under the explicitly weaker
+  `browser-transactional` class. Web requests persistence as best effort; Extension requires
+  `unlimitedStorage`. Unsynced operation count and age stay visible, controlled deletion is guarded,
+  and one semantic fixture core gains mandatory native and Browser Durability profiles. ADR
+  [0023](../../docs/adr/0023-browser-transaction-completion-is-an-honest-weaker-durability-floor.md).
+
+- [Operation state machine and crash safety](issues/17-operation-state-machine-and-crash-safety.md):
+  local acceptance atomically creates a queued immutable command and overlay; every send first records
+  an indeterminate intent, then retries the same canonical bytes indefinitely. Account-scoped random
+  Operation IDs and Account-lifetime canonical Server outcomes provide exactly-once Domain writes;
+  dependency-aware scheduling, locked byte-identical Sync, atomic result reconciliation, explicit
+  discard, and task-oriented UI complete the seven-state lifecycle. State-machine
+  [specification](../../docs/greenfield/target/operations.md); ADR
+  [0025](../../docs/adr/0025-account-lifetime-operation-outcomes-provide-exactly-once-commands.md).
+
+- [Search and autofill index](issues/20-search-and-autofill-index.md): each Account persists one
+  opaque, chunked Search Snapshot behind a fresh Account-sealed key and combines scopes only in
+  unlocked memory. A separate Device-only Suggestion Snapshot exposes the closed mobile preview
+  before Account unlock. Complete Public Suffix matching, deterministic non-secret text search,
+  fail-closed invalidation, progressive rebuild, asynchronous checkpoints, and Travel rekeying bound
+  behavior and leakage. Index [specification](../../docs/greenfield/target/search-index.md); ADR
+  [0026](../../docs/adr/0026-search-indexes-are-opaque-account-local-checkpoints.md).
 
 ## Not yet specified
 
@@ -282,7 +348,7 @@ number wins.
 | [17](issues/17-operation-state-machine-and-crash-safety.md) | grilling | Operation state machine and crash safety | 15 |
 | [18](issues/18-sync-protocol-cursor-bootstrap-and-retention.md) | grilling | Sync protocol: cursor, bootstrap, and retention windows | 17 |
 | [19](issues/19-conflicts-indeterminate-and-authorization-rejection.md) | grilling | Conflicts, indeterminate outcomes, and authorization rejection | 11, 18 |
-| [20](issues/20-search-and-autofill-index.md) | grilling | Search and autofill index | 04, 15 |
+| [20](issues/20-search-and-autofill-index.md) | grilling | Search and autofill index | 04, 13, 15 |
 | [21](issues/21-item-revision-history.md) | grilling | Item revision history and retention | 15 |
 | [22](issues/22-server-domain-architecture-and-atomic-writer.md) | grilling | Server domain architecture and atomic command writer | 04 |
 | [23](issues/23-server-identity-and-protocol-versioning.md) | grilling | Server identity, protocol versioning, and OpenAPI compatibility | 22 |
@@ -300,11 +366,11 @@ number wins.
 | [35](issues/35-travel-mode.md) | grilling | Travel mode | 11, 18 |
 | [36](issues/36-multi-account-collections-and-cross-server.md) | grilling | Multi-Account, Collections, and cross-Server copy | 15, 18 |
 | [37](issues/37-external-integrations-and-favicons.md) | grilling | External integrations, favicons, and the opt-in rule | 04, 26 |
-| [38](issues/38-clientruntime-interface.md) | grilling | ClientRuntime interface | 15, 17 |
+| [38](issues/38-clientruntime-interface.md) | grilling | ClientRuntime interface | 12, 15, 17 |
 | [39](issues/39-binding-strategy-native-and-wasm.md) | prototype | Binding strategy across native and WASM | 38 |
 | [40](issues/40-web-host-worker-and-effect.md) | grilling | Web host: Worker, adapters, and the Effect decision | 39 |
-| [41](issues/41-extension-architecture.md) | grilling | Extension architecture for Chromium and Firefox | 03, 39, 40, 52 |
-| [42](issues/42-desktop-architecture-and-ipc.md) | grilling | Desktop architecture and the extension IPC | 39, 41 |
+| [41](issues/41-extension-architecture.md) | grilling | Extension architecture for Chromium and Firefox | 03, 12, 39, 40, 52 |
+| [42](issues/42-desktop-architecture-and-ipc.md) | grilling | Desktop architecture and the extension IPC | 12, 39, 41 |
 | [43](issues/43-mobile-architecture-seams.md) | grilling | Mobile architecture seams | 13, 39 |
 | [44](issues/44-design-system-on-base-ui.md) | prototype | Design system on Base UI | 40 |
 | [45](issues/45-accessibility-conformance-target.md) | grilling | Accessibility conformance target | 44 |
@@ -316,3 +382,4 @@ number wins.
 | [51](issues/51-first-release-cut-and-implementation-gate.md) | grilling | First-release cut and the implementation gate | most of the map |
 | [52](issues/52-extension-local-network-access-facts.md) | research | Extension Local Network Access and private-address classification | — |
 | [53](issues/53-cryptographic-design-acceptance-policy.md) | grilling | Cryptographic design acceptance policy | 04 |
+| [54](issues/54-device-credential-patterns.md) | research | Device credential patterns in established password managers | — |

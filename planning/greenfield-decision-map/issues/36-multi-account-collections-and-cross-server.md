@@ -29,3 +29,9 @@ shows a user who has several Servers configured on their Desktop client, if anyt
 [ADR 0005](../../../docs/adr/0005-the-web-client-is-bound-to-the-server-that-served-it.md) holds the
 reasoning. A project-operated Web client origin was considered as a way to give Web full multi-Server
 parity, and rejected.
+
+### Inherited from Search and autofill index
+
+Every persisted Search Snapshot belongs to one Account Replica. Account, Collection, and All Accounts
+queries merge independently unlocked results only in volatile memory and preserve Server, Account,
+Vault, and Item provenance. No combined persisted cross-Account or cross-Server index is permitted.

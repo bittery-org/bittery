@@ -49,3 +49,13 @@ state in a transactional domain and ensures correctness depends on neither proce
 Initial registration, password or Secret Key change, profile or protocol migration, and Server-identity
 change must commit the OPAQUE registration and Account Key Set wrapper together. No generic credential-
 replacement endpoint exists outside those named ceremonies.
+
+### Inherited from Operation state machine and crash safety
+
+The atomic writer must accept the canonical `OperationRequest` and use `(Account, Operation ID)` as
+its ledger key. It atomically commits the Domain mutation or proved non-mutation, audit record,
+Sync/outbox event where applicable, and canonical `OperationOutcome`. It returns the stored outcome
+for every matching retry, rejects fingerprint reuse, and retains compact outcomes until Account
+deletion. HTTP method, route, response bytes, Device removal, elapsed time, and Sync-event retention
+are not idempotency identity or cleanup authority. This ticket places that already-decided contract
+inside the selected Server domain architecture; it does not reopen it.

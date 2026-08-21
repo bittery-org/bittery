@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Browser durability floor — throwaway prototype</title>
+    <link rel="stylesheet" href="prototype.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Throwaway decision prototype</p>
+        <h1>What survives when a browser runtime disappears?</h1>
+        <p class="lede">This demo tests a narrow question: after Bittery asks browser storage to accept one complete local operation, can a forced Worker termination expose a partial commit, and what can the browser honestly promise about the result?</p>
+        <p class="warning">It can observe transaction atomicity and runtime termination. It cannot simulate power loss, prove an OS disk flush, or predict later origin eviction.</p>
+      </header>
+
+      <section aria-labelledby="environment-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Measured environment</p>
+            <h2 id="environment-title">Browser and storage policy</h2>
+          </div>
+          <button type="button" data-action="refresh-environment">Refresh</button>
+        </div>
+        <dl id="environment-state" class="state-grid"></dl>
+      </section>
+
+      <section aria-labelledby="replica-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Complete relevant state</p>
+            <h2 id="replica-title">Recovered Account Replica</h2>
+          </div>
+          <button type="button" data-action="inspect">Reopen and inspect</button>
+        </div>
+        <div id="verdict" class="verdict neutral" role="status" aria-live="polite">No experiment has run yet.</div>
+        <dl id="replica-state" class="state-grid"></dl>
+        <details>
+          <summary>Experiment log</summary>
+          <ol id="event-log" class="event-log"></ol>
+        </details>
+      </section>
+
+      <section aria-labelledby="free-play-title">
+        <p class="eyebrow">Free play</p>
+        <h2 id="free-play-title">Push the storage boundary</h2>
+        <div class="actions">
+          <button type="button" data-action="reset">Reset to commit 70</button>
+          <button type="button" data-action="idb-kill-mid">Kill during IndexedDB commit</button>
+          <button type="button" data-action="idb-kill-after-commit">Kill after commit, before acknowledgement</button>
+          <button type="button" data-action="idb-complete">Complete and acknowledge commit</button>
+          <button type="button" data-action="opfs-kill-before-flush">Kill OPFS write before flush</button>
+          <button type="button" data-action="opfs-complete">Flush and acknowledge OPFS write</button>
+          <button type="button" class="danger" data-action="clear-origin">Simulate “clear site data”</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="walkthrough-title">
+        <p class="eyebrow">Guided walkthroughs</p>
+        <h2 id="walkthrough-title">Cases that decide the promise</h2>
+        <div class="tabs" role="tablist" aria-label="Durability scenarios">
+          <button type="button" role="tab" aria-selected="true" aria-controls="scenario-atomic" id="tab-atomic" data-tab="atomic">Atomic interruption</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="scenario-indeterminate" id="tab-indeterminate" data-tab="indeterminate">Lost acknowledgement</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="scenario-origin" id="tab-origin" data-tab="origin">Origin removal</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="scenario-opfs" id="tab-opfs" data-tab="opfs">OPFS comparison</button>
+        </div>
+
+        <article role="tabpanel" id="scenario-atomic" aria-labelledby="tab-atomic">
+          <p>An Account operation, its encrypted object, and its optimistic overlay belong to one transaction. Kill the Worker while it is still issuing writes. Watch for a whole old or whole new state—never a mixture.</p>
+          <div class="steps">
+            <button type="button" data-action="reset">1. Establish commit 70</button>
+            <button type="button" data-action="idb-kill-mid">2. Kill during commit 71</button>
+            <button type="button" data-action="inspect">3. Reopen and classify</button>
+          </div>
+        </article>
+
+        <article role="tabpanel" id="scenario-indeterminate" aria-labelledby="tab-indeterminate" hidden>
+          <p>The browser commits, but the runtime dies before the engine hears success. The operation survived, although the caller could only report an indeterminate result until reopening the Replica.</p>
+          <div class="steps">
+            <button type="button" data-action="reset">1. Establish commit 70</button>
+            <button type="button" data-action="idb-kill-after-commit">2. Kill after commit</button>
+            <button type="button" data-action="inspect">3. Reopen and reconcile</button>
+          </div>
+        </article>
+
+        <article role="tabpanel" id="scenario-origin" aria-labelledby="tab-origin" hidden>
+          <p>Transaction completion does not protect an origin from browser policy or a person clearing site data. This scenario removes both stores, including an unsynced operation.</p>
+          <div class="steps">
+            <button type="button" data-action="reset">1. Establish commit 70</button>
+            <button type="button" data-action="idb-complete">2. Accept unsynced commit 71</button>
+            <button type="button" class="danger" data-action="clear-origin">3. Remove the origin stores</button>
+            <button type="button" data-action="inspect">4. Reopen and observe loss</button>
+          </div>
+        </article>
+
+        <article role="tabpanel" id="scenario-opfs" aria-labelledby="tab-opfs" hidden>
+          <p>OPFS exposes a flush attempt, not a stronger documented acknowledgement. Compare termination before flush with a completed flush. This primitive probe is not a transactional SQLite adapter.</p>
+          <div class="steps">
+            <button type="button" data-action="reset">1. Remove prior probe files</button>
+            <button type="button" data-action="opfs-kill-before-flush">2. Kill before flush</button>
+            <button type="button" data-action="inspect">3. Inspect observed bytes</button>
+            <button type="button" data-action="opfs-complete">4. Write, flush, and acknowledge</button>
+          </div>
+        </article>
+      </section>
+
+      <footer>
+        <p><strong>Interpretation rule:</strong> one successful run can falsify atomicity if it exposes a partial state. Repeated clean runs cannot prove crash durability, protection from eviction, or parity across other browser engines.</p>
+      </footer>
+    </main>
+    <script src="prototype.js"></script>
+  </body>
+</html>

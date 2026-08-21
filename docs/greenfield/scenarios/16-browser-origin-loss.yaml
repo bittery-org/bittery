@@ -1,0 +1,53 @@
+id: REPLICA-BROWSER-ORIGIN-016
+durability_profile: browser-transactional
+requirements:
+  - ARCH-STORE-018
+  - ARCH-STORE-023
+  - ARCH-STORE-024
+  - ARCH-STORE-025
+  - ARCH-STORE-026
+  - SYNC-001
+  - SYNC-005
+given:
+  host: Web or Extension
+  replica:
+    server: server-A
+    account: account-A
+    commit_sequence: 71
+    local_overlay:
+      - operation-L2: queued
+  storage:
+    durability_class: browser-transactional
+    persistent_origin_storage: not-granted
+    origin_present: true
+  sync:
+    server_reachable: false
+    unsynced_operation_count: 1
+    oldest_unsynced_operation_age: 12 minutes
+when:
+  - assert_before_external_loss:
+      visible_status:
+        unsynced_operation_count: 1
+        oldest_unsynced_operation_age: 12 minutes
+        persistent_origin_storage: not-granted
+      bittery_controlled_account_removal: rejected-until-sync-or-explicit-discard
+      explicit_discard_copy: discard the only known copy of 1 Unsynced operation
+  - external_event: browser evicts or the User clears the whole Origin without a Bittery-controlled
+      confirmation path
+  - command_or_event: restart and attempt to open account-A
+then:
+  durable_replica:
+    state: absent
+    forbidden:
+      - partial Replica recovery
+      - claim that operation-L2 reached the Server
+      - silent creation of an empty enrolled Device
+  device_state:
+    account-A: requires fresh Device enrollment through an available remote Unlock route
+  operation_state:
+    operation-L2: unrecoverable from this Origin
+  server_state:
+    changed: false
+  emitted_events:
+    - explain that Browser storage was removed before Sync and locally accepted work may be lost
+    - never describe browser-transactional as native crash durability

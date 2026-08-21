@@ -19,3 +19,14 @@ Decide:
 - What the event stream leaks to the operator, checked against the closed plaintext list.
 
 Produces: a protocol specification, `SYNC-*` and `ITEM-006` refinement, and seed scenarios 5 and 8.
+
+## Comments
+
+### Inherited from Operation state machine and crash safety
+
+The exact Operation lifecycle, request fingerprint, Account-lifetime outcome ledger, and lost-response
+recovery are settled in [`operations.md`](../../../docs/greenfield/target/operations.md). This ticket
+defines the opaque commit-marker bytes carried by a committed `OperationOutcome` and how that marker
+relates to the Sync cursor. Sync-event retention or cursor expiry may never delete or weaken the
+Account-lifetime exactly-once ledger. Seed scenario 3 already proves the generic lost-response path;
+this ticket may refine its marker without weakening its invariants.

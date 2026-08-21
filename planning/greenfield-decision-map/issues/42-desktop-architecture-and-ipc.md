@@ -2,7 +2,7 @@
 
 Type: grilling
 Status: ready-for-human
-Blocked by: 39, 41
+Blocked by: 12, 39, 41
 
 ## Question
 
@@ -58,3 +58,12 @@ remedy. Two escapes exist and this ticket picks one or neither: route Server tra
 `plugin-http`, which uses Rust `reqwest` and bypasses the webview network stack entirely, or pass
 `--disable-features=` through `AdditionalBrowserArguments`, which is a per-application switch rather
 than a user setting.
+
+### Inherited from Device Unlock Wrapper and quick unlock
+
+[Device Unlock Wrapper and quick unlock](12-device-unlock-wrapper-and-quick-unlock.md) rejects key or
+biometric-material transfer. Desktop and Extension remain separate Devices with separate wrappers;
+the Extension may instead delegate the narrow Vault operations this ticket permits over authenticated
+IPC and keeps its own password-wrapper fallback. This ticket still owns peer authentication, operation
+scope, lock authority, revocation during an in-flight call, and the exact data projections that may
+cross.

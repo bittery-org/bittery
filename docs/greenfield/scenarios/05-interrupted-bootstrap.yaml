@@ -1,0 +1,74 @@
+id: REPLICA-BOOTSTRAP-005
+requirements:
+  - ARCH-STORE-016
+  - ARCH-STORE-017
+  - ARCH-STORE-021
+  - SYNC-001
+given:
+  replica:
+    server: server-A
+    account: account-A
+    commit_sequence: 41
+    active_base:
+      generation: base-7
+      cursor: cursor-7
+      complete: true
+      items:
+        - path: [vault-A, item-A, 7]
+          envelope: item-A-revision-7
+    local_overlay:
+      - operation: operation-L1
+        accepted_sequence: 9
+        target: [vault-A, item-local]
+        state: queued
+        envelope: item-local-revision-1
+  keys_and_session:
+    state: unlocked
+  server:
+    bootstrap_snapshot:
+      cursor: cursor-12
+      pages: [page-1, page-2, page-3]
+  operation_log:
+    - operation-L1
+  cursor: cursor-7
+  connectivity: online
+when:
+  - command_or_event: begin bootstrap as staging generation base-8 at cursor-12
+  - command_or_event: commit each page only into base-8
+  - inject_failure: each of
+      - before a page transaction
+      - during a page transaction
+      - after a page transaction
+      - before the promotion transaction
+      - during the promotion transaction
+      - after promotion commit before acknowledgement
+      - after acknowledgement before retired-generation cleanup
+  - command_or_event: terminate the runtime and reopen the same origin store
+then:
+  visible_projection:
+    runtime_state: locked after reopen
+    rule: after unlock, expose exactly the selected complete base plus operation-L1
+    forbidden:
+      - rows from both base-7 and base-8
+      - a staging generation
+      - Vault cleartext before unlock
+  durable_replica:
+    before_successful_promotion:
+      active_generation: base-7
+      cursor: cursor-7
+    after_successful_promotion:
+      active_generation: base-8
+      cursor: cursor-12
+    invariants:
+      - active generation and cursor change in the same guarded commit
+      - operation-L1 and its overlay effect survive every failure point byte-for-byte
+      - base-8 is selectable only after every required page and validation is complete
+      - base-7 remains usable until promotion commits
+      - incomplete and retired generations are cleanup candidates, never read fallbacks inferred by age
+  operation_state:
+    operation-L1: queued
+  server_state:
+    changed: false
+  emitted_events:
+    - at most one bootstrap-promoted invalidation after a proved promotion
+
