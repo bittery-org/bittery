@@ -8,6 +8,8 @@ accounted for before implementation.
 | Rust cryptographic implementation | Keep | One shared Rust crypto implementation beneath the engine |
 | Master password plus Secret Key | Keep | New versioned derivation/format after security grilling |
 | SRP authentication | Replace | RFC 9807 OPAQUE, pending conformance gate |
+| Deterministic fake login verifier | Replace | RFC 9807 fake OPAQUE exchanges with the ordinary versioned Server setup |
+| Rate-limiting subsystem | Replace | Exhaustive subject, source, and Server-capacity scopes with progressive cooldowns and no hard Account lock |
 | Recovery Key and Emergency Kit | Keep | Simplified user-held recovery model |
 | Multiple local Accounts | Keep | Extend across multiple Servers and All Accounts scope |
 | Hosted Bittery cloud | Remove | Fully self-hosted product |
@@ -37,7 +39,7 @@ accounted for before implementation.
 | Generated cross-language definitions | Keep | Canonical protocol/binding generation and fixtures |
 | Domain-owned Server SQL | Keep | SQLx checked SQL beside vertical domain modules |
 | Generic repository tier | Remove | Purpose-shaped domain queries and atomic writer mechanics |
-| Redis correctness dependency | Remove | Optional scaling adapter only |
+| Redis correctness dependency | Remove | PostgreSQL is the default abuse-state authority; durable Redis is an optional selected authority, never a live fallback |
 | SMTP requirement | Replace | Optional integration; essential flows work without it |
 | External service requests by default | Remove | Explicit opt-in per integration |
 
@@ -56,4 +58,3 @@ The following families still need exhaustive disposition passes:
 - Audit retention and operator observability.
 - Localization, accessibility, themes, and supported platform versions.
 - Marketing application and documentation site.
-

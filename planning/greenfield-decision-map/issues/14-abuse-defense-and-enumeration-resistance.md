@@ -1,7 +1,7 @@
 # Abuse defense, rate limiting, and enumeration resistance
 
 Type: grilling
-Status: ready-for-human
+Status: resolved
 Blocked by: 06
 
 ## Question
@@ -40,3 +40,52 @@ and enumeration analysis, but must not silently inherit the superseded signature
 `AUTH-030` revocation and `AUTH-027` rotation are authenticated writes that delete or replace the
 material a locked-out User depends on. Their abuse limits belong here, along with what a Server does
 when recovery sign-ins fail repeatedly for one Account.
+
+## Answer
+
+Bittery uses layered local abuse controls and never creates a hard Account lock. A completed failed
+full sign-in or recovery sign-in enters a progressive **Sign-in cooldown** after five failures: one,
+two, four, eight, then fifteen minutes, capped there. Success clears it and twenty-four quiet hours
+reset it. Starts and abandoned exchanges consume request and concurrency budgets but do not count as
+credential failures. A targeted attacker can keep an Account at one attempt per fifteen minutes, so
+the remaining denial of service is Acknowledged rather than disguised as solved.
+
+OPAQUE starts default to ten per normalized login subject and twenty per source in fifteen minutes.
+An attempt lives for five minutes; at most three are live per subject and twenty per source, plus a
+deployment-sized Server capacity. Excess starts reject the newcomer and never evict accepted work.
+Unknown Accounts run RFC 9807's fake-record path with the ordinary versioned Server setup, fresh
+per-attempt state, and no second seed or persisted fake registration. Real and fake exchanges share
+their outward status, shape, size class, lifecycle, and limits; exact network timing is not promised.
+
+All public signup, sign-in, recovery, invitation, and Share identifier checks conceal target existence.
+Only an authenticated relationship check or possession of an unguessable invitation or Share token
+may reveal state. Message-producing public ceremonies default to five requests per keyed subject and
+ten per source per hour. A short code burns after five failures and imposes a fifteen-minute subject
+cooldown which survives replacement. Clients show one generic credential error; cooldowns return the
+same `429` and `Retry-After` for real and unknown subjects, while Server saturation returns `503`.
+
+Password change, Secret Key rotation, Recovery Key create/replace/revoke, and mass Device revocation
+each get an independent five-per-Account-per-hour budget, counting successful and failed submissions.
+They never consume the credential-failure cooldown. Server-wide protection measures live attempts,
+expensive authentication work, queued limiter writes, and database capacity separately rather than
+using one global request bucket.
+
+PostgreSQL is the default abuse-state authority. Redis or Valkey is a selectable alternative with the
+same atomic contract, selected only at startup and never used as a live fallback. Its required profile
+is persistent and non-evicting; a namespace marker detects state loss, after which protected traffic
+fails closed until an operator explicitly acknowledges reinitialization. Protected credential and
+verification policies may only be strengthened. Positive source, concurrency, and capacity settings
+may scale to the deployment but cannot be disabled.
+
+The direct transport peer supplies the source address unless an explicitly trusted proxy is configured
+to replace forwarding headers. Public identifiers and capabilities are keyed digests in limiter state;
+raw credentials and bearer capabilities are never stored, and enforcement state expires with its
+purpose. The first release adds no CAPTCHA, proof of work, external bot provider, or speculative
+provider interface.
+
+Promoted to `ABUSE-001` through `ABUSE-014` in
+[`docs/greenfield/target/product.md`](../../../docs/greenfield/target/product.md), with **Sign-in
+cooldown** and **Fake OPAQUE exchange** added to [`CONTEXT.md`](../../../CONTEXT.md). The legacy fake
+verifier and rate-limiting subsystem now have explicit replacement rows in
+[`feature-disposition.md`](../../../docs/greenfield/feature-disposition.md). No ADR is warranted: these
+are testable, configurable security policies rather than a hard-to-reverse architectural commitment.

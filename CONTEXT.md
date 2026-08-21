@@ -159,6 +159,18 @@ a new master password, a Secret Key rotation, a new Recovery Key, and the sign-o
 Device.
 _Avoid_: account recovery, password reset, recovery login
 
+## Abuse defense
+
+**Sign-in cooldown**:
+The minimum wait before one Account subject may make its next full-sign-in or recovery-sign-in attempt
+after repeated failures. It permits sparse retries and is not an Account state an operator can unlock.
+_Avoid_: Account lock, lockout, ban
+
+**Fake OPAQUE exchange**:
+The RFC 9807 exchange a Server runs for an unknown Account using its ordinary OPAQUE setup, so the
+public response does not disclose whether an Account exists.
+_Avoid_: fake verifier, dummy Account, synthetic login
+
 ## Cryptographic format
 
 **Envelope**:

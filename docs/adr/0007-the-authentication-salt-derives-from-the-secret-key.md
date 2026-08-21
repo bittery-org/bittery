@@ -7,6 +7,7 @@ pre-login salt lookup. ADR 0006 replaced that construction with RFC 9807 OPAQUE.
 key-stretching function after the oblivious pseudorandom function and defines fake responses for
 unknown credentials; no Bittery authentication salt exists outside the selected OPAQUE profile.
 
-The old decision's enumeration and profile-discovery conclusions do not survive. Ticket 14 owns fake
-responses and abuse policy. Ticket 07 owns profile parameters, pinning, discovery, and upgrades within
-the OPAQUE record-and-wrapper migration fixed by `AUTH-014`.
+The old decision's enumeration and profile-discovery conclusions do not survive. `ABUSE-004` owns fake
+responses and the `ABUSE-*` family owns abuse policy. `AUTH-016` through `AUTH-019` own profile
+parameters, pinning, discovery, and upgrades within the OPAQUE record-and-wrapper migration fixed by
+`AUTH-014`.

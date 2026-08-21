@@ -157,6 +157,10 @@ rely on them until the tickets resolve again.
   [0008](../../docs/adr/0008-memory-hard-work-is-spent-once-and-only-on-human-secrets.md),
   [0009](../../docs/adr/0009-key-derivation-profiles-are-a-closed-append-only-registry.md).
 
+- [Abuse defense, rate limiting, and enumeration resistance](issues/14-abuse-defense-and-enumeration-resistance.md):
+  layered subject, source, and Server-capacity controls conceal public existence without hard-locking
+  Accounts; PostgreSQL is the default authority and durable Redis is a selectable alternative.
+
 - **REOPENED:** [Key hierarchy and canonical envelope format](issues/08-key-hierarchy-and-envelope-format.md): one
   envelope, one AEAD, one version byte. `AUTH-015`'s HKDF output is the Account Unlock Key, which wraps a
   randomly generated **Account Key Set** (X25519 plus Ed25519), so a password change, Secret Key rotation

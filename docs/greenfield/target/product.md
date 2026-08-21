@@ -250,8 +250,9 @@ exchange's final atomic transaction, then both parties erase the session and con
 version. They are root authentication secrets and mandatory backup material. KE1 creates a short-lived
 Sign-in attempt addressed by a random 128-bit identifier. The Server retains the OPAQUE state, Account,
 both version bytes, and expiry and atomically consumes it on the first KE3 submission, success or
-failure. The state is shared across Server processes; correctness never depends on sticky routing or
-Redis. Ticket 14 fixes expiry, fake-response behavior, and abuse limits.
+failure. The state is shared across Server processes through the selected authoritative abuse-state
+adapter; correctness never depends on sticky routing or a non-authoritative cache. `ABUSE-003` fixes
+expiry, fake-response behavior, and attempt bounds, while `ABUSE-011` keeps Redis optional.
 
 `AUTH-013 MUST` CI runs every applicable RFC 9807 Appendix C vector plus Bittery-profile positive and
 negative vectors against Rust and WASM. Independent cross-implementation testing is not a release
@@ -423,6 +424,91 @@ enrolled Device with the local authorization it uses, whether a Recovery Key exi
 Kit was last produced, and the two factors each route consumes. Every route is revocable from that
 screen. It is generated from `AUTH-001`'s closed list, so a route the product grows without amending
 `AUTH-001` is visible as a defect rather than invisible.
+
+## Abuse defense and enumeration resistance
+
+`ABUSE-001 MUST` Every public ceremony, credential-verification route, capability-verification route,
+and authenticated write with a large availability impact declares its subject, source-address, and
+Server-capacity scopes. The selected abuse-state adapter evaluates and records a scope atomically before
+the protected work begins. An unavailable adapter fails the protected request closed with a temporary
+service error; an endpoint cannot silently omit its declared scope.
+
+`ABUSE-002 MUST` The Server uses the transport peer as the source address by default. It honors a
+documented forwarding-header mode only when the transport peer is in an explicit trusted-proxy
+allowlist; invalid proxy configuration fails startup. A request for which no source address is
+available enters one shared `unknown` source scope rather than bypassing source limits.
+
+`ABUSE-003 MUST` A full-sign-in start is limited to ten requests per normalized login subject and
+twenty per source address in each fifteen-minute window. A Sign-in attempt expires five minutes after
+KE1. At most three live attempts exist per login subject and twenty per source address, and the Server
+also enforces a deployment-sized live-attempt capacity. A start above any bound is rejected without
+evicting an existing attempt. Real and unknown Accounts use identical scopes and bounds. An abandoned
+attempt consumes start and concurrency budgets but is not a credential failure.
+
+`ABUSE-004 MUST` An unknown Account runs RFC 9807's fake-record path through the ordinary versioned
+OPAQUE Server setup, with fresh per-attempt state and no persisted fake registration or second seed.
+Known and unknown Accounts have the same outward status, response shape, response size class, attempt
+lifecycle, and abuse treatment. Implementations keep the real and fake paths structurally alike and
+test for gross timing regressions, but make no exact constant-time network-latency promise.
+
+`ABUSE-005 MUST` A completed failed full sign-in or recovery sign-in records one failure against its
+Account subject. The first five failures have no Account cooldown. Further failures permit the next
+attempt after one, two, four, eight, then fifteen minutes; later cooldowns remain capped at fifteen
+minutes. A successful sign-in clears the failure state, and twenty-four hours without a failure resets
+it. The product creates no separately unlockable hard Account lock. A targeted attacker can keep an
+Account in the capped schedule, so this denial of service remains Acknowledged under `PRIVACY-005`.
+
+`ABUSE-006 MUST` A wrong email, master password, Secret Key, Server, OPAQUE proof, or recovery proof
+produces one generic credential error that identifies no failed input. A cooldown produces the same
+`429` response and `Retry-After` value for real and unknown subjects. A Server-capacity rejection uses
+`503`, so clients do not treat overload as a bad credential.
+
+`ABUSE-007 MUST` Public signup, recovery, invitation, and Share requests reveal no difference in target
+existence through status, response shape, response size class, or abuse treatment. Only an authenticated
+relationship check, including `PRIVACY-011`'s invitation-address lookup exception, or possession of an
+unguessable invitation or Share capability may reveal target state. A public request that sends a
+message or issues a verification challenge is limited to five requests per keyed subject and ten per
+source address per hour unless its owning requirement chooses a stricter limit.
+
+`ABUSE-008 MUST` A short verification code, if an owning feature introduces one, is invalidated after
+five failed submissions. The subject then enters a fifteen-minute verification cooldown which survives
+issuing a replacement code; replacement never buys a fresh guessing budget. Success clears the state.
+Known and unknown subjects retain the same outward behavior, and source and Server-capacity scopes also
+apply.
+
+`ABUSE-009 MUST` Password change, Secret Key rotation, Recovery Key creation, replacement or revocation,
+and mass Device revocation each have a separate per-Account budget of five submissions per hour,
+counting successful and failed submissions, plus source and Server-capacity scopes. One operation cannot
+exhaust another operation's budget, and none shares state with the credential-failure cooldown.
+
+`ABUSE-010 MUST` Server-wide protection is a set of positive capacities for live authentication
+attempts, concurrent expensive authentication work, queued abuse-state writes, and relevant database
+work, not one fleet-wide request bucket. Each deployment profile ships sized defaults. Crossing a
+capacity rejects new protected work with `503` before exhaustion and never evicts accepted work.
+
+`ABUSE-011 MUST` PostgreSQL is the default authoritative abuse-state adapter. An operator may instead
+select Redis or Valkey at startup; both adapters implement the same atomic scope, expiry, cooldown, and
+error contract, and the Server never switches authorities while running. The Redis profile requires
+persistence, a non-evicting policy, and a namespace marker. Unavailability fails protected traffic
+closed. Detected state loss refuses protected traffic until an operator explicitly acknowledges
+reinitialization. Redis remains optional for a conforming deployment under `HOST-002`.
+
+`ABUSE-012 MUST` Protected scopes, the credential-failure schedule, verification-code attempt count,
+and sensitive-mutation ceilings cannot be disabled or weakened by configuration; an operator may make
+them stricter. Source-address budgets, concurrency bounds, and Server capacities may be set to any
+positive validated value so shared networks and deployment sizes can be accommodated. Invalid or zero
+values fail startup.
+
+`ABUSE-013 MUST` Abuse state uses Account identifiers after authentication, keyed digests rather than
+raw public identifiers or capabilities before authentication, and source addresses only for declared
+source scopes. It stores no password, Secret Key, Recovery Key, verification code, invitation token,
+Share token, or Device credential. A window, cooldown, capacity reservation, or Sign-in attempt is
+deleted when its enforcement lifetime ends; longer abuse history belongs only to the Operator Log
+policy.
+
+`ABUSE-014 MUST` The first release ships no CAPTCHA, external bot provider, local proof-of-work
+challenge, or unused provider interface. Subject, source, and Server-capacity controls are the complete
+bot-defense surface for this release.
 
 ## Cryptographic format
 
