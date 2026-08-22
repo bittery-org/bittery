@@ -36,6 +36,7 @@
 			"!**/expo-env.d.ts",
 			"!packages/api-contract/openapi.v1.json",
 			"!packages/api-contract/src/generated",
+			"!packages/client-runtime/generated",
 			"!apps/desktop/src/generated",
 			"!apps/server/.sqlx",
 			"!**/src-tauri",
