@@ -865,6 +865,79 @@ async fn vault_deleted_event_remains_visible_after_its_vault_is_deleted() {
 }
 
 #[tokio::test]
+async fn operation_resolved_continues_through_count_bounded_sync_pages() {
+    with_sync_test_app("sync_operation_count_pages", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        seed_sync_event(
+            &app.pool,
+            "sync_operation_count_event",
+            "operation_resolved",
+            "operation_count_1",
+            "operation",
+            None,
+            &fixture.owner_user_id,
+            1,
+            Some("operation-client"),
+            None,
+            datetime!(2025-05-02 10:00 UTC),
+        )
+        .await;
+        seed_sync_event(
+            &app.pool,
+            "sync_item_after_operation",
+            "item_updated",
+            &fixture.primary_item_id,
+            "item",
+            Some(&fixture.primary_vault_id),
+            &fixture.owner_user_id,
+            10,
+            Some("operation-client"),
+            None,
+            datetime!(2025-05-02 10:01 UTC),
+        )
+        .await;
+
+        let first = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/changes?limit=1&sinceId={}",
+                    fixture.secondary_event_id
+                ),
+                None,
+                headers.clone(),
+            )
+            .await;
+        first.assert_contract_status();
+        assert_eq!(first.body["events"].as_array().map(Vec::len), Some(1));
+        assert_eq!(first.body["events"][0]["type"], "operation_resolved");
+        assert_eq!(first.body["events"][0]["entityId"], "operation_count_1");
+        assert_eq!(first.body["hasMore"], json!(true));
+
+        let second = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/changes?limit=1&sinceId={}",
+                    first.body["cursor"]["id"]
+                        .as_str()
+                        .expect("count-bounded page should continue")
+                ),
+                None,
+                headers,
+            )
+            .await;
+        second.assert_contract_status();
+        assert_eq!(second.body["events"].as_array().map(Vec::len), Some(1));
+        assert_eq!(second.body["events"][0]["id"], "sync_item_after_operation");
+        assert_eq!(second.body["hasMore"], json!(false));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
     with_sync_test_app("sync_changes_byte_budget", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
@@ -875,13 +948,26 @@ async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
             .map(|index| format!("sync_budget_event_{index}"))
             .collect();
         for (index, event_id) in expected_ids.iter().enumerate() {
+            let is_operation = index % 2 == 0;
             seed_sync_event(
                 &app.pool,
                 event_id,
-                "item_updated",
-                &fixture.primary_item_id,
-                "item",
-                Some(&fixture.primary_vault_id),
+                if is_operation {
+                    "operation_resolved"
+                } else {
+                    "item_updated"
+                },
+                if is_operation {
+                    event_id
+                } else {
+                    &fixture.primary_item_id
+                },
+                if is_operation { "operation" } else { "item" },
+                if is_operation {
+                    None
+                } else {
+                    Some(&fixture.primary_vault_id)
+                },
                 &fixture.owner_user_id,
                 index as i32 + 10,
                 Some("budget-client"),

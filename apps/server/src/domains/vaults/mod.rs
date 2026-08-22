@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::enums::{VaultRole, VaultType},
+    db::enums::{CreateItemRejectionCode, ItemCategory, VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
@@ -36,10 +36,10 @@ pub(crate) use catalog::{
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
-    bulk_import_vault_items, delete_vault_item, get_vault_item, list_all_deleted_vault_items_page,
-    list_all_vault_items_page, list_deleted_vault_items_page, list_vault_items_page,
-    move_vault_item, permanently_delete_vault_item, restore_vault_item, toggle_vault_favorite,
-    update_vault_item,
+    apply_create_item, bulk_import_vault_items, delete_vault_item, get_vault_item,
+    list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,
+    list_vault_items_page, move_vault_item, permanently_delete_vault_item, restore_vault_item,
+    toggle_vault_favorite, update_vault_item,
 };
 pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
@@ -78,6 +78,22 @@ pub struct CreateVaultImageUploadInput {
 #[serde(deny_unknown_fields)]
 pub struct ItemIdInput {
     pub item_id: String,
+}
+
+pub(crate) struct CreateItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) vault_id: String,
+    pub(crate) category: ItemCategory,
+    pub(crate) encrypted_data: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encryption_algorithm: String,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
+}
+
+pub(crate) enum CreateItemEffect {
+    Applied { item_id: String, version: i32 },
+    Rejected(CreateItemRejectionCode),
 }
 
 #[derive(Debug, Clone, Deserialize)]

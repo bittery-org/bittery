@@ -323,6 +323,9 @@ export interface ApiClient {
 			options?: ApiWriteOptions,
 		): Promise<ApiResult<unknown>>;
 	};
+	readonly operations: {
+		get(operationId: string): Promise<ApiResult<CreateItemOperationOutcome>>;
+	};
 	readonly attachments: {
 		list(itemId: string): Promise<ApiResult<readonly Attachment[]>>;
 		create(
@@ -1147,6 +1150,12 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("POST", "/api/v1/items/{itemId}/restore", {
 					params: { path: { itemId }, ...writeHeaderParams(write) },
 					headers: writeHeaders(write),
+				}),
+		},
+		operations: {
+			get: (operationId) =>
+				call("GET", "/api/v1/operations/{operationId}", {
+					params: { path: { operationId } },
 				}),
 		},
 		attachments: {

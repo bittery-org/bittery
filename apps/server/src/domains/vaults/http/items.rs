@@ -295,11 +295,16 @@ pub(super) async fn create_item(
     )
     .await?;
     match outcome {
-        crate::domains::operations::ExistingOutcome::Matching(outcome) => {
-            state.notify_sync();
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
             Ok(Json(outcome))
         }
-        crate::domains::operations::ExistingOutcome::Reused => Err(ApiError::unprocessable(
+        crate::domains::operations::OperationResolution::IdReused => Err(ApiError::unprocessable(
             ErrorCode::OperationIdReused,
             "The Operation ID was already used for different immutable request bytes.",
         )),

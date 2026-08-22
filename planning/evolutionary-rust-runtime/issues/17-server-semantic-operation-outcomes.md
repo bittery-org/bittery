@@ -30,6 +30,9 @@ Server checks pass.
 
 ## Comments
 
+- Reopened after Spec review found missing current-client outcome lookup/reconciliation, failed
+  optimistic-Item persistence, bounded Sync-page regression coverage, and replay SSE suppression.
+
 - The legacy response-cache inventory remains eleven `idempotency::execute` call sites. Six cover
   Item update, favorite, trash, restore, move, and permanent delete. Five cover the shared Rotation
   handlers for Vault-Member removal start/finalize, Team leave start/finalize, and Team-Member
@@ -40,6 +43,11 @@ Server checks pass.
   old table, errors, replay header, CORS exposure, code, and recovery documentation may be removed.
 - Create Item is no longer one of those callers. Its required `Idempotency-Key` is the stable
   Operation ID, and its public response has only the retained applied/rejected semantic contract.
-- Verification completed with all 402 Server tests, the strict Server format/Clippy/check gate,
-  migration validation, generated-contract drift validation, the 15 API-facade tests, and the 62
-  Sync-engine tests passing. The API-contract and Sync package type checks also pass.
+- Spec-review verification passes all 403 Server library tests plus both migration tests, the strict
+  Server format/Clippy/check gate, migration validation, generated-contract drift validation, all 35
+  API-contract tests, all 80 focused Sync tests, all 38 focused Core repository tests, and the 7
+  Sync-cache plus 1 outbound-drain Extension tests. The dependent 13-task TypeScript check passes.
+- `pnpm check:ci` passes in full. Generated Runtime bindings are excluded from Biome and remain
+  covered by their dedicated deterministic drift, Clippy, and executable binding gates.
+- `pnpm check:ci:rust` passes in full, including Server, Crypto Core/API, native and Web
+  client-runtime generation/contracts, and Desktop checks and tests.

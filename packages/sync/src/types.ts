@@ -258,6 +258,10 @@ export interface ItemCommandProjection {
 	preserveItemConflict(
 		command: import("@bittery/types").ItemSyncCommand,
 	): Promise<import("@bittery/types").ItemSyncCommand | undefined>;
+	rejectItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+		code: import("@bittery/types").CreateItemRejectionCode,
+	): Promise<void>;
 	acknowledgeItemCommand(
 		command: import("@bittery/types").ItemSyncCommand,
 		acknowledgement: import("@bittery/types").ItemSyncAcknowledgement,

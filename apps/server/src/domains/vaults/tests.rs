@@ -1846,6 +1846,11 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
             "encryptionIv": "queued-create-iv",
             "encryptionAlgorithm": "aes-gcm"
         });
+		let (mut sync_notifications, _control_notifications) = app
+			.state
+			.sync_pubsub
+			.subscribe(&fixture.owner_user_id)
+			.await;
 
         let first = app
             .api_json(
@@ -1855,6 +1860,13 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
                 idempotency_headers(&session.token, "queued-create-key"),
             )
             .await;
+		tokio::time::timeout(
+			std::time::Duration::from_secs(1),
+			sync_notifications.recv(),
+		)
+		.await
+		.expect("a newly committed outcome should wake Sync")
+		.expect("Sync notification channel should stay open");
         let replay = app
             .api_json(
                 Method::PUT,
@@ -1863,6 +1875,15 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
                 idempotency_headers(&session.token, "queued-create-key"),
             )
             .await;
+		assert!(
+			tokio::time::timeout(
+				std::time::Duration::from_millis(50),
+				sync_notifications.recv(),
+			)
+			.await
+			.is_err(),
+			"a retained replay must not emit another Sync wake",
+		);
 
         assert_eq!(first.status, StatusCode::OK, "{}", first.body);
         assert_eq!(replay.status, first.status);

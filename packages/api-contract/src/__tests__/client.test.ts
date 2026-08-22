@@ -279,6 +279,45 @@ describe("Bittery API facade", () => {
 		);
 	});
 
+	test("fetches an authenticated retained Operation outcome through the facade", async () => {
+		const requests: Request[] = [];
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getAccessToken: () => "access-token",
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({
+					operationId: "operation-1",
+					kind: "create_item",
+					result: {
+						status: "rejected",
+						code: "vault_read_only",
+					},
+				});
+			},
+		});
+
+		const outcome = await client.operations.get("operation-1");
+
+		expect(outcome.data.result).toEqual({
+			status: "rejected",
+			code: "vault_read_only",
+		});
+		expect(requests[0]?.method).toBe("GET");
+		expect(requests[0]?.url).toBe(
+			"https://api.example.test/api/v1/operations/operation-1",
+		);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer access-token",
+		);
+	});
+
 	test("validates sync response shape and converts decimal event timestamps", async () => {
 		const client = createApiClient({
 			serverUrl: "https://api.example.test",

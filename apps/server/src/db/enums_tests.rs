@@ -130,6 +130,17 @@ fn closed_sets_keep_their_wire_strings() {
         VaultKeyRotationManifestKind,
         ["member", "item", "attachment"]
     );
+    assert_wire_labels!(OperationKind, ["create_item"]);
+    assert_wire_labels!(OperationOutcomeStatus, ["applied", "rejected"]);
+    assert_wire_labels!(
+        CreateItemRejectionCode,
+        [
+            "invalid_ciphertext",
+            "vault_access_denied",
+            "vault_read_only",
+            "item_id_conflict"
+        ]
+    );
 }
 
 /// Reads every `CREATE TYPE ... AS ENUM (...)` and `ALTER TYPE ... ADD VALUE` label.
@@ -209,6 +220,9 @@ fn closed_sets_match_the_postgres_enums() {
     assert_matches_postgres!(VaultKeyRotationPlanState);
     assert_matches_postgres!(VaultKeyRotationStaleReason);
     assert_matches_postgres!(VaultKeyRotationManifestKind);
+    assert_matches_postgres!(OperationKind);
+    assert_matches_postgres!(OperationOutcomeStatus);
+    assert_matches_postgres!(CreateItemRejectionCode);
 }
 
 #[test]

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError } from "@bittery/api-contract";
+import {
+	ApiError,
+	type CreateItemOperationOutcome,
+} from "@bittery/api-contract";
 import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import {
 	OutboundQueue,
@@ -39,6 +42,7 @@ function stubItemCache(
 		executeSemanticItemCommand: async () => undefined,
 		discardItemCommandAcknowledgedElsewhere: async () => undefined,
 		preserveItemConflict: async () => undefined,
+		rejectItemCommand: async () => undefined,
 		acknowledgeItemCommand: async () => undefined,
 		...overrides,
 	};
@@ -193,6 +197,7 @@ interface TestApiClientOptions {
 		cursor: { id: string } | null;
 	}>;
 	getItem?: (itemId: string) => Promise<Record<string, unknown>>;
+	getOperation?: (operationId: string) => Promise<CreateItemOperationOutcome>;
 	events?: (signal?: AbortSignal) => Promise<Response>;
 }
 
@@ -247,6 +252,13 @@ function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 						)),
 				),
 			listInVault: async () => apiResult([]),
+		},
+		operations: {
+			get: async (operationId: string) =>
+				apiResult(
+					await (options.getOperation?.(operationId) ??
+						Promise.reject(new Error("Operation lookup was not expected"))),
+				),
 		},
 		vaults: {
 			get: async () =>
@@ -807,6 +819,99 @@ describe("sync engine regressions", () => {
 		expect(upsertedVersions).toEqual([2]);
 		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
 			"evt_own",
+		);
+		orchestrator.dispose();
+	});
+
+	test("reconciles a retained Operation rejection before advancing its event cursor", async () => {
+		const storage = new MemoryStorage();
+		const rejected: string[] = [];
+		const outboundQueue = new OutboundQueue(storage, "self_client", {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+			reject: async (_command, code) => {
+				rejected.push(code);
+			},
+		});
+		await outboundQueue.enqueue({
+			accountId: "account_a",
+			id: "operation_rejected",
+			operationId: "operation_rejected",
+			type: "create",
+			entityId: "item_rejected",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "ciphertext",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				getOperation: async (operationId) => ({
+					operationId,
+					kind: "create_item",
+					result: { status: "rejected", code: "vault_read_only" },
+				}),
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue,
+		});
+
+		await (orchestrator as any).applyEvent(
+			buildEvent({
+				id: "evt_operation_rejected",
+				type: "operation_resolved",
+				entityId: "operation_rejected",
+				entityType: "operation",
+				vaultId: null,
+			}),
+		);
+
+		expect(rejected).toEqual(["vault_read_only"]);
+		expect(outboundQueue.getCommands("account_a")[0]?.status).toBe("failed");
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_operation_rejected",
+		);
+		orchestrator.dispose();
+	});
+
+	test("keeps the cursor when authoritative Operation lookup fails", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_before_operation" });
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				getOperation: async () => {
+					throw new Error("outcome lookup failed");
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await expect(
+			(orchestrator as any).applyEvent(
+				buildEvent({
+					id: "evt_operation",
+					type: "operation_resolved",
+					entityId: "operation_1",
+					entityType: "operation",
+					vaultId: null,
+				}),
+			),
+		).rejects.toThrow("outcome lookup failed");
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_before_operation",
 		);
 		orchestrator.dispose();
 	});
@@ -2311,6 +2416,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			outboundApiClient({
 				create: async (_itemId, options) => {
 					sentOptions.set("create", options);
+					return undefined;
 				},
 				update: async (_itemId, options) => {
 					sentOptions.set("update", options);
@@ -2328,7 +2434,17 @@ describe("outbound queue multi-account drain isolation", () => {
 	});
 
 	test("stops retrying a retained semantic create rejection", async () => {
-		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		const rejected: Array<{ operationId: string; code: string }> = [];
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+			reject: async (command, code) => {
+				rejected.push({
+					operationId: command.operationId ?? command.id,
+					code,
+				});
+			},
+		});
 		await queue.enqueue({
 			accountId: "account_a",
 			id: "mutation_rejected_create",
@@ -2363,6 +2479,50 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(queue.getCommands("account_a")[0]?.lastError).toContain(
 			"vault_read_only",
 		);
+		expect(rejected).toEqual([
+			{
+				operationId: "mutation_rejected_create",
+				code: "vault_read_only",
+			},
+		]);
+	});
+
+	test("acknowledges a queued create from an applied outcome discovered by Sync", async () => {
+		const acknowledged: string[] = [];
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			acknowledge: async (_command, result) => {
+				acknowledged.push(`${result.entityId}:${result.version}`);
+			},
+		});
+		await queue.enqueue({
+			accountId: "account_a",
+			id: "operation_applied_create",
+			operationId: "operation_applied_create",
+			type: "create",
+			entityId: "item_applied",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+
+		await queue.reconcileCreateItemOutcome("account_a", {
+			operationId: "operation_applied_create",
+			kind: "create_item",
+			result: { status: "applied", itemId: "item_applied", version: 1 },
+		});
+
+		expect(acknowledged).toEqual(["item_applied:1"]);
+		expect(queue.getCommands("account_a")).toEqual([]);
 	});
 
 	test("one account's failure does not starve other accounts' queues", async () => {

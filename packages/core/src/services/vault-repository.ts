@@ -691,6 +691,13 @@ export class VaultRepository {
 		);
 	}
 
+	async rejectItemCommand(
+		command: ItemSyncCommand,
+		code: import("@bittery/types").CreateItemRejectionCode,
+	): Promise<void> {
+		await this.getOrCreate(command.accountId).rejectItemCommand(command, code);
+	}
+
 	async reconcileAuthoritative(
 		command: ItemSyncCommand,
 		item: CachedEncryptedItem,

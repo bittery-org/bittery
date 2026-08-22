@@ -185,6 +185,7 @@ export function toCachedItemMetadata(
 		createdAt: item.createdAt,
 		deletedAt: item.deletedAt,
 		attachments: item.attachments,
+		optimisticFailure: item.optimisticFailure,
 	};
 }
 

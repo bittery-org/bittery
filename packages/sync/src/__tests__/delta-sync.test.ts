@@ -17,6 +17,11 @@ function serverVault() {
 
 function client(): DeltaSyncApiClient {
 	return {
+		operations: {
+			get: async () => {
+				throw new Error("not used");
+			},
+		},
 		items: {
 			get: async () => {
 				throw new Error("not used");
@@ -174,6 +179,70 @@ describe("performDeltaSync vault mapping", () => {
 });
 
 describe("performDeltaSync Item encryption context", () => {
+	it("fetches and applies the authoritative Item for an applied Operation outcome", async () => {
+		const api = client();
+		const fetchedOperations: string[] = [];
+		api.operations.get = async (operationId) => {
+			fetchedOperations.push(operationId);
+			return {
+				data: {
+					operationId,
+					kind: "create_item",
+					result: { status: "applied", itemId: "item_1", version: 4 },
+				},
+			} as never;
+		};
+		api.items.get = async () => ({ data: serverItem() }) as never;
+		const { cache, items } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedOperations).toEqual(["operation_1"]);
+		expect(items[0]?.id).toBe("item_1");
+		expect(outcome?.result.status).toBe("applied");
+	});
+
+	it("returns a retained rejection without deleting its optimistic Item", async () => {
+		const api = client();
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "create_item",
+					result: { status: "rejected", code: "vault_read_only" },
+				},
+			}) as never;
+		const { cache, removedItems } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(outcome?.result).toEqual({
+			status: "rejected",
+			code: "vault_read_only",
+		});
+		expect(removedItems).toEqual([]);
+	});
+
 	it.each([
 		"item_created",
 		"item_updated",

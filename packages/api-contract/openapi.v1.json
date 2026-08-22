@@ -14462,6 +14462,7 @@
       },
       "CreateItemRejectionCode": {
         "type": "string",
+        "description": "The terminal semantic rejections currently possible for Create Item.",
         "enum": [
           "invalid_ciphertext",
           "vault_access_denied",
@@ -16684,6 +16685,7 @@
       },
       "OperationKind": {
         "type": "string",
+        "description": "The Domain operation represented by one retained outcome.",
         "enum": [
           "create_item"
         ]

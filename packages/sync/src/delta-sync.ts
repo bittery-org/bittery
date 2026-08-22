@@ -3,7 +3,11 @@
  * Extracted for reuse in both React hooks and non-React contexts (e.g., extension service worker)
  */
 
-import { type ApiClient, isApiErrorStatus } from "@bittery/api-contract";
+import {
+	type ApiClient,
+	type CreateItemOperationOutcome,
+	isApiErrorStatus,
+} from "@bittery/api-contract";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import {
 	type ServerVaultListEntry,
@@ -14,7 +18,10 @@ import {
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import type { SyncEvent, SyncReplicaStore } from "./types";
 
-export type DeltaSyncApiClient = Pick<ApiClient, "items" | "vaults">;
+export type DeltaSyncApiClient = Pick<
+	ApiClient,
+	"items" | "operations" | "vaults"
+>;
 
 function normalizeVaultSummary(
 	vault: Awaited<ReturnType<ApiClient["vaults"]["get"]>>["data"],
@@ -47,7 +54,7 @@ export async function performDeltaSync(
 	accountScope: string,
 	serverUrl?: string,
 	accountEmail?: string | null,
-): Promise<void> {
+): Promise<CreateItemOperationOutcome | undefined> {
 	if (event.type === "travel_mode_updated") {
 		return;
 	}
@@ -79,6 +86,14 @@ export async function performDeltaSync(
 			await removeItem(itemId);
 		}
 	};
+
+	if (event.type === "operation_resolved") {
+		const { data: outcome } = await apiClient.operations.get(event.entityId);
+		if (outcome.result.status === "applied") {
+			await reconcileCurrentItem(outcome.result.itemId);
+		}
+		return outcome;
+	}
 
 	const syncVaultKeysFromServer = async () => {
 		const { data: vaults } = await apiClient.vaults.list();

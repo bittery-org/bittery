@@ -1,6 +1,7 @@
 import {
 	type ApiClient,
 	ApiError,
+	type CreateItemOperationOutcome,
 	isApiErrorStatus,
 	isApiTransportError,
 } from "@bittery/api-contract";
@@ -29,8 +30,13 @@ export type OutboundQueueApiClient = Pick<ApiClient, "items">;
 
 const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 
+type CreateItemSemanticRejection = Extract<
+	CreateItemOperationOutcome["result"],
+	{ status: "rejected" }
+>;
+
 class SemanticOperationRejected extends Error {
-	constructor(readonly code: string) {
+	constructor(readonly code: CreateItemSemanticRejection["code"]) {
 		super(`Create Item Operation was rejected: ${code}`);
 		this.name = "SemanticOperationRejected";
 	}
@@ -763,6 +769,48 @@ export class ItemSyncEngine {
 		return next;
 	}
 
+	async reconcileCreateItemOutcome(
+		accountId: string,
+		outcome: CreateItemOperationOutcome,
+	): Promise<void> {
+		const mutation = this.queuesByAccountId
+			.get(accountId)
+			?.find(
+				(command) =>
+					(command.operationId ?? command.id) === outcome.operationId,
+			);
+		if (!mutation) return;
+		if (mutation.type !== "create") {
+			throw new Error(
+				`Operation ${outcome.operationId} resolved with a create outcome for a ${mutation.type} command`,
+			);
+		}
+
+		if (outcome.result.status === "rejected") {
+			const error = new SemanticOperationRejected(outcome.result.code);
+			mutation.status = "failed";
+			mutation.lastError = error.message;
+			mutation.nextAttemptAt = undefined;
+			await this.reconciler?.reject?.(mutation, outcome.result.code);
+			await this.schedulePersistence(accountId);
+			this.emit();
+			return;
+		}
+
+		await this.reconciler?.acknowledge(mutation, {
+			entityId: outcome.result.itemId,
+			etag: null,
+			version: outcome.result.version,
+		});
+		const conflicted = await this.persistAcknowledgement(
+			accountId,
+			mutation,
+			outcome.result.version,
+		);
+		if (conflicted) await this.preserveConflict(conflicted);
+		this.emit();
+	}
+
 	async rewritePendingIds(tempId: string, realId: string): Promise<void> {
 		const writes: Promise<void>[] = [];
 		for (const [accountId, queue] of this.queuesByAccountId.entries()) {
@@ -1047,6 +1095,11 @@ export class ItemSyncEngine {
 						mutation.status = "failed";
 						mutation.lastError = error.message;
 						mutation.nextAttemptAt = undefined;
+						try {
+							await this.reconciler?.reject?.(mutation, error.code);
+						} catch (projectionError) {
+							mutation.lastError = `${error.message}; failed to persist optimistic failure: ${projectionError instanceof Error ? projectionError.message : String(projectionError)}`;
+						}
 						await this.schedulePersistence(accountId);
 						this.emit();
 						continue;

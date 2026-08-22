@@ -14,7 +14,6 @@ import type { VaultRepository } from "@bittery/core/services/vault-repository";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import type {
-	DeltaSyncApiClient,
 	SyncApiClient,
 	SyncCursor,
 	SyncEvent,
@@ -82,13 +81,10 @@ export interface SyncCacheServiceDeps {
 	/**
 	 * Mirrors `performDeltaSync` exactly: `(accountScope, serverUrl, accountEmail)`.
 	 */
-	deltaSync: (
-		client: DeltaSyncApiClient,
-		cache: SyncReplicaStore,
-		event: SyncEvent,
-		accountScope: string,
-		serverUrl?: string,
-		accountEmail?: string | null,
+	deltaSync: typeof performDeltaSync;
+	reconcileOperationOutcome?: (
+		accountId: string,
+		outcome: NonNullable<Awaited<ReturnType<typeof performDeltaSync>>>,
 	) => Promise<void>;
 	handleTravelModeSync?: (
 		event: SyncEvent,
@@ -112,6 +108,12 @@ const defaultDeps: SyncCacheServiceDeps = {
 			insecureTransportConfirmed,
 		}),
 	deltaSync: performDeltaSync,
+	reconcileOperationOutcome: async (accountId, outcome) => {
+		const { reconcileOutboundOperationOutcome } = await import(
+			"../outbound-drain"
+		);
+		await reconcileOutboundOperationOutcome(accountId, outcome);
+	},
 	handleTravelModeSync: async (event, accountId, accountClient) => {
 		const accounts = new AccountResolver(storage);
 		await handleTravelModeSyncEvent(
@@ -422,7 +424,7 @@ export function createSyncCacheService(
 
 				const email = await resolveEmailForAccountId(accountId);
 				// `accountId` is the cache scope; the email only decorates the cached item.
-				await deps.deltaSync(
+				const outcome = await deps.deltaSync(
 					accountClient,
 					deps.itemCache,
 					event,
@@ -430,6 +432,9 @@ export function createSyncCacheService(
 					await getServerUrlForAccountId(accountId),
 					email ? normalizeEmail(email) : undefined,
 				);
+				if (outcome) {
+					await deps.reconcileOperationOutcome?.(accountId, outcome);
+				}
 				applied++;
 			} catch (error) {
 				deps.logger.warn(

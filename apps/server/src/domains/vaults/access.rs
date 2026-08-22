@@ -26,6 +26,16 @@ pub(super) async fn load_vault_access<'e>(
         .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }
 
+pub(super) async fn find_vault_access<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    vault_id: &str,
+    user_id: &str,
+) -> Result<Option<VaultAccess>, AppError> {
+    query_vault_access(executor, vault_id, user_id)
+        .await
+        .map_err(|error| database_error(error, "Failed to verify vault access"))
+}
+
 pub(super) async fn assert_item_read_access<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     vault_id: &str,

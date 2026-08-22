@@ -164,6 +164,9 @@ export function useSync(options: UseSyncOptions): SyncContextValue {
 				},
 				preserveConflict: async (command) =>
 					commandProjection?.preserveItemConflict(command),
+				reject: async (command, code) => {
+					await commandProjection?.rejectItemCommand(command, code);
+				},
 				reconcileAuthoritative: async (command, item) => {
 					await replicaStore?.upsertCachedItem(item, command.accountId);
 				},

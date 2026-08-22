@@ -15,10 +15,21 @@
 import type {
 	Attachment,
 	AuthVaultKey,
+	CreateItemOperationOutcome,
 	ItemCategory,
 	ItemPayload,
 	VaultType,
 } from "@bittery/api-contract";
+
+export type CreateItemRejectionCode = Extract<
+	CreateItemOperationOutcome["result"],
+	{ status: "rejected" }
+>["code"];
+
+export interface OptimisticItemFailure {
+	operationId: string;
+	code: CreateItemRejectionCode;
+}
 
 /**
  * The generated contract is emitted `--immutable`, but a cached record is a local working
@@ -58,6 +69,8 @@ export type CachedEncryptedItem = Mutable<ItemPayload> &
 	CachedItemAccountScope & {
 		/** Attachment metadata cached alongside the item */
 		attachments?: CachedAttachment[];
+		/** A retained semantic rejection; ciphertext stays available for later recovery UI. */
+		optimisticFailure?: OptimisticItemFailure;
 	};
 
 /**
@@ -203,6 +216,10 @@ export interface ItemSyncReconciler {
 	reconcileAuthoritative?(
 		command: ItemSyncCommand,
 		item: CachedEncryptedItem,
+	): Promise<void>;
+	reject?(
+		command: ItemSyncCommand,
+		code: CreateItemRejectionCode,
 	): Promise<void>;
 	acknowledge(
 		command: ItemSyncCommand,

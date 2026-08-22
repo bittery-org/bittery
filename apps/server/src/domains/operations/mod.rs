@@ -1,18 +1,20 @@
 pub(crate) mod http;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, FromRow, PgPool};
 use utoipa::ToSchema;
 
 use crate::{
     db::{
-        enums::{ItemCategory, SyncEntityType, SyncEventType, VaultRole},
-        events::{
-            generate_resource_id, insert_audit_event, insert_sync_event, insert_user_sync_event,
+        enums::{
+            CreateItemRejectionCode, ItemCategory, OperationKind, OperationOutcomeStatus,
+            SyncEntityType, SyncEventType,
         },
+        events::insert_user_sync_event,
     },
+    domains::vaults::{self, CreateItemEffect, CreateItemEffectInput},
     error::AppError,
     shared::transaction::{acquire_advisory_lock, database_error},
 };
@@ -20,21 +22,6 @@ use crate::{
 const CREATE_ITEM_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
 const CREATE_ITEM_KIND: &[u8] = b"create_item";
 const CREATE_ITEM_ROUTE: &[u8] = b"PUT /api/v1/vaults/{vaultId}/items/{itemId}";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum OperationKind {
-    CreateItem,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum CreateItemRejectionCode {
-    InvalidCiphertext,
-    VaultAccessDenied,
-    VaultReadOnly,
-    ItemIdConflict,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(
@@ -80,16 +67,19 @@ pub(crate) struct CreateItemOperationInput {
 #[derive(FromRow)]
 struct StoredOutcomeRow {
     request_fingerprint: Vec<u8>,
-    result_status: String,
+    result_status: OperationOutcomeStatus,
     entity_id: Option<String>,
     entity_version: Option<i32>,
-    rejection_code: Option<String>,
+    rejection_code: Option<CreateItemRejectionCode>,
     rejection_details: Option<String>,
 }
 
-pub(crate) enum ExistingOutcome {
-    Matching(CreateItemOperationOutcome),
-    Reused,
+pub(crate) enum OperationResolution {
+    Outcome {
+        outcome: CreateItemOperationOutcome,
+        newly_committed: bool,
+    },
+    IdReused,
 }
 
 fn fingerprint_part(hasher: &mut Sha256, value: &[u8]) {
@@ -113,24 +103,12 @@ fn create_item_fingerprint(input: &CreateItemOperationInput) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn rejection_code(value: &str) -> Result<CreateItemRejectionCode, AppError> {
-    match value {
-        "invalid_ciphertext" => Ok(CreateItemRejectionCode::InvalidCiphertext),
-        "vault_access_denied" => Ok(CreateItemRejectionCode::VaultAccessDenied),
-        "vault_read_only" => Ok(CreateItemRejectionCode::VaultReadOnly),
-        "item_id_conflict" => Ok(CreateItemRejectionCode::ItemIdConflict),
-        _ => Err(AppError::internal(
-            "Stored Operation outcome has an unknown rejection code",
-        )),
-    }
-}
-
 fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
 ) -> Result<CreateItemOperationOutcome, AppError> {
-    let result = match row.result_status.as_str() {
-        "applied" => CreateItemOperationResult::Applied {
+    let result = match row.result_status {
+        OperationOutcomeStatus::Applied => CreateItemOperationResult::Applied {
             item_id: row
                 .entity_id
                 .ok_or_else(|| AppError::internal("Stored applied Operation has no entity"))?,
@@ -138,23 +116,16 @@ fn outcome_from_row(
                 .entity_version
                 .ok_or_else(|| AppError::internal("Stored applied Operation has no version"))?,
         },
-        "rejected" => CreateItemOperationResult::Rejected {
-            code: rejection_code(
-                row.rejection_code
-                    .as_deref()
-                    .ok_or_else(|| AppError::internal("Stored rejected Operation has no code"))?,
-            )?,
+        OperationOutcomeStatus::Rejected => CreateItemOperationResult::Rejected {
+            code: row
+                .rejection_code
+                .ok_or_else(|| AppError::internal("Stored rejected Operation has no code"))?,
             details: row
                 .rejection_details
                 .map(|details| serde_json::from_str(&details))
                 .transpose()
                 .map_err(|_| AppError::internal("Stored Operation details are invalid"))?,
         },
-        _ => {
-            return Err(AppError::internal(
-                "Stored Operation outcome has an unknown status",
-            ))
-        }
     };
     Ok(CreateItemOperationOutcome {
         operation_id: operation_id.to_owned(),
@@ -169,7 +140,7 @@ async fn load_outcome<'e>(
     operation_id: &str,
 ) -> Result<Option<StoredOutcomeRow>, AppError> {
     query_as::<_, StoredOutcomeRow>(
-        "SELECT request_fingerprint, result_status, entity_id, entity_version, rejection_code, rejection_details::text AS rejection_details FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+        "SELECT request_fingerprint, result_status::text AS result_status, entity_id, entity_version, rejection_code::text AS rejection_code, rejection_details::text AS rejection_details FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
     )
     .bind(user_id)
     .bind(operation_id)
@@ -192,7 +163,7 @@ pub(crate) async fn get_create_item_outcome(
 pub(crate) async fn execute_create_item(
     pool: &PgPool,
     input: CreateItemOperationInput,
-) -> Result<ExistingOutcome, AppError> {
+) -> Result<OperationResolution, AppError> {
     let fingerprint = create_item_fingerprint(&input);
     let mut transaction = pool
         .begin()
@@ -216,127 +187,73 @@ pub(crate) async fn execute_create_item(
             transaction.rollback().await.map_err(|error| {
                 database_error(error, "Failed to close reused Operation transaction")
             })?;
-            return Ok(ExistingOutcome::Reused);
+            return Ok(OperationResolution::IdReused);
         }
         let outcome = outcome_from_row(&input.operation_id, row)?;
         transaction
             .commit()
             .await
             .map_err(|error| database_error(error, "Failed to replay Operation outcome"))?;
-        return Ok(ExistingOutcome::Matching(outcome));
+        return Ok(OperationResolution::Outcome {
+            outcome,
+            newly_committed: false,
+        });
     }
 
-    #[derive(FromRow)]
-    struct AccessRow {
-        role: VaultRole,
-    }
-    let access = query_as::<_, AccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
+    let effect = vaults::apply_create_item(
+        &mut transaction,
+        &input.user_id,
+        CreateItemEffectInput {
+            item_id: input.item_id,
+            vault_id: input.vault_id,
+            category: input.category,
+            encrypted_data: input.encrypted_data,
+            encryption_iv: input.encryption_iv,
+            encryption_algorithm: input.encryption_algorithm,
+            client_id: input.client_id.clone(),
+            ciphertext_limit: input.ciphertext_limit,
+        },
     )
-    .bind(&input.vault_id)
-    .bind(&input.user_id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(|error| database_error(error, "Failed to verify create Item authorization"))?;
+    .await?;
 
-    let mut rejection = if input.encrypted_data.len() > input.ciphertext_limit {
-        Some((
-            CreateItemRejectionCode::InvalidCiphertext,
-            "invalid_ciphertext",
-        ))
-    } else {
-        match access {
-            None => Some((
-                CreateItemRejectionCode::VaultAccessDenied,
-                "vault_access_denied",
-            )),
-            Some(access) if !access.role.can_write() => {
-                Some((CreateItemRejectionCode::VaultReadOnly, "vault_read_only"))
+    let result = match effect {
+        CreateItemEffect::Rejected(code) => {
+            query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, $3::operation_kind, $4, $5::operation_outcome_status, $6::create_item_rejection_code)",
+            )
+            .bind(&input.user_id)
+            .bind(&input.operation_id)
+            .bind(OperationKind::CreateItem)
+            .bind(fingerprint.as_slice())
+            .bind(OperationOutcomeStatus::Rejected)
+            .bind(code)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| {
+                database_error(error, "Failed to retain rejected Operation outcome")
+            })?;
+            CreateItemOperationResult::Rejected {
+                code,
+                details: None,
             }
-            Some(_) => None,
         }
-    };
-
-    if rejection.is_none() {
-        let inserted = query(
-            "INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, 1, 1, $7, $7) ON CONFLICT (id) DO NOTHING",
-        )
-        .bind(&input.item_id)
-        .bind(&input.vault_id)
-        .bind(input.category)
-        .bind(&input.encrypted_data)
-        .bind(&input.encryption_iv)
-        .bind(&input.encryption_algorithm)
-        .bind(&input.user_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to create Item"))?;
-        if inserted.rows_affected() == 0 {
-            rejection = Some((CreateItemRejectionCode::ItemIdConflict, "item_id_conflict"));
-        }
-    }
-
-    let result = if let Some((code, stored_code)) = rejection {
-        insert_audit_event(
-            &mut *transaction,
-            &generate_resource_id("audit"),
-            &input.user_id,
-            "item_create_rejected",
-            "item",
-            &input.item_id,
-            Some(json!({ "vaultId": input.vault_id, "code": stored_code })),
-        )
-        .await?;
-        query(
-            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'create_item', $3, 'rejected', $4)",
-        )
-        .bind(&input.user_id)
-        .bind(&input.operation_id)
-        .bind(fingerprint.as_slice())
-        .bind(stored_code)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to retain rejected Operation outcome"))?;
-        CreateItemOperationResult::Rejected {
-            code,
-            details: None,
-        }
-    } else {
-        insert_audit_event(
-            &mut *transaction,
-            &generate_resource_id("audit"),
-            &input.user_id,
-            "item_created",
-            "item",
-            &input.item_id,
-            Some(json!({ "vaultId": input.vault_id, "category": input.category })),
-        )
-        .await?;
-        insert_sync_event(
-            &mut *transaction,
-            SyncEventType::ItemCreated,
-            &input.item_id,
-            SyncEntityType::Item,
-            &input.vault_id,
-            &input.user_id,
-            1,
-            input.client_id.as_deref(),
-            None,
-        )
-        .await?;
-        query(
-            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, entity_id, entity_version) VALUES ($1, $2, 'create_item', $3, 'applied', $4, 1)",
-        )
-        .bind(&input.user_id)
-        .bind(&input.operation_id)
-        .bind(fingerprint.as_slice())
-        .bind(&input.item_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to retain applied Operation outcome"))?;
-        CreateItemOperationResult::Applied {
-            item_id: input.item_id.clone(),
-            version: 1,
+        CreateItemEffect::Applied { item_id, version } => {
+            query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, entity_id, entity_version) VALUES ($1, $2, $3::operation_kind, $4, $5::operation_outcome_status, $6, $7)",
+            )
+            .bind(&input.user_id)
+            .bind(&input.operation_id)
+            .bind(OperationKind::CreateItem)
+            .bind(fingerprint.as_slice())
+            .bind(OperationOutcomeStatus::Applied)
+            .bind(&item_id)
+            .bind(version)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| {
+                database_error(error, "Failed to retain applied Operation outcome")
+            })?;
+            CreateItemOperationResult::Applied { item_id, version }
         }
     };
 
@@ -355,11 +272,14 @@ pub(crate) async fn execute_create_item(
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit Operation outcome"))?;
-    Ok(ExistingOutcome::Matching(CreateItemOperationOutcome {
-        operation_id: input.operation_id,
-        kind: OperationKind::CreateItem,
-        result,
-    }))
+    Ok(OperationResolution::Outcome {
+        outcome: CreateItemOperationOutcome {
+            operation_id: input.operation_id,
+            kind: OperationKind::CreateItem,
+            result,
+        },
+        newly_committed: true,
+    })
 }
 
 #[cfg(test)]

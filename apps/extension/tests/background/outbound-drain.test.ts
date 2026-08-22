@@ -41,7 +41,14 @@ const apiClient = {
 					releaseFirstRequest = resolve;
 				});
 			}
-			return { data: { itemId }, etag: '"1"' };
+			return {
+				data: {
+					operationId: `command-${itemId.slice("item-".length)}`,
+					kind: "create_item",
+					result: { status: "applied", itemId, version: 1 },
+				},
+				etag: null,
+			};
 		},
 	},
 };

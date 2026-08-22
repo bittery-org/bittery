@@ -504,6 +504,47 @@ closed_enum!(VaultKeyRotationManifestKind, "vault_key_rotation_manifest_kind", {
     Attachment => "attachment",
 });
 
+/// The Domain operation represented by one retained outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationKind {
+    CreateItem,
+}
+
+closed_enum!(OperationKind, "operation_kind", {
+    CreateItem => "create_item",
+});
+
+/// Whether a retained Operation applied its effect or proved a terminal rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationOutcomeStatus {
+    Applied,
+    Rejected,
+}
+
+closed_enum!(OperationOutcomeStatus, "operation_outcome_status", {
+    Applied => "applied",
+    Rejected => "rejected",
+});
+
+/// The terminal semantic rejections currently possible for Create Item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CreateItemRejectionCode {
+    InvalidCiphertext,
+    VaultAccessDenied,
+    VaultReadOnly,
+    ItemIdConflict,
+}
+
+closed_enum!(CreateItemRejectionCode, "create_item_rejection_code", {
+    InvalidCiphertext => "invalid_ciphertext",
+    VaultAccessDenied => "vault_access_denied",
+    VaultReadOnly => "vault_read_only",
+    ItemIdConflict => "item_id_conflict",
+});
+
 #[cfg(test)]
 #[path = "enums_tests.rs"]
 mod tests;

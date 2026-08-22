@@ -1749,7 +1749,10 @@ export interface components {
             /** @enum {string} */
             readonly status: "rejected";
         };
-        /** @enum {string} */
+        /**
+         * @description The terminal semantic rejections currently possible for Create Item.
+         * @enum {string}
+         */
         readonly CreateItemRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict";
         readonly CreateShareLinkRequest: {
             readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
@@ -2251,7 +2254,10 @@ export interface components {
             readonly sourceVaultId: string;
             readonly targetVaultId: string;
         };
-        /** @enum {string} */
+        /**
+         * @description The Domain operation represented by one retained outcome.
+         * @enum {string}
+         */
         readonly OperationKind: "create_item";
         readonly PageCursor: string;
         readonly PageRequest: {

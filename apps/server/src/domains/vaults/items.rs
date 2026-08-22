@@ -6,23 +6,23 @@ use time::OffsetDateTime;
 
 use super::{
     access::{
-        assert_item_read_access, assert_item_write_access, insert_item_sync_event, load_item_row,
-        load_vault_access,
+        assert_item_read_access, assert_item_write_access, find_vault_access,
+        insert_item_sync_event, load_item_row, load_vault_access,
     },
     attachments::load_item_attachments,
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
 use super::{
-    BulkImportItemsInput, BulkImportItemsResponse, DeletedVaultItemWithVaultResponse,
-    ItemClientInput, ItemIdInput, MoveItemInput, SuccessResponse, ToggleFavoriteInput,
-    UpdateItemInput, UpdateItemResponse, VaultIdInput, VaultItemDetailsResponse, VaultItemResponse,
-    VaultItemWithVaultResponse, VaultSummaryResponse,
+    BulkImportItemsInput, BulkImportItemsResponse, CreateItemEffect, CreateItemEffectInput,
+    DeletedVaultItemWithVaultResponse, ItemClientInput, ItemIdInput, MoveItemInput,
+    SuccessResponse, ToggleFavoriteInput, UpdateItemInput, UpdateItemResponse, VaultIdInput,
+    VaultItemDetailsResponse, VaultItemResponse, VaultItemWithVaultResponse, VaultSummaryResponse,
 };
 use crate::{
     config::DeploymentMode,
     db::events::{generate_resource_id, insert_audit_event, insert_sync_event},
     db::{
-        enums::{SyncEntityType, SyncEventType},
+        enums::{CreateItemRejectionCode, SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
     },
     domains::billing::entitlements::attachments_enabled_for_user,
@@ -322,6 +322,80 @@ pub(crate) async fn get_vault_item(
             .cloned()
             .unwrap_or_default(),
         ..map_item_details(item_row)
+    })
+}
+
+pub(crate) async fn apply_create_item(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: CreateItemEffectInput,
+) -> Result<CreateItemEffect, AppError> {
+    let access = find_vault_access(&mut **transaction, &input.vault_id, user_id).await?;
+    let mut rejection = if input.encrypted_data.len() > input.ciphertext_limit {
+        Some(CreateItemRejectionCode::InvalidCiphertext)
+    } else {
+        match access {
+            None => Some(CreateItemRejectionCode::VaultAccessDenied),
+            Some(access) if !access.role.can_write() => {
+                Some(CreateItemRejectionCode::VaultReadOnly)
+            }
+            Some(_) => None,
+        }
+    };
+
+    if rejection.is_none() {
+        let inserted = query(
+            "INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, 1, 1, $7, $7) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(&input.item_id)
+        .bind(&input.vault_id)
+        .bind(input.category)
+        .bind(&input.encrypted_data)
+        .bind(&input.encryption_iv)
+        .bind(&input.encryption_algorithm)
+        .bind(user_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to create Item"))?;
+        if inserted.rows_affected() == 0 {
+            rejection = Some(CreateItemRejectionCode::ItemIdConflict);
+        }
+    }
+
+    if let Some(code) = rejection {
+        insert_item_audit_log(
+            &mut **transaction,
+            "item_create_rejected",
+            &input.item_id,
+            user_id,
+            Some(json!({ "vaultId": input.vault_id, "code": code })),
+        )
+        .await?;
+        return Ok(CreateItemEffect::Rejected(code));
+    }
+
+    let version = 1;
+    insert_item_audit_log(
+        &mut **transaction,
+        "item_created",
+        &input.item_id,
+        user_id,
+        Some(json!({ "vaultId": input.vault_id, "category": input.category })),
+    )
+    .await?;
+    insert_item_sync_event(
+        &mut **transaction,
+        SyncEventType::ItemCreated,
+        &input.item_id,
+        &input.vault_id,
+        user_id,
+        input.client_id.as_deref(),
+        version,
+    )
+    .await?;
+    Ok(CreateItemEffect::Applied {
+        item_id: input.item_id,
+        version,
     })
 }
 

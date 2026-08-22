@@ -1103,6 +1103,44 @@ describe("VaultRepository Item sync projections", () => {
 		};
 	}
 
+	it("persists a rejected optimistic create as visibly failed with its ciphertext intact", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const encrypted = await cachedItem("rejected_create", crypto, vaultCrypto);
+		const command: ItemSyncCommand = {
+			accountId: ACCOUNT_ID,
+			id: "operation-rejected-create",
+			operationId: "operation-rejected-create",
+			type: "create",
+			entityId: encrypted.id,
+			vaultId: encrypted.vaultId,
+			category: encrypted.category,
+			encryptedPayload: {
+				encryptedData: encrypted.encryptedData,
+				encryptionIv: encrypted.encryptionIv,
+				encryptionAlgorithm: encrypted.encryptionAlgorithm,
+				encryptionVersion: encrypted.encryptionVersion,
+				encryptedByUserId: encrypted.encryptedByUserId,
+			},
+			baseVersion: 0,
+			timestamp: Date.parse(encrypted.createdAt),
+			retryCount: 0,
+		};
+		await repo.applyItemCommand(command);
+
+		await repo.rejectItemCommand(command, "vault_read_only");
+
+		const persisted = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(persisted?.encryptedData).toBe(encrypted.encryptedData);
+		expect(persisted?.optimisticFailure).toEqual({
+			operationId: "operation-rejected-create",
+			code: "vault_read_only",
+		});
+		expect(repo.getById(encrypted.id)?.optimisticFailure).toEqual({
+			operationId: "operation-rejected-create",
+			code: "vault_read_only",
+		});
+	});
+
 	it("keeps an optimistic metadata command out of the authoritative cache", async () => {
 		const { repo, itemCache, crypto, vaultCrypto } = await setup();
 		const item = await cachedItem("overlay_item", crypto, vaultCrypto);

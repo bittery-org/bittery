@@ -31,6 +31,7 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
+	CreateItemRejectionCode,
 	ItemSyncAcknowledgement,
 	ItemSyncCommand,
 	VaultSummary,
@@ -52,6 +53,7 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	encryptionVersion: number;
 	encryptedByUserId: string;
 	attachments?: CachedAttachment[];
+	optimisticFailure?: CachedEncryptedItem["optimisticFailure"];
 	_encrypted: {
 		data: string;
 		iv: string;
@@ -605,6 +607,7 @@ export class AccountVaultReplica {
 			encryptionVersion: cached.encryptionVersion,
 			encryptedByUserId: cached.encryptedByUserId,
 			attachments: cached.attachments,
+			optimisticFailure: cached.optimisticFailure,
 			...decryptedData,
 			_encrypted: {
 				data: cached.encryptedData,
@@ -839,6 +842,37 @@ export class AccountVaultReplica {
 		}
 		this.pendingCommands.set(this.commandOperationId(command), command);
 		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async rejectItemCommand(
+		command: ItemSyncCommand,
+		code: CreateItemRejectionCode,
+	): Promise<void> {
+		if (
+			!this.isForThisAccount(command.accountId) ||
+			command.type !== "create"
+		) {
+			return;
+		}
+		command.status = "failed";
+		this.pendingCommands.set(this.commandOperationId(command), command);
+		const projected = this.applyCommandToCachedItem(
+			this.authoritativeItems.get(command.entityId),
+			command,
+		);
+		if (!projected) return;
+		const failed = {
+			...projected,
+			optimisticFailure: {
+				operationId: this.commandOperationId(command),
+				code,
+			},
+		};
+		await this.persistItem(failed);
+		if (!(await this.isLocked())) {
+			this.items.set(command.entityId, await this.decryptItem(failed));
+		}
+		this.emit();
 	}
 
 	async discardItemCommandAcknowledgedElsewhere(
