@@ -83,6 +83,37 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "crypto tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
+  client-runtime:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/client-runtime
+            packages/crypto/core
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Runtime format, lint, tests, and generated contracts
+        run: pnpm --filter @bittery/client-runtime check
+
   crypto-bindings:
     name: crypto-bindings-${{ matrix.binding }}
     strategy:

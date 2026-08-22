@@ -1,0 +1,377 @@
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+macro_rules! string_id {
+    ($name:ident) => {
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(value.to_owned())
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+    };
+}
+
+string_id!(AccountId);
+string_id!(Incarnation);
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum RuntimeRequest {
+    SignIn {
+        server_url: String,
+        email: String,
+        master_password: String,
+        secret_key: String,
+    },
+    CreateLoginItem {
+        account_id: AccountId,
+        vault_id: String,
+        draft: LoginItemDraft,
+    },
+}
+
+impl fmt::Debug for RuntimeRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SignIn {
+                server_url, email, ..
+            } => formatter
+                .debug_struct("SignIn")
+                .field("server_url", server_url)
+                .field("email", email)
+                .field("credentials", &"[redacted]")
+                .finish(),
+            Self::CreateLoginItem {
+                account_id,
+                vault_id,
+                draft,
+            } => formatter
+                .debug_struct("CreateLoginItem")
+                .field("account_id", account_id)
+                .field("vault_id", vault_id)
+                .field("draft", draft)
+                .finish(),
+        }
+    }
+}
+
+impl RuntimeRequest {
+    pub fn account_id(&self) -> Option<&AccountId> {
+        match self {
+            Self::SignIn { .. } => None,
+            Self::CreateLoginItem { account_id, .. } => Some(account_id),
+        }
+    }
+
+    pub fn fixture_create(account_id: AccountId) -> Self {
+        Self::CreateLoginItem {
+            account_id,
+            vault_id: "vault-1".into(),
+            draft: LoginItemDraft {
+                title: "Example".into(),
+                url: Some("https://example.test".into()),
+                urls: vec![],
+                username: Some("person@example.test".into()),
+                password: Some("correct horse battery staple".into()),
+                notes: Some("private".into()),
+                note: None,
+                custom_fields: vec![],
+                tags: vec![],
+            },
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginItemDraft {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<LoginCustomField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+impl fmt::Debug for LoginItemDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoginItemDraft")
+            .field("plaintext", &"[redacted]")
+            .field("custom_field_count", &self.custom_fields.len())
+            .field("tag_count", &self.tags.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginCustomField {
+    pub id: String,
+    pub label: String,
+    pub value: String,
+    #[serde(rename = "type")]
+    pub field_type: CustomFieldKind,
+}
+
+impl fmt::Debug for LoginCustomField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoginCustomField")
+            .field("plaintext", &"[redacted]")
+            .field("field_type", &self.field_type)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CustomFieldKind {
+    Text,
+    Password,
+    Email,
+    Url,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum RuntimeResponse {
+    SignedIn {
+        account_id: AccountId,
+        user_id: String,
+    },
+    Accepted {
+        operation_id: String,
+        item_id: String,
+        replica_revision: u64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ObservationRequest {
+    Items { account_id: AccountId },
+    RuntimeStatus { account_id: Option<AccountId> },
+}
+
+impl ObservationRequest {
+    pub fn account_id(&self) -> Option<&AccountId> {
+        match self {
+            Self::Items { account_id } => Some(account_id),
+            Self::RuntimeStatus { account_id } => account_id.as_ref(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum RuntimeProjection {
+    Items(ItemsProjection),
+    RuntimeStatus(RuntimeStatusProjection),
+}
+
+impl RuntimeProjection {
+    pub fn revision(&self) -> u64 {
+        match self {
+            Self::Items(value) => value.replica_revision,
+            Self::RuntimeStatus(value) => value.revision,
+        }
+    }
+
+    pub fn item_count(&self) -> usize {
+        match self {
+            Self::Items(value) => value.items.len(),
+            Self::RuntimeStatus(_) => 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemsProjection {
+    pub account_id: AccountId,
+    pub replica_revision: u64,
+    pub items: Vec<LoginItemProjection>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginItemProjection {
+    pub account_id: AccountId,
+    pub item_id: String,
+    pub vault_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<LoginCustomField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    pub status: ItemProjectionStatus,
+}
+
+impl fmt::Debug for LoginItemProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoginItemProjection")
+            .field("account_id", &self.account_id)
+            .field("item_id", &self.item_id)
+            .field("vault_id", &self.vault_id)
+            .field("plaintext", &"[redacted]")
+            .field("status", &self.status)
+            .finish()
+    }
+}
+
+impl LoginItemProjection {
+    pub fn fixture(account_id: AccountId, item_id: &str, vault_id: &str) -> Self {
+        Self {
+            account_id,
+            item_id: item_id.into(),
+            vault_id: vault_id.into(),
+            title: "Example".into(),
+            url: Some("https://example.test".into()),
+            urls: vec![],
+            username: Some("person@example.test".into()),
+            password: Some("correct horse battery staple".into()),
+            notes: Some("private".into()),
+            note: None,
+            custom_fields: vec![],
+            tags: vec![],
+            status: ItemProjectionStatus::Pending,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ItemProjectionStatus {
+    Pending,
+    Authoritative,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatusProjection {
+    pub account_id: Option<AccountId>,
+    pub revision: u64,
+    pub accounts: Vec<AccountStatus>,
+    pub closed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountStatus {
+    pub account_id: AccountId,
+    pub replica_revision: u64,
+    pub failure: Option<RuntimeErrorCode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RuntimeErrorCode {
+    RuntimeClosed,
+    Cancelled,
+    AccountMissing,
+    AccountAlreadyInstalled,
+    AccountFailed,
+    AuthenticationUnavailable,
+    InvariantViolation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[error("{code:?}: {message}")]
+pub struct RuntimeError {
+    pub code: RuntimeErrorCode,
+    pub message: String,
+}
+
+impl RuntimeError {
+    pub(crate) fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+pub trait ObservationSink: Send + Sync + 'static {
+    fn publish(&self, projection: RuntimeProjection);
+}
+
+#[derive(Clone, Default)]
+pub struct RequestCancellation(Arc<AtomicBool>);
+
+impl RequestCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
