@@ -96,5 +96,17 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 	await reentrantRuntime.close();
 	reentrantRuntime.free();
 
+	const replicaInvocations = [];
+	const persistentRuntime = bindings.WebClientRuntime.withReplicaExecutor(
+		async (requestJson) => {
+			replicaInvocations.push(requestJson);
+			throw new Error("not reached before Account rehydration");
+		},
+	);
+	assert.ok(persistentRuntime instanceof bindings.WebClientRuntime);
+	await persistentRuntime.close();
+	persistentRuntime.free();
+	assert.deepEqual(replicaInvocations, []);
+
 	assert.deepEqual(productionWasm, [resolve(combinedRoot, "index_bg.wasm")]);
 });

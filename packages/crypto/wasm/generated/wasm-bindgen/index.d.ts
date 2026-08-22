@@ -23,6 +23,7 @@ export class WebClientRuntime {
   ): void;
   request_json(request_id: string, request_json: string): Promise<string>;
   unobserve(observation_id: string): void;
+  static withReplicaExecutor(invoke: Function): WebClientRuntime;
 }
 
 export function ubrn_ffi_bittery_crypto_api_rust_future_cancel_f32(
@@ -1778,6 +1779,7 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => void;
+  readonly webclientruntime_withReplicaExecutor: (a: any) => number;
   readonly uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
     a: bigint,
     b: number,
@@ -1886,11 +1888,6 @@ export interface InitOutput {
     c: any,
     d: any,
   ) => void;
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_externrefs: WebAssembly.Table;
-  readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
-  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (
     a: number,
@@ -1898,6 +1895,11 @@ export interface InitOutput {
     c: number,
     d: number,
   ) => number;
+  readonly __wbindgen_exn_store: (a: number) => void;
+  readonly __externref_table_alloc: () => number;
+  readonly __wbindgen_externrefs: WebAssembly.Table;
+  readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
+  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_start: () => void;
 }

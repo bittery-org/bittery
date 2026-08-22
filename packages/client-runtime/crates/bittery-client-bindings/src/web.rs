@@ -7,6 +7,36 @@ use std::{
     },
 };
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+
+struct JsSerializedReplicaExecutor {
+    invoke: js_sys::Function,
+}
+
+#[async_trait::async_trait(?Send)]
+impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
+        let promise = self
+            .invoke
+            .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
+            .map_err(|_| replica_invoke_error("Replica persistence invocation failed"))?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| replica_invoke_error("Replica persistence did not return a Promise"))?;
+        let response = JsFuture::from(promise)
+            .await
+            .map_err(|_| replica_invoke_error("Replica persistence invocation failed"))?;
+        response.as_string().ok_or_else(|| {
+            replica_invoke_error("Replica persistence returned a non-string response")
+        })
+    }
+}
+
+fn replica_invoke_error(message: &str) -> core::RuntimeError {
+    core::RuntimeError {
+        code: core::RuntimeErrorCode::InvariantViolation,
+        message: message.into(),
+    }
+}
 
 #[wasm_bindgen]
 pub struct WebClientRuntime {
@@ -46,8 +76,19 @@ impl WebObservation {
 impl WebClientRuntime {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
+        Self::from_inner(core::Runtime::new())
+    }
+
+    #[wasm_bindgen(js_name = withReplicaExecutor)]
+    pub fn with_replica_executor(invoke: js_sys::Function) -> Self {
+        Self::from_inner(core::Runtime::with_serialized_replica_executor(Arc::new(
+            JsSerializedReplicaExecutor { invoke },
+        )))
+    }
+
+    fn from_inner(inner: Arc<core::Runtime>) -> Self {
         Self {
-            inner: core::Runtime::new(),
+            inner,
             cancellations: Mutex::new(HashMap::new()),
             observations: Mutex::new(HashMap::new()),
         }

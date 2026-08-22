@@ -36,3 +36,9 @@ fn every_host_exposes_the_stable_async_close_facade() {
     assert!(SWIFT_FACADE.contains("await native.shutdown()"));
     assert!(WEB_DECLARATIONS.contains("close(): Promise<void>"));
 }
+
+#[test]
+fn web_exposes_one_flat_serialized_replica_executor_factory() {
+    assert!(WEB_DECLARATIONS
+        .contains("static withReplicaExecutor(invoke: Function): WebClientRuntime;"));
+}
