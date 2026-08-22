@@ -1,11 +1,7 @@
 // Generated key handles stay in this worker; only exportKey may return raw bytes.
 
 import type { KeyHandleLike } from "@bittery/crypto-wasm";
-import type {
-	CryptoPortCall,
-	CryptoPortReply,
-	WorkerKeyToken,
-} from "./adapters/wasm-worker";
+import type { CryptoPortCall, WorkerKeyToken } from "./adapters/wasm-worker";
 import {
 	BackendFailure,
 	classify,
@@ -13,19 +9,17 @@ import {
 	memoizedBackendLoader,
 	type UniffiBackend,
 } from "./uniffi-bindings";
+import {
+	serveWorkerChannels,
+	type WorkerChannelService,
+	type WorkerRouterScope,
+} from "./worker-router";
 
-export interface CryptoWorkerScope {
-	addEventListener(
-		type: "message",
-		listener: (event: { data: unknown }) => void,
-	): void;
-	postMessage(message: unknown): void;
-}
+export interface CryptoWorkerScope extends WorkerRouterScope {}
 
-export function serveCryptoPort(
-	scope: CryptoWorkerScope,
+export function createCryptoWorkerService(
 	loadBackend: () => Promise<UniffiBackend<KeyHandleLike>>,
-): void {
+): WorkerChannelService {
 	const ensureBackend = memoizedBackendLoader(loadBackend);
 	const keys = new Map<number, KeyHandleLike>();
 	let nextKeyId = 0;
@@ -93,13 +87,17 @@ export function serveCryptoPort(
 		return token;
 	}
 
-	scope.addEventListener("message", (event) => {
-		const request = event.data as CryptoPortCall;
-
-		void (async () => {
+	return {
+		async request(payload) {
+			const request = payload as CryptoPortCall;
 			try {
 				const ready = await ensureBackend();
-				if (typeof ready[request.method] !== "function") {
+				if (
+					typeof request !== "object" ||
+					request === null ||
+					!Array.isArray(request.args) ||
+					typeof ready[request.method] !== "function"
+				) {
 					throw new BackendFailure(
 						"invalid-input",
 						`Unknown crypto port member "${String(request.method)}".`,
@@ -117,20 +115,21 @@ export function serveCryptoPort(
 				if (destroyedToken !== null) {
 					keys.delete(destroyedToken.__bitteryWorkerKey);
 				}
-
-				scope.postMessage({
-					id: request.id,
-					ok: true,
-					value: fromBackend(value),
-				} satisfies CryptoPortReply);
+				return fromBackend(value);
 			} catch (error) {
-				scope.postMessage({
-					id: request.id,
-					ok: false,
-					...classify(error),
-				} satisfies CryptoPortReply);
+				const failure = classify(error);
+				throw Object.assign(new Error(failure.message), { code: failure.code });
 			}
-		})();
+		},
+	};
+}
+
+export function serveCryptoPort(
+	scope: CryptoWorkerScope,
+	loadBackend: () => Promise<UniffiBackend<KeyHandleLike>>,
+): void {
+	serveWorkerChannels(scope, {
+		crypto: createCryptoWorkerService(loadBackend),
 	});
 }
 

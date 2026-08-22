@@ -3,7 +3,10 @@ import { CryptoError } from "@bittery/crypto-wasm";
 import { CryptoPortError } from "../errors";
 import type { KdfProfile } from "../types";
 import { runCryptoPortConformance } from "./port-conformance";
-import { createWasmWorkerCryptoPort } from "./wasm-worker";
+import {
+	createWasmWorkerCryptoPort,
+	createWasmWorkerOwner,
+} from "./wasm-worker";
 import {
 	createWasmWorkerDoubles,
 	type WasmWorkerDoubles,
@@ -71,6 +74,16 @@ async function settle(): Promise<void> {
 }
 
 describe("wasm-worker adapter — the thread boundary", () => {
+	test("accepts the shared owner's injected crypto channel", async () => {
+		const doubles = createWasmWorkerDoubles();
+		const owner = createWasmWorkerOwner(doubles.deps);
+		const port = createWasmWorkerCryptoPort(owner.channel("crypto"));
+
+		await port.initialize();
+		expect(await port.generateUuid()).toMatch(/^[0-9a-f-]{36}$/);
+		expect(doubles.workersCreated).toBe(1);
+	});
+
 	test("boots one worker and loads WASM once, however many calls it serves", async () => {
 		const { port, doubles } = await makePort();
 
