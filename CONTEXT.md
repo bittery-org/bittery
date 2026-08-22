@@ -253,6 +253,31 @@ _Avoid_: finding, alert, vulnerability
 
 ### Sync
 
+**Replica**:
+The durable Account-scoped local state owned by the Client Runtime: encrypted authoritative entities,
+accepted Operations and their optimistic effects, retained Operation outcomes already observed, and
+the Sync cursor that makes those values one coherent commit history. A Replica is not merely a
+disposable Item cache, and its invariants do not belong to a UI or platform adapter.
+_Avoid_: cache, local database, offline store, client state
+
+**Operation**:
+One immutable Account-scoped request accepted durably by the Client Runtime under a stable Operation
+ID. Acceptance commits the request and its optimistic Replica effect together. Losing a caller,
+restarting, or exhausting a number of transport attempts does not end it.
+_Avoid_: mutation, queue entry, command attempt, request
+
+**Operation outcome**:
+The Server's durable semantic result for one Operation: success or a proved terminal non-success. It
+commits with the Domain effect or proved non-effect and lets every retry learn what happened after a
+lost response. Transport errors and an in-progress response are not outcomes.
+_Avoid_: cached HTTP response, acknowledgement, idempotency record, sync result
+
+**Sync cursor**:
+An opaque Server-minted position proving which visible Sync events a Replica has applied. It is
+committed atomically with the resulting Replica changes and is neither a timestamp nor a Device-local
+counter.
+_Avoid_: timestamp, offset, sequence number, last sync time
+
 **Sync event**:
 A server record that one entity changed — an item, a vault, a membership, a key, or the travel-mode policy. Clients react to events instead of re-reading everything.
 _Avoid_: change, update, notification, message
@@ -280,6 +305,13 @@ A folder, collection or group from the product being imported from, presented so
 _Avoid_: source folder, source collection
 
 ### Clients and deployment
+
+**Client Runtime**:
+The one process-wide Rust module that owns the Device's Account catalog and each Account's isolated
+authentication, live keys, Replica, Operations, Sync, and failure state. Web, Compose, SwiftUI,
+Desktop, and Extension hosts send typed requests and observe projections; they do not reimplement
+Runtime policy. Active account remains UI state outside this ownership rule.
+_Avoid_: core service, sync engine, worker, backend
 
 **Autofill**:
 Filling a saved login, card or identity into a form outside Bittery — the browser extension on a web page, or the operating system's autofill service on mobile.

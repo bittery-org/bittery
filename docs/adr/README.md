@@ -19,3 +19,4 @@ those rather than restating them.
 - [0011 — Axum REST and OpenAPI replace Qubit JSON-RPC](0011-axum-rest-openapi-replaces-qubit.md)
 - [0012 — One generated definition per cross-language type](0012-one-generated-definition-per-cross-language-type.md)
 - [0013 — Rotation plans coordinate Vault key rotation](0013-rotation-plans-coordinate-vault-key-rotation.md)
+- [0014 — Evolve the existing product around a shared Rust runtime](0014-evolve-the-existing-product-around-a-shared-rust-runtime.md)
