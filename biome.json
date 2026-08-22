@@ -51,6 +51,7 @@
 			"!**/playwright-report",
 			"!**/paraglide",
 			"!**/project.inlang",
+			"!packages/crypto/core/wasm-index.generated.ts",
 			"!apps/web/src/lib/import/__tests__/fixtures"
 		]
 	},

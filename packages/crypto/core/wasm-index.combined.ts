@@ -9,27 +9,27 @@ import initAsync, { WebClientRuntime } from "./generated/wasm-bindgen/index.js";
 export { WebClientRuntime };
 
 const wasmPath = new URL(
-  "./generated/wasm-bindgen/index_bg.wasm",
-  import.meta.url,
+	"./generated/wasm-bindgen/index_bg.wasm",
+	import.meta.url,
 );
 type InitInput = Parameters<typeof initAsync>[0];
 let initialization: Promise<void> | undefined;
 
 export function uniffiInitAsync(
-  moduleOrPath: InitInput = { module_or_path: wasmPath },
+	moduleOrPath: InitInput = { module_or_path: wasmPath },
 ): Promise<void> {
-  initialization ??= initAsync(moduleOrPath)
-    .then(() => {
-      bittery_crypto_api.default.initialize();
-    })
-    .catch((error: unknown) => {
-      initialization = undefined;
-      throw error;
-    });
-  return initialization;
+	initialization ??= initAsync(moduleOrPath)
+		.then(() => {
+			bittery_crypto_api.default.initialize();
+		})
+		.catch((error: unknown) => {
+			initialization = undefined;
+			throw error;
+		});
+	return initialization;
 }
 
 // Export the crates as individually namespaced objects.
 export default {
-  bittery_crypto_api,
+	bittery_crypto_api,
 };
