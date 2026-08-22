@@ -29,6 +29,41 @@ legacy crypto Worker behavior stays green during the transition.
 
 ## Comments
 
+### 2026-08-23 — cold production Runtime transport
+
+Replaced the Web-only Runtime shadow with a cold production transport. The Web app now owns the
+single Worker composition root, attaches the unchanged Crypto service and `WebClientRuntime` to its
+two closed channels, and exports a cold Runtime facade beside the existing Crypto port. Both
+services enter through `@bittery/crypto-wasm`'s memoized initializer, so they share the existing
+single generated WASM module; Crypto retains one Worker-owned key-handle table. The Runtime is
+constructed with the dedicated IndexedDB executor, but a cold unauthenticated request does not
+invoke persistence.
+
+The outer wire now carries clone-guarded, uncorrelated channel notifications. The Runtime channel
+supports only request, observe, and unobserve commands with exact fields. Tests cover notification
+before observe acknowledgement, unknown and late observation IDs, listener replacement and
+unobserve, cancel-before-ACK cleanup, request cancellation isolation, cross-channel crash handling,
+idempotent close after Runtime close, and exactly one Worker. Existing Crypto Worker conformance and
+the combined WASM initializer smoke remain green.
+
+This is deliberately not an AccountStore/React cutover: account authentication, load/rehydration,
+bootstrap, Sync/device transport, and product commit flows remain deferred. There is no
+`localStorage` bridge and no claim that a durable IndexedDB plan ran during the cold Runtime smoke.
+Ticket 18 remains claimed.
+
+Verified from the repository root:
+
+```text
+pnpm --filter @bittery/client-runtime test
+pnpm --filter @bittery/crypto-port test
+pnpm --filter web exec bun test src/lib/crypto.test.ts
+pnpm --filter @bittery/crypto-wasm test:combined
+pnpm exec turbo -F @bittery/client-runtime -F @bittery/crypto-port -F web check-types
+pnpm architecture:check
+pnpm exec biome check <scoped TypeScript, JSON, YAML, and Markdown files>
+git diff --check <scoped files>
+```
+
 ### 2026-08-23 — first bounded Worker batch
 
 Added the process-wide Web Worker owner and channel-tagged request multiplexer before the Runtime's

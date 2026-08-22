@@ -19,6 +19,9 @@
 		},
 		"./adapters/wasm-static": {
 			"default": "./src/adapters/wasm-static.ts"
+		},
+		"./worker": {
+			"default": "./src/worker.ts"
 		}
 	},
 	"scripts": {

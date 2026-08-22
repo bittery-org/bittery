@@ -20,6 +20,7 @@ export interface WorkerRpcChannel {
 		payload: unknown,
 		options?: { signal?: AbortSignal },
 	): Promise<T>;
+	subscribe(listener: (value: unknown) => void): () => void;
 }
 
 export interface SharedWorkerOwner {
@@ -61,6 +62,7 @@ export function createSharedWorkerOwner(
 	const nextIds = new Map<WorkerChannelName, number>();
 	let nextControlId = 0;
 	const pending = new Map<string, PendingRequest>();
+	const listeners = new Map<WorkerChannelName, Set<(value: unknown) => void>>();
 
 	function key(channel: WorkerChannelName, id: number): string {
 		return `${channel}\u0000${id}`;
@@ -73,6 +75,12 @@ export function createSharedWorkerOwner(
 			worker.onmessage = (event) => {
 				if (!isWorkerReply(event.data)) return;
 				const reply = event.data;
+				if (reply.type === "notification") {
+					for (const listener of listeners.get(reply.channel) ?? []) {
+						listener(reply.value);
+					}
+					return;
+				}
 				if (reply.type === "close-ack") {
 					if (closeRequest === null || reply.id !== closeRequest.id) return;
 					const closing = closeRequest;
@@ -124,6 +132,18 @@ export function createSharedWorkerOwner(
 	return {
 		channel(channel) {
 			return {
+				subscribe(listener) {
+					let channelListeners = listeners.get(channel);
+					if (channelListeners === undefined) {
+						channelListeners = new Set();
+						listeners.set(channel, channelListeners);
+					}
+					channelListeners.add(listener);
+					return () => {
+						channelListeners?.delete(listener);
+						if (channelListeners?.size === 0) listeners.delete(channel);
+					};
+				},
 				request<T = unknown>(
 					payload: unknown,
 					options?: { signal?: AbortSignal },

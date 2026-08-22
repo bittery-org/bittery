@@ -14,7 +14,11 @@ export interface WorkerRouterScope {
 }
 
 export interface WorkerChannelService {
-	request(payload: unknown, signal: AbortSignal): Promise<unknown>;
+	request(
+		payload: unknown,
+		signal: AbortSignal,
+		notify: (value: unknown) => void,
+	): Promise<unknown>;
 	close?(): Promise<void>;
 }
 
@@ -88,7 +92,16 @@ export function serveWorkerChannels(
 		active.set(key(request.channel, request.id), controller);
 		void Promise.resolve()
 			.then(() =>
-				service.request(copyWorkerValue(request.payload), controller.signal),
+				service.request(
+					copyWorkerValue(request.payload),
+					controller.signal,
+					(value) =>
+						scope.postMessage({
+							type: "notification",
+							channel: request.channel,
+							value: copyWorkerValue(value),
+						} satisfies WorkerReply),
+				),
 			)
 			.then((value) => {
 				active.delete(key(request.channel, request.id));

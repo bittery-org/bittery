@@ -6,6 +6,9 @@
 	"exports": {
 		"./indexeddb-executor": {
 			"default": "./src/indexeddb-executor.ts"
+		},
+		"./worker-runtime": {
+			"default": "./src/worker-runtime.ts"
 		}
 	},
 	"scripts": {

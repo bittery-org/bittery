@@ -14,11 +14,39 @@ class UnifiedWorkerDouble implements CryptoWorkerHandle {
 			id: number;
 			payload: unknown;
 		};
+		if (request.type === "close") {
+			queueMicrotask(() =>
+				this.onmessage?.(
+					new MessageEvent("message", {
+						data: { type: "close-ack", id: request.id, ok: true },
+					}),
+				),
+			);
+			return;
+		}
 		if (request.type !== "request") return;
-		const value =
-			request.channel === "runtime"
-				? { shadow: true, payload: request.payload }
-				: undefined;
+		const command = request.payload as {
+			type?: string;
+			observationId?: string;
+		};
+		if (request.channel === "runtime" && command.type === "observe") {
+			queueMicrotask(() =>
+				this.onmessage?.(
+					new MessageEvent("message", {
+						data: {
+							type: "notification",
+							channel: "runtime",
+							value: {
+								type: "observation",
+								observationId: command.observationId,
+								projectionJson: "cold-projection",
+							},
+						},
+					}),
+				),
+			);
+		}
+		const value = request.channel === "runtime" ? "cold-result" : undefined;
 		queueMicrotask(() =>
 			this.onmessage?.(
 				new MessageEvent("message", {
@@ -39,7 +67,7 @@ class UnifiedWorkerDouble implements CryptoWorkerHandle {
 	}
 }
 
-test("Web composes crypto and a Runtime shadow channel over one worker owner", async () => {
+test("Web composes cold Crypto and Runtime facades over exactly one worker", async () => {
 	const worker = new UnifiedWorkerDouble();
 	let workersCreated = 0;
 	const composition = createWebWorkerComposition({
@@ -50,15 +78,15 @@ test("Web composes crypto and a Runtime shadow channel over one worker owner", a
 	});
 
 	await composition.crypto.initialize();
-	const shadow = await composition.workerOwner
-		.channel("runtime")
-		.request<{ shadow: boolean; payload: { operation: string } }>({
-			operation: "shadow-only",
-		});
+	const result = await composition.runtime.request("cold", "{}");
+	const observations: string[] = [];
+	await composition.runtime.observe("vault", "{}", (value) =>
+		observations.push(value),
+	);
 
-	expect(shadow).toEqual({
-		shadow: true,
-		payload: { operation: "shadow-only" },
-	});
+	expect(result).toBe("cold-result");
+	expect(observations).toEqual(["cold-projection"]);
 	expect(workersCreated).toBe(1);
+	await Promise.all([composition.runtime.close(), composition.runtime.close()]);
+	expect(worker.terminateCalls).toBe(1);
 });

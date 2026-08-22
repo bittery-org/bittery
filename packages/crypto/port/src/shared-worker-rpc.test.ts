@@ -77,6 +77,36 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 }
 
 describe("shared worker RPC", () => {
+	test("channel subscriptions receive clone-safe notifications until detached", async () => {
+		const worker = new MultiplexWorkerDouble({
+			runtime: {
+				request: async (_payload, _signal, notify) => {
+					notify({ observationId: "known", bytes: new Uint8Array([1, 2]) });
+					return "observing";
+				},
+			},
+		});
+		const channel = createSharedWorkerOwner({
+			createWorker: () => worker,
+		}).channel("runtime");
+		const notifications: unknown[] = [];
+		const detach = channel.subscribe((value) => notifications.push(value));
+
+		expect(await channel.request<string>({})).toBe("observing");
+		await Promise.resolve();
+		expect(notifications).toEqual([
+			{ observationId: "known", bytes: new Uint8Array([1, 2]) },
+		]);
+
+		detach();
+		worker.emitToMain({
+			type: "notification",
+			channel: "runtime",
+			value: { observationId: "late" },
+		});
+		expect(notifications).toHaveLength(1);
+	});
+
 	test("one worker correlates reverse-order replies independently per channel", async () => {
 		const cryptoAnswer = deferred<unknown>();
 		const runtimeAnswer = deferred<unknown>();

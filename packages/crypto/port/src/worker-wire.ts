@@ -14,6 +14,11 @@ export type WorkerRequest =
 
 export type WorkerReply =
 	| {
+			type: "notification";
+			channel: WorkerChannelName;
+			value: unknown;
+	  }
+	| {
 			type: "response";
 			channel: WorkerChannelName;
 			id: number;
@@ -64,7 +69,11 @@ export function isWorkerRequest(value: unknown): value is WorkerRequest {
 }
 
 export function isWorkerReply(value: unknown): value is WorkerReply {
-	if (!isRecord(value) || !isRequestId(value.id)) return false;
+	if (!isRecord(value)) return false;
+	if (value.type === "notification") {
+		return isWorkerChannelName(value.channel) && Object.hasOwn(value, "value");
+	}
+	if (!isRequestId(value.id)) return false;
 	if (value.type === "close-ack") {
 		return (
 			value.ok === true ||

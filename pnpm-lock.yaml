@@ -508,6 +508,9 @@ importers:
       '@bittery/api-contract':
         specifier: workspace:*
         version: link:../../packages/api-contract
+      '@bittery/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@bittery/core':
         specifier: workspace:*
         version: link:../../packages/core
