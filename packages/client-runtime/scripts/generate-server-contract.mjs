@@ -172,6 +172,13 @@ function rustType(schema, owner, field) {
 	if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
 		unsupportedSchema(owner, field, "schema is not an object");
 	}
+	if (schema.enum) {
+		unsupportedSchema(
+			owner,
+			field,
+			"inline enums are not supported; use a named schema",
+		);
+	}
 	if (schema.allOf) unsupportedSchema(owner, field, "allOf is not supported");
 	if (schema.anyOf) unsupportedSchema(owner, field, "anyOf is not supported");
 	if (schema.oneOf && nonNullSchema(schema) === schema) {
@@ -265,6 +272,13 @@ function renderTaggedOneOf(name, schema) {
 			);
 		}
 		const required = new Set(branch.required ?? []);
+		if (!required.has("status")) {
+			unsupportedSchema(
+				name,
+				undefined,
+				`tagged branch ${index + 1} must require its status discriminator`,
+			);
+		}
 		const fields = Object.entries(branch.properties ?? {})
 			.filter(([field]) => field !== "status")
 			.sort(([left], [right]) => compareCodePoints(left, right))

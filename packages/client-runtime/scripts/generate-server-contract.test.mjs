@@ -87,6 +87,14 @@ test("generation rejects unsupported shapes except audited free JSON fields", as
 		() => generateServerContract(withField({}), source),
 		/unknown type/,
 	);
+	assert.throws(
+		() =>
+			generateServerContract(
+				withField({ type: "string", enum: ["sealed", "open"] }),
+				source,
+			),
+		/inline enums are not supported; use a named schema/,
+	);
 
 	const generated = generateServerContract(original, source);
 	assert.match(generated, /details: Option<serde_json::Value>/);
@@ -104,4 +112,18 @@ test("tagged operation results use exact camelCase wire fields", async () => {
 	);
 	assert.match(generated, /enum ErrorCode \{[\s\S]*InternalError/);
 	assert.doesNotMatch(generated, /INTERNALERROR/);
+});
+
+test("tagged unions reject an optional discriminator", async () => {
+	const source = await readFile(
+		new URL("../../api-contract/openapi.v1.json", import.meta.url),
+	);
+	const document = JSON.parse(source);
+	const branch = document.components.schemas.CreateItemOperationResult.oneOf[0];
+	branch.required = branch.required.filter((field) => field !== "status");
+
+	assert.throws(
+		() => generateServerContract(document, source),
+		/tagged branch 1 must require its status discriminator/,
+	);
 });
