@@ -2,6 +2,9 @@
 bittery-client-bindings = { path = "../../../client-runtime/crates/bittery-client-bindings" }
 wasm-bindgen = "=0.2.126"
 
+[package]
+license = "GPL-3.0-only"
+
 [profile.release]
 codegen-units = 1
 lto = true
