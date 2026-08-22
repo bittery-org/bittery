@@ -153,12 +153,16 @@ jobs:
       - name: Lint WASM binding
         if: matrix.binding == 'wasm'
         run: >-
-          cargo clippy --manifest-path packages/crypto/core/Cargo.toml
-          -p bittery-crypto-api --target wasm32-unknown-unknown --lib -- -D warnings
+          cargo clippy --manifest-path packages/crypto/wasm/crate/Cargo.toml
+          --target wasm32-unknown-unknown --all-targets -- -D warnings
 
       - name: Build crypto WASM
         if: matrix.binding == 'wasm'
         run: packages/crypto/core/build-wasm.sh
+
+      - name: Test combined crypto and Runtime WASM
+        if: matrix.binding == 'wasm'
+        run: pnpm --filter @bittery/crypto-wasm run test:combined
 
       - name: Build Android bindings
         if: matrix.binding == 'android'
@@ -174,7 +178,13 @@ jobs:
           set -euo pipefail
           case "${{ matrix.binding }}" in
             wasm)
-              paths=(packages/crypto/wasm/generated)
+              paths=(
+                packages/crypto/wasm/generated
+                packages/crypto/wasm/crate/Cargo.lock
+                packages/crypto/wasm/crate/Cargo.toml
+                packages/crypto/wasm/crate/src
+                packages/crypto/wasm/index.ts
+              )
               regen_cmd="pnpm run build:crypto-wasm"
               ;;
             android)
@@ -1285,10 +1295,10 @@ jobs:
           MINIO_ROOT_PASSWORD: ci-validation-only
         run: docker compose -f deploy/docker/docker-compose.yml config --quiet
 
-  # Vulnerability-database gate. This repo has four independent Cargo lockfiles
+  # Vulnerability-database gate. This repo has five independent Cargo lockfiles
   # and takes weekly automated Cargo bumps from Dependabot; without this job a
   # bump could land a crate carrying a published RustSec advisory and nothing
-  # would say so. All four lockfiles are checked against the single root
+  # would say so. All five lockfiles are checked against the single root
   # deny.toml — a gate that only covered the server would be most of the problem
   # left in place.
   #
@@ -1326,7 +1336,7 @@ jobs:
 
       # Every lockfile is checked even if an earlier one fails, so one bad bump
       # does not hide another.
-      - name: Advisories (all four lockfiles)
+      - name: Advisories (all five lockfiles)
         shell: bash
         run: |
           set -euo pipefail
@@ -1336,10 +1346,11 @@ jobs:
             apps/server/Cargo.toml \
             apps/desktop/src-tauri/Cargo.toml \
             packages/crypto/core/Cargo.toml \
-            packages/client-runtime/Cargo.toml
+            packages/client-runtime/Cargo.toml \
+            packages/crypto/wasm/crate/Cargo.toml
           do
             echo "::group::cargo deny check advisories -- $manifest"
-            # --allow advisory-not-detected: one shared deny.toml spans four
+            # --allow advisory-not-detected: one shared deny.toml spans five
             # disjoint dependency graphs, so every ignore entry belonging to a
             # different lockfile would otherwise warn on each run.
             if cargo deny --manifest-path "$manifest" --config deny.toml \

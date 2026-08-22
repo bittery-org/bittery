@@ -14,6 +14,6 @@
 		"check:generated": "pnpm run check:server-contract && pnpm run check:bindings:native && pnpm run check:bindings:web",
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
 		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs",
-		"test:bindings:web": "node --test ./scripts/web-bindings.test.mjs"
+		"test:bindings:web": "node --test ./scripts/combined-web-bindings.test.mjs"
 	}
 }

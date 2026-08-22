@@ -702,6 +702,8 @@ impl From<core::RuntimeError> for BindingError {
 
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+pub use web::WebClientRuntime;
 
 #[cfg(test)]
 mod tests {

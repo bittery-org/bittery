@@ -1,22 +1,45 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
-const bindingRoot =
-	process.env.BITTERY_WEB_BINDINGS_ROOT ??
-	resolve(scriptRoot, "../generated/web");
+const combinedRoot =
+	process.env.BITTERY_COMBINED_WEB_BINDINGS_ROOT ??
+	resolve(scriptRoot, "../../crypto/wasm/generated/wasm-bindgen");
+const standaloneRoot = resolve(scriptRoot, "../generated/web");
 
-test("Web adapter observes full snapshots and keeps request handling async", async () => {
+test("one WebAssembly module exposes crypto and the Client Runtime", async () => {
+	const productionWasm = (
+		await Promise.all(
+			[combinedRoot, standaloneRoot].map(async (root) => {
+				try {
+					return (await readdir(root))
+						.filter((name) => name.endsWith("_bg.wasm"))
+						.map((name) => resolve(root, name));
+				} catch (error) {
+					if (error?.code === "ENOENT") return [];
+					throw error;
+				}
+			}),
+		)
+	).flat();
 	const bindings = await import(
-		pathToFileURL(resolve(bindingRoot, "bittery_client_bindings.js")).href
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
 	);
-	const wasm = await readFile(
-		resolve(bindingRoot, "bittery_client_bindings_bg.wasm"),
-	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
 	await bindings.default({ module_or_path: wasm });
+
+	assert.equal(
+		typeof bindings.ubrn_uniffi_bittery_crypto_api_checksum_func_generate_uuid,
+		"function",
+	);
+	assert.equal(
+		typeof bindings.ubrn_uniffi_bittery_crypto_api_fn_func_generate_uuid,
+		"function",
+	);
+	assert.equal(typeof bindings.WebClientRuntime, "function");
 
 	const runtime = new bindings.WebClientRuntime();
 	const projections = [];
@@ -53,7 +76,6 @@ test("Web adapter observes full snapshots and keeps request handling async", asy
 		},
 	});
 
-	runtime.unobserve("runtime-status");
 	const closePromise = runtime.close();
 	assert.ok(closePromise instanceof Promise);
 	await closePromise;
@@ -73,4 +95,6 @@ test("Web adapter observes full snapshots and keeps request handling async", asy
 	await reentrantClose;
 	await reentrantRuntime.close();
 	reentrantRuntime.free();
+
+	assert.deepEqual(productionWasm, [resolve(combinedRoot, "index_bg.wasm")]);
 });

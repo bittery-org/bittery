@@ -4,7 +4,8 @@ const KOTLIN: &str = include_str!(
 const SWIFT: &str = include_str!("../../../generated/native/swift/bittery_client_bindings.swift");
 const KOTLIN_FACADE: &str = include_str!("../facades/kotlin/BitteryClientRuntime.kt");
 const SWIFT_FACADE: &str = include_str!("../facades/swift/BitteryClientRuntime.swift");
-const WEB_DECLARATIONS: &str = include_str!("../../../generated/web/bittery_client_bindings.d.ts");
+const WEB_DECLARATIONS: &str =
+    include_str!("../../../../crypto/wasm/generated/wasm-bindgen/index.d.ts");
 
 #[test]
 fn native_generated_values_keep_plaintext_behind_opaque_objects() {
