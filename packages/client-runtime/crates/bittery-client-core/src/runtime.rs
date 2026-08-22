@@ -190,6 +190,13 @@ impl Runtime {
         )
     }
 
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "the Web Runtime is confined to one Worker, while Arc preserves shared binding ownership"
+        )
+    )]
     fn with_persistence(
         persistence: Arc<dyn ReplicaPersistence>,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
