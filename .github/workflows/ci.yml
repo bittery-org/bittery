@@ -194,6 +194,7 @@ jobs:
               regen_cmd="pnpm run build:crypto-android"
               ;;
           esac
+          git add --intent-to-add -- "${paths[@]}"
           if ! git diff --exit-code -- "${paths[@]}"; then
             echo "::error::Generated crypto bindings under ${paths[*]} are out of date. Re-run \`$regen_cmd\` locally and commit the updated files."
             exit 1
@@ -1312,6 +1313,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       # cargo-deny shells out to `cargo metadata`, so a toolchain is still
       # needed even though nothing is compiled.
