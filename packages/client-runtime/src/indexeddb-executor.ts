@@ -1,63 +1,59 @@
+import type {
+	PreparedReplicaCommit,
+	ReplicaHead,
+	ReplicaPersistenceRequest,
+	ReplicaPersistenceResponse,
+	ReplicaStore,
+	StoredReplicaRow,
+} from "../generated/persistence/contract.ts";
+import {
+	validateReplicaPersistenceRequest,
+	validateReplicaPersistenceResponse,
+} from "../generated/persistence/validator.js";
+
 const DATABASE_NAME = "bittery_replica";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
+const STORE_NAMES = ["heads", "optimistic_items", "operations"] as const;
 
-type JsonObject = Record<string, unknown>;
-
-type Head = {
-	accountId: string;
-	incarnation: string;
-	revision: string;
-	failure: string | null;
-};
-
-type ReplicaItem = {
-	accountId: string;
-	itemId: string;
-	vaultId: string;
-	ciphertext: number[];
-	optimistic: boolean;
-};
-
-type Operation = {
-	operationId: string;
-	itemId: string;
-	requestBytes: number[];
-};
-
-type StoredOperation = Operation & { accountId: string };
-
-type Mutation =
-	| { type: "putOptimisticItem"; item: ReplicaItem }
-	| { type: "acceptOperation"; operation: Operation }
-	| { type: "removeOperation"; operationId: string };
-
-type CommitPlan = {
-	accountId: string;
-	expectedIncarnation: string;
-	expectedReplicaRevision: string;
-	mutations: Mutation[];
-};
-
-type Request =
-	| { type: "load"; accountId: string }
-	| { type: "commit"; plan: CommitPlan };
+type DatabaseStore = (typeof STORE_NAMES)[number];
 
 export class IndexedDbReplicaExecutor {
 	async invoke(requestJson: string): Promise<string> {
 		const request = parseRequest(requestJson);
 		const database = await openDatabase();
 		try {
-			return JSON.stringify(
+			const response =
 				request.type === "load"
 					? await load(database, request.accountId)
-					: await commit(database, request.plan),
-			);
+					: await commit(database, request.prepared);
+			if (!validateReplicaPersistenceResponse(response)) {
+				throw new Error(
+					"persistence response does not match the generated contract",
+				);
+			}
+			return JSON.stringify(response);
 		} finally {
 			database.close();
 		}
 	}
+}
+
+function parseRequest(requestJson: string): ReplicaPersistenceRequest {
+	let value: unknown;
+	try {
+		value = JSON.parse(requestJson);
+	} catch {
+		throw new Error("persistence request must be valid JSON");
+	}
+	if (!validateReplicaPersistenceRequest(value)) {
+		throw new Error(
+			"persistence request does not match the generated contract",
+		);
+	}
+	if (value.type === "commit") assertPreparedSafety(value.prepared);
+	return value;
 }
 
 async function openDatabase(): Promise<IDBDatabase> {
@@ -66,28 +62,31 @@ async function openDatabase(): Promise<IDBDatabase> {
 	}
 	const request = globalThis.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
 	request.onupgradeneeded = (event) => {
-		if (event.oldVersion !== 0) {
-			request.transaction?.abort();
-			return;
-		}
 		const database = request.result;
-		database.createObjectStore("heads", { keyPath: "accountId" });
-		const items = database.createObjectStore("optimistic_items", {
-			keyPath: ["accountId", "itemId"],
-		});
-		items.createIndex(ACCOUNT_INDEX, "accountId");
-		const operations = database.createObjectStore("operations", {
-			keyPath: ["accountId", "operationId"],
-		});
-		operations.createIndex(ACCOUNT_INDEX, "accountId");
+		if (event.oldVersion !== 0) {
+			for (const storeName of [...database.objectStoreNames]) {
+				database.deleteObjectStore(storeName);
+			}
+		}
+		createSchema(database);
 	};
 	const database = await requestResult(request);
 	assertSchema(database);
 	return database;
 }
 
+function createSchema(database: IDBDatabase): void {
+	database.createObjectStore("heads", { keyPath: "accountId" });
+	for (const storeName of ["optimistic_items", "operations"]) {
+		const store = database.createObjectStore(storeName, {
+			keyPath: ["accountId", "recordId"],
+		});
+		store.createIndex(ACCOUNT_INDEX, "accountId");
+	}
+}
+
 function assertSchema(database: IDBDatabase): void {
-	for (const storeName of ["heads", "optimistic_items", "operations"]) {
+	for (const storeName of STORE_NAMES) {
 		if (!database.objectStoreNames.contains(storeName)) {
 			database.close();
 			throw new Error(`IndexedDB schema is missing ${storeName}`);
@@ -95,55 +94,41 @@ function assertSchema(database: IDBDatabase): void {
 	}
 }
 
-async function load(database: IDBDatabase, accountId: string) {
-	const transaction = database.transaction(
-		["heads", "optimistic_items", "operations"],
-		"readonly",
-	);
+async function load(
+	database: IDBDatabase,
+	accountId: string,
+): Promise<ReplicaPersistenceResponse> {
+	assertIdentifier(accountId, "load Account");
+	const transaction = database.transaction(STORE_NAMES, "readonly");
 	const completed = transactionDone(transaction);
 	try {
-		const headRequest = transaction.objectStore("heads").get(accountId);
-		const itemsRequest = transaction
-			.objectStore("optimistic_items")
-			.index(ACCOUNT_INDEX)
-			.getAll(accountId);
-		const operationsRequest = transaction
-			.objectStore("operations")
-			.index(ACCOUNT_INDEX)
-			.getAll(accountId);
 		const [headValue, itemValues, operationValues] = await Promise.all([
-			requestResult(headRequest),
-			requestResult(itemsRequest),
-			requestResult(operationsRequest),
+			requestResult(transaction.objectStore("heads").get(accountId)),
+			requestResult(
+				transaction
+					.objectStore("optimistic_items")
+					.index(ACCOUNT_INDEX)
+					.getAll(accountId),
+			),
+			requestResult(
+				transaction
+					.objectStore("operations")
+					.index(ACCOUNT_INDEX)
+					.getAll(accountId),
+			),
 		]);
 		await completed;
-		if (headValue === undefined) {
-			return { type: "loaded", snapshot: null } as const;
-		}
-		const head = parseHead(headValue);
-		const items = itemValues.map(parseStoredItem);
-		if (head.accountId !== accountId) {
-			throw new Error("head account scope does not match its key");
-		}
-		if (items.some((item) => item.accountId !== accountId)) {
-			throw new Error("item account scope does not match its index");
-		}
-		const operations = operationValues.map((value) => {
-			const stored = parseStoredOperation(value);
-			if (stored.accountId !== accountId) {
-				throw new Error("operation account scope does not match its index");
-			}
-			const { accountId: _, ...operation } = stored;
-			return operation;
-		});
-		items.sort((left, right) => left.itemId.localeCompare(right.itemId));
-		operations.sort((left, right) =>
-			left.operationId.localeCompare(right.operationId),
-		);
-		return {
-			type: "loaded",
-			snapshot: { ...head, items, operations },
-		} as const;
+		const head =
+			headValue === undefined ? null : parseStoredHead(headValue, accountId);
+		const rows = [
+			...itemValues.map((value) =>
+				parseStoredRow(value, "optimisticItems", accountId),
+			),
+			...operationValues.map((value) =>
+				parseStoredRow(value, "operations", accountId),
+			),
+		];
+		return { type: "loaded", head, rows };
 	} catch (error) {
 		abort(transaction);
 		await completed.catch(() => undefined);
@@ -151,87 +136,55 @@ async function load(database: IDBDatabase, accountId: string) {
 	}
 }
 
-async function commit(database: IDBDatabase, plan: CommitPlan) {
-	const transaction = database.transaction(
-		["heads", "optimistic_items", "operations"],
-		"readwrite",
-	);
+async function commit(
+	database: IDBDatabase,
+	prepared: PreparedReplicaCommit,
+): Promise<ReplicaPersistenceResponse> {
+	const transaction = database.transaction(STORE_NAMES, "readwrite");
 	const completed = transactionDone(transaction);
 	try {
 		const heads = transaction.objectStore("heads");
-		const items = transaction.objectStore("optimistic_items");
-		const operations = transaction.objectStore("operations");
-		const headValue = await requestResult(heads.get(plan.accountId));
+		const headValue = await requestResult(
+			heads.get(prepared.expected.accountId),
+		);
 		if (headValue === undefined) {
 			await completed;
-			return { type: "committed", result: { type: "missing" } } as const;
+			return { type: "committed", result: { type: "missing" } };
 		}
-		const head = parseHead(headValue);
+		const head = parseStoredHead(headValue, prepared.expected.accountId);
 		if (
-			head.incarnation !== plan.expectedIncarnation ||
-			head.revision !== plan.expectedReplicaRevision
+			head.incarnation !== prepared.expected.incarnation ||
+			head.replicaRevision !== prepared.expected.replicaRevision
 		) {
 			await completed;
 			return {
 				type: "committed",
-				result: { type: "stale", actualRevision: head.revision },
-			} as const;
+				result: { type: "stale", actualRevision: head.replicaRevision },
+			};
 		}
 
-		const operationIds = new Set<string>();
-		for (const mutation of plan.mutations) {
-			if (mutation.type === "acceptOperation") {
-				operationIds.add(mutation.operation.operationId);
-			} else if (mutation.type === "removeOperation") {
-				operationIds.add(mutation.operationId);
+		for (const write of prepared.writes) {
+			if (write.type === "put") {
+				transaction.objectStore(mapStore(write.row.store)).put({
+					accountId: write.row.key.accountId,
+					recordId: write.row.key.recordId,
+					payloadJson: write.row.payloadJson,
+				});
+			} else {
+				transaction
+					.objectStore(mapStore(write.store))
+					.delete([write.key.accountId, write.key.recordId]);
 			}
 		}
-		const operationState = new Map<string, boolean>();
-		await Promise.all(
-			[...operationIds].map(async (operationId) => {
-				const value = await requestResult(
-					operations.get([plan.accountId, operationId]),
-				);
-				operationState.set(operationId, value !== undefined);
-			}),
-		);
-		for (const mutation of plan.mutations) {
-			if (mutation.type === "acceptOperation") {
-				if (operationState.get(mutation.operation.operationId)) {
-					throw new Error("operation identity was reused");
-				}
-				operationState.set(mutation.operation.operationId, true);
-			} else if (mutation.type === "removeOperation") {
-				if (!operationState.get(mutation.operationId)) {
-					throw new Error("cannot remove an unknown operation");
-				}
-				operationState.set(mutation.operationId, false);
-			}
-		}
-
-		const nextRevision = incrementRevision(head.revision);
-		for (const mutation of plan.mutations) {
-			switch (mutation.type) {
-				case "putOptimisticItem":
-					items.put(mutation.item);
-					break;
-				case "acceptOperation":
-					operations.put({
-						accountId: plan.accountId,
-						...mutation.operation,
-					} satisfies StoredOperation);
-					break;
-				case "removeOperation":
-					operations.delete([plan.accountId, mutation.operationId]);
-					break;
-			}
-		}
-		heads.put({ ...head, revision: nextRevision });
+		heads.put(prepared.nextHead);
 		await completed;
 		return {
 			type: "committed",
-			result: { type: "applied", replicaRevision: nextRevision },
-		} as const;
+			result: {
+				type: "applied",
+				replicaRevision: prepared.nextHead.replicaRevision,
+			},
+		};
 	} catch (error) {
 		abort(transaction);
 		await completed.catch(() => undefined);
@@ -239,226 +192,105 @@ async function commit(database: IDBDatabase, plan: CommitPlan) {
 	}
 }
 
-function parseRequest(requestJson: string): Request {
-	let value: unknown;
-	try {
-		value = JSON.parse(requestJson);
-	} catch {
-		throw new Error("request must be valid JSON");
-	}
-	const request = object(value, "request");
-	const type = string(request.type, "request.type");
-	if (type === "load") {
-		exactFields(request, ["type", "accountId"], "load request");
-		return { type, accountId: string(request.accountId, "accountId") };
-	}
-	if (type === "commit") {
-		exactFields(request, ["type", "plan"], "commit request");
-		return { type, plan: parsePlan(request.plan) };
-	}
-	throw new Error(`unsupported request type: ${type}`);
-}
-
-function parsePlan(value: unknown): CommitPlan {
-	const plan = object(value, "commit plan");
-	exactFields(
-		plan,
-		[
-			"accountId",
-			"expectedIncarnation",
-			"expectedReplicaRevision",
-			"mutations",
-		],
-		"commit plan",
+function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
+	const { expected, nextHead } = prepared;
+	assertIdentifier(expected.accountId, "expected Account");
+	assertIdentifier(expected.incarnation, "expected incarnation");
+	const expectedRevision = parseRevision(
+		expected.replicaRevision,
+		"expected revision",
 	);
-	const accountId = string(plan.accountId, "plan.accountId");
-	const mutationsValue = array(plan.mutations, "plan.mutations");
-	return {
-		accountId,
-		expectedIncarnation: string(
-			plan.expectedIncarnation,
-			"plan.expectedIncarnation",
-		),
-		expectedReplicaRevision: revision(
-			plan.expectedReplicaRevision,
-			"plan.expectedReplicaRevision",
-		),
-		mutations: mutationsValue.map((mutation, index) =>
-			parseMutation(mutation, accountId, index),
-		),
-	};
-}
-
-function parseMutation(
-	value: unknown,
-	accountId: string,
-	index: number,
-): Mutation {
-	const context = `mutation ${index}`;
-	const mutation = object(value, context);
-	const type = string(mutation.type, `${context}.type`);
-	if (type === "putOptimisticItem") {
-		exactFields(
-			mutation,
-			["type", "accountId", "itemId", "vaultId", "ciphertext", "optimistic"],
-			context,
-		);
-		const item = parseItem(mutation);
-		if (item.accountId !== accountId) {
-			throw new Error("item account scope does not match the guarded plan");
-		}
-		return { type, item };
-	}
-	if (type === "acceptOperation") {
-		exactFields(
-			mutation,
-			["type", "operationId", "itemId", "requestBytes"],
-			context,
-		);
-		return { type, operation: parseOperation(mutation) };
-	}
-	if (type === "removeOperation") {
-		exactFields(mutation, ["type", "operationId"], context);
-		return {
-			type,
-			operationId: string(mutation.operationId, `${context}.operationId`),
-		};
-	}
-	throw new Error(`unsupported mutation type: ${type}`);
-}
-
-function parseHead(value: unknown): Head {
-	const head = object(value, "stored head");
-	exactFields(
-		head,
-		["accountId", "incarnation", "revision", "failure"],
-		"stored head",
-	);
-	const failure = head.failure;
-	if (failure !== null && typeof failure !== "string") {
-		throw new Error("stored head.failure must be null or a string");
-	}
-	return {
-		accountId: string(head.accountId, "stored head.accountId"),
-		incarnation: string(head.incarnation, "stored head.incarnation"),
-		revision: revision(head.revision, "stored head.revision"),
-		failure,
-	};
-}
-
-function parseStoredItem(value: unknown): ReplicaItem {
-	const stored = object(value, "stored item");
-	exactFields(
-		stored,
-		["accountId", "itemId", "vaultId", "ciphertext", "optimistic"],
-		"stored item",
-	);
-	const item = parseItem(stored);
-	return item;
-}
-
-function parseItem(value: JsonObject): ReplicaItem {
-	return {
-		accountId: string(value.accountId, "item.accountId"),
-		itemId: string(value.itemId, "item.itemId"),
-		vaultId: string(value.vaultId, "item.vaultId"),
-		ciphertext: bytes(value.ciphertext, "item.ciphertext"),
-		optimistic: boolean(value.optimistic, "item.optimistic"),
-	};
-}
-
-function parseStoredOperation(value: unknown): StoredOperation {
-	const stored = object(value, "stored operation");
-	exactFields(
-		stored,
-		["accountId", "operationId", "itemId", "requestBytes"],
-		"stored operation",
-	);
-	return {
-		accountId: string(stored.accountId, "stored operation.accountId"),
-		...parseOperation(stored),
-	};
-}
-
-function parseOperation(value: JsonObject): Operation {
-	return {
-		operationId: string(value.operationId, "operation.operationId"),
-		itemId: string(value.itemId, "operation.itemId"),
-		requestBytes: bytes(value.requestBytes, "operation.requestBytes"),
-	};
-}
-
-function object(value: unknown, context: string): JsonObject {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new Error(`${context} must be an object`);
-	}
-	return value as JsonObject;
-}
-
-function array(value: unknown, context: string): unknown[] {
-	if (!Array.isArray(value)) {
-		throw new Error(`${context} must be an array`);
-	}
-	return value;
-}
-
-function string(value: unknown, context: string): string {
-	if (typeof value !== "string") {
-		throw new Error(`${context} must be a string`);
-	}
-	return value;
-}
-
-function boolean(value: unknown, context: string): boolean {
-	if (typeof value !== "boolean") {
-		throw new Error(`${context} must be a boolean`);
-	}
-	return value;
-}
-
-function bytes(value: unknown, context: string): number[] {
-	const values = array(value, context);
 	if (
-		!values.every(
-			(byte) =>
-				typeof byte === "number" &&
-				Number.isInteger(byte) &&
-				byte >= 0 &&
-				byte <= 255,
-		)
+		nextHead.accountId !== expected.accountId ||
+		nextHead.incarnation !== expected.incarnation
 	) {
-		throw new Error(`${context} must contain only bytes`);
+		throw new Error(
+			"next head does not preserve the expected Account and incarnation",
+		);
 	}
-	return values as number[];
-}
-
-function revision(value: unknown, context: string): string {
-	const decimal = string(value, context);
-	if (!/^(0|[1-9][0-9]*)$/.test(decimal) || BigInt(decimal) > MAX_U64) {
-		throw new Error(`${context} must be a uint64 decimal string`);
+	if (expectedRevision === MAX_U64)
+		throw new Error("Replica revision overflow");
+	if (nextHead.replicaRevision !== (expectedRevision + 1n).toString()) {
+		throw new Error("next head revision must be the exact successor");
 	}
-	return decimal;
-}
-
-function incrementRevision(value: string): string {
-	const current = BigInt(revision(value, "replica revision"));
-	if (current === MAX_U64) {
-		throw new Error("replica revision overflow");
-	}
-	return (current + 1n).toString();
-}
-
-function exactFields(
-	value: JsonObject,
-	allowed: readonly string[],
-	context: string,
-): void {
-	const allowedFields = new Set(allowed);
-	for (const key of Object.keys(value)) {
-		if (!allowedFields.has(key)) {
-			throw new Error(`${context} has unexpected field: ${key}`);
+	for (const write of prepared.writes) {
+		const key = write.type === "put" ? write.row.key : write.key;
+		if (key.accountId !== expected.accountId) {
+			throw new Error(
+				"prepared row Account scope does not match the expected head",
+			);
 		}
+		assertIdentifier(key.recordId, "prepared row key");
 	}
+}
+
+function parseStoredHead(value: unknown, accountId: string): ReplicaHead {
+	const candidate: ReplicaPersistenceResponse = {
+		type: "loaded",
+		head: value as ReplicaHead,
+		rows: [],
+	};
+	if (
+		!validateReplicaPersistenceResponse(candidate) ||
+		candidate.type !== "loaded" ||
+		!candidate.head
+	) {
+		throw new Error("stored head does not match the generated contract");
+	}
+	if (candidate.head.accountId !== accountId) {
+		throw new Error("stored head Account scope does not match its key");
+	}
+	assertIdentifier(candidate.head.accountId, "stored head Account");
+	assertIdentifier(candidate.head.incarnation, "stored head incarnation");
+	parseRevision(candidate.head.replicaRevision, "stored head revision");
+	return candidate.head;
+}
+
+function parseStoredRow(
+	value: unknown,
+	store: ReplicaStore,
+	accountId: string,
+): StoredReplicaRow {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error("stored Replica row must be an object");
+	}
+	const record = value as Record<string, unknown>;
+	if (
+		Object.keys(record).length !== 3 ||
+		typeof record.accountId !== "string" ||
+		typeof record.recordId !== "string" ||
+		typeof record.payloadJson !== "string"
+	) {
+		throw new Error("stored Replica row has an invalid primitive shape");
+	}
+	if (record.accountId !== accountId) {
+		throw new Error(
+			"stored Replica row Account scope does not match its index",
+		);
+	}
+	assertIdentifier(record.recordId, "stored Replica row key");
+	return {
+		store,
+		key: { accountId: record.accountId, recordId: record.recordId },
+		payloadJson: record.payloadJson,
+	};
+}
+
+function mapStore(store: ReplicaStore): DatabaseStore {
+	return store === "optimisticItems" ? "optimistic_items" : "operations";
+}
+
+function assertIdentifier(value: string, context: string): void {
+	if (value.length === 0) throw new Error(`${context} must not be empty`);
+}
+
+function parseRevision(value: string, context: string): bigint {
+	if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+		throw new Error(`${context} must be a canonical uint64 decimal string`);
+	}
+	const revision = BigInt(value);
+	if (revision > MAX_U64) throw new Error(`${context} exceeds uint64`);
+	return revision;
 }
 
 function requestResult<T = unknown>(request: IDBRequest<T>): Promise<T> {
@@ -483,10 +315,7 @@ function abort(transaction: IDBTransaction): void {
 	try {
 		transaction.abort();
 	} catch (error) {
-		if (
-			!(error instanceof DOMException && error.name === "InvalidStateError")
-		) {
+		if (!(error instanceof DOMException && error.name === "InvalidStateError"))
 			throw error;
-		}
 	}
 }

@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplicaPersistenceContract",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/ReplicaPersistenceRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/ReplicaPersistenceResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "$defs": {
+    "ExpectedReplicaHead": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "replicaRevision": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnation",
+        "replicaRevision"
+      ]
+    },
+    "PlanResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "replicaRevision": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actualRevision": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "actualRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "PreparedReplicaCommit": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/ExpectedReplicaHead"
+        },
+        "nextHead": {
+          "$ref": "#/$defs/ReplicaHead"
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreparedReplicaWrite"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected",
+        "nextHead",
+        "writes"
+      ]
+    },
+    "PreparedReplicaWrite": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "row": {
+              "$ref": "#/$defs/StoredReplicaRow"
+            },
+            "type": {
+              "type": "string",
+              "const": "put"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "row"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/ReplicaRowKey"
+            },
+            "store": {
+              "$ref": "#/$defs/ReplicaStore"
+            },
+            "type": {
+              "type": "string",
+              "const": "delete"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "store",
+            "key"
+          ]
+        }
+      ]
+    },
+    "ReplicaHead": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "failure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "replicaRevision": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnation",
+        "replicaRevision",
+        "failure"
+      ]
+    },
+    "ReplicaPersistenceRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "load"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prepared": {
+              "$ref": "#/$defs/PreparedReplicaCommit"
+            },
+            "type": {
+              "type": "string",
+              "const": "commit"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "prepared"
+          ]
+        }
+      ]
+    },
+    "ReplicaPersistenceResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "head": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReplicaHead"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/StoredReplicaRow"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "loaded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "head",
+            "rows"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/PlanResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "committed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        }
+      ]
+    },
+    "ReplicaRowKey": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "recordId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "recordId"
+      ]
+    },
+    "ReplicaStore": {
+      "type": "string",
+      "enum": [
+        "optimisticItems",
+        "operations"
+      ]
+    },
+    "StoredReplicaRow": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ReplicaRowKey"
+        },
+        "payloadJson": {
+          "type": "string"
+        },
+        "store": {
+          "$ref": "#/$defs/ReplicaStore"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "store",
+        "key",
+        "payloadJson"
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:persistence"
+}

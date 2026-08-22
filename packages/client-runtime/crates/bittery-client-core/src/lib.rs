@@ -20,6 +20,9 @@ pub use protocol::{
     RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
     RuntimeResponse, RuntimeStatusProjection,
 };
+#[cfg(feature = "persistence-contract-schema")]
+#[doc(hidden)]
+pub use replica::persistence_contract_schema;
 #[doc(hidden)]
 pub use replica::SerializedReplicaExecutor;
 pub use runtime::{ObservationHandle, Runtime};

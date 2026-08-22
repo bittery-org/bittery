@@ -47,7 +47,7 @@ impl StaleOnceExecutor {
 impl SerializedReplicaExecutor for StaleOnceExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
         let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
-        if let ReplicaPersistenceRequest::Commit { plan } = &request {
+        if let ReplicaPersistenceRequest::Commit { prepared } = &request {
             self.requested_commits.fetch_add(1, Ordering::SeqCst);
             if let Ok(previous) =
                 self.remaining_races
@@ -59,9 +59,9 @@ impl SerializedReplicaExecutor for StaleOnceExecutor {
                 let operation_id = format!("competing-operation-{race_number}");
                 let item_id = format!("competing-item-{race_number}");
                 self.state.execute(GuardedCommitPlan::new(
-                    plan.account_id.clone(),
-                    plan.expected_incarnation.clone(),
-                    plan.expected_replica_revision,
+                    prepared.expected.account_id.clone(),
+                    prepared.expected.incarnation.clone(),
+                    prepared.expected.replica_revision,
                     vec![
                         PlanMutation::AcceptOperation(OperationRecord {
                             operation_id,
@@ -69,7 +69,7 @@ impl SerializedReplicaExecutor for StaleOnceExecutor {
                             request_bytes: b"competing-sealed-request".to_vec(),
                         }),
                         PlanMutation::PutOptimisticItem(ReplicaItemRecord {
-                            account_id: plan.account_id.clone(),
+                            account_id: prepared.expected.account_id.clone(),
                             item_id,
                             vault_id: "vault-1".into(),
                             ciphertext: b"competing-sealed-item".to_vec(),
@@ -114,9 +114,9 @@ impl RemoveOnCommitExecutor {
 impl SerializedReplicaExecutor for RemoveOnCommitExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
         let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
-        if let ReplicaPersistenceRequest::Commit { plan } = &request {
+        if let ReplicaPersistenceRequest::Commit { prepared } = &request {
             if self.remove_on_commit.swap(false, Ordering::SeqCst) {
-                self.state.remove(&plan.account_id);
+                self.state.remove(&prepared.expected.account_id);
             }
         }
         serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {

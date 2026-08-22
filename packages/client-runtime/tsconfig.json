@@ -1,5 +1,5 @@
 {
 	"extends": "@bittery/config/tsconfig.base.json",
-	"include": ["src/**/*"],
+	"include": ["src/**/*", "generated/**/*.ts"],
 	"exclude": ["node_modules"]
 }

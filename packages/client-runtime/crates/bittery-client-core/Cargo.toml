@@ -5,10 +5,20 @@ edition.workspace = true
 license.workspace = true
 description = "Shared Bittery client Runtime and Replica policy"
 
+[features]
+default = []
+persistence-contract-schema = ["dep:schemars"]
+
 [dependencies]
 async-trait.workspace = true
 bittery-crypto-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars = { version = "=1.2.2", optional = true }
 thiserror.workspace = true
 tokio.workspace = true
+
+[[bin]]
+name = "generate-persistence-contract-schema"
+path = "src/bin/generate_persistence_contract_schema.rs"
+required-features = ["persistence-contract-schema"]

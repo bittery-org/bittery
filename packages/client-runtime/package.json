@@ -14,9 +14,11 @@
 		"check:bindings:native": "./scripts/check-native-bindings.sh",
 		"check:bindings:web": "./scripts/check-web-bindings.sh",
 		"generate:server-contract": "node ./scripts/generate-server-contract.mjs",
+		"generate:persistence-contract": "node ./scripts/generate-persistence-contract.mjs",
 		"check:server-contract": "node ./scripts/generate-server-contract.mjs --check",
+		"check:persistence-contract": "node ./scripts/generate-persistence-contract.mjs --check",
 		"check:rust": "cargo fmt --all --check --manifest-path ./Cargo.toml && cargo clippy --manifest-path ./Cargo.toml --workspace --all-targets -- -D warnings && cargo test --manifest-path ./Cargo.toml --workspace",
-		"check:generated": "pnpm run check:server-contract && pnpm run check:bindings:native && pnpm run check:bindings:web",
+		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:bindings:native && pnpm run check:bindings:web",
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
 		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs",
 		"test:bindings:web": "node --test ./scripts/combined-web-bindings.test.mjs",
@@ -25,7 +27,9 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
-		"fake-indexeddb": "6.2.4"
+		"ajv": "8.17.1",
+		"fake-indexeddb": "6.2.4",
+		"json-schema-to-typescript": "15.0.4"
 	},
 	"peerDependencies": {
 		"typescript": "^5"

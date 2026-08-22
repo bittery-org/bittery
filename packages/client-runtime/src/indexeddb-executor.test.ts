@@ -1,17 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IDBFactory } from "fake-indexeddb";
+import type {
+	PreparedReplicaCommit,
+	PreparedReplicaWrite,
+	ReplicaHead,
+} from "../generated/persistence/contract.ts";
+import { validateReplicaPersistenceResponse } from "../generated/persistence/validator.js";
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 1;
-
-type Head = {
-	accountId: string;
-	incarnation: string;
-	revision: string;
-	failure: string | null;
-};
-
+const DB_VERSION = 2;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
@@ -30,17 +28,21 @@ function executor(): IndexedDbReplicaExecutor {
 	return new IndexedDbReplicaExecutor();
 }
 
-async function invoke(value: unknown, target = executor()): Promise<unknown> {
+async function invoke(value: unknown, target = executor()): Promise<any> {
 	return JSON.parse(await target.invoke(JSON.stringify(value)));
 }
 
-async function seedHead(head: Head): Promise<void> {
-	await invoke({ type: "load", accountId: head.accountId });
-	const database = await new Promise<IDBDatabase>((resolve, reject) => {
+async function openRawDatabase(): Promise<IDBDatabase> {
+	await invoke({ type: "load", accountId: "schema-bootstrap" });
+	return new Promise((resolve, reject) => {
 		const request = indexedDB.open(DB_NAME, DB_VERSION);
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => resolve(request.result);
 	});
+}
+
+async function seedHead(head: ReplicaHead): Promise<void> {
+	const database = await openRawDatabase();
 	const transaction = database.transaction("heads", "readwrite");
 	transaction.objectStore("heads").put(head);
 	await transactionDone(transaction);
@@ -48,27 +50,15 @@ async function seedHead(head: Head): Promise<void> {
 }
 
 async function rawDatabaseContents(): Promise<unknown[]> {
-	const database = await new Promise<IDBDatabase>((resolve, reject) => {
-		const request = indexedDB.open(DB_NAME, DB_VERSION);
-		request.onerror = () => reject(request.error);
-		request.onsuccess = () => resolve(request.result);
-	});
+	const database = await openRawDatabase();
 	const transaction = database.transaction(
 		["heads", "optimistic_items", "operations"],
 		"readonly",
 	);
-	const stores = ["heads", "optimistic_items", "operations"].map((storeName) =>
-		transaction.objectStore(storeName).getAll(),
+	const requests = ["heads", "optimistic_items", "operations"].map(
+		(storeName) => transaction.objectStore(storeName).getAll(),
 	);
-	const values = await Promise.all(
-		stores.map(
-			(request) =>
-				new Promise<unknown[]>((resolve, reject) => {
-					request.onsuccess = () => resolve(request.result);
-					request.onerror = () => reject(request.error);
-				}),
-		),
-	);
+	const values = await Promise.all(requests.map(requestResult));
 	await transactionDone(transaction);
 	database.close();
 	return values.flat();
@@ -82,247 +72,223 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 	});
 }
 
-const item = {
-	accountId: "account-a",
-	itemId: "item-a",
-	vaultId: "vault-a",
-	ciphertext: [1, 2, 255],
-	optimistic: true,
-};
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+	return new Promise((resolve, reject) => {
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
 
-const operation = {
-	operationId: "operation-a",
-	itemId: "item-a",
-	requestBytes: [4, 5, 6],
-};
-
-function commit(mutations: unknown[], overrides: Record<string, unknown> = {}) {
+function put(
+	store: "optimisticItems" | "operations",
+	recordId: string,
+	payloadJson: string,
+	accountId = "account-a",
+): PreparedReplicaWrite {
 	return {
-		type: "commit",
-		plan: {
-			accountId: "account-a",
-			expectedIncarnation: "incarnation-a",
-			expectedReplicaRevision: "0",
-			mutations,
-			...overrides,
-		},
+		type: "put",
+		row: { store, key: { accountId, recordId }, payloadJson },
 	};
+}
+
+function prepared(
+	writes: PreparedReplicaWrite[],
+	expectedRevision = "0",
+	nextRevision = (BigInt(expectedRevision) + 1n).toString(),
+): PreparedReplicaCommit {
+	return {
+		expected: {
+			accountId: "account-a",
+			incarnation: "incarnation-a",
+			replicaRevision: expectedRevision,
+		},
+		nextHead: {
+			accountId: "account-a",
+			incarnation: "incarnation-a",
+			replicaRevision: nextRevision,
+			failure: null,
+		},
+		writes,
+	};
+}
+
+function commit(value: PreparedReplicaCommit) {
+	return { type: "commit", prepared: value } as const;
 }
 
 describe("IndexedDbReplicaExecutor", () => {
 	test("loads and commits a missing account without creating it", async () => {
 		expect(await invoke({ type: "load", accountId: "missing" })).toEqual({
 			type: "loaded",
-			snapshot: null,
+			head: null,
+			rows: [],
 		});
-		expect(await invoke(commit([]))).toEqual({
+		expect(await invoke(commit(prepared([])))).toEqual({
 			type: "committed",
 			result: { type: "missing" },
 		});
 	});
 
-	test("returns stale without applying mutations", async () => {
+	test("rejects the former domain plan and unknown wire fields", async () => {
+		await expect(
+			invoke({ type: "commit", plan: { mutations: [] } }),
+		).rejects.toThrow(
+			"persistence request does not match the generated contract",
+		);
+		await expect(
+			invoke({ type: "load", accountId: "account-a", extra: true }),
+		).rejects.toThrow(
+			"persistence request does not match the generated contract",
+		);
+	});
+
+	test("generated response validation requires explicit nullable fields", () => {
+		expect(
+			validateReplicaPersistenceResponse({ type: "loaded", rows: [] }),
+		).toBeFalse();
+		expect(
+			validateReplicaPersistenceResponse({
+				type: "loaded",
+				head: {
+					accountId: "account-a",
+					incarnation: "incarnation-a",
+					replicaRevision: "0",
+				},
+				rows: [],
+			}),
+		).toBeFalse();
+	});
+
+	test("returns stale without applying prepared writes", async () => {
 		await seedHead({
 			accountId: "account-a",
 			incarnation: "incarnation-a",
-			revision: "4",
+			replicaRevision: "4",
 			failure: null,
 		});
-
 		expect(
-			await invoke(commit([{ type: "putOptimisticItem", ...item }])),
+			await invoke(commit(prepared([put("operations", "loser", "opaque")]))),
 		).toEqual({
 			type: "committed",
 			result: { type: "stale", actualRevision: "4" },
 		});
-		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual({
-			type: "loaded",
-			snapshot: {
-				accountId: "account-a",
-				incarnation: "incarnation-a",
-				revision: "4",
-				items: [],
-				operations: [],
-				failure: null,
-			},
-		});
+		expect(await rawDatabaseContents()).not.toContainEqual(
+			expect.objectContaining({ recordId: "loser" }),
+		);
 	});
 
-	test("atomically applies the current tagged mutations and advances exactly once", async () => {
+	test("stores and loads opaque rows without parsing their payload", async () => {
 		await seedHead({
 			accountId: "account-a",
 			incarnation: "incarnation-a",
-			revision: "0",
+			replicaRevision: "0",
 			failure: null,
 		});
-
-		expect(
-			await invoke(
-				commit([
-					{ type: "putOptimisticItem", ...item },
-					{ type: "acceptOperation", ...operation },
-				]),
-			),
-		).toEqual({
+		const writes = [
+			put("optimisticItems", "item-a", "not-json"),
+			put("operations", "operation-a", '{"sealed":[4,5,6]}'),
+		];
+		expect(await invoke(commit(prepared(writes)))).toEqual({
 			type: "committed",
 			result: { type: "applied", replicaRevision: "1" },
 		});
 		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual({
 			type: "loaded",
-			snapshot: {
+			head: {
 				accountId: "account-a",
 				incarnation: "incarnation-a",
-				revision: "1",
-				items: [item],
-				operations: [operation],
+				replicaRevision: "1",
 				failure: null,
 			},
+			rows: writes.map((write) => (write.type === "put" ? write.row : write)),
 		});
-	});
-
-	test("rolls back a valid first mutation when the second is invalid", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-
-		await expect(
-			invoke(
-				commit([
-					{ type: "putOptimisticItem", ...item },
-					{ type: "putOptimisticItem", ...item, accountId: "account-b" },
-				]),
-			),
-		).rejects.toThrow("account scope");
-		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual({
-			type: "loaded",
-			snapshot: {
-				accountId: "account-a",
-				incarnation: "incarnation-a",
-				revision: "0",
-				items: [],
-				operations: [],
-				failure: null,
-			},
-		});
-	});
-
-	test("keeps records scoped to their account", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-		await seedHead({
-			accountId: "account-b",
-			incarnation: "incarnation-b",
-			revision: "0",
-			failure: null,
-		});
-		await invoke(commit([{ type: "putOptimisticItem", ...item }]));
-
-		expect(await invoke({ type: "load", accountId: "account-b" })).toEqual({
-			type: "loaded",
-			snapshot: {
-				accountId: "account-b",
-				incarnation: "incarnation-b",
-				revision: "0",
-				items: [],
-				operations: [],
-				failure: null,
-			},
-		});
-	});
-
-	test("rejects duplicate operations without changing the replica", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-		await invoke(commit([{ type: "acceptOperation", ...operation }]));
-
-		await expect(
-			invoke(
-				commit([{ type: "acceptOperation", ...operation }], {
-					expectedReplicaRevision: "1",
-				}),
-			),
-		).rejects.toThrow("operation identity was reused");
 		expect(
-			(await invoke({ type: "load", accountId: "account-a" })) as object,
+			await invoke(
+				commit(
+					prepared(
+						[
+							{
+								type: "delete",
+								store: "operations",
+								key: { accountId: "account-a", recordId: "operation-a" },
+							},
+						],
+						"1",
+					),
+				),
+			),
+		).toMatchObject({ result: { type: "applied", replicaRevision: "2" } });
+		expect(
+			(await invoke({ type: "load", accountId: "account-a" })).rows,
+		).toEqual([writes[0]?.type === "put" ? writes[0].row : writes[0]]);
+	});
+
+	test("rejects an unsafe primitive batch before writing any row", async () => {
+		await seedHead({
+			accountId: "account-a",
+			incarnation: "incarnation-a",
+			replicaRevision: "0",
+			failure: null,
+		});
+		await expect(
+			invoke(
+				commit(
+					prepared([
+						put("operations", "first", "opaque"),
+						put("operations", "cross-account", "opaque", "account-b"),
+					]),
+				),
+			),
+		).rejects.toThrow("Account scope");
+		expect(await rawDatabaseContents()).not.toContainEqual(
+			expect.objectContaining({ recordId: expect.any(String) }),
+		);
+	});
+
+	test("two executors race through CAS without mixing loser writes", async () => {
+		await seedHead({
+			accountId: "account-a",
+			incarnation: "incarnation-a",
+			replicaRevision: "0",
+			failure: null,
+		});
+		const results = await Promise.all([
+			invoke(
+				commit(prepared([put("operations", "left", "left-payload")])),
+				executor(),
+			),
+			invoke(
+				commit(prepared([put("operations", "right", "right-payload")])),
+				executor(),
+			),
+		]);
+		expect(results.map((result) => result.result.type).sort()).toEqual([
+			"applied",
+			"stale",
+		]);
+		const loaded = await invoke({ type: "load", accountId: "account-a" });
+		expect(loaded.head.replicaRevision).toBe("1");
+		expect(loaded.rows).toHaveLength(1);
+		expect(["left", "right"]).toContain(loaded.rows[0].key.recordId);
+		expect(loaded.rows[0].payloadJson).toBe(
+			`${loaded.rows[0].key.recordId}-payload`,
+		);
+	});
+
+	test("preserves uint64 precision and rejects a non-successor head", async () => {
+		await seedHead({
+			accountId: "account-a",
+			incarnation: "incarnation-a",
+			replicaRevision: "9007199254740993",
+			failure: null,
+		});
+		expect(
+			await invoke(commit(prepared([], "9007199254740993"))),
 		).toMatchObject({
-			snapshot: { revision: "1", operations: [operation] },
+			result: { replicaRevision: "9007199254740994" },
 		});
-	});
-
-	test("rejects removing an unknown operation without changing the replica", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-
 		await expect(
-			invoke(commit([{ type: "removeOperation", operationId: "unknown" }])),
-		).rejects.toThrow("cannot remove an unknown operation");
-		expect(
-			(await invoke({ type: "load", accountId: "account-a" })) as object,
-		).toMatchObject({ snapshot: { revision: "0", operations: [] } });
-	});
-
-	test("persists records when a new executor reopens the database", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-		await invoke(commit([{ type: "putOptimisticItem", ...item }]));
-
-		expect(
-			await invoke({ type: "load", accountId: "account-a" }, executor()),
-		).toMatchObject({ snapshot: { revision: "1", items: [item] } });
-	});
-
-	test("preserves uint64 decimal precision", async () => {
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "9007199254740993",
-			failure: null,
-		});
-
-		expect(
-			await invoke(commit([], { expectedReplicaRevision: "9007199254740993" })),
-		).toEqual({
-			type: "committed",
-			result: { type: "applied", replicaRevision: "9007199254740994" },
-		});
-	});
-
-	test("rejects non-contract plaintext fields without persisting their marker", async () => {
-		const marker = "PLAINTEXT_MUST_NOT_REACH_INDEXEDDB";
-		await seedHead({
-			accountId: "account-a",
-			incarnation: "incarnation-a",
-			revision: "0",
-			failure: null,
-		});
-
-		await expect(
-			invoke(
-				commit([{ type: "putOptimisticItem", ...item, plaintext: marker }]),
-			),
-		).rejects.toThrow("unexpected field");
-		expect(
-			JSON.stringify(await invoke({ type: "load", accountId: "account-a" })),
-		).not.toContain(marker);
-		expect(JSON.stringify(await rawDatabaseContents())).not.toContain(marker);
+			invoke(commit(prepared([], "9007199254740994", "9007199254740996"))),
+		).rejects.toThrow("successor");
 	});
 });
