@@ -1,5 +1,6 @@
 import { ApiError, isApiErrorStatus } from "@bittery/api-contract";
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import { SemanticOperationRejected } from "@bittery/sync";
 import type { ItemSyncAcknowledgement, ItemSyncCommand } from "@bittery/types";
 import type { DefaultApiClient } from "./account-resolver";
 import type { DecryptedAttachmentParts } from "./attachment-crypto";
@@ -328,7 +329,7 @@ export class CrossAccountItemCommandExecutor {
 					operationId,
 				);
 			else {
-				await targetClient.items.create(
+				const { data: outcome } = await targetClient.items.create(
 					targetVaultId,
 					targetItemId,
 					{
@@ -339,6 +340,9 @@ export class CrossAccountItemCommandExecutor {
 					},
 					{ idempotencyKey: `${operationId}:create-target` },
 				);
+				if (outcome.result.status === "rejected") {
+					throw new SemanticOperationRejected(outcome.result.code);
+				}
 			}
 
 			if (migration) {

@@ -58,6 +58,16 @@ function targetItem(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function appliedCreateOutcome() {
+	return {
+		data: {
+			operationId: "move-1:create-target",
+			kind: "create_item",
+			result: { status: "applied", itemId: "item-target", version: 1 },
+		},
+	};
+}
+
 function executor(clients: Record<string, unknown>) {
 	return new CrossAccountItemCommandExecutor({
 		crypto: { destroyKey: async () => undefined } as never,
@@ -80,7 +90,10 @@ describe("CrossAccountItemCommandExecutor", () => {
 						_i: string,
 						_p: unknown,
 						options: { idempotencyKey?: string },
-					) => phases.push(["create", options.idempotencyKey]),
+					) => {
+						phases.push(["create", options.idempotencyKey]);
+						return appliedCreateOutcome();
+					},
 				},
 				attachments: { list: async () => ({ data: [] }) },
 			},
@@ -142,6 +155,61 @@ describe("CrossAccountItemCommandExecutor", () => {
 		);
 		await service.executeSemanticItemCommand(command());
 		expect({ creates, deleted }).toEqual({ creates: 1, deleted: true });
+	});
+
+	test("keeps the source and attachments when target create is semantically rejected", async () => {
+		const sideEffects: string[] = [];
+		const service = executor({
+			[TARGET]: {
+				items: {
+					get: async () => {
+						throw notFound();
+					},
+					create: async () => ({
+						data: {
+							operationId: "move-1:create-target",
+							kind: "create_item",
+							result: {
+								status: "rejected",
+								code: "vault_read_only",
+							},
+						},
+					}),
+				},
+				attachments: {
+					list: async () => {
+						sideEffects.push("target-attachments");
+						return { data: [] };
+					},
+				},
+			},
+			[SOURCE]: {
+				items: {
+					get: async () => ({ data: { version: 1, deletedAt: null } }),
+					trash: async () => {
+						sideEffects.push("trash-source");
+					},
+					deletePermanently: async () => {
+						sideEffects.push("delete-source");
+					},
+				},
+				attachments: {
+					list: async () => ({ data: [{ id: "attachment-1" }] }),
+					createDownloadUrl: async () => {
+						sideEffects.push("download-attachment");
+						return { data: { downloadUrl: "https://example.invalid" } };
+					},
+				},
+			},
+		});
+
+		await expect(
+			service.executeSemanticItemCommand(command()),
+		).rejects.toMatchObject({
+			name: "SemanticOperationRejected",
+			code: "vault_read_only",
+		});
+		expect(sideEffects).toEqual([]);
 	});
 
 	test("rejects a changed source before creating the target", async () => {

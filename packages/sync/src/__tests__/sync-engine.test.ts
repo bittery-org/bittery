@@ -8,6 +8,7 @@ import {
 	OutboundQueue,
 	type OutboundQueueApiClient,
 	type PendingMutation,
+	SemanticOperationRejected,
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { type SyncApiClient, SyncOrchestrator } from "../sync-orchestrator";
@@ -1426,6 +1427,35 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(restarted.getPendingCount()).toBe(0);
 	});
 
+	test("treats a semantic executor rejection as terminal", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			executeSemanticCommand: async () => {
+				throw new SemanticOperationRejected("vault_read_only");
+			},
+			acknowledge: async () => undefined,
+		});
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "move-mutation",
+				operationId: "move-operation",
+				type: "cross_account_move",
+				targetAccountId: "account_b",
+				targetVaultId: "vault_b",
+				targetItemId: "item_b",
+			}),
+		);
+
+		await queue.drain(() => outboundApiClient());
+		await queue.drain(() => outboundApiClient());
+
+		expect(queue.getCommands("account_a")[0]).toMatchObject({
+			operationId: "move-operation",
+			status: "failed",
+			retryCount: 0,
+		});
+	});
+
 	test("enqueue resolves only after the command is durably persisted", async () => {
 		const storage = new GatedStorage();
 		const queue = new OutboundQueue(storage, "self_client");
@@ -2378,6 +2408,8 @@ describe("outbound queue multi-account drain isolation", () => {
 		queue.enqueue({
 			accountId: "account_a",
 			id: "mutation_create",
+			operationId: "operation_create",
+			attemptId: "attempt_create",
 			type: "create",
 			entityId: "item_new",
 			vaultId: "vault_1",
@@ -2425,7 +2457,7 @@ describe("outbound queue multi-account drain isolation", () => {
 		);
 
 		expect(sentOptions.get("create")).toEqual({
-			idempotencyKey: "mutation_create",
+			idempotencyKey: "operation_create",
 		});
 		expect(sentOptions.get("update")).toEqual({
 			etag: '"7"',
@@ -2497,8 +2529,9 @@ describe("outbound queue multi-account drain isolation", () => {
 		});
 		await queue.enqueue({
 			accountId: "account_a",
-			id: "operation_applied_create",
+			id: "mutation_applied_create",
 			operationId: "operation_applied_create",
+			attemptId: "attempt_applied_create",
 			type: "create",
 			entityId: "item_applied",
 			vaultId: "vault_1",

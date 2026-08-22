@@ -35,7 +35,7 @@ type CreateItemSemanticRejection = Extract<
 	{ status: "rejected" }
 >;
 
-class SemanticOperationRejected extends Error {
+export class SemanticOperationRejected extends Error {
 	constructor(readonly code: CreateItemSemanticRejection["code"]) {
 		super(`Create Item Operation was rejected: ${code}`);
 		this.name = "SemanticOperationRejected";
@@ -850,7 +850,7 @@ export class ItemSyncEngine {
 						encryptionIv: payload.encryptionIv,
 						encryptionAlgorithm: payload.encryptionAlgorithm,
 					},
-					{ idempotencyKey: mutation.attemptId ?? mutation.id },
+					{ idempotencyKey: mutation.operationId ?? mutation.id },
 				);
 				const outcome = response.data;
 				if (outcome.result.status === "rejected") {
