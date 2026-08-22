@@ -1,7 +1,8 @@
 use crate::{
     replica::{
-        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult,
-        ReplicaItemRecord,
+        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult, Replica,
+        ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
+        SerializedReplicaPersistence,
     },
     AccountId, AccountStatus, ItemProjectionStatus, ItemsProjection, LoginItemProjection,
     ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
@@ -138,7 +139,9 @@ impl Subscription {
 }
 
 pub struct Runtime {
-    replica: Arc<InMemoryReplica>,
+    replica: Arc<Replica>,
+    #[cfg(test)]
+    test_persistence: Option<Arc<InMemoryReplica>>,
     observers: Mutex<HashMap<u64, Arc<Subscription>>>,
     next_observer_id: AtomicU64,
     device_revision: AtomicU64,
@@ -147,9 +150,51 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "WASM is single-threaded, while Arc keeps the Runtime lifetime identical across bindings"
+        )
+    )]
     pub fn new() -> Arc<Self> {
+        let in_memory = Arc::new(InMemoryReplica::default());
+        let persistence: Arc<dyn ReplicaPersistence> = in_memory.clone();
+        Self::with_persistence(
+            persistence,
+            #[cfg(test)]
+            Some(in_memory),
+        )
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "the serialized Web executor and Runtime share one single-threaded Worker"
+        )
+    )]
+    pub fn with_serialized_replica_executor(
+        executor: Arc<dyn SerializedReplicaExecutor>,
+    ) -> Arc<Self> {
+        let persistence: Arc<dyn ReplicaPersistence> =
+            Arc::new(SerializedReplicaPersistence::new(executor));
+        Self::with_persistence(
+            persistence,
+            #[cfg(test)]
+            None,
+        )
+    }
+
+    fn with_persistence(
+        persistence: Arc<dyn ReplicaPersistence>,
+        #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
-            replica: Arc::new(InMemoryReplica::default()),
+            replica: Arc::new(Replica::new(persistence)),
+            #[cfg(test)]
+            test_persistence,
             observers: Mutex::new(HashMap::new()),
             next_observer_id: AtomicU64::new(1),
             device_revision: AtomicU64::new(0),
@@ -159,7 +204,7 @@ impl Runtime {
     }
 
     #[cfg(test)]
-    pub(crate) fn replica(&self) -> Arc<InMemoryReplica> {
+    pub(crate) fn replica(&self) -> Arc<Replica> {
         Arc::clone(&self.replica)
     }
 
@@ -171,8 +216,17 @@ impl Runtime {
         incarnation: crate::protocol::Incarnation,
     ) -> Result<(), RuntimeError> {
         self.ensure_open()?;
-        self.replica
+        self.test_persistence
+            .as_ref()
+            .expect("test Account installation requires in-memory persistence")
             .install(account_id.clone(), user_id, incarnation)?;
+        self.replica.cache(
+            self.test_persistence
+                .as_ref()
+                .expect("test Account installation requires in-memory persistence")
+                .snapshot(&account_id)
+                .expect("installed Account must have a snapshot"),
+        );
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -251,20 +305,23 @@ impl Runtime {
                     ciphertext: format!("simulated-sealed:{item_id}").into_bytes(),
                     optimistic: true,
                 };
-                let result = self.replica.execute(GuardedCommitPlan::new(
-                    account_id.clone(),
-                    snapshot.incarnation,
-                    snapshot.revision,
-                    vec![
-                        PlanMutation::AcceptOperation(OperationRecord {
-                            operation_id: operation_id.clone(),
-                            item_id: item_id.clone(),
-                            request_bytes: format!("simulated-sealed-request:{item_id}")
-                                .into_bytes(),
-                        }),
-                        PlanMutation::PutOptimisticItem(sealed_item),
-                    ],
-                ))?;
+                let result = self
+                    .replica
+                    .execute(GuardedCommitPlan::new(
+                        account_id.clone(),
+                        snapshot.incarnation,
+                        snapshot.revision,
+                        vec![
+                            PlanMutation::AcceptOperation(OperationRecord {
+                                operation_id: operation_id.clone(),
+                                item_id: item_id.clone(),
+                                request_bytes: format!("simulated-sealed-request:{item_id}")
+                                    .into_bytes(),
+                            }),
+                            PlanMutation::PutOptimisticItem(sealed_item),
+                        ],
+                    ))
+                    .await?;
                 let PlanResult::Applied { replica_revision } = result else {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
@@ -296,9 +353,12 @@ impl Runtime {
     }
 
     #[cfg(test)]
-    pub(crate) fn execute_plan(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
+    pub(crate) async fn execute_plan(
+        &self,
+        plan: GuardedCommitPlan,
+    ) -> Result<PlanResult, RuntimeError> {
         self.ensure_open()?;
-        let result = self.replica.execute(plan)?;
+        let result = self.replica.execute(plan).await?;
         if matches!(result, PlanResult::Applied { .. }) {
             self.device_revision.fetch_add(1, Ordering::SeqCst);
             self.publish_all();
@@ -313,12 +373,29 @@ impl Runtime {
         code: RuntimeErrorCode,
     ) -> Result<(), RuntimeError> {
         self.ensure_open()?;
-        self.replica.fail(account_id, code)?;
+        self.test_persistence
+            .as_ref()
+            .expect("test Account failure requires in-memory persistence")
+            .fail(account_id, code)?;
+        self.replica.cache(
+            self.test_persistence
+                .as_ref()
+                .expect("test Account failure requires in-memory persistence")
+                .snapshot(account_id)
+                .expect("failed Account must have a snapshot"),
+        );
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all();
         Ok(())
     }
 
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "WASM is single-threaded, while observation ownership still shares the Runtime"
+        )
+    )]
     pub fn observe(
         self: &Arc<Self>,
         request: ObservationRequest,

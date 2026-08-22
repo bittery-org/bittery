@@ -20,4 +20,6 @@ pub use protocol::{
     RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
     RuntimeResponse, RuntimeStatusProjection,
 };
+#[doc(hidden)]
+pub use replica::SerializedReplicaExecutor;
 pub use runtime::{ObservationHandle, Runtime};

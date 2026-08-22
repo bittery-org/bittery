@@ -57,8 +57,8 @@ fn run_request(runtime: Arc<Runtime>, request: RuntimeRequest) {
         .unwrap();
 }
 
-#[test]
-fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
+#[tokio::test]
+async fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
     let (runtime, account_id, incarnation) = installed_runtime();
     let replica = runtime.replica();
 
@@ -69,6 +69,7 @@ fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
             0,
             vec![],
         ))
+        .await
         .unwrap();
     assert_eq!(missing, PlanResult::Missing);
 
@@ -79,6 +80,7 @@ fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
             4,
             vec![],
         ))
+        .await
         .unwrap();
     assert_eq!(stale, PlanResult::Stale { actual_revision: 0 });
 
@@ -93,7 +95,7 @@ fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
             },
         ],
     );
-    assert!(replica.execute(invalid).is_err());
+    assert!(replica.execute(invalid).await.is_err());
     let snapshot = replica.snapshot(&account_id).unwrap();
     assert_eq!(snapshot.revision, 0);
     assert!(snapshot.items.is_empty());
@@ -372,8 +374,8 @@ fn login_draft_and_runtime_wire_match_the_existing_camel_case_subset() {
     assert!(wire.get("account_id").is_none());
 }
 
-#[test]
-fn accepted_plan_keeps_operation_and_overlay_in_one_revision() {
+#[tokio::test]
+async fn accepted_plan_keeps_operation_and_overlay_in_one_revision() {
     let (runtime, account_id, incarnation) = installed_runtime();
     let result = runtime
         .execute_plan(GuardedCommitPlan::new(
@@ -389,6 +391,7 @@ fn accepted_plan_keeps_operation_and_overlay_in_one_revision() {
                 PlanMutation::PutOptimisticItem(optimistic_item(account_id.clone(), "item-1")),
             ],
         ))
+        .await
         .unwrap();
     assert_eq!(
         result,
