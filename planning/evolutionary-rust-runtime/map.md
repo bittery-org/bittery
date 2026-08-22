@@ -93,6 +93,9 @@ or rollout order.
 - [Runtime module and first-slice sequence](issues/14-runtime-module-and-first-slice-sequence.md): a
   deep Rust client core plus shallow generated bindings proceeds through binding, protocol, Web
   persistence, Sign-in, Bootstrap, Server outcome, offline create, and Web cutover gates.
+- [Binding compile spike](issues/15-binding-compile-spike.md): native Kotlin/Swift retain UniFFI
+  0.31.2, while Web uses a thin explicit `wasm-bindgen` adapter because UniFFI's experimental
+  single-threaded WASM async foreign callback has a concrete `Send`-future mismatch.
 
 ## Not yet specified
 

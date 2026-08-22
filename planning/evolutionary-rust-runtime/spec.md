@@ -59,7 +59,8 @@ Add a new `packages/client-runtime` Rust workspace containing:
 - `bittery-client-core`: the deep module owning Runtime protocol, Device Account catalog, per-Account
   authentication and Session, live keys, Replica, Operations, retry, Bootstrap, changes, request
   construction, outcome interpretation, and observation projections;
-- `bittery-client-bindings`: shallow UniFFI/WASM conversions and host callback wiring; and
+- `bittery-client-bindings`: shallow native UniFFI conversions plus an explicit Web `wasm-bindgen`
+  adapter and host callback wiring; and
 - generated Server wire types sourced from the checked-in OpenAPI contract.
 
 `bittery-client-core` depends directly on the unchanged `bittery-crypto-core`. It does not depend on
@@ -83,7 +84,8 @@ hosts not yet cut over. New Runtime policy is not added to them.
 
 ## External Runtime protocol
 
-The generated external object has exactly three operation families:
+The Rust-defined external object has exactly three operation families. UniFFI generates its Kotlin
+and Swift projections; the thin Web `wasm-bindgen` adapter projects the same closed types:
 
 ```text
 request(RuntimeRequest) async -> RuntimeResponse
@@ -368,7 +370,7 @@ then removed rather than kept behind a compatibility facade.
 
 ### Binding gate
 
-A throwaway compile spike must prove, with the pinned toolchain:
+A completed throwaway compile spike proved, with the pinned toolchain:
 
 - data-carrying closed request/response/projection variants;
 - async Rust-to-host primitive callbacks;
@@ -377,8 +379,12 @@ A throwaway compile spike must prove, with the pinned toolchain:
 - one WebAssembly artifact containing Runtime API and existing crypto implementation; and
 - headless native Runtime creation without Activity or SwiftUI-scene ownership.
 
-The spike records its verdict and is removed before production implementation continues. Failure
-reopens only the binding mechanism.
+The spike source and artifacts were removed after its verdict was recorded in ticket 15. Native
+Kotlin/Swift use UniFFI 0.31.2. Web uses a thin explicit `wasm-bindgen` adapter because the pinned
+UniFFI experimental single-threaded WASM backend generated an async foreign-callback future with an
+incompatible `Send` requirement. This binding-only difference does not change Runtime ownership or
+protocol semantics. Android and Apple production link tests remain required because their language
+toolchains were unavailable on the spike machine.
 
 ### Shared Replica conformance
 

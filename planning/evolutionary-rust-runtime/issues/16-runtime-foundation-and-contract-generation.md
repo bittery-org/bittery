@@ -1,7 +1,7 @@
 # Runtime foundation and contract generation
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 15
 Spec: ../spec.md#module-boundary
 
@@ -12,8 +12,8 @@ in-memory conformance model without authentication or network behavior.
 
 ## Work
 
-- Add `bittery-client-core` and shallow `bittery-client-bindings` crates with the decided dependency
-  direction into unchanged `bittery-crypto-core`.
+- Add `bittery-client-core`, shallow native UniFFI bindings, and a thin explicit Web `wasm-bindgen`
+  adapter with the decided dependency direction into unchanged `bittery-crypto-core`.
 - Define the first closed request, response, observation, error, and guarded-plan families in Rust.
 - Add deterministic OpenAPI-to-Rust generation for the first-slice Server allowlist and drift checks.
 - Implement process-wide Runtime and isolated in-memory per-Account modules, observation revisions,
