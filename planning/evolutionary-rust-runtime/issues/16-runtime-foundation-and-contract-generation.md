@@ -46,16 +46,19 @@ tests prove requests, projections, and binding Debug output do not reveal creden
 plaintext.
 
 The in-memory conformance implementation provides one process-wide Runtime, isolated per-Account
-state/failure, atomic guarded plans, explicit `Missing` and `Stale` results, durable Operation
-acceptance independent of caller cancellation, monotonic full projections, late-callback
-suppression, and idempotent observation/Runtime close. Sign-in intentionally returns
+state/failure, atomic guarded plans, explicit `Missing` and `Stale` results, and Operation acceptance
+independent of caller cancellation. Cancellation after acceptance returns typed `Cancelled` to stop
+the caller wait while the Operation remains. Per-observation delivery serializes strictly increasing
+full projections; close waits for foreign-thread delivery, permits reentrant self-close, and
+suppresses later callbacks. Sign-in intentionally returns
 `AuthenticationUnavailable`; storage, transport, authentication, and real sealing remain later
 vertical slices.
 
-Native records/enums are foreign-wire projections rather than a second behavioral model. Each enum
-conversion exhaustively matches all variants and every record conversion destructures all fields
-without `..`, so Core additions fail the binding build until the wire projection is reconciled. Web
-uses the Core Serde types directly and owns only JavaScript callback buffering. Generated Kotlin and
+Native values/enums are foreign-wire projections rather than a second behavioral model. Each enum
+conversion exhaustively matches all variants; output records destructure all Core fields without
+`..`, and opaque inputs use complete Core struct literals. Core additions therefore fail the binding
+build until the wire projection is reconciled. Web uses the Core Serde types directly and owns only
+JavaScript callback buffering. Generated Kotlin and
 Swift expose headless Runtime construction, async `request`/`shutdown`, observation handles, optional
 Login fields, and the corrected Custom field shape without Activity, Compose, UIKit, SwiftUI, Scene,
 or application ownership. Web exposes async `request_json`, `cancel`, `observe_json`, `unobserve`,
@@ -65,10 +68,18 @@ snapshot and async request result.
 `shutdown` is deliberately only the raw UniFFI transport spelling for semantic Runtime `close`.
 UniFFI 0.31.2 generates a synchronous Kotlin `AutoCloseable.close()` for foreign-handle disposal;
 also exporting the asynchronous Runtime operation as `close()` produces a conflicting Kotlin API.
-Each future Android/iOS host facade exposes the stable protocol's asynchronous `close()` and
-delegates to `shutdown()`; host-facade source is outside Ticket 16. A generated-signature gate
-requires Kotlin `suspend shutdown()` and Swift async `shutdown()`, and rejects a generated Kotlin
-`suspend close()` so the collision cannot return.
+Checked-in Kotlin and Swift facades now expose the stable protocol's asynchronous, idempotent
+`close()` and delegate to `shutdown()`. A generated-signature gate requires Kotlin
+`suspend shutdown()` and Swift async `shutdown()`, and rejects a generated Kotlin `suspend close()`
+so the collision cannot return. Web exports `close(): Promise<void>` directly.
+
+Secret strings, Login drafts, Custom fields, and decrypted Login projections use opaque UniFFI
+objects. Generated Kotlin data-class and Swift value stringification therefore sees only object
+identity, while explicit accessors retain intentional UI access. Tests inspect the actual generated
+artifacts and fail if these types return to synthesized value records or custom plaintext
+stringification. Replica/plan internals are crate-private or test-only, fixture constructors live only
+in Core tests, and the premature boolean `RecordOutcome` mutation was removed until Ticket 21 defines
+the closed immutable reconciliation semantics.
 
 Added a deterministic recursive OpenAPI-to-Rust allowlist generator for the initial authentication,
 bootstrap, create, refresh, and Sync schemas. Stable Rust PascalCase identifiers handle names such as
@@ -82,7 +93,7 @@ Commands that passed from the repository root:
 
 ```text
 cargo test --manifest-path packages/client-runtime/Cargo.toml -p bittery-client-core \
-  --test runtime_conformance runtime_wire_protocol_uses_camel_case_for_tagged_variant_fields
+  cancellation_after_acceptance_stops_waiting_but_preserves_operation
 node --test packages/client-runtime/scripts/generate-server-contract.test.mjs
 cargo test --manifest-path packages/client-runtime/Cargo.toml --workspace
 cargo clippy --manifest-path packages/client-runtime/Cargo.toml --workspace --all-targets -- \
@@ -97,7 +108,7 @@ git diff --check -- packages/client-runtime package.json pnpm-lock.yaml .github/
 ```
 
 The camelCase protocol test was observed failing before `rename_all_fields = "camelCase"` was added
-to tagged Runtime enums, then passed. The Runtime workspace passes format, all-target Clippy, 10 Rust
+to tagged Runtime enums, then passed. The Runtime workspace passes format, all-target Clippy, 14 Rust
 tests, generator tests, both binding drift gates, and the actual Node/WASM adapter test. CI now runs
 the package gate, root Rust CI includes it, and root contract checks include OpenAPI drift.
 
