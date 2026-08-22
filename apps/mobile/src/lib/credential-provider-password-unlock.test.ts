@@ -7,11 +7,12 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { StoredSessionData } from "@bittery/storage";
 
-mock.module("./storage", () => ({
-	storage: {},
-}));
+// Bun retains module mocks across test files in the same process. Keep the mock's
+// exports compatible with every Mobile consumer that may load after this file.
+mock.module("./storage", () => ({ storage: {}, itemCache: {} }));
 mock.module("./credential-provider", () => ({
 	credentialProvider: {},
+	borrowLiveMasterUnlockKey: async () => null,
 }));
 mock.module("./credential-provider-master-unlock-key", () => ({
 	mirrorBorrowedMasterUnlockKeysToCredentialProvider: async () => {},

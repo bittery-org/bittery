@@ -20,6 +20,7 @@ let activeAccount: string | null = null;
 const storedServerUrlWrites: Array<[string, string]> = [];
 
 mock.module("./storage", () => ({
+	itemCache: {},
 	storage: {
 		getActiveAccount: async () => activeAccount,
 		getAccountsList: async () => accounts,
