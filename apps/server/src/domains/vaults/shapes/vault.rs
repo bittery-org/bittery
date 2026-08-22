@@ -57,17 +57,6 @@ macro_rules! bulk_import_item_shape {
     };
 }
 
-/// A created item. `itemId` is the client-generated id and `id` the stored one; they agree unless
-/// the client supplied none.
-macro_rules! create_item_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            item_id: String,
-            id: String,
-        } }
-    };
-}
-
 /// The outcome of a bulk import.
 macro_rules! bulk_import_result_shape {
     ($emit:ident $args:tt) => {
@@ -201,8 +190,7 @@ macro_rules! vault_stats_shape {
 
 pub(crate) use {
     attachment_download_shape, bulk_import_item_shape, bulk_import_result_shape,
-    convert_vault_type_shape, create_attachment_shape, create_item_shape, create_vault_shape,
-    success_shape, update_item_shape, update_vault_shape, vault_available_member_shape,
-    vault_details_shape, vault_list_entry_shape, vault_member_shape, vault_stats_shape,
-    vault_summary_shape,
+    convert_vault_type_shape, create_attachment_shape, create_vault_shape, success_shape,
+    update_item_shape, update_vault_shape, vault_available_member_shape, vault_details_shape,
+    vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
 };

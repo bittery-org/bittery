@@ -131,6 +131,7 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("listVaultItems", OperationSecurity::Bearer),
     ("listTrashedVaultItems", OperationSecurity::Bearer),
     ("createItem", OperationSecurity::Bearer),
+    ("getOperationOutcome", OperationSecurity::Bearer),
     ("listVaultMembers", OperationSecurity::Bearer),
     ("addVaultMember", OperationSecurity::Bearer),
     ("updateVaultMemberRole", OperationSecurity::Bearer),

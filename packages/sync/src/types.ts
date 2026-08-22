@@ -65,6 +65,7 @@ export interface SyncMetadataMap {
 	vault_member_removed: VaultMemberRemovedMetadata;
 	vault_key_rotated: VaultKeyRotatedMetadata;
 	travel_mode_updated: TravelModeUpdatedMetadata;
+	operation_resolved: DefaultSyncMetadata;
 }
 
 /**

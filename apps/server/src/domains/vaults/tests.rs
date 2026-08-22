@@ -395,6 +395,25 @@ async fn install_required_audit_failure_trigger(pool: &PgPool, action: &str) {
     .expect("audit failure trigger should install");
 }
 
+async fn install_operation_step_failure_trigger(pool: &PgPool, table: &str, when_clause: &str) {
+    query(
+        r#"CREATE FUNCTION reject_operation_step_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'Operation step rejected by test';
+        END;
+        $$"#,
+    )
+    .execute(pool)
+    .await
+    .expect("Operation failure function should install");
+    query(&format!(
+        "CREATE TRIGGER reject_operation_step_insert BEFORE INSERT ON {table} FOR EACH ROW {when_clause} EXECUTE FUNCTION reject_operation_step_insert()"
+    ))
+    .execute(pool)
+    .await
+    .expect("Operation failure trigger should install");
+}
+
 async fn seed_attachment(
     pool: &PgPool,
     attachment_id: &str,
@@ -1149,7 +1168,7 @@ async fn item_create_audit_failure_rolls_back_mutation() {
                     "encryptionIv": "atomic-audit-iv",
                     "encryptionAlgorithm": "aes-gcm"
                 })),
-                authenticated_json_headers(&session.token),
+                idempotency_headers(&session.token, "item-create-audit-failure"),
             )
             .await;
 
@@ -1177,6 +1196,78 @@ async fn item_create_audit_failure_rolls_back_mutation() {
 }
 
 #[tokio::test]
+async fn create_item_rolls_back_when_a_late_operation_step_fails() {
+    for (test_name, table, when_clause) in [
+        (
+            "item_create_item_event_failure",
+            "sync_event",
+            "WHEN (NEW.event_type = 'item_created')",
+        ),
+        ("item_create_outcome_failure", "operation_outcome", ""),
+        (
+            "item_create_operation_event_failure",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+    ] {
+        with_api_test_app(test_name, |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            install_operation_step_failure_trigger(&app.pool, table, when_clause).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let item_id = format!("{test_name}_item");
+            let operation_id = format!("{test_name}_operation");
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!(
+                        "/api/v1/vaults/{}/items/{item_id}",
+                        fixture.owner_personal_vault_id
+                    ),
+                    Some(json!({
+                        "category": "login",
+                        "encryptedData": "atomic-ciphertext",
+                        "encryptionIv": "atomic-iv",
+                        "encryptionAlgorithm": "aes-gcm"
+                    })),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+                .bind(&item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("Item count should load");
+            let audit_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = 'item_created'",
+            )
+            .bind(&item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("audit count should load");
+            let event_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 OR entity_id = $2",
+            )
+            .bind(&item_id)
+            .bind(&operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("event count should load");
+            let outcome_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind(&operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("outcome count should load");
+            assert_eq!((item_count, audit_count, event_count, outcome_count), (0, 0, 0, 0));
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
 async fn vault_item_mutation_handlers_manage_item_lifecycle() {
     with_api_test_app(
         "vault_item_mutation_handlers_manage_item_lifecycle",
@@ -1195,10 +1286,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(empty_import_response.body["importedCount"], json!(0));
 
             let create_item_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&owner_session.token, "lifecycle-create-item"))
                 .await;
             create_item_response.assert_contract_status();
-            assert_eq!(create_item_response.body["itemId"], json!(created_item_id));
+            assert_eq!(create_item_response.body["result"]["itemId"], json!(created_item_id));
 
             let bulk_import_response = app
                 .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [
@@ -1562,7 +1653,7 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                     "encryptionIv": "created-iv",
                     "encryptionAlgorithm": "aes-gcm"
                 })),
-                authenticated_json_headers(&owner_session.token),
+                idempotency_headers(&owner_session.token, "encryption-context-create"),
             )
             .await;
         assert_eq!(created.status, StatusCode::OK);
@@ -1773,15 +1864,86 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
             )
             .await;
 
-        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.status, StatusCode::OK, "{}", first.body);
         assert_eq!(replay.status, first.status);
         assert_eq!(replay.body, first.body);
-        assert_eq!(first.headers.get(ETAG), Some(&HeaderValue::from_static("\"1\"")));
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
         assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
+            first.body,
+            json!({
+                "operationId": "queued-create-key",
+                "kind": "create_item",
+                "result": {
+                    "status": "applied",
+                    "itemId": item_id,
+                    "version": 1
+                }
+            })
         );
+        let lookup = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(lookup.status, StatusCode::OK);
+        assert_eq!(lookup.body, first.body);
+        query("UPDATE operation_outcome SET resolved_at = NOW() - INTERVAL '10 years' WHERE user_id = $1 AND operation_id = $2")
+            .bind(&fixture.owner_user_id)
+            .bind("queued-create-key")
+            .execute(&app.pool)
+            .await
+            .expect("outcome age should be adjustable for retention test");
+        let renewed_session = app.issue_session(&fixture.owner_user_id).await;
+        let retained = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        assert_eq!(retained.status, StatusCode::OK);
+        assert_eq!(retained.body, first.body);
+        let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
+        let isolated = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&outsider_session.token),
+            )
+            .await;
+        assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+        assert_eq!(isolated.body["code"], "OPERATION_OUTCOME_NOT_FOUND");
+        let changes = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/changes",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        changes.assert_contract_status();
+        assert!(changes.body["events"]
+            .as_array()
+            .expect("changes events should be an array")
+            .iter()
+            .any(|event| {
+                event["type"] == "operation_resolved"
+                    && event["entityId"] == "queued-create-key"
+            }));
+        let bootstrap = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/bootstrap",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        bootstrap.assert_contract_status();
+        assert!(!bootstrap.body.to_string().contains("queued-create-key"));
         let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
             .bind(item_id)
             .fetch_one(&app.pool)
@@ -1794,8 +1956,164 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
         .fetch_one(&app.pool)
         .await
         .expect("created event count should load");
+        let outcome_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind("queued-create-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("operation outcome count should load");
+        let operation_event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'operation_resolved'::sync_event_type",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind("queued-create-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("operation event count should load");
         assert_eq!(item_count, 1);
         assert_eq!(event_count, 1);
+        assert_eq!(outcome_count, 1);
+        assert_eq!(operation_event_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_item_retains_a_semantic_rejection_even_after_authorization_changes() {
+    with_api_test_app("create_item_retained_rejection", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.readonly_user_id).await;
+        let item_id = "item_retained_rejection";
+        let uri = format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id);
+        let body = json!({
+            "category": "login",
+            "encryptedData": "rejected-ciphertext",
+            "encryptionIv": "rejected-iv",
+            "encryptionAlgorithm": "aes-gcm"
+        });
+
+        let first = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body.clone()),
+                idempotency_headers(&session.token, "retained-rejection-key"),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.body["result"]["status"], "rejected");
+        assert_eq!(first.body["result"]["code"], "vault_read_only");
+
+        query("UPDATE vault_key SET role = 'member' WHERE vault_id = $1 AND user_id = $2")
+            .bind(&fixture.main_vault_id)
+            .bind(&fixture.readonly_user_id)
+            .execute(&app.pool)
+            .await
+            .expect("test authorization should change");
+        let replay = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body),
+                idempotency_headers(&session.token, "retained-rejection-key"),
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::OK);
+        assert_eq!(replay.body, first.body);
+
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("rejected item count should load");
+        let rejection_audits: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2 AND action = 'item_create_rejected'",
+        )
+        .bind(&fixture.readonly_user_id)
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("rejection audit count should load");
+        let operation_events: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'operation_resolved'::sync_event_type",
+        )
+        .bind(&fixture.readonly_user_id)
+        .bind("retained-rejection-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("rejection Operation event count should load");
+        assert_eq!(item_count, 0);
+        assert_eq!(rejection_audits, 1);
+        assert_eq!(operation_events, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_item_requires_an_operation_id_before_semantic_execution() {
+    with_api_test_app("create_item_requires_operation_id", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let item_id = "item_without_operation_id";
+        let response = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id),
+                Some(json!({
+                    "category": "login",
+                    "encryptedData": "ciphertext",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["code"], "INVALID_OPERATION_ID");
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("Item count should load");
+        assert_eq!(item_count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn deleting_a_user_cascades_retained_operation_outcomes() {
+    with_api_test_app("operation_outcome_user_cascade", |app| async move {
+        let user_id = "operation_outcome_cascade_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Outcome Cascade",
+            "operation-outcome-cascade@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'cascade-operation', 'create_item', $2, 'rejected', 'vault_access_denied')",
+        )
+        .bind(user_id)
+        .bind(vec![7_u8; 32])
+        .execute(&app.pool)
+        .await
+        .expect("outcome fixture should insert");
+        query("DELETE FROM \"user\" WHERE id = $1")
+            .bind(user_id)
+            .execute(&app.pool)
+            .await
+            .expect("standalone User should delete");
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("outcome count should load");
+        assert_eq!(count, 0);
     })
     .await;
 }
@@ -1917,7 +2235,7 @@ async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
             )
             .await;
         assert_eq!(body_mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body_mismatch.body["code"], json!("IDEMPOTENCY_KEY_REUSED"));
+        assert_eq!(body_mismatch.body["code"], json!("OPERATION_ID_REUSED"));
 
         let trash_uri = format!("/api/v1/items/{}", fixture.active_item_id);
         let first = app
@@ -1978,15 +2296,9 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
             idempotency_headers(&session.token, "concurrent-create-key"),
         );
         let (first, second) = tokio::join!(first, second);
-        assert!(matches!(
-            first.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(matches!(
-            second.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(second.status, StatusCode::OK);
+        assert_eq!(first.body, second.body);
 
         let replay = app
             .api_json(
@@ -1997,10 +2309,7 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
             )
             .await;
         assert_eq!(replay.status, StatusCode::OK);
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true"))
-        );
+        assert_eq!(replay.body, first.body);
         let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
             .bind(item_id)
             .fetch_one(&app.pool)
@@ -2015,6 +2324,66 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
         .expect("created event count should load");
         assert_eq!(item_count, 1);
         assert_eq!(event_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn different_operations_racing_for_one_item_retain_applied_and_rejected_outcomes() {
+    with_api_test_app("different_create_operations_race", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let item_id = "item_different_operation_race";
+        let uri = format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id);
+        let body = json!({
+            "category": "login",
+            "encryptedData": "race-ciphertext",
+            "encryptionIv": "race-iv",
+            "encryptionAlgorithm": "aes-gcm"
+        });
+        let first = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body.clone()),
+            idempotency_headers(&session.token, "race-operation-a"),
+        );
+        let second = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body),
+            idempotency_headers(&session.token, "race-operation-b"),
+        );
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(second.status, StatusCode::OK);
+        let statuses = [
+            first.body["result"]["status"].as_str().unwrap(),
+            second.body["result"]["status"].as_str().unwrap(),
+        ];
+        assert!(statuses.contains(&"applied"));
+        assert!(statuses.contains(&"rejected"));
+        let rejected = if first.body["result"]["status"] == "rejected" {
+            &first.body
+        } else {
+            &second.body
+        };
+        assert_eq!(rejected["result"]["code"], "item_id_conflict");
+
+        let outcome_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = ANY($2)",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind(vec!["race-operation-a", "race-operation-b"])
+        .fetch_one(&app.pool)
+        .await
+        .expect("racing outcomes should load");
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("racing Item count should load");
+        assert_eq!(outcome_count, 2);
+        assert_eq!(item_count, 1);
     })
     .await;
 }
@@ -2308,14 +2677,12 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let readonly_headers = authenticated_json_headers(&readonly_session.token);
 
             let readonly_create_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), readonly_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&readonly_session.token, "readonly-create-item"))
                 .await;
             readonly_create_response.assert_contract_status();
-            assert_handler_error(
-                &readonly_create_response.body,
-                "FORBIDDEN",
-                "Read-only access cannot create items",
-            );
+            assert_eq!(readonly_create_response.status, StatusCode::OK);
+            assert_eq!(readonly_create_response.body["result"]["status"], "rejected");
+            assert_eq!(readonly_create_response.body["result"]["code"], "vault_read_only");
 
             let readonly_update_response = app
                 .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "enc" })), with_if_match(readonly_headers, 1))

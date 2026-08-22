@@ -13,10 +13,10 @@ use super::{
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
 use super::{
-    BulkImportItemsInput, BulkImportItemsResponse, CreateItemInput, CreateItemResponse,
-    DeletedVaultItemWithVaultResponse, ItemClientInput, ItemIdInput, MoveItemInput,
-    SuccessResponse, ToggleFavoriteInput, UpdateItemInput, UpdateItemResponse, VaultIdInput,
-    VaultItemDetailsResponse, VaultItemResponse, VaultItemWithVaultResponse, VaultSummaryResponse,
+    BulkImportItemsInput, BulkImportItemsResponse, DeletedVaultItemWithVaultResponse,
+    ItemClientInput, ItemIdInput, MoveItemInput, SuccessResponse, ToggleFavoriteInput,
+    UpdateItemInput, UpdateItemResponse, VaultIdInput, VaultItemDetailsResponse, VaultItemResponse,
+    VaultItemWithVaultResponse, VaultSummaryResponse,
 };
 use crate::{
     config::DeploymentMode,
@@ -322,65 +322,6 @@ pub(crate) async fn get_vault_item(
             .cloned()
             .unwrap_or_default(),
         ..map_item_details(item_row)
-    })
-}
-
-pub(crate) async fn create_vault_item(
-    pool: &PgPool,
-    user_id: &str,
-    input: CreateItemInput,
-) -> Result<CreateItemResponse, AppError> {
-    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Read-only access cannot create items")?;
-    let item_id = input
-        .item_id
-        .clone()
-        .unwrap_or_else(|| generate_resource_id("item"));
-    let version = 1;
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start item transaction"))?;
-    query(
-		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, $7, $8, $8)",
-	)
-	.bind(&item_id)
-	.bind(&input.vault_id)
-	.bind(input.category)
-	.bind(&input.encrypted_data)
-	.bind(&input.encryption_iv)
-	.bind(&input.encryption_algorithm)
-	.bind(version)
-	.bind(user_id)
-	.execute(&mut *transaction)
-	.await
-	.map_err(|error| database_error(error, "Failed to create item"))?;
-    insert_item_sync_event(
-        &mut *transaction,
-        SyncEventType::ItemCreated,
-        &item_id,
-        &input.vault_id,
-        user_id,
-        input.client_id.as_deref(),
-        version,
-    )
-    .await?;
-    insert_item_audit_log(
-        &mut *transaction,
-        "item_created",
-        &item_id,
-        user_id,
-        Some(json!({ "vaultId": input.vault_id, "category": input.category })),
-    )
-    .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item creation"))?;
-
-    Ok(CreateItemResponse {
-        item_id: item_id.clone(),
-        id: item_id,
     })
 }
 

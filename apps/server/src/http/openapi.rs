@@ -11,7 +11,7 @@ use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    domains::{auth, billing, shares, sync, teams, vaults},
+    domains::{auth, billing, operations, shares, sync, teams, vaults},
     AppState,
 };
 
@@ -77,6 +77,7 @@ pub(crate) fn openapi_router() -> OpenApiRouter<AppState> {
             "/v1",
             auth::http::router()
                 .merge(vaults::http::router())
+                .merge(operations::http::router())
                 .merge(vaults::http::rotation::router())
                 .merge(sync::http::router())
                 .merge(teams::routes::router())
@@ -174,8 +175,8 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 90);
-        assert_eq!(operation_count, 104);
+        assert_eq!(paths.len(), 91);
+        assert_eq!(operation_count, 105);
     }
 
     /// Every `ToSchema` type reaches the document under its short Rust name, so two types that
@@ -408,7 +409,7 @@ mod tests {
             .count();
 
         assert_eq!(public, 17);
-        assert_eq!(bearer, 87);
+        assert_eq!(bearer, 88);
         assert_eq!(public + bearer, operations.len());
 
         for operation_id in [

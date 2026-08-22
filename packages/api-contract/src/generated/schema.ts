@@ -500,6 +500,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/operations/{operationId}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getOperationOutcome"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/public/share-links/{token}": {
         readonly parameters: {
             readonly query?: never;
@@ -1716,10 +1732,25 @@ export interface components {
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
         };
-        readonly CreateItemResponse: {
-            readonly id: string;
-            readonly itemId: string;
+        readonly CreateItemOperationOutcome: {
+            readonly kind: components["schemas"]["OperationKind"];
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateItemOperationResult"];
         };
+        readonly CreateItemOperationResult: {
+            readonly itemId: string;
+            /** @enum {string} */
+            readonly status: "applied";
+            /** Format: int32 */
+            readonly version: number;
+        } | {
+            readonly code: components["schemas"]["CreateItemRejectionCode"];
+            readonly details?: unknown;
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
+        /** @enum {string} */
+        readonly CreateItemRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict";
         readonly CreateShareLinkRequest: {
             readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly allowedEmails?: readonly components["schemas"]["EmailAddress"][] | null;
@@ -2034,7 +2065,7 @@ export interface components {
          * @description A stable, machine-readable Bittery error code.
          * @enum {string}
          */
-        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
+        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "INVALID_OPERATION_ID" | "OPERATION_ID_REUSED" | "OPERATION_OUTCOME_NOT_FOUND" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
         /** @enum {string} */
         readonly EventSource: "audit_log" | "share_access_log";
         readonly FavoriteBody: {
@@ -2220,6 +2251,8 @@ export interface components {
             readonly sourceVaultId: string;
             readonly targetVaultId: string;
         };
+        /** @enum {string} */
+        readonly OperationKind: "create_item";
         readonly PageCursor: string;
         readonly PageRequest: {
             readonly cursor?: null | components["schemas"]["PageCursor"];
@@ -2514,7 +2547,7 @@ export interface components {
          * @description Sync entity type — maps to PostgreSQL `sync_entity_type` enum.
          * @enum {string}
          */
-        readonly SyncEntityType: "item" | "vault" | "vault_member" | "vault_key" | "user";
+        readonly SyncEntityType: "item" | "vault" | "vault_member" | "vault_key" | "user" | "operation";
         readonly SyncEventResponse: {
             readonly clientId?: string | null;
             readonly entityId: string;
@@ -2532,7 +2565,7 @@ export interface components {
          * @description Sync event type — maps to PostgreSQL `sync_event_type` enum.
          * @enum {string}
          */
-        readonly SyncEventType: "item_created" | "item_updated" | "item_deleted" | "item_restored" | "item_permanently_deleted" | "item_moved" | "vault_created" | "vault_updated" | "vault_deleted" | "vault_access_revoked" | "vault_member_added" | "vault_member_removed" | "vault_key_rotated" | "travel_mode_updated";
+        readonly SyncEventType: "item_created" | "item_updated" | "item_deleted" | "item_restored" | "item_permanently_deleted" | "item_moved" | "vault_created" | "vault_updated" | "vault_deleted" | "vault_access_revoked" | "vault_member_added" | "vault_member_removed" | "vault_key_rotated" | "travel_mode_updated" | "operation_resolved";
         readonly TeamDetailsResponse: {
             readonly createdAt: string;
             readonly id: string;
@@ -6063,6 +6096,64 @@ export interface operations {
                 headers: {
                     /** @description Seconds before retrying */
                     readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly getOperationOutcome: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly operationId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Retained semantic Operation outcome */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CreateItemOperationOutcome"];
+                };
+            };
+            /** @description Malformed Operation ID */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No outcome exists for this User and Operation ID */
+            readonly 404: {
+                headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -11750,9 +11841,9 @@ export interface operations {
     readonly createItem: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                /** @description Replays the same queued mutation outcome for 24 hours when request bytes match */
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly vaultId: string;
@@ -11766,20 +11857,16 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Created strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["CreateItemResponse"];
+                    readonly "application/json": components["schemas"]["CreateItemOperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request or Operation ID */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -11790,42 +11877,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -11851,17 +11902,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description If-Match is required */
-            readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -11872,17 +11914,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

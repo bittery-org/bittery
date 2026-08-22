@@ -368,6 +368,8 @@ pub enum SyncEventType {
     VaultKeyRotated,
     #[serde(rename = "travel_mode_updated")]
     TravelModeUpdated,
+    #[serde(rename = "operation_resolved")]
+    OperationResolved,
 }
 
 closed_enum!(SyncEventType, "sync_event_type", {
@@ -385,6 +387,7 @@ closed_enum!(SyncEventType, "sync_event_type", {
     VaultMemberRemoved => "vault_member_removed",
     VaultKeyRotated => "vault_key_rotated",
     TravelModeUpdated => "travel_mode_updated",
+    OperationResolved => "operation_resolved",
 });
 
 /// Sync entity type — maps to PostgreSQL `sync_entity_type` enum.
@@ -400,6 +403,8 @@ pub enum SyncEntityType {
     VaultKey,
     #[serde(rename = "user")]
     User,
+    #[serde(rename = "operation")]
+    Operation,
 }
 
 closed_enum!(SyncEntityType, "sync_entity_type", {
@@ -408,6 +413,7 @@ closed_enum!(SyncEntityType, "sync_entity_type", {
     VaultMember => "vault_member",
     VaultKey => "vault_key",
     User => "user",
+    Operation => "operation",
 });
 
 /// Item category — maps to PostgreSQL `item_category` enum.

@@ -267,45 +267,43 @@ pub(super) async fn get_item(
     versioned_json(item, version)
 }
 
-#[utoipa::path(put, path = "/vaults/{vaultId}/items/{itemId}", operation_id = "createItem", tag = "items", params(("vaultId" = String, Path), ("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same queued mutation outcome for 24 hours when request bytes match")), request_body = CreateItemBody, responses((status = 200, description = "Success", body = CreateItemResponse, headers(("ETag" = String, description = "Created strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(put, path = "/vaults/{vaultId}/items/{itemId}", operation_id = "createItem", tag = "items", params(("vaultId" = String, Path), ("itemId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = CreateItemBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::CreateItemOperationOutcome), CreateItemOperationErrorResponses))]
 pub(super) async fn create_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((vault_id, item_id)): Path<(String, String)>,
     ApiJsonBytes { value: body, bytes }: ApiJsonBytes<CreateItemBody, ITEM_BODY_LIMIT_BYTES>,
-) -> Result<Response, ApiError> {
-    check_ciphertext(&body.encrypted_data)?;
-    let pool = state.db_pool.clone();
+) -> Result<Json<crate::domains::operations::CreateItemOperationOutcome>, ApiError> {
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/vaults/{vault_id}/items/{item_id}");
-    idempotency::execute(
-        pool,
-        &headers,
-        auth.session.user_id.clone(),
-        "PUT",
-        &route_target,
-        &bytes,
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::create_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::CreateItemInput {
-                    item_id: Some(item_id),
-                    vault_id,
-                    category: body.category,
-                    encrypted_data: body.encrypted_data,
-                    encryption_iv: body.encryption_iv,
-                    encryption_algorithm: body.encryption_algorithm,
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)?;
-            versioned_json(CreateItemResponse::from(result), 1)
+    let outcome = crate::domains::operations::execute_create_item(
+        &state.db_pool,
+        crate::domains::operations::CreateItemOperationInput {
+            operation_id,
+            user_id: auth.session.user_id,
+            vault_id,
+            item_id,
+            category: body.category,
+            encrypted_data: body.encrypted_data,
+            encryption_iv: body.encryption_iv,
+            encryption_algorithm: body.encryption_algorithm,
+            client_id,
+            raw_body: bytes,
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
         },
     )
-    .await
+    .await?;
+    match outcome {
+        crate::domains::operations::ExistingOutcome::Matching(outcome) => {
+            state.notify_sync();
+            Ok(Json(outcome))
+        }
+        crate::domains::operations::ExistingOutcome::Reused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
 }
 
 #[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path)), request_body = BulkImportBody, responses((status = 200, description = "Success", body = BulkImportItemsResponse), VaultErrorResponses))]

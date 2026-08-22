@@ -35,7 +35,7 @@ use crate::{
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, update_item_shape, update_vault_shape,
+        create_vault_shape, item_shape, update_item_shape, update_vault_shape,
         vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
         vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
@@ -299,13 +299,6 @@ convert_vault_type_shape!(wire_struct {
 convert_vault_type_shape!(shape_from {
     vault::ConvertVaultTypeResponse => ConvertVaultTypeResponse
 });
-
-create_item_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct CreateItemResponse
-});
-create_item_shape!(shape_from { vault::CreateItemResponse => CreateItemResponse });
 
 bulk_import_result_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -621,6 +614,47 @@ enum VaultErrorResponses {
         headers(("Retry-After" = String, description = "Seconds before retrying"))
     )]
     ServiceUnavailable(ProblemDetails),
+    #[response(
+        status = 500,
+        description = "Internal error",
+        content_type = "application/problem+json"
+    )]
+    Internal(ProblemDetails),
+}
+
+#[derive(IntoResponses)]
+#[allow(dead_code)]
+enum CreateItemOperationErrorResponses {
+    #[response(
+        status = 400,
+        description = "Malformed request or Operation ID",
+        content_type = "application/problem+json"
+    )]
+    BadRequest(ProblemDetails),
+    #[response(
+        status = 401,
+        description = "Authentication required",
+        content_type = "application/problem+json"
+    )]
+    Unauthorized(ProblemDetails),
+    #[response(
+        status = 413,
+        description = "Payload too large",
+        content_type = "application/problem+json"
+    )]
+    PayloadTooLarge(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Operation ID was reused with different immutable request bytes",
+        content_type = "application/problem+json"
+    )]
+    OperationIdReused(ProblemDetails),
     #[response(
         status = 500,
         description = "Internal error",
@@ -973,7 +1007,7 @@ mod tests {
     fn router_registers_all_used_vault_operations_only() {
         let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
         let rendered = openapi.to_string();
-        assert_eq!(rendered.matches("operationId").count(), 31);
+        assert_eq!(rendered.matches("operationId").count(), 33);
         assert!(rendered.contains("listAllTrashedItems"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));

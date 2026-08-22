@@ -115,6 +115,10 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, code, "Conflict", detail, false)
     }
 
+    pub(crate) fn not_found(code: ErrorCode, detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, code, "Not found", detail, false)
+    }
+
     pub(crate) fn service_unavailable(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,

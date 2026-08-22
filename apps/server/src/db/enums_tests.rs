@@ -83,11 +83,19 @@ fn closed_sets_keep_their_wire_strings() {
             "vault_member_removed",
             "vault_key_rotated",
             "travel_mode_updated",
+            "operation_resolved",
         ]
     );
     assert_wire_labels!(
         SyncEntityType,
-        ["item", "vault", "vault_member", "vault_key", "user"]
+        [
+            "item",
+            "vault",
+            "vault_member",
+            "vault_key",
+            "user",
+            "operation"
+        ]
     );
     assert_wire_labels!(
         ItemCategory,

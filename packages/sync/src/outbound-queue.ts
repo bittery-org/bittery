@@ -29,6 +29,13 @@ export type OutboundQueueApiClient = Pick<ApiClient, "items">;
 
 const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 
+class SemanticOperationRejected extends Error {
+	constructor(readonly code: string) {
+		super(`Create Item Operation was rejected: ${code}`);
+		this.name = "SemanticOperationRejected";
+	}
+}
+
 type QueueDocument = Record<string, PendingMutation[]>;
 
 function isNetworkError(error: unknown): boolean {
@@ -777,7 +784,7 @@ export class ItemSyncEngine {
 	private async processMutation(
 		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
-	): Promise<{ etag: string | null }> {
+	): Promise<{ etag: string | null; version?: number }> {
 		switch (mutation.type) {
 			case "create": {
 				const payload = mutation.encryptedPayload;
@@ -797,11 +804,13 @@ export class ItemSyncEngine {
 					},
 					{ idempotencyKey: mutation.attemptId ?? mutation.id },
 				);
-				const result = response.data;
+				const outcome = response.data;
+				if (outcome.result.status === "rejected") {
+					throw new SemanticOperationRejected(outcome.result.code);
+				}
+				const result = outcome.result;
 
-				const fallbackId =
-					result.id && result.id !== mutation.vaultId ? result.id : undefined;
-				const realId = result.itemId ?? fallbackId;
+				const realId = result.itemId;
 				if (realId && realId !== mutation.entityId) {
 					this.latestMappings.push({
 						tempId: mutation.entityId,
@@ -811,7 +820,7 @@ export class ItemSyncEngine {
 					});
 					await this.rewritePendingIds(mutation.entityId, realId);
 				}
-				return { etag: response.etag };
+				return { etag: response.etag, version: result.version };
 			}
 			case "update": {
 				const payload = mutation.encryptedPayload;
@@ -1017,7 +1026,9 @@ export class ItemSyncEngine {
 						? { etag: semanticAcknowledgement.etag }
 						: await this.processMutation(client, mutation);
 					const serverVersion =
-						semanticAcknowledgement?.version ?? strongNumericEtag(result.etag);
+						semanticAcknowledgement?.version ??
+						result.version ??
+						strongNumericEtag(result.etag);
 					await this.reconciler?.acknowledge(mutation, {
 						entityId: semanticAcknowledgement?.entityId ?? mutation.entityId,
 						etag: result.etag,
@@ -1032,6 +1043,14 @@ export class ItemSyncEngine {
 					if (conflicted) await this.preserveConflict(conflicted);
 					this.emit();
 				} catch (error) {
+					if (error instanceof SemanticOperationRejected) {
+						mutation.status = "failed";
+						mutation.lastError = error.message;
+						mutation.nextAttemptAt = undefined;
+						await this.schedulePersistence(accountId);
+						this.emit();
+						continue;
+					}
 					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
 						const retryImmediately = await this.rebaseMetadataMutation(
 							client,

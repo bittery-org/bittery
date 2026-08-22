@@ -87,6 +87,12 @@ pub enum ErrorCode {
     IdempotencyOutcomeIndeterminate,
     /// The outcome could not be stored or replayed.
     IdempotencyResponseUnavailable,
+    /// The stable Operation ID is missing or malformed.
+    InvalidOperationId,
+    /// An Operation ID was already bound to different immutable request bytes.
+    OperationIdReused,
+    /// No retained outcome exists for this User and Operation ID.
+    OperationOutcomeNotFound,
     RotationStaleVaultVersion,
     RotationStaleMemberSet,
     RotationStaleItemState,
@@ -129,6 +135,9 @@ impl ErrorCode {
         Self::IdempotencyRequestInProgress,
         Self::IdempotencyOutcomeIndeterminate,
         Self::IdempotencyResponseUnavailable,
+        Self::InvalidOperationId,
+        Self::OperationIdReused,
+        Self::OperationOutcomeNotFound,
         Self::RotationStaleVaultVersion,
         Self::RotationStaleMemberSet,
         Self::RotationStaleItemState,
@@ -169,6 +178,9 @@ impl ErrorCode {
             Self::IdempotencyRequestInProgress => "IDEMPOTENCY_REQUEST_IN_PROGRESS",
             Self::IdempotencyOutcomeIndeterminate => "IDEMPOTENCY_OUTCOME_INDETERMINATE",
             Self::IdempotencyResponseUnavailable => "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+            Self::InvalidOperationId => "INVALID_OPERATION_ID",
+            Self::OperationIdReused => "OPERATION_ID_REUSED",
+            Self::OperationOutcomeNotFound => "OPERATION_OUTCOME_NOT_FOUND",
             Self::RotationStaleVaultVersion => "ROTATION_STALE_VAULT_VERSION",
             Self::RotationStaleMemberSet => "ROTATION_STALE_MEMBER_SET",
             Self::RotationStaleItemState => "ROTATION_STALE_ITEM_STATE",

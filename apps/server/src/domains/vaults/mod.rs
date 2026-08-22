@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::enums::{ItemCategory, VaultRole, VaultType},
+    db::enums::{VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, success_shape, update_item_shape,
-        update_vault_shape, vault_available_member_shape, vault_details_shape,
-        vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
+        create_vault_shape, item_shape, success_shape, update_item_shape, update_vault_shape,
+        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
+        vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
 };
 
@@ -36,10 +36,10 @@ pub(crate) use catalog::{
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
-    bulk_import_vault_items, create_vault_item, delete_vault_item, get_vault_item,
-    list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,
-    list_vault_items_page, move_vault_item, permanently_delete_vault_item, restore_vault_item,
-    toggle_vault_favorite, update_vault_item,
+    bulk_import_vault_items, delete_vault_item, get_vault_item, list_all_deleted_vault_items_page,
+    list_all_vault_items_page, list_deleted_vault_items_page, list_vault_items_page,
+    move_vault_item, permanently_delete_vault_item, restore_vault_item, toggle_vault_favorite,
+    update_vault_item,
 };
 pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
@@ -159,25 +159,6 @@ pub struct AddVaultMemberInput {
     pub encrypted_vault_key: String,
     pub client_id: Option<String>,
 }
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct CreateItemInput {
-    pub item_id: Option<String>,
-    pub vault_id: String,
-    pub category: ItemCategory,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub client_id: Option<String>,
-}
-
-create_item_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateItemResponse
-});
 
 bulk_import_item_shape!(service_struct {
     #[derive(Debug, Clone, Deserialize)]

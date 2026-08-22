@@ -268,7 +268,10 @@ interface TestWriteOptions {
 }
 
 interface OutboundClientHandlers {
-	create?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	create?: (
+		itemId: string,
+		options?: TestWriteOptions,
+	) => Promise<"vault_read_only" | undefined>;
 	update?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
 	trash?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
 	deletePermanently?: (
@@ -291,8 +294,19 @@ function outboundApiClient(
 				_input: unknown,
 				options?: TestWriteOptions,
 			) => {
-				await handlers.create?.(itemId, options);
-				return apiResult({ itemId, id: itemId });
+				const rejection = await handlers.create?.(itemId, options);
+				if (rejection) {
+					return apiResult({
+						operationId: options?.idempotencyKey ?? itemId,
+						kind: "create_item" as const,
+						result: { status: "rejected" as const, code: rejection },
+					});
+				}
+				return apiResult({
+					operationId: options?.idempotencyKey ?? itemId,
+					kind: "create_item" as const,
+					result: { status: "applied" as const, itemId, version: 1 },
+				});
 			},
 			update: async (
 				itemId: string,
@@ -2199,7 +2213,11 @@ describe("outbound queue multi-account drain isolation", () => {
 			throw conflictError(412);
 		};
 		client.items.create = async (_vaultId: string, itemId: string) => ({
-			...apiResult({ itemId }),
+			...apiResult({
+				operationId: itemId,
+				kind: "create_item" as const,
+				result: { status: "applied" as const, itemId, version: 1 },
+			}),
 			etag: '"1"',
 		});
 
@@ -2307,6 +2325,44 @@ describe("outbound queue multi-account drain isolation", () => {
 			etag: '"7"',
 			idempotencyKey: "mutation_update",
 		});
+	});
+
+	test("stops retrying a retained semantic create rejection", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue({
+			accountId: "account_a",
+			id: "mutation_rejected_create",
+			type: "create",
+			entityId: "item_rejected",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		let attempts = 0;
+		const client = outboundApiClient({
+			create: async () => {
+				attempts += 1;
+				return "vault_read_only";
+			},
+		});
+
+		await queue.drain(() => client);
+		await queue.drain(() => client);
+
+		expect(attempts).toBe(1);
+		expect(queue.getCommands("account_a")[0]?.status).toBe("failed");
+		expect(queue.getCommands("account_a")[0]?.lastError).toContain(
+			"vault_read_only",
+		);
 	});
 
 	test("one account's failure does not starve other accounts' queues", async () => {

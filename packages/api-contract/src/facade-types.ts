@@ -14,6 +14,10 @@ export interface ApiWriteOptions {
 	idempotencyKey?: string;
 }
 
+export interface CreateItemWriteOptions extends ApiWriteOptions {
+	idempotencyKey: string;
+}
+
 export interface ApiPageRequest {
 	cursor?: string;
 	limit?: number;
@@ -139,7 +143,7 @@ export type VaultItem = Omit<WireVaultItem, "attachments"> & {
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;
-export type CreateItemResponse = Schema<"CreateItemResponse">;
+export type CreateItemOperationOutcome = Schema<"CreateItemOperationOutcome">;
 export type UpdateItemInput = Schema<"UpdateItemBody">;
 export type UpdateItemResponse = Schema<"UpdateItemResponse">;
 export type FavoriteInput = Schema<"FavoriteBody">;

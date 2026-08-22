@@ -26,7 +26,8 @@ import type {
 	CreateAttachmentInput,
 	CreateAttachmentResponse,
 	CreateItemInput,
-	CreateItemResponse,
+	CreateItemOperationOutcome,
+	CreateItemWriteOptions,
 	CreateTeamInput,
 	CreateVaultInput,
 	CreateVaultResponse,
@@ -292,8 +293,8 @@ export interface ApiClient {
 			vaultId: string,
 			itemId: string,
 			input: CreateItemInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<CreateItemResponse>>;
+			options: CreateItemWriteOptions,
+		): Promise<ApiResult<CreateItemOperationOutcome>>;
 		update(
 			itemId: string,
 			input: UpdateItemInput,
@@ -1107,7 +1108,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("GET", "/api/v1/items/{itemId}", { params: { path: { itemId } } }),
 			create: (vaultId, itemId, input, write) =>
 				call("PUT", "/api/v1/vaults/{vaultId}/items/{itemId}", {
-					params: { path: { vaultId, itemId } },
+					params: {
+						path: { vaultId, itemId },
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					body: input,
 					headers: writeHeaders(write),
 				}),
