@@ -45,7 +45,7 @@ termination with idempotent repeated close. Existing Crypto Worker conformance r
 
 Ticket 18 remains claimed. The real Runtime Worker service and its transport/device-storage ports,
 the dedicated IndexedDB Replica adapter, shared guarded-plan conformance, observation routing, fault
-injection, restart recovery, and production one-artifact integration remain for later batches.
+injection, and restart recovery remain for later batches.
 
 Verified from the repository root:
 
@@ -55,4 +55,30 @@ pnpm --filter web exec bun test src/lib/crypto.test.ts
 pnpm exec turbo -F @bittery/crypto-port -F '...@bittery/crypto-port' check-types
 pnpm exec biome check <the nine changed TypeScript files>
 git diff --check <the scoped tracked and new files>
+```
+
+### 2026-08-23 — combined production WASM artifact
+
+Unified the unchanged Crypto exports and `WebClientRuntime` in the production-owned
+`@bittery/crypto-wasm` package. Both surfaces now share one generated WebAssembly module, one
+memoized initializer, and one linked `bittery-crypto-core` instance. The standalone Runtime Web
+artifact was removed. Generation fails closed when UBRN changes either composed source template,
+and CI checks the combined generated declarations, Rust composition input, lockfile, and absence of
+a second production `.wasm` file.
+
+The existing Crypto port continues to load the same package and its SRP, AES, RSA, and persisted
+formats remain unchanged. The combined smoke test exercises representative low- and high-level
+Crypto exports and Runtime request, observation, and close behavior against that one artifact.
+
+Ticket 18 remains claimed. The production `runtime` Worker channel, browser transport and device
+storage ports, the dedicated IndexedDB Replica adapter, shared guarded-plan conformance, observation
+routing, fault injection, and restart recovery remain for later batches.
+
+Verified from the repository root:
+
+```text
+pnpm --filter @bittery/client-runtime check
+pnpm --filter @bittery/crypto-wasm test:combined
+pnpm --filter @bittery/crypto-core test
+pnpm check:ci
 ```
