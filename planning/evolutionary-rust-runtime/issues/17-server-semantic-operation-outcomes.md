@@ -1,7 +1,7 @@
 # Server semantic Operation outcomes
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 13
 Spec: ../spec.md#server-operation-contract
 
