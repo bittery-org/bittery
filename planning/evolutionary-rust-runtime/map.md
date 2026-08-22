@@ -101,7 +101,10 @@ or rollout order.
 
 - First Web slice implementation is specified in [the accepted specification](spec.md) and queued in
   [tickets 15 through 23](issues/15-binding-compile-spike.md).
-- Remaining in-place Server command writers beyond the first create-Item slice.
+- The eleven remaining response-cache call sites are inventoried in
+  [ticket 24](issues/24-remaining-server-operation-outcomes.md). Its cross-kind outcome and rejection
+  contract remains a maintainer frontier, so the ticket is `needs-info`; old idempotency cleanup is
+  gated on an executable zero-call-site inventory.
 - Web host integration, followed by Extension and Desktop host integration.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
