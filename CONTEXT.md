@@ -89,6 +89,32 @@ A locally accepted operation for which Sync has not yet proved the matching Serv
 then, its Replica record is the only copy Bittery knows exists.
 _Avoid_: pending change, local change, dirty state
 
+**Sync cursor**:
+The opaque protocol position through which one Account proves how far its Replica has processed a
+particular Sync stream generation. A Device durably pins its greatest accepted position and never
+uses a Cursor as an object revision or pagination token.
+_Avoid_: event ID, page token, last sync time, revision
+
+**Sync Commit**:
+The complete Account-visible effect of one Server transaction at one Sync Cursor position. A client
+applies all of its changes together.
+_Avoid_: event, change, sync batch, transaction log row
+
+**Bootstrap Lease**:
+A temporary Server-held view of one Account at one fixed Sync Cursor from which a Device can resume
+building a complete Replica base.
+_Avoid_: sync session, snapshot token, pagination cursor
+
+**Tombstone**:
+The signed Item revision that places an Item in Trash and points to the last live revision retained
+for restoration.
+_Avoid_: deleted flag, soft delete, Trash record
+
+**Deletion Fence**:
+The signed Tombstone retained after permanent deletion so the same Item identity can never be created,
+updated, moved, or restored again within its Vault.
+_Avoid_: permanent-delete event, expired tombstone, deleted Item
+
 **Operation**:
 One immutable Account-scoped command accepted into a Replica under a random identifier and retried
 byte-for-byte until its Server outcome is proved or its local work is explicitly discarded.

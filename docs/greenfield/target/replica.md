@@ -47,10 +47,10 @@ Server registry `PRIVACY-007` does not by itself admit a local field.
   and local cleanup eligibility.
 - **Account routing:** stable Server identity, configured Server origin, Account identifier, Device
   identifier, and the User-chosen local Account label permitted by `ARCH-STORE-010`.
-- **Sync and operation routing:** Sync cursor and bootstrap page token, accepted local sequence,
-  operation and idempotency identifiers, closed operation kind and state, retry/control counters,
-  Device Session identifier and reserved request-counter range, typed target path, and authenticated
-  outcome discriminator.
+- **Sync and operation routing:** fixed Sync Cursor generation and position, greatest accepted Cursor,
+  Bootstrap snapshot Cursor and opaque page token, accepted local sequence, operation and idempotency
+  identifiers, closed operation kind and state, retry/control counters, Device Session identifier and
+  reserved request-counter range, typed target path, and authenticated outcome discriminator.
   [Operation state machine and crash safety](../../../planning/greenfield-decision-map/issues/17-operation-state-machine-and-crash-safety.md)
   fixes the closed state machine and exact operation payload.
 - **Typed Domain paths:** Team, Vault, Item, revision, Attachment, chunk, Share-link, Device-event,
@@ -98,7 +98,7 @@ make no cross-Replica atomicity claim.
 | --- | --- | --- |
 | `replica_head` | singleton | Server, Account, schema version, commit sequence, active base generation and cursor |
 | `base_generations` | generation | staging/completed marker, fixed snapshot cursor, bootstrap continuation and cleanup eligibility |
-| `accepted_floors` | typed object path | greatest authenticated revision or generation this Device has accepted |
+| `accepted_floors` | typed object path | greatest authenticated revision or generation this Device has accepted, including a signed Tombstone retained after permanent deletion |
 | `derived_sets` | kind, derivation version | source commit, snapshot identifier, complete/incomplete marker, and wrapped local key record |
 | `derived_chunks` | kind, derivation version, snapshot identifier, chunk index | complete encrypted Search or Suggestion envelope chunk |
 | `device_request_counters` | Device Session | next unreserved request counter for concurrent runtime hosts |
@@ -219,10 +219,12 @@ starts a distinct row and never carries an old range into the new Session.
 
 ## Bootstrap generations
 
-Bootstrap captures one fixed Server snapshot cursor before accepting its first page. Page commits
-write only to a fresh staging generation. Each page is idempotent by its canonical typed keys; a
-changed snapshot cursor, malformed path, duplicate with different bytes, invalid Envelope shape, or
-failed authenticated-object validation makes the generation unusable.
+Bootstrap follows [`sync-protocol.md`](sync-protocol.md). Its non-renewing 24-hour Server lease captures
+one fixed snapshot Cursor before its first page and orders records by closed section then canonical
+typed primary key. Each bounded page and its next opaque 32-byte token commit together only to a fresh
+staging generation. Repeating a token is byte-identical. A changed snapshot Cursor, malformed path,
+noncanonical order, duplicate with different bytes, invalid Envelope shape, failed authenticated
+object, or unknown section makes the generation unusable.
 
 After every required page and control object is present, the engine marks the staging generation
 complete. One guarded commit then checks the previously active generation and cursor and changes
@@ -233,6 +235,22 @@ the other's cursor.
 The local operation overlay remains visible across promotion. Retired and incomplete generations are
 garbage collected only after they are unreachable from `replica_head`; cleanup is idempotent and is
 never part of the promotion commit.
+
+An expired lease discards only its incomplete staging generation and starts another lease. The active
+base and local overlay remain selected. After promotion, ordinary Delta begins strictly after the
+snapshot Cursor.
+
+## Delta application
+
+The engine validates a complete canonical Delta page before storage. One guarded commit applies all
+of its consecutive Account Sync Commits to the active remote base and changes the Replica Cursor to
+the page's end Cursor. It changes no local Operation bytes or overlay effects. A stale guard retries
+from a fresh Snapshot; a crash or lost acknowledgement leaves the complete old or new page state.
+
+A same-generation Cursor below the durable greatest accepted Cursor fails closed. A different stream
+generation and an expired Cursor both start Bootstrap and never directly alter the active base.
+Permanent deletion removes remote content while `accepted_floors` keeps the signed Tombstone revision;
+the local operation overlay remains until its canonical outcome and owning Domain reconciliation.
 
 ## Durability classes
 

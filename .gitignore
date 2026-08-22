@@ -4,8 +4,10 @@ target/
 !docs/greenfield/target/
 docs/greenfield/target/*
 !docs/greenfield/target/cryptographic-format.md
+!docs/greenfield/target/operations.md
 !docs/greenfield/target/replica.md
 !docs/greenfield/target/search-index.md
+!docs/greenfield/target/sync-protocol.md
 dist/
 build/
 .turbo/

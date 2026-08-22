@@ -4,6 +4,7 @@ requirements:
   - ARCH-STORE-017
   - ARCH-STORE-021
   - SYNC-001
+  - SYNC-008
 given:
   replica:
     server: server-A
@@ -26,15 +27,34 @@ given:
     state: unlocked
   server:
     bootstrap_snapshot:
-      cursor: cursor-12
-      pages: [page-1, page-2, page-3]
+      cursor:
+        version: 1
+        generation: stream-generation-A
+        position: 12
+      lease:
+        absolute_lifetime: 24h
+        renews_on_activity: false
+      order: section_kind_then_canonical_primary_key
+      page_bounds:
+        records: 512
+        canonical_bytes: 2_MiB
+      pages:
+        - page: page-1
+          request_token: initial
+          next_token: token-1-32-random-bytes
+        - page: page-2
+          request_token: token-1-32-random-bytes
+          next_token: token-2-32-random-bytes
+        - page: page-3
+          request_token: token-2-32-random-bytes
+          complete: true
   operation_log:
     - operation-L1
   cursor: cursor-7
   connectivity: online
 when:
-  - command_or_event: begin bootstrap as staging generation base-8 at cursor-12
-  - command_or_event: commit each page only into base-8
+  - command_or_event: begin the fixed snapshot lease and staging generation base-8 at cursor-12
+  - command_or_event: validate each complete canonical page before atomically committing its records and next token only into base-8
   - inject_failure: each of
       - before a page transaction
       - during a page transaction
@@ -44,6 +64,7 @@ when:
       - after promotion commit before acknowledgement
       - after acknowledgement before retired-generation cleanup
   - command_or_event: terminate the runtime and reopen the same origin store
+  - command_or_event: repeat the last unacknowledged page token or resume from the last acknowledged token
 then:
   visible_projection:
     runtime_state: locked after reopen
@@ -64,6 +85,8 @@ then:
       - operation-L1 and its overlay effect survive every failure point byte-for-byte
       - base-8 is selectable only after every required page and validation is complete
       - base-7 remains usable until promotion commits
+      - repeating the same unexpired page token returns byte-identical page and next token
+      - lease expiry abandons only base-8 and starts a new lease without changing base-7
       - incomplete and retired generations are cleanup candidates, never read fallbacks inferred by age
   operation_state:
     operation-L1: queued
@@ -71,4 +94,3 @@ then:
     changed: false
   emitted_events:
     - at most one bootstrap-promoted invalidation after a proved promotion
-

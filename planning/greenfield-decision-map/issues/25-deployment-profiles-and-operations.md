@@ -48,3 +48,11 @@ Both deployment profiles must share Sign-in-attempt state across Server processe
 it without sticky routing. Redis may accelerate this path but cannot own its correctness. Both profiles
 must back up and restore the Server-wide OPAQUE seed and static 3DH key with the matching registration
 records and Account Key Set wrappers.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+The Server publishes two privacy/operations settings: Sync-event retention defaults to 30 days with a
+48-hour minimum and optional indefinite retention; Server-wide Trash retention defaults to 90 days
+with a one-day minimum and optional no automatic deletion. Active 24-hour Bootstrap leases pin their
+snapshot objects and Delta suffix. This ticket owns deployment configuration shape, cleanup job
+operation and observability without adding per-Team or per-Vault overrides.

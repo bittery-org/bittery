@@ -19,6 +19,7 @@ current evidence or new product need
 | Duplicate delivery and lost responses | Account-lifetime canonical outcomes make retries exactly once | `SYNC-004`, `ARCH-SERVER-001` | [Seed 2](scenarios/02-duplicate-operation-delivery.yaml), [Seed 3](scenarios/03-lost-operation-response.yaml) | OPEN |
 | Current sealed ciphertext cannot safely rebase | Preserve explicit conflict copy | `ITEM-004` | Seed 4 | OPEN |
 | Current staged bootstrap | Promote one complete remote base without merging the local overlay | `ARCH-STORE-017`, `SYNC-001` | [Seed 5](scenarios/05-interrupted-bootstrap.yaml) | OPEN |
+| Finite Delta retention and old offline Devices | Account stream expiry bootstraps safely; signed Deletion Fences outlive Item content | `SYNC-006`–`SYNC-009`, `ITEM-006` | [Seed 5](scenarios/05-interrupted-bootstrap.yaml), [Seed 8](scenarios/08-offline-device-permanent-deletion.yaml) | OPEN |
 | Self-hosted zero-knowledge administration | Admin cannot decrypt/impersonate | `ADMIN-001` | OPEN | OPEN |
 | Current Share fragment-key design | Preserve zero-knowledge snapshot link | `SHARE-001` | OPEN | OPEN |
 | Platform keys can be invalidated without Account loss | Fail closed to password quick unlock and explicit re-enrollment | `ARCH-STORE-011`, `AUTH-043` | Seed 11 | OPEN |

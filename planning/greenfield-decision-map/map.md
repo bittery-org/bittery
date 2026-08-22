@@ -264,6 +264,15 @@ reject any of it. `legacy/` is evidence about the previous product and governs n
   [specification](../../docs/greenfield/target/operations.md); ADR
   [0025](../../docs/adr/0025-account-lifetime-operation-outcomes-provide-exactly-once-commands.md).
 
+- [Sync protocol: cursor, bootstrap, and retention windows](issues/18-sync-protocol-cursor-bootstrap-and-retention.md):
+  one atomic per-Account transaction stream uses a pinned 25-byte Cursor, bounded binary Delta pages
+  and resumable 24-hour Bootstrap leases. Configurable finite event retention falls back safely to
+  Bootstrap; SSE is only a Cursor hint. Signed Trash revisions retain restorable content, while
+  permanent deletion keeps a content-free Deletion Fence until Vault deletion. Protocol
+  [specification](../../docs/greenfield/target/sync-protocol.md); ADRs
+  [0027](../../docs/adr/0027-sync-is-a-per-account-transaction-stream.md) and
+  [0028](../../docs/adr/0028-permanent-deletion-fences-outlive-item-content.md).
+
 - [Search and autofill index](issues/20-search-and-autofill-index.md): each Account persists one
   opaque, chunked Search Snapshot behind a fresh Account-sealed key and combines scopes only in
   unlocked memory. A separate Device-only Suggestion Snapshot exposes the closed mobile preview

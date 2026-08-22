@@ -57,3 +57,12 @@ generic user phrases. A lost response therefore needs no manual recovery and see
 accepted. This ticket still owns the registered rejection/conflict outcome bodies, what unique local
 work becomes, export and Conflict-copy flows, dependent-operation reconciliation, and the exact
 object-level explanatory copy. It may not add a second operation identity or weaken automatic retry.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+[`sync-protocol.md`](../../../docs/greenfield/target/sync-protocol.md) fixes one registered
+`permanently_deleted` rejection: the Server returns the exact signed-Tombstone Deletion Fence even
+when the deletion event has aged out. The client validates and retains that authenticated Item floor,
+keeps the rejected Operation and its unique overlay work, and never converts the same Item identifier
+into a create. This ticket owns the final user-visible artifact, export/copy action, dependent
+reconciliation and explanatory copy; it may not silently discard that work or weaken the Fence.

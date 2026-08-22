@@ -44,3 +44,11 @@ Vault epoch; context `0x22` chunk envelopes spend the Attachment key's separate 
 Compromise or replacement of one Attachment key does not trigger Vault rotation. This ticket still
 owns whether that Attachment is re-encrypted under a fresh key and how such a replacement becomes a
 new signed manifest revision.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+A current Trash Tombstone forces retention of the referenced last live Item revision and all
+Attachment keys and bytes required to restore it, regardless of ordinary revision retention.
+Permanent deletion atomically removes that material and retains only the signed content-free
+Tombstone Deletion Fence. This ticket defines upload/download/chunk and ordinary Attachment lifecycle
+without weakening those Trash boundaries.

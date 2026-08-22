@@ -37,3 +37,13 @@ secrets. A database backup without them cannot authenticate a fresh Device or re
 key to unwrap the Account Key Set. Restore validation must prove the setup, registrations, wrappers, and
 active version pair are restored together. Enrolled Devices remain locally usable through their Device
 Unlock Wrappers, but that is not a substitute for a complete Server backup.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+Each Replica now pins the greatest accepted position of a random 16-byte Account stream generation;
+same-generation regression fails, a different generation installs only through complete Bootstrap,
+and ordinary event compaction never changes the generation. Server-signing a Cursor was explicitly
+rejected because a Malicious Operator owns that signing key. This ticket decides which Server
+backup/restore events may create a legitimate new generation, how a client distinguishes or presents
+that event, and whether it refuses or warns; it may not silently accept a lower same-generation
+position or imply cross-Device agreement.

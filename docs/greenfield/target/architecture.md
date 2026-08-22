@@ -259,10 +259,12 @@ plans. A plan validates its expected commit/head values and applies all mutation
 Account transaction or applies none; stale input returns a typed `StaleSnapshot`. Network, crypto,
 prompts and unbounded work cannot run inside the transaction.
 
-`ARCH-STORE-017 MUST` Bootstrap writes one invisible remote-base generation at a fixed Sync cursor.
-One guarded commit promotes the complete generation and cursor together. A generation is never mixed
-with another cursor, locally accepted operations remain in a generation-independent overlay, and
-retired/incomplete generation cleanup is idempotent and post-promotion.
+`ARCH-STORE-017 MUST` Bootstrap follows [`sync-protocol.md`](sync-protocol.md): one fixed Cursor, a
+non-renewing 24-hour Server lease, deterministic bounded pages and opaque resumable tokens write one
+invisible remote-base generation. One guarded commit promotes the complete generation and Cursor
+together. A generation is never mixed with another Cursor, locally accepted operations remain in a
+generation-independent overlay, and retired/incomplete generation cleanup is idempotent and
+post-promotion.
 
 `ARCH-STORE-018 MUST` Every adapter declares one closed Durability class with the exact commit meaning
 in [`replica.md`](replica.md). Native crash durability and browser transaction completion are not
@@ -368,8 +370,10 @@ server/
 Each domain owns its authorization, SQL, commands, queries, mappings, and real-Postgres tests.
 Persistence contains pool, transaction, migration, and shared error mechanics only.
 
-`ARCH-SERVER-001 MUST` One command transaction atomically commits its domain mutation, audit record,
-Sync/outbox event, and idempotency outcome.
+`ARCH-SERVER-001 MUST` One command transaction atomically commits its Domain mutation, audit record,
+canonical Operation outcome, the initiating Account's Sync Commit and one ordered fan-out Sync Commit
+per other affected Account. A Sync Commit is the atomic client apply unit defined by
+[`sync-protocol.md`](sync-protocol.md); there is no per-Vault or Server-global client Cursor.
 
 `ARCH-SERVER-002 MUST` Postgres is an intentional product dependency. SQLx with checked explicit SQL
 is the persistence mechanism. Generic repositories and entity-save workflows are absent.

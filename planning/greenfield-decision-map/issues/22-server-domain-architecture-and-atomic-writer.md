@@ -59,3 +59,12 @@ for every matching retry, rejects fingerprint reuse, and retains compact outcome
 deletion. HTTP method, route, response bytes, Device removal, elapsed time, and Sync-event retention
 are not idempotency identity or cleanup authority. This ticket places that already-decided contract
 inside the selected Server domain architecture; it does not reopen it.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+[`sync-protocol.md`](../../../docs/greenfield/target/sync-protocol.md) fixes one ordered stream per
+Account. A command transaction allocates at most one next position and appends one atomic Sync Commit
+for each affected Account; the initiating Account always receives a Commit whose Cursor is stored as
+the canonical Operation marker. Domain mutation, audit, compact change index, affected-Account fan-out
+and Account-lifetime outcome succeed or fail together. This ticket chooses module and SQL ownership
+without replacing that transaction boundary with eventual outbox delivery.

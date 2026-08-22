@@ -84,8 +84,10 @@ check fails on any plaintext Server schema field absent from the registry.
   upload state, retention time, and operational timestamps.
 - **Share link** — identifier, expiry, view count, maximum views, ciphertext, ciphertext length, and
   operational timestamps.
-- **Sync and command processing** — per-Vault sequence records carrying Item identifier and operation
-  kind, cursor and retention state, idempotency key and outcome, and operational timestamps.
+- **Sync and command processing** — target Account, Account-stream generation and position, registered
+  change kind, typed Server-visible object path, revision/epoch/generation control, cursor and
+  retention state, Bootstrap lease and opaque page-token state, idempotency key and outcome, and
+  operational timestamps.
 - **Operator Log** — actor Account or administrator identifier, event category, affected Server-visible
   identifiers, sequence number, source address, byte counts, and timestamp.
 - **Quota and storage** — Item count per Vault, stored byte count per Account, and pending-upload state.
@@ -997,8 +999,13 @@ Conflict copy. The Server does not merge ciphertext.
 `ITEM-005 SHOULD` Bounded encrypted revision history replaces a separate ad hoc password-history
 model. Retention remains configurable.
 
-`ITEM-006 MUST` Trash and permanent deletion synchronize through tombstone behavior that prevents old
-offline Devices from resurrecting deleted Items.
+`ITEM-006 MUST` Trash, Restore and permanent deletion follow
+[`sync-protocol.md`](sync-protocol.md). Trash is the next signed Tombstone revision and retains its
+referenced last live revision and Attachment material until Restore or permanent deletion. Restore is
+a new signed live revision. Permanent deletion removes all content but preserves the signed Tombstone
+as a Deletion Fence until Vault deletion; the Server permanently rejects every later operation using
+that Item identifier. Server-wide Trash retention defaults to 90 days, permits one day through no
+automatic deletion, applies shortening to existing Tombstones, and is shown to Users.
 
 `ITEM-007 MUST` A mobile Credential Provider gives the 1Password-parity credential flow across every
 locally enabled Account: show matching Login suggestions before Account unlock within `PRIVACY-017`;
@@ -1046,9 +1053,14 @@ initial synchronization. A browser acknowledgement means `browser-transactional`
 durability; documentation and contextual UI state that an Origin removed before Sync can take its
 locally accepted work with it.
 
-`SYNC-002 MUST` Consistency is eventual. Realtime delivery is never required for correctness.
+`SYNC-002 MUST` Consistency is eventual. Realtime delivery is never required for correctness. Each
+Account has one ordered stream of atomic Server-transaction commits; no order is claimed between
+Accounts.
 
-`SYNC-003 MUST` SSE is an optional wake-up optimization. Bounded HTTP push/pull remains authoritative.
+`SYNC-003 MUST` SSE is an optional `sync_available` Cursor hint. It never applies state or advances a
+processed Cursor. Bounded HTTP push/pull remains authoritative. Without SSE, an executable runtime
+pulls at start, resume, connectivity restoration, manual refresh and local acceptance, then uniformly
+between 60 and 120 seconds after success; suspended runtimes pull at their next wake.
 
 `SYNC-004 MUST` Local acceptance is an event and the durable operation states are `queued`,
 `indeterminate`, `committed`, `rejected`, `conflicted`, `failed`, and `discarded`, with the exact
@@ -1062,6 +1074,28 @@ Sync proves them committed. Missing persistent-storage protection is visible whi
 Lock, navigation and closing do not claim to protect or block the User; Account removal, Device wipe
 and local reset require successful Sync or explicit confirmation of the exact operation count being
 discarded.
+
+`SYNC-006 MUST` [`sync-protocol.md`](sync-protocol.md) defines the exact V1 Cursor, Sync Change, Sync
+Commit and Delta-page bytes. A Cursor is `0x01`, a random 16-byte stream generation, and a big-endian
+`u64` position. A Replica durably pins its greatest accepted position; a same-generation rollback
+fails, another generation installs only through Bootstrap, and Server signatures are not treated as
+protection from a Malicious Operator. The committed Operation marker is exactly this 25-byte Cursor.
+
+`SYNC-007 MUST` A Delta page carries consecutive Account positions, never splits a Server transaction,
+contains at most 512 changes and 2 MiB, and is fully validated before one guarded Replica commit
+applies the remote-base changes with its end Cursor. The retained index is compact; the response joins
+the exact referenced canonical objects and is independently applicable without per-change fetches.
+
+`SYNC-008 MUST` Bootstrap uses one fixed logical snapshot Cursor, a non-renewing 24-hour Server lease,
+deterministic section-and-key ordering, opaque 32-byte resumable page tokens, and the same 512-record
+and 2 MiB page bounds. Pages write only to staging. Only a complete validated generation promotes with
+its Cursor; expiry abandons staging while the prior base and all local Operations remain intact.
+
+`SYNC-009 MUST` Sync-event retention defaults to 30 days, is Server-configurable from 48 hours through
+indefinite, and removes only complete position prefixes after Bootstrap pins and referenced-object
+lifetimes are honored. A typed expired-Cursor result requires Bootstrap and never weakens the
+Account-lifetime Operation ledger, authenticated revision floors, or Deletion Fences. Protocol Sync
+state adds only the fields admitted by `PRIVACY-007`; SSE adds no object metadata.
 
 `AUDIT-001 MUST` The product has one Operator Log, readable by administrators and limited to the
 `PRIVACY-007` Operator Log fields. It records administrative, operational, security, membership, Vault

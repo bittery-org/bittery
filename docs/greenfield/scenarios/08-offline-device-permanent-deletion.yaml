@@ -1,0 +1,81 @@
+id: SYNC-PERMANENT-DELETE-008
+requirements:
+  - ITEM-006
+  - SYNC-004
+  - SYNC-006
+  - SYNC-008
+  - SYNC-009
+given:
+  server:
+    account_stream:
+      generation: stream-generation-A
+      position: 40
+    vault: vault-A
+    item:
+      id: item-A
+      head_revision: 7
+      state: live
+      envelope: item-A-live-revision-7
+      attachments: [attachment-A]
+    sync_event_retention: 48h
+    trash_retention: 1d
+  online_device_A:
+    cursor: [stream-generation-A, 40]
+    accepted_item_revision: 7
+  offline_device_B:
+    active_base:
+      cursor: [stream-generation-A, 40]
+      item_head: item-A-live-revision-7
+    accepted_item_revision: 7
+    local_overlay:
+      operation: operation-B1
+      kind: update_item
+      expected_base: [item-A, 7]
+      proposed_revision: item-A-live-revision-8-from-B
+      state: queued
+  connectivity:
+    device_A: online
+    device_B: offline
+when:
+  - command_or_event: device A trashes item-A as signed Tombstone revision 8 referring to live revision 7
+  - command_or_event: trash retention expires and the Server atomically permanently deletes item-A
+  - command_or_event: remove all content-bearing Item revisions and Attachment material
+  - command_or_event: retain the exact signed Tombstone revision 8 as the Deletion Fence
+  - command_or_event: append the permanent-deletion Sync Commit
+  - command_or_event: let the permanent-deletion event age out while device B remains offline
+  - command_or_event: reconnect device B and receive cursor_expired
+  - command_or_event: bootstrap and atomically promote a complete base in which item-A is absent
+  - command_or_event: retry operation-B1 byte-for-byte
+  - command_or_event: receive permanently_deleted carrying the exact Deletion Fence
+then:
+  visible_projection:
+    remote_item_A: absent
+    local_unique_work:
+      operation: operation-B1
+      wording: Could not apply
+      retained_for_domain_resolution: true
+  durable_replica:
+    stream_generation: stream-generation-A
+    active_base_item_A: absent
+    accepted_floor:
+      item_A: signed Tombstone revision 8
+    local_overlay:
+      operation-B1: preserved byte-for-byte
+  operation_state:
+    operation-B1: rejected
+  server_state:
+    item_A_content: absent
+    attachment_A: absent
+    deletion_fence:
+      item: item-A
+      signed_tombstone_revision: 8
+      retained_until: vault-A deletion
+    operation_outcome:
+      operation-B1: permanently_deleted
+    forbidden:
+      - recreate item-A
+      - treat operation-B1 as a new create
+      - delete operation-B1 local work silently
+  emitted_events:
+    permanent_deletion_sync_commits: exactly_one_before_retention_expiry
+    resurrection_sync_commits: none

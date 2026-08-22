@@ -40,7 +40,7 @@ then:
 6. Session revocation learned after offline use locks and removes local authorization material.
 7. Member departure creates a non-expiring rotation requirement, survives initiator termination,
    blocks affected Vault writes until one atomic epoch cutover, and leaves unrelated Vaults usable.
-8. Old offline Device cannot resurrect a permanently deleted Item.
+8. [Old offline Device cannot resurrect a permanently deleted Item.](08-offline-device-permanent-deletion.yaml)
 9. Cross-Server copy succeeds before optional source deletion is offered.
 10. [Browser Worker or extension background termination loses live keys without corrupting durable
     state.](10-runtime-termination.yaml)

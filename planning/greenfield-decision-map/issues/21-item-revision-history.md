@@ -52,3 +52,12 @@ Rotation never rewrites retained revisions. `VAULT-ROTATION-009` keeps every his
 grants while a retained revision references it, then permits collection only when no retained
 Vault-key envelope does. This ticket's count and age policy therefore determines key-epoch retention
 indirectly; it must not expire a grant before the revision it opens.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+Trash is now the next signed Tombstone revision referring to the last live revision. That live
+revision, every historical Vault grant needed to open it, and its Attachment material survive
+ordinary revision pruning while the Tombstone is current. Restore creates another signed live
+revision. Permanent deletion removes every live and historical content revision but retains the exact
+signed Tombstone as a content-free Deletion Fence until Vault deletion. This ticket chooses ordinary
+history retention without weakening those overrides.

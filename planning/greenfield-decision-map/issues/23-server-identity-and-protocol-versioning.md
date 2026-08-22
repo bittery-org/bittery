@@ -49,3 +49,11 @@ An identity change changes OPAQUE's export key and therefore uses `AUTH-014`'s a
 the OPAQUE registration and Account Key Set wrapper before the old identity is refused. Authentication
 versions are one-byte, append-only, client-pinned, printed on the Emergency Kit, and never negotiated or
 walked automatically. This ticket must keep general API capability negotiation separate from that rule.
+
+### Inherited from Sync protocol: cursor, bootstrap, and retention windows
+
+[`sync-protocol.md`](../../../docs/greenfield/target/sync-protocol.md) fixes the canonical V1 Cursor,
+Delta and Bootstrap bytes, strict unknown-value handling, and the distinction between durable Cursor
+and opaque Bootstrap page token. This ticket chooses HTTP routes, media/OpenAPI packaging,
+capability advertisement and compatibility policy. It may wrap the canonical frames but may not
+reinterpret their bytes or use product release numbers as their format versions.
