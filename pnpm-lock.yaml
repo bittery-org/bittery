@@ -664,7 +664,18 @@ importers:
         specifier: ^5.7.2
         version: 5.8.3
 
-  packages/client-runtime: {}
+  packages/client-runtime:
+    dependencies:
+      typescript:
+        specifier: ^5
+        version: 5.8.3
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
+      fake-indexeddb:
+        specifier: 6.2.4
+        version: 6.2.4
 
   packages/config: {}
 
@@ -5735,6 +5746,10 @@ packages:
 
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
+
+  fake-indexeddb@6.2.4:
+    resolution: {integrity: sha512-INKeIKEtSViN4yVtEWEUqbsqmaIy7Ls+MfU0yxQVXg67pOJ/sH1ZxcVrP8XrKULUFohcPD9gnmym+qBfEybACw==}
+    engines: {node: '>=18'}
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
@@ -13653,6 +13668,8 @@ snapshots:
   exsolve@1.1.0: {}
 
   extend@3.0.2: {}
+
+  fake-indexeddb@6.2.4: {}
 
   fast-deep-equal@3.1.3: {}
 

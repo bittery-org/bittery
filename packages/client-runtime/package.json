@@ -3,6 +3,11 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
+	"exports": {
+		"./indexeddb-executor": {
+			"default": "./src/indexeddb-executor.ts"
+		}
+	},
 	"scripts": {
 		"build:bindings:native": "./scripts/generate-native-bindings.sh",
 		"build:bindings:web": "./scripts/build-web-bindings.sh",
@@ -14,6 +19,15 @@
 		"check:generated": "pnpm run check:server-contract && pnpm run check:bindings:native && pnpm run check:bindings:web",
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
 		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs",
-		"test:bindings:web": "node --test ./scripts/combined-web-bindings.test.mjs"
+		"test:bindings:web": "node --test ./scripts/combined-web-bindings.test.mjs",
+		"check-types": "tsc --noEmit",
+		"test": "bun test src"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"fake-indexeddb": "6.2.4"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
 	}
 }
