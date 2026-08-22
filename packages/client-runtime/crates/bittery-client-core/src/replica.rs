@@ -107,6 +107,11 @@ pub(crate) enum PlanResult {
     Missing,
 }
 
+pub(crate) enum RecomputedPlanResult {
+    Applied { replica_revision: u64 },
+    Missing,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReplicaSnapshot {
@@ -261,9 +266,11 @@ impl Replica {
 
     pub(crate) async fn execute(
         &self,
-        plan: GuardedCommitPlan,
+        mut plan: GuardedCommitPlan,
     ) -> Result<PlanResult, RuntimeError> {
-        let Some(current) = self.load(&plan.account_id).await? else {
+        let account_id = plan.account_id.clone();
+        let expected_incarnation = plan.expected_incarnation.clone();
+        let Some(mut current) = self.load(&account_id).await? else {
             return Ok(PlanResult::Missing);
         };
         if current.incarnation != plan.expected_incarnation
@@ -274,30 +281,92 @@ impl Replica {
             });
         }
 
-        let next = apply_plan(current, plan.clone())?;
-        let response = self
-            .persistence
-            .invoke(ReplicaPersistenceRequest::Commit { plan })
-            .await?;
-        let ReplicaPersistenceResponse::Committed { result } = response else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Replica persistence returned a load response for a commit",
-            ));
-        };
-        if let PlanResult::Applied { replica_revision } = result {
-            if replica_revision != next.revision {
+        loop {
+            let next = apply_plan(current, plan.clone())?;
+            let response = self
+                .persistence
+                .invoke(ReplicaPersistenceRequest::Commit { plan: plan.clone() })
+                .await?;
+            let ReplicaPersistenceResponse::Committed { result } = response else {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::InvariantViolation,
-                    "Replica persistence committed an unexpected revision",
+                    "Replica persistence returned a load response for a commit",
                 ));
+            };
+            match result {
+                PlanResult::Applied { replica_revision } => {
+                    if replica_revision != next.revision {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "Replica persistence committed an unexpected revision",
+                        ));
+                    }
+                    self.snapshots
+                        .lock()
+                        .expect("Replica cache lock poisoned")
+                        .insert(next.account_id.clone(), next);
+                    return Ok(PlanResult::Applied { replica_revision });
+                }
+                PlanResult::Missing => {
+                    self.load(&account_id).await?;
+                    return Ok(PlanResult::Missing);
+                }
+                PlanResult::Stale { actual_revision } => {
+                    let attempted_revision = plan.expected_replica_revision;
+                    let latest = self.load(&account_id).await?;
+                    let Some(latest) = latest else {
+                        return Ok(PlanResult::Missing);
+                    };
+                    if latest.incarnation != expected_incarnation {
+                        return Ok(PlanResult::Missing);
+                    }
+                    if latest.revision <= attempted_revision {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            format!(
+                                "Replica persistence reported stale revision {actual_revision} without durable progress"
+                            ),
+                        ));
+                    }
+                    plan.expected_replica_revision = latest.revision;
+                    current = latest;
+                }
             }
-            self.snapshots
-                .lock()
-                .expect("Replica cache lock poisoned")
-                .insert(next.account_id.clone(), next);
         }
-        Ok(result)
+    }
+
+    pub(crate) async fn execute_recomputing(
+        &self,
+        mut plan: GuardedCommitPlan,
+    ) -> Result<RecomputedPlanResult, RuntimeError> {
+        let account_id = plan.account_id.clone();
+        let expected_incarnation = plan.expected_incarnation.clone();
+        loop {
+            let attempted_revision = plan.expected_replica_revision;
+            match self.execute(plan.clone()).await? {
+                PlanResult::Stale { actual_revision } => {
+                    let Some(latest) = self.snapshot(&account_id) else {
+                        return Ok(RecomputedPlanResult::Missing);
+                    };
+                    if latest.incarnation != expected_incarnation {
+                        return Ok(RecomputedPlanResult::Missing);
+                    }
+                    if latest.revision <= attempted_revision {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            format!(
+                                "Replica remained stale at revision {actual_revision} without durable progress"
+                            ),
+                        ));
+                    }
+                    plan.expected_replica_revision = latest.revision;
+                }
+                PlanResult::Applied { replica_revision } => {
+                    return Ok(RecomputedPlanResult::Applied { replica_revision });
+                }
+                PlanResult::Missing => return Ok(RecomputedPlanResult::Missing),
+            }
+        }
     }
 
     pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
@@ -410,6 +479,14 @@ impl InMemoryReplica {
         Ok(PlanResult::Applied {
             replica_revision: revision,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove(&self, account_id: &AccountId) {
+        self.accounts
+            .lock()
+            .expect("replica lock poisoned")
+            .remove(account_id);
     }
 
     pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {

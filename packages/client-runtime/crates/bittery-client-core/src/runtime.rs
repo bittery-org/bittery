@@ -1,7 +1,9 @@
+#[cfg(test)]
+use crate::replica::PlanResult;
 use crate::{
     replica::{
-        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult, Replica,
-        ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
+        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, RecomputedPlanResult,
+        Replica, ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
         SerializedReplicaPersistence,
     },
     AccountId, AccountStatus, ItemProjectionStatus, ItemsProjection, LoginItemProjection,
@@ -147,6 +149,7 @@ pub struct Runtime {
     device_revision: AtomicU64,
     closed: AtomicBool,
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
+    account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Runtime {
@@ -200,6 +203,7 @@ impl Runtime {
             device_revision: AtomicU64::new(0),
             closed: AtomicBool::new(false),
             unlocked_items: Mutex::new(HashMap::new()),
+            account_execution_locks: Mutex::new(HashMap::new()),
         })
     }
 
@@ -270,6 +274,8 @@ impl Runtime {
                 vault_id,
                 draft,
             } => {
+                let execution_lock = self.account_execution_lock(&account_id);
+                let execution_guard = execution_lock.lock().await;
                 let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
                 })?;
@@ -307,7 +313,7 @@ impl Runtime {
                 };
                 let result = self
                     .replica
-                    .execute(GuardedCommitPlan::new(
+                    .execute_recomputing(GuardedCommitPlan::new(
                         account_id.clone(),
                         snapshot.incarnation,
                         snapshot.revision,
@@ -322,11 +328,21 @@ impl Runtime {
                         ],
                     ))
                     .await?;
-                let PlanResult::Applied { replica_revision } = result else {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::InvariantViolation,
-                        "in-process Account plan became stale",
-                    ));
+                let replica_revision = match result {
+                    RecomputedPlanResult::Applied { replica_revision } => replica_revision,
+                    RecomputedPlanResult::Missing => {
+                        self.unlocked_items
+                            .lock()
+                            .expect("unlocked projection lock poisoned")
+                            .remove(&account_id);
+                        self.device_revision.fetch_add(1, Ordering::SeqCst);
+                        drop(execution_guard);
+                        self.publish_all();
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::AccountMissing,
+                            "account was removed during durable acceptance",
+                        ));
+                    }
                 };
                 self.unlocked_items
                     .lock()
@@ -335,6 +351,7 @@ impl Runtime {
                     .or_default()
                     .push(projection);
                 self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(execution_guard);
                 self.publish_all();
                 accepted();
                 if cancellation.is_cancelled() {
@@ -460,6 +477,15 @@ impl Runtime {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    fn account_execution_lock(&self, account_id: &AccountId) -> Arc<tokio::sync::Mutex<()>> {
+        self.account_execution_locks
+            .lock()
+            .expect("Account execution lock map poisoned")
+            .entry(account_id.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<RuntimeProjection, RuntimeError> {

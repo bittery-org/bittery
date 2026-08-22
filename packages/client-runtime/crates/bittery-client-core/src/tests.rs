@@ -1,15 +1,190 @@
 use crate::{
     protocol::Incarnation,
-    replica::{GuardedCommitPlan, OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord},
+    replica::{
+        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult,
+        ReplicaItemRecord, ReplicaPersistence, ReplicaPersistenceRequest,
+        SerializedReplicaExecutor,
+    },
     AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle, ObservationRequest,
-    ObservationSink, RequestCancellation, Runtime, RuntimeErrorCode, RuntimeProjection,
-    RuntimeRequest,
+    ObservationSink, RequestCancellation, Runtime, RuntimeError, RuntimeErrorCode,
+    RuntimeProjection, RuntimeRequest,
 };
+use async_trait::async_trait;
 use std::{
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
     time::Duration,
 };
+
+struct StaleOnceExecutor {
+    state: InMemoryReplica,
+    remaining_races: AtomicUsize,
+    requested_commits: AtomicUsize,
+}
+
+impl StaleOnceExecutor {
+    fn seeded() -> Self {
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        Self {
+            state,
+            remaining_races: AtomicUsize::new(9),
+            requested_commits: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for StaleOnceExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if let ReplicaPersistenceRequest::Commit { plan } = &request {
+            self.requested_commits.fetch_add(1, Ordering::SeqCst);
+            if let Ok(previous) =
+                self.remaining_races
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                        (remaining > 0).then(|| remaining - 1)
+                    })
+            {
+                let race_number = 10 - previous;
+                let operation_id = format!("competing-operation-{race_number}");
+                let item_id = format!("competing-item-{race_number}");
+                self.state.execute(GuardedCommitPlan::new(
+                    plan.account_id.clone(),
+                    plan.expected_incarnation.clone(),
+                    plan.expected_replica_revision,
+                    vec![
+                        PlanMutation::AcceptOperation(OperationRecord {
+                            operation_id,
+                            item_id: item_id.clone(),
+                            request_bytes: b"competing-sealed-request".to_vec(),
+                        }),
+                        PlanMutation::PutOptimisticItem(ReplicaItemRecord {
+                            account_id: plan.account_id.clone(),
+                            item_id,
+                            vault_id: "vault-1".into(),
+                            ciphertext: b"competing-sealed-item".to_vec(),
+                            optimistic: true,
+                        }),
+                    ],
+                ))?;
+            }
+        }
+        serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "race fake response could not be serialized",
+            )
+        })
+    }
+}
+
+struct RemoveOnCommitExecutor {
+    state: InMemoryReplica,
+    remove_on_commit: AtomicBool,
+}
+
+impl RemoveOnCommitExecutor {
+    fn seeded() -> Self {
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        Self {
+            state,
+            remove_on_commit: AtomicBool::new(true),
+        }
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for RemoveOnCommitExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if let ReplicaPersistenceRequest::Commit { plan } = &request {
+            if self.remove_on_commit.swap(false, Ordering::SeqCst) {
+                self.state.remove(&plan.account_id);
+            }
+        }
+        serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "removal fake response could not be serialized",
+            )
+        })
+    }
+}
+
+struct AdvanceBeforeLoadExecutor {
+    state: InMemoryReplica,
+    load_calls: AtomicUsize,
+}
+
+impl AdvanceBeforeLoadExecutor {
+    fn seeded() -> Self {
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        Self {
+            state,
+            load_calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for AdvanceBeforeLoadExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if let ReplicaPersistenceRequest::Load { account_id } = &request {
+            if self.load_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                self.state.execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    Incarnation::from("incarnation-1"),
+                    0,
+                    vec![
+                        PlanMutation::AcceptOperation(OperationRecord {
+                            operation_id: "early-competing-operation".into(),
+                            item_id: "early-competing-item".into(),
+                            request_bytes: b"early-competing-sealed-request".to_vec(),
+                        }),
+                        PlanMutation::PutOptimisticItem(ReplicaItemRecord {
+                            account_id: account_id.clone(),
+                            item_id: "early-competing-item".into(),
+                            vault_id: "vault-1".into(),
+                            ciphertext: b"early-competing-sealed-item".to_vec(),
+                            optimistic: true,
+                        }),
+                    ],
+                ))?;
+            }
+        }
+        serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "early race fake response could not be serialized",
+            )
+        })
+    }
+}
 
 fn installed_runtime() -> (Arc<Runtime>, AccountId, Incarnation) {
     let runtime = Runtime::new();
@@ -99,6 +274,70 @@ async fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
     let snapshot = replica.snapshot(&account_id).unwrap();
     assert_eq!(snapshot.revision, 0);
     assert!(snapshot.items.is_empty());
+}
+
+#[tokio::test]
+async fn durable_stale_keeps_rereading_and_recomputing_while_revisions_advance() {
+    let executor = Arc::new(StaleOnceExecutor::seeded());
+    let runtime = Runtime::with_serialized_replica_executor(executor.clone());
+    let account_id = AccountId::from("account-1");
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+
+    let response = runtime
+        .request(
+            create_request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(response, crate::RuntimeResponse::Accepted { .. }));
+    assert_eq!(executor.requested_commits.load(Ordering::SeqCst), 10);
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.revision, 10);
+    assert_eq!(snapshot.operations.len(), 10);
+    assert_eq!(snapshot.items.len(), 10);
+}
+
+#[tokio::test]
+async fn durable_missing_clears_the_cache_and_returns_account_missing() {
+    let executor = Arc::new(RemoveOnCommitExecutor::seeded());
+    let runtime = Runtime::with_serialized_replica_executor(executor);
+    let account_id = AccountId::from("account-1");
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+
+    let error = runtime
+        .request(
+            create_request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::AccountMissing);
+    assert!(runtime.replica().snapshot(&account_id).is_none());
+}
+
+#[tokio::test]
+async fn create_recomputes_when_revision_advances_before_the_guarded_commit_load() {
+    let executor = Arc::new(AdvanceBeforeLoadExecutor::seeded());
+    let runtime = Runtime::with_serialized_replica_executor(executor);
+    let account_id = AccountId::from("account-1");
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+
+    let response = runtime
+        .request(
+            create_request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(response, crate::RuntimeResponse::Accepted { .. }));
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.revision, 2);
+    assert_eq!(snapshot.operations.len(), 2);
+    assert_eq!(snapshot.items.len(), 2);
 }
 
 #[tokio::test]
