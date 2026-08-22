@@ -1285,10 +1285,10 @@ jobs:
           MINIO_ROOT_PASSWORD: ci-validation-only
         run: docker compose -f deploy/docker/docker-compose.yml config --quiet
 
-  # Vulnerability-database gate. This repo has three independent Cargo lockfiles
+  # Vulnerability-database gate. This repo has four independent Cargo lockfiles
   # and takes weekly automated Cargo bumps from Dependabot; without this job a
   # bump could land a crate carrying a published RustSec advisory and nothing
-  # would say so. All three lockfiles are checked against the single root
+  # would say so. All four lockfiles are checked against the single root
   # deny.toml — a gate that only covered the server would be most of the problem
   # left in place.
   #
@@ -1326,7 +1326,7 @@ jobs:
 
       # Every lockfile is checked even if an earlier one fails, so one bad bump
       # does not hide another.
-      - name: Advisories (all three lockfiles)
+      - name: Advisories (all four lockfiles)
         shell: bash
         run: |
           set -euo pipefail
@@ -1335,10 +1335,11 @@ jobs:
           for manifest in \
             apps/server/Cargo.toml \
             apps/desktop/src-tauri/Cargo.toml \
-            packages/crypto/core/Cargo.toml
+            packages/crypto/core/Cargo.toml \
+            packages/client-runtime/Cargo.toml
           do
             echo "::group::cargo deny check advisories -- $manifest"
-            # --allow advisory-not-detected: one shared deny.toml spans three
+            # --allow advisory-not-detected: one shared deny.toml spans four
             # disjoint dependency graphs, so every ignore entry belonging to a
             # different lockfile would otherwise warn on each run.
             if cargo deny --manifest-path "$manifest" --config deny.toml \

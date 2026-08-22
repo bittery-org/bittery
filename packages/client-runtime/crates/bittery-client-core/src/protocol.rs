@@ -92,24 +92,6 @@ impl RuntimeRequest {
             Self::CreateLoginItem { account_id, .. } => Some(account_id),
         }
     }
-
-    pub fn fixture_create(account_id: AccountId) -> Self {
-        Self::CreateLoginItem {
-            account_id,
-            vault_id: "vault-1".into(),
-            draft: LoginItemDraft {
-                title: "Example".into(),
-                url: Some("https://example.test".into()),
-                urls: vec![],
-                username: Some("person@example.test".into()),
-                password: Some("correct horse battery staple".into()),
-                notes: Some("private".into()),
-                note: None,
-                custom_fields: vec![],
-                tags: vec![],
-            },
-        }
-    }
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,26 +261,6 @@ impl fmt::Debug for LoginItemProjection {
             .field("plaintext", &"[redacted]")
             .field("status", &self.status)
             .finish()
-    }
-}
-
-impl LoginItemProjection {
-    pub fn fixture(account_id: AccountId, item_id: &str, vault_id: &str) -> Self {
-        Self {
-            account_id,
-            item_id: item_id.into(),
-            vault_id: vault_id.into(),
-            title: "Example".into(),
-            url: Some("https://example.test".into()),
-            urls: vec![],
-            username: Some("person@example.test".into()),
-            password: Some("correct horse battery staple".into()),
-            notes: Some("private".into()),
-            note: None,
-            custom_fields: vec![],
-            tags: vec![],
-            status: ItemProjectionStatus::Pending,
-        }
     }
 }
 

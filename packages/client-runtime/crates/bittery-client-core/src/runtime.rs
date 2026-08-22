@@ -1,25 +1,145 @@
 use crate::{
-    AccountId, AccountStatus, GuardedCommitPlan, InMemoryReplica, ItemProjectionStatus,
-    ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, OperationRecord,
-    PlanMutation, PlanResult, ReplicaItemRecord, RequestCancellation, RuntimeError,
-    RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    replica::{
+        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult,
+        ReplicaItemRecord,
+    },
+    AccountId, AccountStatus, ItemProjectionStatus, ItemsProjection, LoginItemProjection,
+    ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
+    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex, Weak,
+        Arc, Condvar, Mutex, Weak,
     },
+    thread::ThreadId,
 };
 
 struct Subscription {
     request: ObservationRequest,
     sink: Arc<dyn ObservationSink>,
+    delivery: Mutex<DeliveryState>,
+    delivery_finished: Condvar,
+}
+
+#[derive(Default)]
+struct DeliveryState {
+    closed: bool,
+    delivering_thread: Option<ThreadId>,
+    last_queued_revision: Option<u64>,
+    queue: VecDeque<RuntimeProjection>,
+}
+
+struct DeliveryGuard<'a> {
+    subscription: &'a Subscription,
+    armed: bool,
+}
+
+impl DeliveryGuard<'_> {
+    fn finish(&mut self, delivery: &mut DeliveryState) {
+        delivery.delivering_thread = None;
+        self.subscription.delivery_finished.notify_all();
+        self.armed = false;
+    }
+}
+
+impl Drop for DeliveryGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let mut delivery = self
+            .subscription
+            .delivery
+            .lock()
+            .expect("observation delivery lock poisoned");
+        delivery.delivering_thread = None;
+        self.subscription.delivery_finished.notify_all();
+    }
+}
+
+impl Subscription {
+    fn new(request: ObservationRequest, sink: Arc<dyn ObservationSink>) -> Self {
+        Self {
+            request,
+            sink,
+            delivery: Mutex::new(DeliveryState::default()),
+            delivery_finished: Condvar::new(),
+        }
+    }
+
+    fn publish(&self, projection: RuntimeProjection) {
+        let revision = projection.revision();
+        let current_thread = std::thread::current().id();
+        {
+            let mut delivery = self
+                .delivery
+                .lock()
+                .expect("observation delivery lock poisoned");
+            if delivery.closed
+                || delivery
+                    .last_queued_revision
+                    .is_some_and(|last| revision <= last)
+            {
+                return;
+            }
+            delivery.last_queued_revision = Some(revision);
+            delivery.queue.push_back(projection);
+            if delivery.delivering_thread.is_some() {
+                return;
+            }
+            delivery.delivering_thread = Some(current_thread);
+        }
+
+        let mut delivery_guard = DeliveryGuard {
+            subscription: self,
+            armed: true,
+        };
+        loop {
+            let next = {
+                let mut delivery = self
+                    .delivery
+                    .lock()
+                    .expect("observation delivery lock poisoned");
+                if delivery.closed {
+                    delivery.queue.clear();
+                    delivery_guard.finish(&mut delivery);
+                    return;
+                }
+                let Some(next) = delivery.queue.pop_front() else {
+                    delivery_guard.finish(&mut delivery);
+                    return;
+                };
+                next
+            };
+            self.sink.publish(next);
+        }
+    }
+
+    fn close(&self) {
+        let current_thread = std::thread::current().id();
+        let mut delivery = self
+            .delivery
+            .lock()
+            .expect("observation delivery lock poisoned");
+        delivery.closed = true;
+        delivery.queue.clear();
+        while delivery
+            .delivering_thread
+            .is_some_and(|owner| owner != current_thread)
+        {
+            delivery = self
+                .delivery_finished
+                .wait(delivery)
+                .expect("observation delivery lock poisoned while closing");
+        }
+    }
 }
 
 pub struct Runtime {
     replica: Arc<InMemoryReplica>,
-    observers: Mutex<HashMap<u64, Subscription>>,
+    observers: Mutex<HashMap<u64, Arc<Subscription>>>,
     next_observer_id: AtomicU64,
     device_revision: AtomicU64,
     closed: AtomicBool,
@@ -38,15 +158,17 @@ impl Runtime {
         })
     }
 
-    pub fn replica(&self) -> Arc<InMemoryReplica> {
+    #[cfg(test)]
+    pub(crate) fn replica(&self) -> Arc<InMemoryReplica> {
         Arc::clone(&self.replica)
     }
 
-    pub fn install_account(
+    #[cfg(test)]
+    pub(crate) fn install_account(
         &self,
         account_id: AccountId,
         user_id: String,
-        incarnation: crate::Incarnation,
+        incarnation: crate::protocol::Incarnation,
     ) -> Result<(), RuntimeError> {
         self.ensure_open()?;
         self.replica
@@ -70,7 +192,7 @@ impl Runtime {
             .await
     }
 
-    pub async fn request_with_acceptance_hook(
+    pub(crate) async fn request_with_acceptance_hook(
         &self,
         request: RuntimeRequest,
         cancellation: RequestCancellation,
@@ -158,8 +280,12 @@ impl Runtime {
                 self.device_revision.fetch_add(1, Ordering::SeqCst);
                 self.publish_all();
                 accepted();
-                // Cancellation after this commit stops only the caller's wait. The accepted
-                // Operation remains Runtime-owned and is observable through the Replica.
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled after durable acceptance",
+                    ));
+                }
                 Ok(RuntimeResponse::Accepted {
                     operation_id,
                     item_id,
@@ -169,7 +295,8 @@ impl Runtime {
         }
     }
 
-    pub fn execute_plan(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
+    #[cfg(test)]
+    pub(crate) fn execute_plan(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
         self.ensure_open()?;
         let result = self.replica.execute(plan)?;
         if matches!(result, PlanResult::Applied { .. }) {
@@ -179,11 +306,13 @@ impl Runtime {
         Ok(result)
     }
 
-    pub fn fail_account(
+    #[cfg(test)]
+    pub(crate) fn fail_account(
         &self,
         account_id: &AccountId,
         code: RuntimeErrorCode,
     ) -> Result<(), RuntimeError> {
+        self.ensure_open()?;
         self.replica.fail(account_id, code)?;
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all();
@@ -196,53 +325,63 @@ impl Runtime {
         sink: Arc<dyn ObservationSink>,
     ) -> Result<Arc<ObservationHandle>, RuntimeError> {
         self.ensure_open()?;
-        let initial = self.projection(&request)?;
         let id = self.next_observer_id.fetch_add(1, Ordering::SeqCst);
+        let subscription = Arc::new(Subscription::new(request, sink));
         self.observers
             .lock()
             .expect("observer lock poisoned")
-            .insert(
-                id,
-                Subscription {
-                    request,
-                    sink: Arc::clone(&sink),
-                },
-            );
-        sink.publish(initial);
+            .insert(id, Arc::clone(&subscription));
+        let initial = match self.projection(&subscription.request) {
+            Ok(initial) => initial,
+            Err(error) => {
+                self.observers
+                    .lock()
+                    .expect("observer lock poisoned")
+                    .remove(&id);
+                subscription.close();
+                return Err(error);
+            }
+        };
+        subscription.publish(initial);
         Ok(Arc::new(ObservationHandle {
             id,
             runtime: Arc::downgrade(self),
+            subscription,
             closed: AtomicBool::new(false),
         }))
     }
 
-    pub fn publish_all(&self) {
-        let publications: Vec<_> = self
+    pub(crate) fn publish_all(&self) {
+        let subscriptions: Vec<_> = self
             .observers
             .lock()
             .expect("observer lock poisoned")
             .values()
-            .filter_map(|subscription| {
-                self.projection(&subscription.request)
-                    .ok()
-                    .map(|projection| (Arc::clone(&subscription.sink), projection))
-            })
+            .cloned()
             .collect();
-        for (sink, projection) in publications {
-            sink.publish(projection);
+        for subscription in subscriptions {
+            if let Ok(projection) = self.projection(&subscription.request) {
+                subscription.publish(projection);
+            }
         }
     }
 
-    pub fn close(&self) {
+    pub async fn close(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
-            self.observers
+            let subscriptions: Vec<_> = self
+                .observers
                 .lock()
                 .expect("observer lock poisoned")
-                .clear();
+                .drain()
+                .map(|(_, subscription)| subscription)
+                .collect();
+            for subscription in subscriptions {
+                subscription.close();
+            }
         }
     }
 
-    pub fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
 
@@ -312,6 +451,7 @@ impl Runtime {
 pub struct ObservationHandle {
     id: u64,
     runtime: Weak<Runtime>,
+    subscription: Arc<Subscription>,
     closed: AtomicBool,
 }
 
@@ -327,6 +467,7 @@ impl ObservationHandle {
                 .expect("observer lock poisoned")
                 .remove(&self.id);
         }
+        self.subscription.close();
     }
 }
 

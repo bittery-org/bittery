@@ -1,7 +1,10 @@
 use bittery_client_core as core;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use wasm_bindgen::prelude::*;
 
@@ -9,7 +12,7 @@ use wasm_bindgen::prelude::*;
 pub struct WebClientRuntime {
     inner: Arc<core::Runtime>,
     cancellations: Mutex<HashMap<String, core::RequestCancellation>>,
-    observations: Mutex<HashMap<String, WebObservation>>,
+    observations: Mutex<HashMap<String, Arc<WebObservation>>>,
 }
 
 #[derive(Default)]
@@ -25,9 +28,18 @@ impl core::ObservationSink for BufferedSink {
 }
 
 struct WebObservation {
-    _handle: Arc<core::ObservationHandle>,
+    handle: Arc<core::ObservationHandle>,
     sink: Arc<BufferedSink>,
     callback: js_sys::Function,
+    closed: AtomicBool,
+}
+
+impl WebObservation {
+    fn close(&self) {
+        if !self.closed.swap(true, Ordering::SeqCst) {
+            self.handle.close();
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -75,20 +87,19 @@ impl WebClientRuntime {
             .inner
             .observe(request, sink.clone())
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        if let Some(previous) = self
+        let observation = Arc::new(WebObservation {
+            handle,
+            sink,
+            callback,
+            closed: AtomicBool::new(false),
+        });
+        let previous = self
             .observations
             .lock()
             .expect("Web observation lock poisoned")
-            .insert(
-                observation_id.clone(),
-                WebObservation {
-                    _handle: handle,
-                    sink,
-                    callback,
-                },
-            )
-        {
-            previous._handle.close();
+            .insert(observation_id.clone(), Arc::clone(&observation));
+        if let Some(previous) = previous {
+            previous.close();
         }
         self.flush_observation(&observation_id)
     }
@@ -100,7 +111,7 @@ impl WebClientRuntime {
             .expect("Web observation lock poisoned")
             .remove(observation_id)
         {
-            observation._handle.close();
+            observation.close();
         }
     }
 
@@ -115,8 +126,8 @@ impl WebClientRuntime {
         }
     }
 
-    pub fn close(&self) {
-        self.inner.close();
+    pub async fn close(&self) {
+        self.inner.close().await;
         for cancellation in self
             .cancellations
             .lock()
@@ -125,10 +136,16 @@ impl WebClientRuntime {
         {
             cancellation.cancel();
         }
-        self.observations
+        let observations: Vec<_> = self
+            .observations
             .lock()
             .expect("Web observation lock poisoned")
-            .clear();
+            .drain()
+            .map(|(_, observation)| observation)
+            .collect();
+        for observation in observations {
+            observation.close();
+        }
     }
 }
 
@@ -148,11 +165,13 @@ impl WebClientRuntime {
     }
 
     fn flush_observation(&self, observation_id: &str) -> Result<(), JsValue> {
-        let observations = self
+        let observation = self
             .observations
             .lock()
-            .expect("Web observation lock poisoned");
-        let Some(observation) = observations.get(observation_id) else {
+            .expect("Web observation lock poisoned")
+            .get(observation_id)
+            .cloned();
+        let Some(observation) = observation else {
             return Ok(());
         };
         let projections: Vec<_> = observation
@@ -163,6 +182,9 @@ impl WebClientRuntime {
             .drain(..)
             .collect();
         for projection in projections {
+            if observation.closed.load(Ordering::SeqCst) {
+                break;
+            }
             let json = serde_json::to_string(&projection)
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             observation

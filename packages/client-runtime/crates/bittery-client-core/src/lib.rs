@@ -7,10 +7,17 @@ mod protocol;
 mod replica;
 mod runtime;
 
+#[cfg(test)]
+mod tests;
+
 pub mod server_contract {
     include!("generated/server.rs");
 }
 
-pub use protocol::*;
-pub use replica::*;
-pub use runtime::*;
+pub use protocol::{
+    AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus, ItemsProjection,
+    LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink,
+    RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
+    RuntimeResponse, RuntimeStatusProjection,
+};
+pub use runtime::{ObservationHandle, Runtime};

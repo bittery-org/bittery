@@ -6,16 +6,22 @@ has no binding-generator, browser, Kotlin, Swift, UI, or platform dependency.
 
 The native binding crate contains wire projections solely because UniFFI metadata belongs at the
 foreign boundary. They are not a second domain model. Every variant conversion uses an exhaustive
-`match`, and every record conversion destructures every source field without `..`. Adding a Core
-variant or field therefore fails the binding build until the projection is updated. The Web adapter
-does not restate the protocol: it serializes the Core's Serde definitions directly.
+`match`; output records destructure every Core field without `..`, and opaque input objects construct
+Core records with complete literals. Adding a Core variant or field therefore fails the binding build
+until the projection is updated. The Web adapter does not restate the protocol: it serializes the
+Core's Serde definitions directly.
 
 The raw native UniFFI object calls semantic Runtime close `shutdown()`. UniFFI 0.31.2 reserves a
 synchronous Kotlin `AutoCloseable.close()` for foreign-handle disposal, so exporting the Runtime's
-asynchronous method under the same raw name produces a Kotlin source-level collision. Each future
-native host facade exposes the stable asynchronous `close()` protocol and delegates it to
-`shutdown()`; host-facade source is outside Ticket 16, and this transport spelling owns no Runtime
-policy. Core and Web use `close()` directly.
+asynchronous method under the same raw name produces a Kotlin source-level collision. The checked-in
+Kotlin and Swift facades expose the stable asynchronous `close()` protocol and delegate it to
+`shutdown()`; this transport spelling owns no Runtime policy. Core and Web use asynchronous `close()`
+directly.
+
+UniFFI records and enum payloads synthesize host-language stringification. Secret strings, Login
+drafts, Custom fields, and decrypted Login projections therefore cross the native boundary as opaque
+objects with explicit constructors/accessors rather than generated value records. Artifact tests pin
+that generated Kotlin/Swift shape so host logging cannot recursively print their plaintext fields.
 
 Generated Server types are a recursively closed allowlist sourced from the checked-in OpenAPI
 document. The generator is deterministic, committed output is compiled into the Core, and `--check`

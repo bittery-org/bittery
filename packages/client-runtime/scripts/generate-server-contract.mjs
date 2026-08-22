@@ -30,6 +30,14 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"SyncChangesResponse",
 ]);
 
+// These fields are intentionally unconstrained JSON in the Server contract. Every other schema in
+// the Runtime allowlist must have a shape the generator understands; silently replacing a new or
+// unsupported shape with `serde_json::Value` would defeat the contract drift gate.
+const FREE_JSON_FIELDS = new Set([
+	"CreateItemOperationResult.details",
+	"SyncEventResponse.metadata",
+]);
+
 const RUST_RESERVED = new Set([
 	"as",
 	"break",
@@ -75,6 +83,37 @@ function referencedName(schema) {
 	return schema?.$ref?.replace("#/components/schemas/", "");
 }
 
+function compareCodePoints(left, right) {
+	return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function schemaLocation(owner, field) {
+	return field ? `${owner}.${field}` : owner;
+}
+
+function unsupportedSchema(owner, field, reason) {
+	throw new Error(
+		`Unsupported OpenAPI schema at ${schemaLocation(owner, field)}: ${reason}`,
+	);
+}
+
+function isExplicitFreeJson(schema, owner, field) {
+	if (!FREE_JSON_FIELDS.has(schemaLocation(owner, field))) return false;
+	if (
+		schema &&
+		typeof schema === "object" &&
+		!Array.isArray(schema) &&
+		Object.keys(schema).length === 0
+	) {
+		return true;
+	}
+	unsupportedSchema(
+		owner,
+		field,
+		"audited free-JSON field is no longer unconstrained",
+	);
+}
+
 function collectReferences(schema, found = new Set()) {
 	if (!schema || typeof schema !== "object") return found;
 	const reference = referencedName(schema);
@@ -117,7 +156,10 @@ function isNullable(schema) {
 
 function nonNullSchema(schema) {
 	if (schema?.oneOf) {
-		return schema.oneOf.find((entry) => entry.type !== "null") ?? schema;
+		const nonNull = schema.oneOf.filter((entry) => entry.type !== "null");
+		const nullCount = schema.oneOf.length - nonNull.length;
+		if (nonNull.length !== 1 || nullCount !== 1) return schema;
+		return nonNull[0];
 	}
 	if (Array.isArray(schema?.type)) {
 		return { ...schema, type: schema.type.find((value) => value !== "null") };
@@ -126,20 +168,63 @@ function nonNullSchema(schema) {
 }
 
 function rustType(schema, owner, field) {
+	if (isExplicitFreeJson(schema, owner, field)) return "serde_json::Value";
+	if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+		unsupportedSchema(owner, field, "schema is not an object");
+	}
+	if (schema.allOf) unsupportedSchema(owner, field, "allOf is not supported");
+	if (schema.anyOf) unsupportedSchema(owner, field, "anyOf is not supported");
+	if (schema.oneOf && nonNullSchema(schema) === schema) {
+		unsupportedSchema(
+			owner,
+			field,
+			"only one nullable branch is supported here",
+		);
+	}
+	if (
+		Array.isArray(schema.type) &&
+		(schema.type.length !== 2 ||
+			schema.type.filter((value) => value === "null").length !== 1)
+	) {
+		unsupportedSchema(
+			owner,
+			field,
+			"only one nullable type branch is supported here",
+		);
+	}
 	const value = nonNullSchema(schema);
 	const reference = referencedName(value);
 	let type;
 	if (reference) type = rustTypeName(reference);
 	else if (owner === "CursorPage_AuthVaultKeyResponse" && field === "items") {
 		type = "Vec<AuthVaultKeyResponse>";
-	} else if (value?.type === "array")
-		type = `Vec<${rustType(value.items, owner, field)}>`;
-	else if (value?.type === "string") type = "String";
+	} else if (value?.type === "array") {
+		if (!value.items)
+			unsupportedSchema(owner, field, "array has no item schema");
+		type = `Vec<${rustType(value.items, owner, `${field}[]`)}>`;
+	} else if (value?.type === "string") type = "String";
 	else if (value?.type === "integer")
 		type = value.format === "int64" ? "i64" : "i32";
 	else if (value?.type === "number") type = "f64";
 	else if (value?.type === "boolean") type = "bool";
-	else type = "serde_json::Value";
+	else if (value?.type === "object" && value.additionalProperties) {
+		unsupportedSchema(
+			owner,
+			field,
+			"map/object additionalProperties are not supported",
+		);
+	} else if (value?.type === "object") {
+		unsupportedSchema(
+			owner,
+			field,
+			"inline object is not supported; use a named schema",
+		);
+	} else
+		unsupportedSchema(
+			owner,
+			field,
+			`unknown type ${JSON.stringify(value?.type)}`,
+		);
 	return isNullable(schema) ? `Option<${type}>` : type;
 }
 
@@ -158,12 +243,31 @@ function renderEnum(name, schema) {
 
 function renderTaggedOneOf(name, schema) {
 	const variants = schema.oneOf.map((branch, index) => {
-		const status =
-			branch.properties?.status?.enum?.[0] ?? `variant-${index + 1}`;
+		if (
+			branch.type !== "object" ||
+			branch.allOf ||
+			branch.anyOf ||
+			branch.oneOf
+		) {
+			unsupportedSchema(
+				name,
+				undefined,
+				`tagged branch ${index + 1} is not an object`,
+			);
+		}
+		const statusSchema = branch.properties?.status;
+		const status = statusSchema?.enum?.[0] ?? `variant-${index + 1}`;
+		if (statusSchema?.type !== "string" || statusSchema.enum?.length !== 1) {
+			unsupportedSchema(
+				name,
+				undefined,
+				`tagged branch ${index + 1} has no single status tag`,
+			);
+		}
 		const required = new Set(branch.required ?? []);
 		const fields = Object.entries(branch.properties ?? {})
 			.filter(([field]) => field !== "status")
-			.sort(([left], [right]) => left.localeCompare(right))
+			.sort(([left], [right]) => compareCodePoints(left, right))
 			.map(([field, fieldSchema]) => {
 				const base = rustType(fieldSchema, name, field);
 				const type =
@@ -189,18 +293,37 @@ function renderTaggedOneOf(name, schema) {
 }
 
 function renderSchema(name, schema) {
+	if (schema.allOf)
+		unsupportedSchema(name, undefined, "allOf is not supported");
+	if (schema.anyOf)
+		unsupportedSchema(name, undefined, "anyOf is not supported");
 	if (schema.enum) return renderEnum(name, schema);
 	if (schema.oneOf && !isNullable(schema))
 		return renderTaggedOneOf(name, schema);
+	if (schema.oneOf)
+		unsupportedSchema(
+			name,
+			undefined,
+			"nullable root unions are not supported",
+		);
 	if (schema.type === "string") {
 		return `pub type ${rustTypeName(name)} = String;`;
 	}
-	if (schema.type !== "object") {
-		return `pub type ${rustTypeName(name)} = serde_json::Value;`;
-	}
+	if (schema.type !== "object")
+		unsupportedSchema(
+			name,
+			undefined,
+			`unknown type ${JSON.stringify(schema.type)}`,
+		);
+	if (schema.additionalProperties)
+		unsupportedSchema(
+			name,
+			undefined,
+			"map/object additionalProperties are not supported",
+		);
 	const required = new Set(schema.required ?? []);
 	const fields = Object.entries(schema.properties ?? {})
-		.sort(([left], [right]) => left.localeCompare(right))
+		.sort(([left], [right]) => compareCodePoints(left, right))
 		.map(([field, fieldSchema]) => {
 			const base = rustType(fieldSchema, name, field);
 			const type =
@@ -238,7 +361,7 @@ export function generateServerContract(document, sourceBytes) {
 		selected.add("AuthVaultKeyResponse");
 
 	const digest = createHash("sha256").update(sourceBytes).digest("hex");
-	const definitions = [...selected].sort().map((name) => {
+	const definitions = [...selected].sort(compareCodePoints).map((name) => {
 		if (!schemas[name])
 			throw new Error(`Referenced OpenAPI schema is missing: ${name}`);
 		return renderSchema(name, schemas[name]);

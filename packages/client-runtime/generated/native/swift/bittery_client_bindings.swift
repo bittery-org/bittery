@@ -675,6 +675,521 @@ public func FfiConverterTypeClientRuntime_lower(_ value: ClientRuntime) -> UInt6
 
 
 
+public protocol LoginCustomFieldProtocol: AnyObject, Sendable {
+
+    func fieldType()  -> CustomFieldKind
+
+    func id()  -> String
+
+    func label()  -> String
+
+    func value()  -> String
+
+}
+open class LoginCustomField: LoginCustomFieldProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_logincustomfield(self.handle, $0) }
+    }
+public convenience init(id: String, label: String, value: String, fieldType: CustomFieldKind) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(label),
+        FfiConverterString.lower(value),
+        FfiConverterTypeCustomFieldKind_lower(fieldType),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_logincustomfield(handle, $0) }
+    }
+
+
+
+
+open func fieldType() -> CustomFieldKind  {
+    return try!  FfiConverterTypeCustomFieldKind_lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func id() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_logincustomfield_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func label() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_logincustomfield_label(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func value() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_logincustomfield_value(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLoginCustomField: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LoginCustomField
+
+    public static func lift(_ handle: UInt64) throws -> LoginCustomField {
+        return LoginCustomField(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LoginCustomField) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginCustomField {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LoginCustomField, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginCustomField_lift(_ handle: UInt64) throws -> LoginCustomField {
+    return try FfiConverterTypeLoginCustomField.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginCustomField_lower(_ value: LoginCustomField) -> UInt64 {
+    return FfiConverterTypeLoginCustomField.lower(value)
+}
+
+
+
+
+
+
+public protocol LoginItemDraftProtocol: AnyObject, Sendable {
+
+}
+open class LoginItemDraft: LoginItemDraftProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_loginitemdraft(self.handle, $0) }
+    }
+public convenience init(title: String, url: String?, urls: [String], username: String?, password: String?, notes: String?, note: String?, customFields: [LoginCustomField], tags: [String]) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new(
+        FfiConverterString.lower(title),
+        FfiConverterOptionString.lower(url),
+        FfiConverterSequenceString.lower(urls),
+        FfiConverterOptionString.lower(username),
+        FfiConverterOptionString.lower(password),
+        FfiConverterOptionString.lower(notes),
+        FfiConverterOptionString.lower(note),
+        FfiConverterSequenceTypeLoginCustomField.lower(customFields),
+        FfiConverterSequenceString.lower(tags),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_loginitemdraft(handle, $0) }
+    }
+
+
+
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLoginItemDraft: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LoginItemDraft
+
+    public static func lift(_ handle: UInt64) throws -> LoginItemDraft {
+        return LoginItemDraft(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LoginItemDraft) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemDraft {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LoginItemDraft, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemDraft_lift(_ handle: UInt64) throws -> LoginItemDraft {
+    return try FfiConverterTypeLoginItemDraft.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemDraft_lower(_ value: LoginItemDraft) -> UInt64 {
+    return FfiConverterTypeLoginItemDraft.lower(value)
+}
+
+
+
+
+
+
+public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
+
+    func accountId()  -> String
+
+    func customFields()  -> [LoginCustomField]
+
+    func itemId()  -> String
+
+    func note()  -> String?
+
+    func notes()  -> String?
+
+    func password()  -> String?
+
+    func status()  -> ItemProjectionStatus
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+    func url()  -> String?
+
+    func urls()  -> [String]
+
+    func username()  -> String?
+
+    func vaultId()  -> String
+
+}
+open class LoginItemProjection: LoginItemProjectionProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_loginitemprojection(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_loginitemprojection(handle, $0) }
+    }
+
+
+
+
+open func accountId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func customFields() -> [LoginCustomField]  {
+    return try!  FfiConverterSequenceTypeLoginCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func itemId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func note() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_note(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func password() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_password(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func status() -> ItemProjectionStatus  {
+    return try!  FfiConverterTypeItemProjectionStatus_lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_status(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func url() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_url(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func urls() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_urls(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func username() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_username(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func vaultId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLoginItemProjection: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LoginItemProjection
+
+    public static func lift(_ handle: UInt64) throws -> LoginItemProjection {
+        return LoginItemProjection(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LoginItemProjection) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemProjection {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LoginItemProjection, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemProjection_lift(_ handle: UInt64) throws -> LoginItemProjection {
+    return try FfiConverterTypeLoginItemProjection.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemProjection_lower(_ value: LoginItemProjection) -> UInt64 {
+    return FfiConverterTypeLoginItemProjection.lower(value)
+}
+
+
+
+
+
+
 public protocol ObservationHandleProtocol: AnyObject, Sendable {
 
     func close()
@@ -985,6 +1500,120 @@ public func FfiConverterTypeObservationSink_lower(_ value: ObservationSink) -> U
 
 
 
+
+
+public protocol SecretStringProtocol: AnyObject, Sendable {
+
+}
+open class SecretString: SecretStringProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_secretstring(self.handle, $0) }
+    }
+public convenience init(value: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_secretstring_new(
+        FfiConverterString.lower(value),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_secretstring(handle, $0) }
+    }
+
+
+
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSecretString: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SecretString
+
+    public static func lift(_ handle: UInt64) throws -> SecretString {
+        return SecretString(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SecretString) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SecretString {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SecretString, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretString_lift(_ handle: UInt64) throws -> SecretString {
+    return try FfiConverterTypeSecretString.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretString_lower(_ value: SecretString) -> UInt64 {
+    return FfiConverterTypeSecretString.lower(value)
+}
+
+
+
+
 public struct AccountStatus: Equatable, Hashable {
     public var accountId: String
     public var replicaRevision: UInt64
@@ -1043,7 +1672,7 @@ public func FfiConverterTypeAccountStatus_lower(_ value: AccountStatus) -> RustB
 }
 
 
-public struct ItemsProjection: Equatable, Hashable {
+public struct ItemsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
     public var items: [LoginItemProjection]
@@ -1098,248 +1727,6 @@ public func FfiConverterTypeItemsProjection_lift(_ buf: RustBuffer) throws -> It
 #endif
 public func FfiConverterTypeItemsProjection_lower(_ value: ItemsProjection) -> RustBuffer {
     return FfiConverterTypeItemsProjection.lower(value)
-}
-
-
-public struct LoginCustomField: Equatable, Hashable {
-    public var id: String
-    public var label: String
-    public var value: String
-    public var fieldType: CustomFieldKind
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(id: String, label: String, value: String, fieldType: CustomFieldKind) {
-        self.id = id
-        self.label = label
-        self.value = value
-        self.fieldType = fieldType
-    }
-
-
-
-
-}
-
-#if compiler(>=6)
-extension LoginCustomField: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeLoginCustomField: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginCustomField {
-        return
-            try LoginCustomField(
-                id: FfiConverterString.read(from: &buf),
-                label: FfiConverterString.read(from: &buf),
-                value: FfiConverterString.read(from: &buf),
-                fieldType: FfiConverterTypeCustomFieldKind.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: LoginCustomField, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.label, into: &buf)
-        FfiConverterString.write(value.value, into: &buf)
-        FfiConverterTypeCustomFieldKind.write(value.fieldType, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginCustomField_lift(_ buf: RustBuffer) throws -> LoginCustomField {
-    return try FfiConverterTypeLoginCustomField.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginCustomField_lower(_ value: LoginCustomField) -> RustBuffer {
-    return FfiConverterTypeLoginCustomField.lower(value)
-}
-
-
-public struct LoginItemDraft: Equatable, Hashable {
-    public var title: String
-    public var url: String?
-    public var urls: [String]
-    public var username: String?
-    public var password: String?
-    public var notes: String?
-    public var note: String?
-    public var customFields: [LoginCustomField]
-    public var tags: [String]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(title: String, url: String?, urls: [String], username: String?, password: String?, notes: String?, note: String?, customFields: [LoginCustomField], tags: [String]) {
-        self.title = title
-        self.url = url
-        self.urls = urls
-        self.username = username
-        self.password = password
-        self.notes = notes
-        self.note = note
-        self.customFields = customFields
-        self.tags = tags
-    }
-
-
-
-
-}
-
-#if compiler(>=6)
-extension LoginItemDraft: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeLoginItemDraft: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemDraft {
-        return
-            try LoginItemDraft(
-                title: FfiConverterString.read(from: &buf),
-                url: FfiConverterOptionString.read(from: &buf),
-                urls: FfiConverterSequenceString.read(from: &buf),
-                username: FfiConverterOptionString.read(from: &buf),
-                password: FfiConverterOptionString.read(from: &buf),
-                notes: FfiConverterOptionString.read(from: &buf),
-                note: FfiConverterOptionString.read(from: &buf),
-                customFields: FfiConverterSequenceTypeLoginCustomField.read(from: &buf),
-                tags: FfiConverterSequenceString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: LoginItemDraft, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.title, into: &buf)
-        FfiConverterOptionString.write(value.url, into: &buf)
-        FfiConverterSequenceString.write(value.urls, into: &buf)
-        FfiConverterOptionString.write(value.username, into: &buf)
-        FfiConverterOptionString.write(value.password, into: &buf)
-        FfiConverterOptionString.write(value.notes, into: &buf)
-        FfiConverterOptionString.write(value.note, into: &buf)
-        FfiConverterSequenceTypeLoginCustomField.write(value.customFields, into: &buf)
-        FfiConverterSequenceString.write(value.tags, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginItemDraft_lift(_ buf: RustBuffer) throws -> LoginItemDraft {
-    return try FfiConverterTypeLoginItemDraft.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginItemDraft_lower(_ value: LoginItemDraft) -> RustBuffer {
-    return FfiConverterTypeLoginItemDraft.lower(value)
-}
-
-
-public struct LoginItemProjection: Equatable, Hashable {
-    public var accountId: String
-    public var itemId: String
-    public var vaultId: String
-    public var title: String
-    public var url: String?
-    public var urls: [String]
-    public var username: String?
-    public var password: String?
-    public var notes: String?
-    public var note: String?
-    public var customFields: [LoginCustomField]
-    public var tags: [String]
-    public var status: ItemProjectionStatus
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(accountId: String, itemId: String, vaultId: String, title: String, url: String?, urls: [String], username: String?, password: String?, notes: String?, note: String?, customFields: [LoginCustomField], tags: [String], status: ItemProjectionStatus) {
-        self.accountId = accountId
-        self.itemId = itemId
-        self.vaultId = vaultId
-        self.title = title
-        self.url = url
-        self.urls = urls
-        self.username = username
-        self.password = password
-        self.notes = notes
-        self.note = note
-        self.customFields = customFields
-        self.tags = tags
-        self.status = status
-    }
-
-
-
-
-}
-
-#if compiler(>=6)
-extension LoginItemProjection: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeLoginItemProjection: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemProjection {
-        return
-            try LoginItemProjection(
-                accountId: FfiConverterString.read(from: &buf),
-                itemId: FfiConverterString.read(from: &buf),
-                vaultId: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                url: FfiConverterOptionString.read(from: &buf),
-                urls: FfiConverterSequenceString.read(from: &buf),
-                username: FfiConverterOptionString.read(from: &buf),
-                password: FfiConverterOptionString.read(from: &buf),
-                notes: FfiConverterOptionString.read(from: &buf),
-                note: FfiConverterOptionString.read(from: &buf),
-                customFields: FfiConverterSequenceTypeLoginCustomField.read(from: &buf),
-                tags: FfiConverterSequenceString.read(from: &buf),
-                status: FfiConverterTypeItemProjectionStatus.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: LoginItemProjection, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.accountId, into: &buf)
-        FfiConverterString.write(value.itemId, into: &buf)
-        FfiConverterString.write(value.vaultId, into: &buf)
-        FfiConverterString.write(value.title, into: &buf)
-        FfiConverterOptionString.write(value.url, into: &buf)
-        FfiConverterSequenceString.write(value.urls, into: &buf)
-        FfiConverterOptionString.write(value.username, into: &buf)
-        FfiConverterOptionString.write(value.password, into: &buf)
-        FfiConverterOptionString.write(value.notes, into: &buf)
-        FfiConverterOptionString.write(value.note, into: &buf)
-        FfiConverterSequenceTypeLoginCustomField.write(value.customFields, into: &buf)
-        FfiConverterSequenceString.write(value.tags, into: &buf)
-        FfiConverterTypeItemProjectionStatus.write(value.status, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginItemProjection_lift(_ buf: RustBuffer) throws -> LoginItemProjection {
-    return try FfiConverterTypeLoginItemProjection.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLoginItemProjection_lower(_ value: LoginItemProjection) -> RustBuffer {
-    return FfiConverterTypeLoginItemProjection.lower(value)
 }
 
 
@@ -1813,7 +2200,7 @@ public func FfiConverterTypeRuntimeErrorCode_lower(_ value: RuntimeErrorCode) ->
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum RuntimeProjection: Equatable, Hashable {
+public enum RuntimeProjection {
 
     case items(value: ItemsProjection
     )
@@ -1886,9 +2273,9 @@ public func FfiConverterTypeRuntimeProjection_lower(_ value: RuntimeProjection) 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum RuntimeRequest: Equatable, Hashable {
+public enum RuntimeRequest {
 
-    case signIn(serverUrl: String, email: String, masterPassword: String, secretKey: String
+    case signIn(serverUrl: String, email: String, masterPassword: SecretString, secretKey: SecretString
     )
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
@@ -1913,7 +2300,7 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterString.read(from: &buf), secretKey: try FfiConverterString.read(from: &buf)
+        case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf)
         )
 
         case 2: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
@@ -1931,8 +2318,8 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             writeInt(&buf, Int32(1))
             FfiConverterString.write(serverUrl, into: &buf)
             FfiConverterString.write(email, into: &buf)
-            FfiConverterString.write(masterPassword, into: &buf)
-            FfiConverterString.write(secretKey, into: &buf)
+            FfiConverterTypeSecretString.write(masterPassword, into: &buf)
+            FfiConverterTypeSecretString.write(secretKey, into: &buf)
 
 
         case let .createLoginItem(accountId,vaultId,draft):
@@ -2113,31 +2500,6 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer {
-    typealias SwiftType = [AccountStatus]
-
-    public static func write(_ value: [AccountStatus], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeAccountStatus.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AccountStatus] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [AccountStatus]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeAccountStatus.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeLoginCustomField: FfiConverterRustBuffer {
     typealias SwiftType = [LoginCustomField]
 
@@ -2180,6 +2542,31 @@ fileprivate struct FfiConverterSequenceTypeLoginItemProjection: FfiConverterRust
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeLoginItemProjection.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer {
+    typealias SwiftType = [AccountStatus]
+
+    public static func write(_ value: [AccountStatus], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAccountStatus.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AccountStatus] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AccountStatus]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAccountStatus.read(from: &buf))
         }
         return seq
     }
@@ -2257,6 +2644,57 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_shutdown() != 63419) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type() != 53304) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_id() != 43011) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_label() != 8495) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_value() != 17024) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id() != 32154) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note() != 1288) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes() != 36364) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_password() != 46390) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status() != 40814) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags() != 26227) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title() != 63640) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url() != 868) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls() != 56038) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username() != 55946) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id() != 1268) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_observationhandle_close() != 5413) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2264,6 +2702,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new() != 17823) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new() != 20797) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_secretstring_new() != 460) {
         return InitializationResult.apiChecksumMismatch
     }
 

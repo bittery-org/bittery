@@ -23,7 +23,10 @@ test("Web adapter observes full snapshots and keeps request handling async", asy
 	runtime.observe_json(
 		"runtime-status",
 		JSON.stringify({ type: "runtimeStatus", accountId: null }),
-		(value) => projections.push(JSON.parse(value)),
+		(value) => {
+			projections.push(JSON.parse(value));
+			runtime.unobserve("runtime-status");
+		},
 	);
 	assert.deepEqual(projections, [
 		{
@@ -51,8 +54,23 @@ test("Web adapter observes full snapshots and keeps request handling async", asy
 	});
 
 	runtime.unobserve("runtime-status");
-	runtime.unobserve("runtime-status");
-	runtime.close();
-	runtime.close();
+	const closePromise = runtime.close();
+	assert.ok(closePromise instanceof Promise);
+	await closePromise;
+	await runtime.close();
 	runtime.free();
+
+	const reentrantRuntime = new bindings.WebClientRuntime();
+	let reentrantClose;
+	reentrantRuntime.observe_json(
+		"reentrant-close",
+		JSON.stringify({ type: "runtimeStatus", accountId: null }),
+		() => {
+			reentrantClose = reentrantRuntime.close();
+		},
+	);
+	assert.ok(reentrantClose instanceof Promise);
+	await reentrantClose;
+	await reentrantRuntime.close();
+	reentrantRuntime.free();
 });

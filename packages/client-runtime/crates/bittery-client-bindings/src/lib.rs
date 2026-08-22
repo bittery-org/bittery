@@ -2,17 +2,35 @@
 
 use bittery_client_core as core;
 use std::fmt;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 uniffi::setup_scaffolding!();
 
-#[derive(Clone, uniffi::Record)]
+#[derive(uniffi::Object)]
+pub struct SecretString {
+    value: String,
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SecretString([redacted])")
+    }
+}
+
+#[uniffi::export]
+impl SecretString {
+    #[uniffi::constructor]
+    pub fn new(value: String) -> Arc<Self> {
+        Arc::new(Self { value })
+    }
+}
+
+#[derive(uniffi::Object)]
 pub struct LoginCustomField {
-    pub id: String,
-    pub label: String,
-    pub value: String,
-    pub field_type: CustomFieldKind,
+    id: String,
+    label: String,
+    value: String,
+    field_type: CustomFieldKind,
 }
 
 impl fmt::Debug for LoginCustomField {
@@ -25,6 +43,46 @@ impl fmt::Debug for LoginCustomField {
     }
 }
 
+#[uniffi::export]
+impl LoginCustomField {
+    #[uniffi::constructor]
+    pub fn new(id: String, label: String, value: String, field_type: CustomFieldKind) -> Arc<Self> {
+        Arc::new(Self {
+            id,
+            label,
+            value,
+            field_type,
+        })
+    }
+
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    pub fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    pub fn value(&self) -> String {
+        self.value.clone()
+    }
+
+    pub fn field_type(&self) -> CustomFieldKind {
+        self.field_type
+    }
+}
+
+impl LoginCustomField {
+    fn to_core(&self) -> core::LoginCustomField {
+        core::LoginCustomField {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            value: self.value.clone(),
+            field_type: self.field_type.into(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CustomFieldKind {
     Text,
@@ -33,17 +91,17 @@ pub enum CustomFieldKind {
     Url,
 }
 
-#[derive(Clone, uniffi::Record)]
+#[derive(uniffi::Object)]
 pub struct LoginItemDraft {
-    pub title: String,
-    pub url: Option<String>,
-    pub urls: Vec<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub notes: Option<String>,
-    pub note: Option<String>,
-    pub custom_fields: Vec<LoginCustomField>,
-    pub tags: Vec<String>,
+    title: String,
+    url: Option<String>,
+    urls: Vec<String>,
+    username: Option<String>,
+    password: Option<String>,
+    notes: Option<String>,
+    note: Option<String>,
+    custom_fields: Vec<Arc<LoginCustomField>>,
+    tags: Vec<String>,
 }
 
 impl fmt::Debug for LoginItemDraft {
@@ -57,18 +115,67 @@ impl fmt::Debug for LoginItemDraft {
     }
 }
 
+#[uniffi::export]
+impl LoginItemDraft {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        url: Option<String>,
+        urls: Vec<String>,
+        username: Option<String>,
+        password: Option<String>,
+        notes: Option<String>,
+        note: Option<String>,
+        custom_fields: Vec<Arc<LoginCustomField>>,
+        tags: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            url,
+            urls,
+            username,
+            password,
+            notes,
+            note,
+            custom_fields,
+            tags,
+        })
+    }
+}
+
+impl LoginItemDraft {
+    fn to_core(&self) -> core::LoginItemDraft {
+        core::LoginItemDraft {
+            title: self.title.clone(),
+            url: self.url.clone(),
+            urls: self.urls.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            notes: self.notes.clone(),
+            note: self.note.clone(),
+            custom_fields: self
+                .custom_fields
+                .iter()
+                .map(|field| field.to_core())
+                .collect(),
+            tags: self.tags.clone(),
+        }
+    }
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeRequest {
     SignIn {
         server_url: String,
         email: String,
-        master_password: String,
-        secret_key: String,
+        master_password: Arc<SecretString>,
+        secret_key: Arc<SecretString>,
     },
     CreateLoginItem {
         account_id: String,
         vault_id: String,
-        draft: LoginItemDraft,
+        draft: Arc<LoginItemDraft>,
     },
 }
 
@@ -123,21 +230,21 @@ pub enum ItemProjectionStatus {
     Failed,
 }
 
-#[derive(Clone, uniffi::Record)]
+#[derive(uniffi::Object)]
 pub struct LoginItemProjection {
-    pub account_id: String,
-    pub item_id: String,
-    pub vault_id: String,
-    pub title: String,
-    pub url: Option<String>,
-    pub urls: Vec<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub notes: Option<String>,
-    pub note: Option<String>,
-    pub custom_fields: Vec<LoginCustomField>,
-    pub tags: Vec<String>,
-    pub status: ItemProjectionStatus,
+    account_id: String,
+    item_id: String,
+    vault_id: String,
+    title: String,
+    url: Option<String>,
+    urls: Vec<String>,
+    username: Option<String>,
+    password: Option<String>,
+    notes: Option<String>,
+    note: Option<String>,
+    custom_fields: Vec<Arc<LoginCustomField>>,
+    tags: Vec<String>,
+    status: ItemProjectionStatus,
 }
 
 impl fmt::Debug for LoginItemProjection {
@@ -153,11 +260,66 @@ impl fmt::Debug for LoginItemProjection {
     }
 }
 
+#[uniffi::export]
+impl LoginItemProjection {
+    pub fn account_id(&self) -> String {
+        self.account_id.clone()
+    }
+
+    pub fn item_id(&self) -> String {
+        self.item_id.clone()
+    }
+
+    pub fn vault_id(&self) -> String {
+        self.vault_id.clone()
+    }
+
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+
+    pub fn url(&self) -> Option<String> {
+        self.url.clone()
+    }
+
+    pub fn urls(&self) -> Vec<String> {
+        self.urls.clone()
+    }
+
+    pub fn username(&self) -> Option<String> {
+        self.username.clone()
+    }
+
+    pub fn password(&self) -> Option<String> {
+        self.password.clone()
+    }
+
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+
+    pub fn note(&self) -> Option<String> {
+        self.note.clone()
+    }
+
+    pub fn custom_fields(&self) -> Vec<Arc<LoginCustomField>> {
+        self.custom_fields.clone()
+    }
+
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+
+    pub fn status(&self) -> ItemProjectionStatus {
+        self.status
+    }
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct ItemsProjection {
     pub account_id: String,
     pub replica_revision: u64,
-    pub items: Vec<LoginItemProjection>,
+    pub items: Vec<Arc<LoginItemProjection>>,
 }
 
 impl fmt::Debug for ItemsProjection {
@@ -284,7 +446,7 @@ impl ClientRuntime {
     // UniFFI's Kotlin object wrapper reserves `close()` for synchronous handle disposal. The native
     // facade projects this transport name back to the Runtime protocol's asynchronous `close()`.
     pub async fn shutdown(&self) {
-        self.inner.close();
+        self.inner.close().await;
     }
 }
 
@@ -313,8 +475,8 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             } => Self::SignIn {
                 server_url,
                 email,
-                master_password,
-                secret_key,
+                master_password: master_password.value.clone(),
+                secret_key: secret_key.value.clone(),
             },
             RuntimeRequest::CreateLoginItem {
                 account_id,
@@ -323,52 +485,8 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             } => Self::CreateLoginItem {
                 account_id: account_id.into(),
                 vault_id,
-                draft: draft.into(),
+                draft: draft.to_core(),
             },
-        }
-    }
-}
-
-impl From<LoginItemDraft> for core::LoginItemDraft {
-    fn from(value: LoginItemDraft) -> Self {
-        let LoginItemDraft {
-            title,
-            url,
-            urls,
-            username,
-            password,
-            notes,
-            note,
-            custom_fields,
-            tags,
-        } = value;
-        Self {
-            title,
-            url,
-            urls,
-            username,
-            password,
-            notes,
-            note,
-            custom_fields: custom_fields.into_iter().map(Into::into).collect(),
-            tags,
-        }
-    }
-}
-
-impl From<LoginCustomField> for core::LoginCustomField {
-    fn from(value: LoginCustomField) -> Self {
-        let LoginCustomField {
-            id,
-            label,
-            value,
-            field_type,
-        } = value;
-        Self {
-            id,
-            label,
-            value,
-            field_type: field_type.into(),
         }
     }
 }
@@ -443,7 +561,10 @@ impl From<core::ItemsProjection> for ItemsProjection {
         Self {
             account_id: account_id.into(),
             replica_revision,
-            items: items.into_iter().map(Into::into).collect(),
+            items: items
+                .into_iter()
+                .map(|item| Arc::new(LoginItemProjection::from(item)))
+                .collect(),
         }
     }
 }
@@ -476,7 +597,10 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
             password,
             notes,
             note,
-            custom_fields: custom_fields.into_iter().map(Into::into).collect(),
+            custom_fields: custom_fields
+                .into_iter()
+                .map(|field| Arc::new(LoginCustomField::from(field)))
+                .collect(),
             tags,
             status: status.into(),
         }
@@ -588,34 +712,34 @@ mod tests {
         let sign_in = RuntimeRequest::SignIn {
             server_url: "https://server.test".into(),
             email: "person@example.test".into(),
-            master_password: "UNIQUE_MASTER_PASSWORD".into(),
-            secret_key: "UNIQUE_SECRET_KEY".into(),
+            master_password: SecretString::new("UNIQUE_MASTER_PASSWORD".into()),
+            secret_key: SecretString::new("UNIQUE_SECRET_KEY".into()),
         };
         let create = RuntimeRequest::CreateLoginItem {
             account_id: "account-1".into(),
             vault_id: "vault-1".into(),
-            draft: LoginItemDraft {
-                title: "UNIQUE_TITLE".into(),
-                url: Some("UNIQUE_URL".into()),
-                urls: vec!["UNIQUE_URLS".into()],
-                username: Some("UNIQUE_USERNAME".into()),
-                password: Some("UNIQUE_PASSWORD".into()),
-                notes: Some("UNIQUE_NOTES".into()),
-                note: Some("UNIQUE_NOTE".into()),
-                custom_fields: vec![LoginCustomField {
-                    id: "UNIQUE_FIELD_ID".into(),
-                    label: "UNIQUE_FIELD_LABEL".into(),
-                    value: "UNIQUE_FIELD_VALUE".into(),
-                    field_type: CustomFieldKind::Password,
-                }],
-                tags: vec!["UNIQUE_TAG".into()],
-            },
+            draft: LoginItemDraft::new(
+                "UNIQUE_TITLE".into(),
+                Some("UNIQUE_URL".into()),
+                vec!["UNIQUE_URLS".into()],
+                Some("UNIQUE_USERNAME".into()),
+                Some("UNIQUE_PASSWORD".into()),
+                Some("UNIQUE_NOTES".into()),
+                Some("UNIQUE_NOTE".into()),
+                vec![LoginCustomField::new(
+                    "UNIQUE_FIELD_ID".into(),
+                    "UNIQUE_FIELD_LABEL".into(),
+                    "UNIQUE_FIELD_VALUE".into(),
+                    CustomFieldKind::Password,
+                )],
+                vec!["UNIQUE_TAG".into()],
+            ),
         };
         let projection = RuntimeProjection::Items {
             value: ItemsProjection {
                 account_id: "account-1".into(),
                 replica_revision: 1,
-                items: vec![LoginItemProjection {
+                items: vec![Arc::new(LoginItemProjection {
                     account_id: "account-1".into(),
                     item_id: "item-1".into(),
                     vault_id: "vault-1".into(),
@@ -629,7 +753,7 @@ mod tests {
                     custom_fields: vec![],
                     tags: vec![],
                     status: ItemProjectionStatus::Pending,
-                }],
+                })],
             },
         };
 

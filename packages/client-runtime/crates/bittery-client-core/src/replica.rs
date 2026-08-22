@@ -1,10 +1,10 @@
-use crate::{AccountId, Incarnation, RuntimeError, RuntimeErrorCode};
+use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GuardedCommitPlan {
+pub(crate) struct GuardedCommitPlan {
     pub account_id: AccountId,
     pub expected_incarnation: Incarnation,
     pub expected_replica_revision: u64,
@@ -12,7 +12,7 @@ pub struct GuardedCommitPlan {
 }
 
 impl GuardedCommitPlan {
-    pub fn new(
+    pub(crate) fn new(
         account_id: AccountId,
         expected_incarnation: Incarnation,
         expected_replica_revision: u64,
@@ -33,18 +33,15 @@ impl GuardedCommitPlan {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-pub enum PlanMutation {
-    PutAuthoritativeItem(ReplicaItemRecord),
+pub(crate) enum PlanMutation {
     PutOptimisticItem(ReplicaItemRecord),
     AcceptOperation(OperationRecord),
     RemoveOperation { operation_id: String },
-    RecordOutcome(OperationOutcomeRecord),
-    AdvanceCursor { cursor: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OperationRecord {
+pub(crate) struct OperationRecord {
     pub operation_id: String,
     pub item_id: String,
     pub request_bytes: Vec<u8>,
@@ -52,7 +49,7 @@ pub struct OperationRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReplicaItemRecord {
+pub(crate) struct ReplicaItemRecord {
     pub account_id: AccountId,
     pub item_id: String,
     pub vault_id: String,
@@ -60,68 +57,44 @@ pub struct ReplicaItemRecord {
     pub optimistic: bool,
 }
 
-impl ReplicaItemRecord {
-    pub fn fixture(account_id: AccountId, item_id: &str, vault_id: &str) -> Self {
-        Self {
-            account_id,
-            item_id: item_id.into(),
-            vault_id: vault_id.into(),
-            ciphertext: b"sealed-fixture".to_vec(),
-            optimistic: true,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OperationOutcomeRecord {
-    pub operation_id: String,
-    pub applied: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PlanResult {
+pub(crate) enum PlanResult {
     Applied { replica_revision: u64 },
     Stale { actual_revision: u64 },
     Missing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReplicaSnapshot {
+pub(crate) struct ReplicaSnapshot {
     pub account_id: AccountId,
-    pub user_id: String,
     pub incarnation: Incarnation,
     pub revision: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
-    pub outcomes: Vec<OperationOutcomeRecord>,
-    pub cursor: Option<String>,
     pub failure: Option<RuntimeErrorCode>,
 }
 
 #[derive(Clone)]
 struct AccountReplica {
     account_id: AccountId,
-    user_id: String,
     incarnation: Incarnation,
     revision: u64,
     items: HashMap<String, ReplicaItemRecord>,
     operations: HashMap<String, OperationRecord>,
-    outcomes: HashMap<String, OperationOutcomeRecord>,
-    cursor: Option<String>,
     failure: Option<RuntimeErrorCode>,
 }
 
 #[derive(Default)]
-pub struct InMemoryReplica {
+pub(crate) struct InMemoryReplica {
     accounts: Mutex<HashMap<AccountId, AccountReplica>>,
 }
 
 impl InMemoryReplica {
-    pub fn install(
+    #[cfg(test)]
+    pub(crate) fn install(
         &self,
         account_id: AccountId,
-        user_id: String,
+        _user_id: String,
         incarnation: Incarnation,
     ) -> Result<(), RuntimeError> {
         let mut accounts = self.accounts.lock().expect("replica lock poisoned");
@@ -135,20 +108,17 @@ impl InMemoryReplica {
             account_id.clone(),
             AccountReplica {
                 account_id,
-                user_id,
                 incarnation,
                 revision: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
-                outcomes: HashMap::new(),
-                cursor: None,
                 failure: None,
             },
         );
         Ok(())
     }
 
-    pub fn execute(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
+    pub(crate) fn execute(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
         let mut accounts = self.accounts.lock().expect("replica lock poisoned");
         let Some(current) = accounts.get(&plan.account_id) else {
             return Ok(PlanResult::Missing);
@@ -173,7 +143,7 @@ impl InMemoryReplica {
         })
     }
 
-    pub fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
+    pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
         self.accounts
             .lock()
             .expect("replica lock poisoned")
@@ -181,7 +151,7 @@ impl InMemoryReplica {
             .map(AccountReplica::snapshot)
     }
 
-    pub fn snapshots(&self) -> Vec<ReplicaSnapshot> {
+    pub(crate) fn snapshots(&self) -> Vec<ReplicaSnapshot> {
         let mut values: Vec<_> = self
             .accounts
             .lock()
@@ -193,7 +163,12 @@ impl InMemoryReplica {
         values
     }
 
-    pub fn fail(&self, account_id: &AccountId, code: RuntimeErrorCode) -> Result<(), RuntimeError> {
+    #[cfg(test)]
+    pub(crate) fn fail(
+        &self,
+        account_id: &AccountId,
+        code: RuntimeErrorCode,
+    ) -> Result<(), RuntimeError> {
         let mut accounts = self.accounts.lock().expect("replica lock poisoned");
         let account = accounts.get_mut(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
@@ -207,19 +182,12 @@ impl InMemoryReplica {
 impl AccountReplica {
     fn apply(&mut self, mutation: PlanMutation) -> Result<(), RuntimeError> {
         match mutation {
-            PlanMutation::PutAuthoritativeItem(mut item) => {
-                self.check_item_scope(&item)?;
-                item.optimistic = false;
-                self.items.insert(item.item_id.clone(), item);
-            }
             PlanMutation::PutOptimisticItem(item) => {
                 self.check_item_scope(&item)?;
                 self.items.insert(item.item_id.clone(), item);
             }
             PlanMutation::AcceptOperation(operation) => {
-                if self.operations.contains_key(&operation.operation_id)
-                    || self.outcomes.contains_key(&operation.operation_id)
-                {
+                if self.operations.contains_key(&operation.operation_id) {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "operation identity was reused",
@@ -236,10 +204,6 @@ impl AccountReplica {
                     ));
                 }
             }
-            PlanMutation::RecordOutcome(outcome) => {
-                self.outcomes.insert(outcome.operation_id.clone(), outcome);
-            }
-            PlanMutation::AdvanceCursor { cursor } => self.cursor = Some(cursor),
         }
         Ok(())
     }
@@ -260,17 +224,12 @@ impl AccountReplica {
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut operations: Vec<_> = self.operations.values().cloned().collect();
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
-        let mut outcomes: Vec<_> = self.outcomes.values().cloned().collect();
-        outcomes.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         ReplicaSnapshot {
             account_id: self.account_id.clone(),
-            user_id: self.user_id.clone(),
             incarnation: self.incarnation.clone(),
             revision: self.revision,
             items,
             operations,
-            outcomes,
-            cursor: self.cursor.clone(),
             failure: self.failure,
         }
     }
