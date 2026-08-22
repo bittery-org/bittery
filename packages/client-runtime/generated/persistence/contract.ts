@@ -8,6 +8,7 @@ type: "load"
 prepared: PreparedReplicaCommit
 type: "commit"
 })
+export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type PreparedReplicaWrite = ({
 row: StoredReplicaRow
 type: "put"
@@ -51,7 +52,7 @@ replicaRevision: string
 }
 export interface ReplicaHead {
 accountId: string
-failure: (string | null)
+failure: (RuntimeErrorCode | null)
 incarnation: string
 replicaRevision: string
 }

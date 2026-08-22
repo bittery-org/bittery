@@ -4,8 +4,12 @@ import type {
 	PreparedReplicaCommit,
 	PreparedReplicaWrite,
 	ReplicaHead,
+	ReplicaStore,
 } from "../generated/persistence/contract.ts";
-import { validateReplicaPersistenceResponse } from "../generated/persistence/validator.js";
+import {
+	validateReplicaPersistenceRequest,
+	validateReplicaPersistenceResponse,
+} from "../generated/persistence/validator.js";
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
@@ -80,7 +84,7 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 function put(
-	store: "optimisticItems" | "operations",
+	store: ReplicaStore,
 	recordId: string,
 	payloadJson: string,
 	accountId = "account-a",
@@ -155,6 +159,61 @@ describe("IndexedDbReplicaExecutor", () => {
 					replicaRevision: "0",
 				},
 				rows: [],
+			}),
+		).toBeFalse();
+	});
+
+	test("generated validation keeps failure codes closed", () => {
+		const response = {
+			type: "loaded",
+			head: {
+				accountId: "account-a",
+				incarnation: "incarnation-a",
+				replicaRevision: "0",
+				failure: "INVARIANT_VIOLATION",
+			},
+			rows: [],
+		};
+		expect(validateReplicaPersistenceResponse(response)).toBeTrue();
+		expect(
+			validateReplicaPersistenceResponse({
+				...response,
+				head: { ...response.head, failure: "ARBITRARY_FAILURE" },
+			}),
+		).toBeFalse();
+	});
+
+	test("generated validation accepts exactly canonical uint64 decimal strings", () => {
+		const response = (replicaRevision: unknown) => ({
+			type: "loaded",
+			head: {
+				accountId: "account-a",
+				incarnation: "incarnation-a",
+				replicaRevision,
+				failure: null,
+			},
+			rows: [],
+		});
+
+		expect(
+			validateReplicaPersistenceResponse(response("18446744073709551615")),
+		).toBeTrue();
+		for (const invalid of ["18446744073709551616", "01", "-1", 1]) {
+			expect(validateReplicaPersistenceResponse(response(invalid))).toBeFalse();
+		}
+
+		const request = commit(prepared([]));
+		expect(validateReplicaPersistenceRequest(request)).toBeTrue();
+		expect(
+			validateReplicaPersistenceRequest({
+				...request,
+				prepared: {
+					...request.prepared,
+					expected: {
+						...request.prepared.expected,
+						replicaRevision: "01",
+					},
+				},
 			}),
 		).toBeFalse();
 	});

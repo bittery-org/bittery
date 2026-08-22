@@ -290,6 +290,7 @@ pub struct AccountStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RuntimeErrorCode {
     RuntimeClosed,
