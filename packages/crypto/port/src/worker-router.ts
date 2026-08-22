@@ -1,4 +1,9 @@
-import { copyWorkerValue } from "./shared-worker-rpc";
+import {
+	copyWorkerValue,
+	isWorkerRequest,
+	type WorkerChannelName,
+	type WorkerReply,
+} from "./worker-wire";
 
 export interface WorkerRouterScope {
 	addEventListener(
@@ -13,45 +18,19 @@ export interface WorkerChannelService {
 	close?(): Promise<void>;
 }
 
-type WorkerRequest =
-	| {
-			type: "request";
-			channel: string;
-			id: number;
-			payload: unknown;
-	  }
-	| { type: "cancel"; channel: string; id: number }
-	| { type: "close"; id: number };
-
 interface ChannelRequest {
-	channel: string;
+	channel: WorkerChannelName;
 	id: number;
 	payload: unknown;
 }
 
-function isWorkerRequest(value: unknown): value is WorkerRequest {
-	if (typeof value !== "object" || value === null) return false;
-	const message = value as Partial<WorkerRequest>;
-	if (message.type === "close") return typeof message.id === "number";
-	if (message.type === "cancel") {
-		return (
-			typeof message.channel === "string" && typeof message.id === "number"
-		);
-	}
-	return (
-		message.type === "request" &&
-		typeof message.channel === "string" &&
-		typeof message.id === "number" &&
-		"payload" in message
-	);
-}
-
 export function serveWorkerChannels(
 	scope: WorkerRouterScope,
-	services: Readonly<Record<string, WorkerChannelService>>,
+	services: Readonly<Partial<Record<WorkerChannelName, WorkerChannelService>>>,
 ): void {
 	const active = new Map<string, AbortController>();
-	const key = (channel: string, id: number) => `${channel}\u0000${id}`;
+	const key = (channel: WorkerChannelName, id: number) =>
+		`${channel}\u0000${id}`;
 	let closeTask: Promise<void> | null = null;
 	scope.addEventListener("message", (event) => {
 		if (!isWorkerRequest(event.data)) return;
@@ -64,7 +43,11 @@ export function serveWorkerChannels(
 			).then(() => undefined);
 			void closeTask.then(
 				() =>
-					scope.postMessage({ type: "close-ack", id: message.id, ok: true }),
+					scope.postMessage({
+						type: "close-ack",
+						id: message.id,
+						ok: true,
+					} satisfies WorkerReply),
 				(error: unknown) => {
 					const record = error as { code?: unknown; message?: unknown };
 					scope.postMessage({
@@ -77,7 +60,7 @@ export function serveWorkerChannels(
 							typeof record.message === "string"
 								? record.message
 								: "The worker failed to close.",
-					});
+					} satisfies WorkerReply);
 				},
 			);
 			return;
@@ -98,7 +81,7 @@ export function serveWorkerChannels(
 				ok: false,
 				code: "closed",
 				message: `Worker channel "${request.channel}" is not attached.`,
-			});
+			} satisfies WorkerReply);
 			return;
 		}
 		const controller = new AbortController();
@@ -115,7 +98,7 @@ export function serveWorkerChannels(
 					id: request.id,
 					ok: true,
 					value: copyWorkerValue(value),
-				});
+				} satisfies WorkerReply);
 			})
 			.catch((error: unknown) => {
 				active.delete(key(request.channel, request.id));
@@ -131,7 +114,7 @@ export function serveWorkerChannels(
 						typeof record.message === "string"
 							? record.message
 							: "The worker channel request failed.",
-				});
+				} satisfies WorkerReply);
 			});
 	});
 }

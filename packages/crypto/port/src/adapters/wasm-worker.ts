@@ -41,15 +41,9 @@ export type WasmWorkerBackend = {
 
 /** One outbound call. `args` is already in wire form. */
 export interface CryptoPortCall {
-	id: number;
 	method: keyof CryptoPort;
 	args: readonly unknown[];
 }
-
-/** Errors cross as data because structured cloning thrown values varies by engine. */
-export type CryptoPortReply =
-	| { id: number; ok: true; value: unknown }
-	| { id: number; ok: false; code: CryptoPortErrorCode; message: string };
 
 type UnforwardedMember = Exclude<
 	keyof CryptoPort,
@@ -167,7 +161,6 @@ export function createWasmWorkerCryptoPort(
 	const channel = isWorkerRpcChannel(channelOrDeps)
 		? channelOrDeps
 		: createWasmWorkerOwner(channelOrDeps).channel("crypto");
-	let nextId = 0;
 
 	function toWire(value: unknown): unknown {
 		if (typeof value !== "object" || value === null) {
@@ -211,12 +204,9 @@ export function createWasmWorkerCryptoPort(
 		args: readonly unknown[],
 	): Promise<unknown> {
 		const wire = args.map(toWire);
-		const id = nextId;
-		nextId += 1;
 		try {
 			return fromWire(
 				await channel.request({
-					id,
 					method,
 					args: wire,
 				} satisfies CryptoPortCall),

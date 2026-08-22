@@ -7,10 +7,18 @@ import type { CryptoWorkerScope } from "../wasm.worker";
 import { serveCryptoPort } from "../wasm.worker";
 import type {
 	CryptoPortCall,
-	CryptoPortReply,
 	CryptoWorkerHandle,
 	WasmWorkerDeps,
 } from "./wasm-worker";
+
+type CryptoReplyObservation =
+	| { method: CryptoPortCall["method"]; ok: true; value: unknown }
+	| {
+			method: CryptoPortCall["method"];
+			ok: false;
+			code: CryptoPortErrorCode;
+			message: string;
+	  };
 
 class KeyHandleDouble implements KeyHandleLike {
 	constructor(readonly ref: KeyRef) {}
@@ -113,7 +121,7 @@ export class WorkerDouble implements CryptoWorkerHandle {
 	onmessage: ((event: MessageEvent) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	readonly calls: CryptoPortCall[] = [];
-	readonly replies: CryptoPortReply[] = [];
+	readonly replies: CryptoReplyObservation[] = [];
 	holdReplies = false;
 	terminateCalls = 0;
 
@@ -186,14 +194,15 @@ export class WorkerDouble implements CryptoWorkerHandle {
 			if (call !== undefined) {
 				this.replies.push(
 					envelope.ok
-						? { id: call.id, ok: true, value: envelope.value }
+						? { method: call.method, ok: true, value: envelope.value }
 						: {
-								id: call.id,
+								method: call.method,
 								ok: false,
 								code: envelope.code ?? "backend-failure",
 								message: envelope.message ?? "The crypto worker failed.",
 							},
 				);
+				this.cryptoCallsByRpcId.delete(envelope.id);
 			}
 		}
 		if (this.holdReplies) {

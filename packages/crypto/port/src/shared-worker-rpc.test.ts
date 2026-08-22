@@ -269,6 +269,40 @@ describe("shared worker RPC", () => {
 		});
 	});
 
+	test("an unknown channel is rejected as invalid wire data", async () => {
+		let listener!: (event: { data: unknown }) => void;
+		const replies: unknown[] = [];
+		let serviceCalls = 0;
+		serveWorkerChannels(
+			{
+				addEventListener: (_type, nextListener) => {
+					listener = nextListener;
+				},
+				postMessage: (message) => replies.push(message),
+			},
+			{
+				crypto: {
+					request: async () => {
+						serviceCalls += 1;
+					},
+				},
+			},
+		);
+
+		listener({
+			data: {
+				type: "request",
+				channel: "diagnostics",
+				id: 0,
+				payload: {},
+			},
+		});
+		await Promise.resolve();
+
+		expect(serviceCalls).toBe(0);
+		expect(replies).toEqual([]);
+	});
+
 	test("a synchronous postMessage failure rejects only that pending call", async () => {
 		const worker = new MultiplexWorkerDouble({
 			crypto: { request: async () => "healthy" },

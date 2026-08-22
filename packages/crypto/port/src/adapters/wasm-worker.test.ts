@@ -9,7 +9,6 @@ import {
 } from "./wasm-worker";
 import {
 	createWasmWorkerDoubles,
-	type WasmWorkerDoubles,
 	type WasmWorkerDoublesOptions,
 } from "./wasm-worker-test-doubles";
 
@@ -61,11 +60,6 @@ function stringsIn(value: unknown): string[] {
 	return [];
 }
 
-/** The member each answer belongs to, matched back through its call id. */
-function methodOf(doubles: WasmWorkerDoubles, id: number): string {
-	return doubles.worker.calls.find((call) => call.id === id)?.method ?? "?";
-}
-
 /** Let every queued microtask and the worker's own awaits run to completion. */
 async function settle(): Promise<void> {
 	await new Promise((resolve) => {
@@ -81,6 +75,9 @@ describe("wasm-worker adapter — the thread boundary", () => {
 
 		await port.initialize();
 		expect(await port.generateUuid()).toMatch(/^[0-9a-f-]{36}$/);
+		expect(doubles.worker.callsTo("initialize")).toEqual([
+			{ method: "initialize", args: [] },
+		]);
 		expect(doubles.workersCreated).toBe(1);
 	});
 
@@ -135,9 +132,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		expect(first).not.toBe(second);
 		expect(
 			doubles.worker.replies
-				.filter(
-					(reply) => methodOf(doubles, reply.id) === "generateEncryptionKey",
-				)
+				.filter((reply) => reply.method === "generateEncryptionKey")
 				.map((reply) => (reply.ok ? reply.value : null)),
 		).toEqual([{ __bitteryWorkerKey: 0 }, { __bitteryWorkerKey: 1 }]);
 	});
@@ -169,7 +164,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		expect(
 			doubles.worker.replies
 				.filter((reply) => reply.ok && bytesIn(reply.value).length > 0)
-				.map((reply) => methodOf(doubles, reply.id)),
+				.map((reply) => reply.method),
 		).toEqual(["exportKey"]);
 	});
 
@@ -210,7 +205,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 
 		for (const method of ["unwrapKey", "decryptRsaWrappedKey"] as const) {
 			const replies = doubles.worker.replies.filter(
-				(reply) => methodOf(doubles, reply.id) === method,
+				(reply) => reply.method === method,
 			);
 			expect(replies).toHaveLength(1);
 			expect(replies[0]).toMatchObject({ ok: true });

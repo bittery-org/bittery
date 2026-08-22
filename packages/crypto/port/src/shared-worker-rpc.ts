@@ -1,3 +1,13 @@
+import {
+	copyWorkerValue,
+	isWorkerReply,
+	type WorkerChannelName,
+	type WorkerRequest,
+	WorkerRpcError,
+} from "./worker-wire";
+
+export { copyWorkerValue, WorkerRpcError } from "./worker-wire";
+
 export interface SharedWorkerHandle {
 	postMessage(message: unknown): void;
 	terminate(): void;
@@ -13,7 +23,7 @@ export interface WorkerRpcChannel {
 }
 
 export interface SharedWorkerOwner {
-	channel(name: string): WorkerRpcChannel;
+	channel(name: WorkerChannelName): WorkerRpcChannel;
 	close(): Promise<void>;
 }
 
@@ -21,58 +31,10 @@ export interface SharedWorkerOwnerDeps {
 	createWorker: () => SharedWorkerHandle;
 }
 
-type WorkerReply =
-	| { type: "response"; channel: string; id: number; ok: true; value: unknown }
-	| {
-			type: "response";
-			channel: string;
-			id: number;
-			ok: false;
-			code: string;
-			message: string;
-	  }
-	| { type: "close-ack"; id: number; ok: true }
-	| { type: "close-ack"; id: number; ok: false; code: string; message: string };
-
 interface PendingRequest {
 	resolve: (value: unknown) => void;
 	reject: (error: unknown) => void;
 	detachAbort: () => void;
-}
-
-function isWorkerReply(value: unknown): value is WorkerReply {
-	if (typeof value !== "object" || value === null) return false;
-	const reply = value as Record<string, unknown>;
-	if (reply.type === "close-ack") {
-		return (
-			typeof reply.id === "number" &&
-			typeof reply.ok === "boolean" &&
-			(reply.ok ||
-				(typeof reply.code === "string" && typeof reply.message === "string"))
-		);
-	}
-	if (reply.type !== "response") return false;
-	if (
-		typeof reply.channel !== "string" ||
-		typeof reply.id !== "number" ||
-		typeof reply.ok !== "boolean"
-	) {
-		return false;
-	}
-	return (
-		reply.ok ||
-		(typeof reply.code === "string" && typeof reply.message === "string")
-	);
-}
-
-export class WorkerRpcError extends Error {
-	constructor(
-		readonly code: string,
-		message: string,
-	) {
-		super(message);
-		this.name = "WorkerRpcError";
-	}
 }
 
 function backendFailure(error: unknown, fallback: string): WorkerRpcError {
@@ -82,70 +44,6 @@ function backendFailure(error: unknown, fallback: string): WorkerRpcError {
 			? error.message
 			: fallback,
 	);
-}
-
-/** Validate the deliberately small worker wire vocabulary and copy every byte buffer. */
-export function copyWorkerValue(
-	value: unknown,
-	seen: Set<object> = new Set(),
-): unknown {
-	if (
-		value === undefined ||
-		value === null ||
-		typeof value === "string" ||
-		typeof value === "number" ||
-		typeof value === "boolean" ||
-		typeof value === "bigint"
-	) {
-		return value;
-	}
-	if (typeof value !== "object") {
-		throw new WorkerRpcError(
-			"invalid-input",
-			"The worker boundary accepts only plain data and byte arrays.",
-		);
-	}
-	if (value instanceof Uint8Array) return new Uint8Array(value);
-	if (seen.has(value)) {
-		throw new WorkerRpcError(
-			"invalid-input",
-			"Cyclic worker values are forbidden.",
-		);
-	}
-	seen.add(value);
-	try {
-		if (Array.isArray(value)) {
-			return value.map((member) => copyWorkerValue(member, seen));
-		}
-		const prototype = Object.getPrototypeOf(value) as object | null;
-		if (prototype !== Object.prototype && prototype !== null) {
-			throw new WorkerRpcError(
-				"invalid-input",
-				"The worker boundary accepts only plain data and byte arrays.",
-			);
-		}
-		if (Object.getOwnPropertySymbols(value).length > 0) {
-			throw new WorkerRpcError(
-				"invalid-input",
-				"Symbol properties are forbidden at the worker boundary.",
-			);
-		}
-		const copy: Record<string, unknown> = {};
-		for (const [name, descriptor] of Object.entries(
-			Object.getOwnPropertyDescriptors(value),
-		)) {
-			if (descriptor.get !== undefined || descriptor.set !== undefined) {
-				throw new WorkerRpcError(
-					"invalid-input",
-					"Accessor properties are forbidden at the worker boundary.",
-				);
-			}
-			copy[name] = copyWorkerValue(descriptor.value, seen);
-		}
-		return copy;
-	} finally {
-		seen.delete(value);
-	}
 }
 
 export function createSharedWorkerOwner(
@@ -160,11 +58,11 @@ export function createSharedWorkerOwner(
 		resolve: () => void;
 		reject: (error: unknown) => void;
 	} | null = null;
-	const nextIds = new Map<string, number>();
+	const nextIds = new Map<WorkerChannelName, number>();
 	let nextControlId = 0;
 	const pending = new Map<string, PendingRequest>();
 
-	function key(channel: string, id: number): string {
+	function key(channel: WorkerChannelName, id: number): string {
 		return `${channel}\u0000${id}`;
 	}
 
@@ -257,7 +155,11 @@ export function createSharedWorkerOwner(
 						const abort = () => {
 							if (!pending.delete(key(channel, id))) return;
 							try {
-								target.postMessage({ type: "cancel", channel, id });
+								target.postMessage({
+									type: "cancel",
+									channel,
+									id,
+								} satisfies WorkerRequest);
 							} catch {
 								// The local wait is already cancelled; a failed best-effort cancel
 								// cannot make the caller wait again.
@@ -283,7 +185,7 @@ export function createSharedWorkerOwner(
 							channel,
 							id,
 							payload: wirePayload,
-						});
+						} satisfies WorkerRequest);
 					} catch (error) {
 						const request = pending.get(key(channel, id));
 						pending.delete(key(channel, id));
@@ -317,7 +219,7 @@ export function createSharedWorkerOwner(
 				closeRequest = { id, resolve, reject };
 			});
 			try {
-				target.postMessage({ type: "close", id });
+				target.postMessage({ type: "close", id } satisfies WorkerRequest);
 			} catch (error) {
 				failure = backendFailure(
 					error,
