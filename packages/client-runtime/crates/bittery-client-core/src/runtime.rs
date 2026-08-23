@@ -80,6 +80,11 @@ struct DeliveryGeneration {
 
 struct LiveMasterUnlockKey(Zeroizing<[u8; 32]>);
 
+#[derive(Clone, Copy)]
+struct RecoveryAccountStatus {
+    replica_revision: u64,
+}
+
 impl LiveMasterUnlockKey {
     fn new(value: Zeroizing<[u8; 32]>) -> Self {
         Self(value)
@@ -361,6 +366,7 @@ pub struct Runtime {
     live_master_unlock_keys:
         Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
+    recovery_accounts: Mutex<HashMap<AccountId, RecoveryAccountStatus>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
     delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
@@ -469,6 +475,7 @@ impl Runtime {
             unlocked_items: Mutex::new(HashMap::new()),
             live_master_unlock_keys: Mutex::new(HashMap::new()),
             account_access: Mutex::new(HashMap::new()),
+            recovery_accounts: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
             lock_epoch_pending: Mutex::new(HashMap::new()),
             delivery_tokens: Mutex::new(HashMap::new()),
@@ -561,6 +568,10 @@ impl Runtime {
     }
 
     fn publish_restored_accounts(&self, restored: &[crate::replica::ReplicaSnapshot]) {
+        self.recovery_accounts
+            .lock()
+            .expect("recovery Account lock poisoned")
+            .clear();
         self.live_master_unlock_keys
             .lock()
             .expect("live master unlock key lock poisoned")
@@ -657,6 +668,10 @@ impl Runtime {
                 .snapshot(&account_id)
                 .expect("installed Account must have a snapshot"),
         );
+        self.recovery_accounts
+            .lock()
+            .expect("recovery Account lock poisoned")
+            .remove(&account_id);
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -696,6 +711,10 @@ impl Runtime {
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated_delivery = self.invalidate_delivery(&account_id);
         self.replica.cache(snapshot);
+        self.recovery_accounts
+            .lock()
+            .expect("recovery Account lock poisoned")
+            .remove(&account_id);
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -1126,11 +1145,28 @@ impl Runtime {
     ) -> Option<Arc<DeliveryToken>> {
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated = self.invalidate_delivery(account_id);
+        let previous_revision = self
+            .replica
+            .snapshot(account_id)
+            .map_or(0, |snapshot| snapshot.revision);
         let lock_epoch = snapshot.as_ref().map(|snapshot| snapshot.lock_epoch);
         if let Some(snapshot) = snapshot {
             self.replica.cache(snapshot);
+            self.recovery_accounts
+                .lock()
+                .expect("recovery Account lock poisoned")
+                .remove(account_id);
         } else {
             self.replica.remove_cached(account_id);
+            self.recovery_accounts
+                .lock()
+                .expect("recovery Account lock poisoned")
+                .insert(
+                    account_id.clone(),
+                    RecoveryAccountStatus {
+                        replica_revision: previous_revision,
+                    },
+                );
         }
         self.unlocked_items
             .lock()
@@ -1176,6 +1212,10 @@ impl Runtime {
         }
         let invalidated = self.invalidate_delivery(&account_id);
         self.replica.cache(snapshot);
+        self.recovery_accounts
+            .lock()
+            .expect("recovery Account lock poisoned")
+            .remove(&account_id);
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -1245,6 +1285,10 @@ impl Runtime {
             .filter_map(|account_id| self.invalidate_delivery(account_id))
             .collect();
         self.replica.replace_cache(&restored);
+        self.recovery_accounts
+            .lock()
+            .expect("recovery Account lock poisoned")
+            .clear();
         {
             let mut access = self
                 .account_access
@@ -1570,6 +1614,10 @@ impl Runtime {
                         let _publication =
                             self.publication.lock().expect("publication lock poisoned");
                         self.replica.remove_cached(&account_id);
+                        self.recovery_accounts
+                            .lock()
+                            .expect("recovery Account lock poisoned")
+                            .remove(&account_id);
                         self.unlocked_items
                             .lock()
                             .expect("unlocked projection lock poisoned")
@@ -1786,6 +1834,10 @@ impl Runtime {
                 .lock()
                 .expect("live master unlock key lock poisoned")
                 .clear();
+            self.recovery_accounts
+                .lock()
+                .expect("recovery Account lock poisoned")
+                .clear();
             self.account_access
                 .lock()
                 .expect("Account access lock poisoned")
@@ -1937,37 +1989,68 @@ impl Runtime {
                 })
             }
             ObservationRequest::RuntimeStatus { account_id } => {
+                let recovery = self
+                    .recovery_accounts
+                    .lock()
+                    .expect("recovery Account lock poisoned")
+                    .clone();
                 let snapshots = match account_id {
-                    Some(account_id) => {
-                        vec![self.replica.snapshot(account_id).ok_or_else(|| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::AccountMissing,
-                                "account is not installed",
-                            )
-                        })?]
-                    }
+                    Some(account_id) => self.replica.snapshot(account_id).into_iter().collect(),
                     None => self.replica.snapshots(),
                 };
+                let mut accounts: Vec<_> = snapshots
+                    .into_iter()
+                    .map(|value| AccountStatus {
+                        access: self
+                            .account_access
+                            .lock()
+                            .expect("Account access lock poisoned")
+                            .get(&value.account_id)
+                            .copied()
+                            .unwrap_or(AccountAccessState::SignedOut),
+                        account_id: value.account_id,
+                        replica_revision: value.revision,
+                        failure: value.failure,
+                    })
+                    .collect();
+                let visible: HashSet<_> = accounts
+                    .iter()
+                    .map(|status| status.account_id.clone())
+                    .collect();
+                accounts.extend(
+                    recovery
+                        .into_iter()
+                        .filter(|(recovery_account_id, _)| {
+                            account_id
+                                .as_ref()
+                                .is_none_or(|requested| requested == recovery_account_id)
+                                && !visible.contains(recovery_account_id)
+                        })
+                        .map(|(account_id, recovery)| AccountStatus {
+                            account_id,
+                            replica_revision: recovery.replica_revision,
+                            access: AccountAccessState::SignedOut,
+                            failure: None,
+                        }),
+                );
+                if let Some(requested) = account_id {
+                    if accounts.is_empty() {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::AccountMissing,
+                            "account is not installed",
+                        ));
+                    }
+                    debug_assert!(accounts
+                        .iter()
+                        .all(|status| &status.account_id == requested));
+                }
+                accounts.sort_by(|a, b| a.account_id.as_str().cmp(b.account_id.as_str()));
                 let revision = self.device_revision.load(Ordering::SeqCst);
                 Ok(ProjectedDelivery {
                     projection: RuntimeProjection::RuntimeStatus(RuntimeStatusProjection {
                         account_id: account_id.clone(),
                         revision,
-                        accounts: snapshots
-                            .into_iter()
-                            .map(|value| AccountStatus {
-                                access: self
-                                    .account_access
-                                    .lock()
-                                    .expect("Account access lock poisoned")
-                                    .get(&value.account_id)
-                                    .copied()
-                                    .unwrap_or(AccountAccessState::SignedOut),
-                                account_id: value.account_id,
-                                replica_revision: value.revision,
-                                failure: value.failure,
-                            })
-                            .collect(),
+                        accounts,
                         closed: self.is_closed(),
                     }),
                     generation: None,
@@ -3002,6 +3085,34 @@ mod authenticated_installation_tests {
             .await
     }
 
+    fn runtime_status(runtime: &Runtime) -> RuntimeStatusProjection {
+        let projected = runtime
+            .projection(&ObservationRequest::RuntimeStatus { account_id: None })
+            .unwrap();
+        let RuntimeProjection::RuntimeStatus(status) = projected.projection else {
+            panic!("Runtime-status observation returned another projection");
+        };
+        status
+    }
+
+    fn create_request(account_id: &str) -> RuntimeRequest {
+        RuntimeRequest::CreateLoginItem {
+            account_id: AccountId::from(account_id),
+            vault_id: "visible".into(),
+            draft: crate::LoginItemDraft {
+                title: "Login".into(),
+                url: None,
+                urls: Vec::new(),
+                username: None,
+                password: None,
+                notes: None,
+                note: None,
+                custom_fields: Vec::new(),
+                tags: Vec::new(),
+            },
+        }
+    }
+
     #[tokio::test]
     async fn first_install_obeys_the_exact_durable_order_before_publication() {
         let (runtime, _replica, platform) = harness().await;
@@ -3204,6 +3315,200 @@ mod authenticated_installation_tests {
                 &AccountId::from("account-1"),
                 &Incarnation::from("generation-1")
             ));
+        }
+    }
+
+    #[tokio::test]
+    async fn unreadable_replica_outcomes_remain_visible_signed_out_without_a_usable_account() {
+        let (runtime, replica, platform) = harness().await;
+        replica.fail_with(ReplicaFault::ApplyThenUnreadable);
+        let error = install(
+            &runtime,
+            "user-1",
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(
+            runtime_status(&runtime).accounts,
+            vec![AccountStatus {
+                account_id: AccountId::from("account-1"),
+                replica_revision: 0,
+                access: AccountAccessState::SignedOut,
+                failure: None,
+            }]
+        );
+        assert!(runtime
+            .replica
+            .snapshot(&AccountId::from("account-1"))
+            .is_none());
+        assert!(runtime
+            .observe(
+                ObservationRequest::Items {
+                    account_id: AccountId::from("account-1"),
+                },
+                Arc::new(Sink::default()),
+            )
+            .is_err());
+        assert_eq!(
+            runtime
+                .request(create_request("account-1"), RequestCancellation::new())
+                .await
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::AccountMissing
+        );
+        assert!(platform.catalog().unwrap().accounts[0]
+            .pending_install
+            .is_some());
+
+        let (runtime, replica, platform) = harness().await;
+        install(
+            &runtime,
+            "user-1",
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap();
+        let items = Arc::new(Sink::default());
+        let _items_handle = runtime
+            .observe(
+                ObservationRequest::Items {
+                    account_id: AccountId::from("account-1"),
+                },
+                items.clone(),
+            )
+            .unwrap();
+        let delivered_before = items.0.lock().unwrap().len();
+        let _ = take_zeroized_live_master_unlock_key_drops();
+        replica.fail_with(ReplicaFault::ApplyThenUnreadable);
+        assert!(
+            install(&runtime, "user-1", &FixedEntropy::new(&["generation-2"]),)
+                .await
+                .is_err()
+        );
+
+        let status = runtime_status(&runtime);
+        assert_eq!(status.accounts.len(), 1);
+        assert_eq!(status.accounts[0].account_id, AccountId::from("account-1"));
+        assert_eq!(status.accounts[0].access, AccountAccessState::SignedOut);
+        assert_eq!(items.0.lock().unwrap().len(), delivered_before);
+        assert!(!runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        assert_eq!(take_zeroized_live_master_unlock_key_drops(), 1);
+        assert_eq!(
+            runtime
+                .request(create_request("account-1"), RequestCancellation::new())
+                .await
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::AccountMissing
+        );
+        let catalog = platform.catalog().unwrap();
+        assert_eq!(catalog.accounts.len(), 1);
+        assert_eq!(catalog.accounts[0].account_id, AccountId::from("account-1"));
+        assert_eq!(
+            catalog.accounts[0].active_incarnation,
+            Some(Incarnation::from("generation-1"))
+        );
+        assert_eq!(
+            catalog.accounts[0]
+                .pending_install
+                .as_ref()
+                .map(|pending| pending.incarnation.clone()),
+            Some(Incarnation::from("generation-2"))
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_same_identity_installations_serialize_to_one_stable_account() {
+        let (runtime, _replica, platform) = harness().await;
+        let status_sink = Arc::new(Sink::default());
+        let _status_handle = runtime
+            .observe(
+                ObservationRequest::RuntimeStatus { account_id: None },
+                status_sink.clone(),
+            )
+            .unwrap();
+        let pause = Pause::new(PersistenceStep::CurrentSession);
+        platform.pause_at(pause.clone());
+        let first = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                install(
+                    &runtime,
+                    "user-1",
+                    &FixedEntropy::new(&["account-1", "generation-1"]),
+                )
+                .await
+            })
+        };
+        pause.wait_until_reached().await;
+        assert!(runtime_status(&runtime).accounts.is_empty());
+        let events_before_second = platform.events();
+        let second_started = Arc::new(tokio::sync::Notify::new());
+        let second = {
+            let runtime = runtime.clone();
+            let second_started = second_started.clone();
+            tokio::spawn(async move {
+                second_started.notify_one();
+                install(&runtime, "user-1", &FixedEntropy::new(&["generation-2"])).await
+            })
+        };
+        second_started.notified().await;
+        tokio::task::yield_now().await;
+        assert_eq!(platform.events(), events_before_second);
+        assert!(runtime_status(&runtime).accounts.is_empty());
+        let _ = take_zeroized_live_master_unlock_key_drops();
+        pause.release();
+
+        let first_response = first.await.unwrap().unwrap();
+        let second_response = second.await.unwrap().unwrap();
+        for response in [first_response, second_response] {
+            assert_eq!(
+                response,
+                RuntimeResponse::SignedIn {
+                    account_id: AccountId::from("account-1"),
+                    user_id: "user-1".into(),
+                }
+            );
+        }
+        let catalog = platform.catalog().unwrap();
+        assert_eq!(catalog.accounts.len(), 1);
+        assert_eq!(
+            catalog.accounts[0].active_incarnation,
+            Some(Incarnation::from("generation-2"))
+        );
+        assert!(catalog.accounts[0].pending_install.is_none());
+        assert_eq!(
+            runtime
+                .replica
+                .snapshot(&AccountId::from("account-1"))
+                .unwrap()
+                .incarnation,
+            Incarnation::from("generation-2")
+        );
+        assert!(!runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        assert!(runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-2")
+        ));
+        assert!(take_zeroized_live_master_unlock_key_drops() >= 1);
+        for projection in status_sink.0.lock().unwrap().iter() {
+            let RuntimeProjection::RuntimeStatus(status) = projection else {
+                panic!("status sink received another projection");
+            };
+            assert!(status.accounts.len() <= 1);
+            assert!(status
+                .accounts
+                .iter()
+                .all(|status| status.account_id == AccountId::from("account-1")));
         }
     }
 
