@@ -94,19 +94,77 @@ describe("WebHttpTransportExecutor", () => {
 		});
 	});
 
-	test("omits a body for GET and HEAD", async () => {
+	test("passes undefined for every empty body including GET and HEAD", async () => {
 		const captured: Request[] = [];
 		const executor = new WebHttpTransportExecutor(async (input) => {
 			captured.push(input as Request);
 			return new Response(null, { status: 204 });
 		});
 
-		await executor.invoke(request({ method: "GET", body: [1, 2] }));
+		await executor.invoke(request({ method: "GET", body: [] }));
 		await executor.invoke(
-			request({ dispatchId: "head", method: "HEAD", body: [3, 4] }),
+			request({ dispatchId: "head", method: "HEAD", body: [] }),
+		);
+		await executor.invoke(
+			request({ dispatchId: "post", method: "POST", body: [] }),
 		);
 
-		expect(captured.map(({ body }) => body)).toEqual([null, null]);
+		expect(captured.map(({ body }) => body)).toEqual([null, null, null]);
+	});
+
+	test("rejects nonempty GET and HEAD bodies instead of silently dropping bytes", async () => {
+		let calls = 0;
+		const executor = new WebHttpTransportExecutor(async () => {
+			calls += 1;
+			return new Response(null);
+		});
+
+		for (const [method, dispatchId] of [
+			["GET", "get-body"],
+			["HEAD", "head-body"],
+		] as const) {
+			await expect(
+				executor.invoke(request({ dispatchId, method, body: [1] })),
+			).rejects.toThrow("HTTP transport invocation failed");
+		}
+		expect(calls).toBe(0);
+	});
+
+	test("rejects case-insensitive duplicate request headers before fetch", async () => {
+		let calls = 0;
+		const executor = new WebHttpTransportExecutor(async () => {
+			calls += 1;
+			return new Response(null);
+		});
+
+		await expect(
+			executor.invoke(
+				request({
+					headers: [
+						{ name: "X-Bittery-Request", value: "one" },
+						{ name: "x-bittery-request", value: "two" },
+					],
+				}),
+			),
+		).rejects.toThrow("HTTP transport invocation failed");
+		expect(calls).toBe(0);
+	});
+
+	test("rejects header values that Request would silently normalize", async () => {
+		let calls = 0;
+		const executor = new WebHttpTransportExecutor(async () => {
+			calls += 1;
+			return new Response(null);
+		});
+
+		await expect(
+			executor.invoke(
+				request({
+					headers: [{ name: "x-bittery-request", value: " silently-trimmed " }],
+				}),
+			),
+		).rejects.toThrow("HTTP transport invocation failed");
+		expect(calls).toBe(0);
 	});
 
 	test("returns redirects and opaque-style status for Rust policy", async () => {

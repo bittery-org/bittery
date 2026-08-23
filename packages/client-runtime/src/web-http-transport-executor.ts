@@ -25,6 +25,8 @@ export class WebHttpTransportExecutor {
 		if (this.#active.has(request.dispatchId)) {
 			throw new HttpTransportInvocationError();
 		}
+		assertBodySupported(request);
+		assertUniqueHeaderNames(request.headers);
 
 		const controller = new AbortController();
 		let browserRequest: Request;
@@ -36,9 +38,7 @@ export class WebHttpTransportExecutor {
 					value,
 				]),
 				body:
-					request.method === "GET" || request.method === "HEAD"
-						? undefined
-						: Uint8Array.from(request.body),
+					request.body.length === 0 ? undefined : Uint8Array.from(request.body),
 				signal: controller.signal,
 				redirect: "manual",
 				credentials: "omit",
@@ -46,6 +46,7 @@ export class WebHttpTransportExecutor {
 				referrerPolicy: "no-referrer",
 				mode: "cors",
 			});
+			assertHeadersPreserved(request.headers, browserRequest.headers);
 		} catch {
 			throw new HttpTransportInvocationError();
 		}
@@ -76,6 +77,42 @@ export class WebHttpTransportExecutor {
 		if (controller === undefined) return;
 		this.#active.delete(dispatchId);
 		controller.abort();
+	}
+}
+
+function assertBodySupported(request: HttpRequest): void {
+	if (
+		request.body.length > 0 &&
+		(request.method === "GET" || request.method === "HEAD")
+	) {
+		throw new HttpTransportInvocationError();
+	}
+}
+
+function assertUniqueHeaderNames(headers: HttpRequest["headers"]): void {
+	const names = new Set<string>();
+	for (const { name } of headers) {
+		const canonicalName = name.toLowerCase();
+		if (names.has(canonicalName)) throw new HttpTransportInvocationError();
+		names.add(canonicalName);
+	}
+}
+
+function assertHeadersPreserved(
+	expected: HttpRequest["headers"],
+	actual: Headers,
+): void {
+	const actualEntries = [...actual.entries()];
+	if (actualEntries.length !== expected.length) {
+		throw new HttpTransportInvocationError();
+	}
+	const expectedValues = new Map(
+		expected.map(({ name, value }) => [name.toLowerCase(), value]),
+	);
+	for (const [name, value] of actualEntries) {
+		if (expectedValues.get(name.toLowerCase()) !== value) {
+			throw new HttpTransportInvocationError();
+		}
 	}
 }
 
