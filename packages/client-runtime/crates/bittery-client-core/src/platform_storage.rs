@@ -302,7 +302,6 @@ pub(crate) struct QuickUnlockDocument {
     pub(crate) encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
     pub(crate) secret_key: String,
     pub(crate) created_at_ms: u64,
-    pub(crate) expires_at_ms: u64,
     pub(crate) last_master_password_entry_ms: Option<u64>,
     pub(crate) biometric_enabled: bool,
 }
@@ -315,7 +314,6 @@ impl QuickUnlockDocument {
         encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
         secret_key: String,
         created_at_ms: u64,
-        expires_at_ms: u64,
         last_master_password_entry_ms: Option<u64>,
         biometric_enabled: bool,
     ) -> Result<Self, RuntimeError> {
@@ -326,7 +324,6 @@ impl QuickUnlockDocument {
             encrypted_master_unlock_key,
             secret_key,
             created_at_ms,
-            expires_at_ms,
             last_master_password_entry_ms,
             biometric_enabled,
         };
@@ -977,7 +974,6 @@ mod tests {
             },
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
             10,
-            20,
             None,
             false,
         )
@@ -1025,7 +1021,6 @@ mod tests {
             },
             "not-a-Secret-Key".into(),
             10,
-            20,
             None,
             false,
         );
@@ -1041,7 +1036,6 @@ mod tests {
             },
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
             10,
-            20,
             None,
             false,
         );

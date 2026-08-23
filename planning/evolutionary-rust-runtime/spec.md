@@ -297,12 +297,13 @@ Account/quick-unlock data commits before publication. Session-bound credentials 
 platform scope. `SignedIn` is returned only when both are usable.
 
 If a crash leaves Device-bound Account data without Session-bound credentials, startup presents that
-Account as signed out and locked. When its stored Secret Key, pinned KDF profile, and quick-unlock
-lifetime remain valid, `QuickUnlock { account_id, master_password }` reads that material inside Rust
+Account as signed out and locked. When its stored Secret Key and pinned KDF profile remain readable,
+`QuickUnlock { account_id, master_password }` reads that material inside Rust
 and runs the complete existing SRP ceremony, including Server-proof verification, all Vault-key
 pages, Travel Mode verification, and fresh Session installation. Password-only describes the host
 input, not an offline or shortened authentication path. The Account remains signed out and locked
-until the sequence succeeds. Missing, expired, or corrupt quick-unlock material requires full
+until the sequence succeeds. Quick-unlock material has no time-based expiry; explicit Sign-out,
+Account removal, or Device reset deletes it. Missing or corrupt quick-unlock material requires full
 Sign-in with email, master password, and Secret Key. The Runtime never publishes an unlocked Account
 or treats missing credentials as a successful Session. This recoverable boundary is explicit because
 browser session storage cannot join an IndexedDB transaction.
