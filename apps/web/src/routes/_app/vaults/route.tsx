@@ -43,9 +43,10 @@ function VaultsLayout() {
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
 	const { vaultKeys } = useAllVaultKeys();
-	const { items, isLoading: isLoadingItems } = useRuntimeItems();
+	const { items, state: itemsState } = useRuntimeItems();
 	const availableTags = useAvailableTags(items);
-	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
+	// A count of nothing is not a count of zero: only a ready projection may claim one.
+	const itemCounts = useItemCounts(itemsState === "ready" ? items : undefined);
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();

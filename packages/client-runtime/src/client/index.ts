@@ -19,13 +19,34 @@ import {
 	type ObservationRegistryOptions,
 	type Schedule,
 } from "./registry";
-import type { RuntimeStore } from "./store";
+import {
+	type ActiveAccountStorage,
+	createMemoryActiveAccountStorage,
+	RuntimeSession,
+	type RuntimeSessionSnapshot,
+} from "./session";
+import type { RuntimeStore, Subscribable } from "./store";
 import { RuntimeRequestError, type RuntimeTransport } from "./transport";
 
 export { DEFAULT_RELEASE_GRACE_MS, type Schedule } from "./registry";
-export type {
-	RuntimeSnapshot,
-	RuntimeStore,
+export {
+	ACTIVE_ACCOUNT_STORAGE_KEY,
+	type ActiveAccountStorage,
+	createMemoryActiveAccountStorage,
+	createWebActiveAccountStorage,
+	deriveSession,
+	LOADING_SESSION,
+	RuntimeSession,
+	type RuntimeSessionSnapshot,
+	type RuntimeSessionState,
+	reconcileAccount,
+	type WebStorageLike,
+} from "./session";
+export {
+	IDLE_SNAPSHOT,
+	type RuntimeSnapshot,
+	type RuntimeStore,
+	type Subscribable,
 } from "./store";
 export {
 	RuntimeRequestError,
@@ -35,6 +56,10 @@ export {
 
 export type RuntimeSignedIn = Omit<
 	Extract<RuntimeResponse, { type: "signedIn" }>,
+	"type"
+>;
+export type RuntimeAccessChanged = Omit<
+	Extract<RuntimeResponse, { type: "accessChanged" }>,
 	"type"
 >;
 export type RuntimeAccepted = Omit<
@@ -68,6 +93,21 @@ export interface RuntimeClient {
 		input: QuickUnlockInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeSignedIn>;
+	/**
+	 * Retires live access but keeps what a password-only unlock needs. Both this and
+	 * {@link RuntimeClient.signOut} answer the access state the Device now holds, and an
+	 * unknown Account answers `signedOut` rather than failing, so a teardown path never has
+	 * to handle an error it cannot act on.
+	 */
+	lock(
+		accountId: string,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccessChanged>;
+	/** Retires access and forgets the Quick Unlock material and Session with it. */
+	signOut(
+		accountId: string,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccessChanged>;
 	createLoginItem(
 		input: CreateLoginItemInput,
 		options?: RuntimeCallOptions,
@@ -76,6 +116,17 @@ export interface RuntimeClient {
 	items(accountId: string): RuntimeStore<ItemsProjection>;
 	/** One Account's status, or the Device aggregate when no Account is named. */
 	status(accountId?: string | null): RuntimeStore<RuntimeStatusProjection>;
+	/**
+	 * The Device session: one Device-wide status observation reconciled against the host's
+	 * active-Account pointer. Open it once at the composition root and never tear it down —
+	 * `status(accountId)` answers `ACCOUNT_MISSING` for an uninstalled Account, while the
+	 * Device-wide form survives sign-in, sign-out, lock, and Account switch.
+	 */
+	session(): Subscribable<RuntimeSessionSnapshot>;
+	/** Moves the host's active-Account pointer. A UI selection, never Runtime scope. */
+	selectAccount(accountId: string | null): void;
+	/** The Account an action applies to; an explicit offer outranks the stored pointer. */
+	resolveAccount(preferred?: string | null): string | null;
 	close(): Promise<void>;
 }
 
@@ -83,6 +134,8 @@ export interface RuntimeClientOptions {
 	transport: RuntimeTransport;
 	schedule?: Schedule;
 	releaseGraceMs?: number;
+	/** Where the active-Account pointer lives. In memory when the host supplies none. */
+	activeAccount?: ActiveAccountStorage;
 }
 
 let clients = 0;
@@ -97,6 +150,13 @@ export function createRuntimeClient(
 	clients += 1;
 	const prefix = `client-${clients}`;
 	let requests = 0;
+	const session = new RuntimeSession(
+		registry.store<RuntimeStatusProjection>({
+			type: "runtimeStatus",
+			accountId: null,
+		} satisfies ObservationRequest),
+		options.activeAccount ?? createMemoryActiveAccountStorage(),
+	);
 
 	async function call<Variant extends RuntimeResponse["type"]>(
 		request: RuntimeRequest,
@@ -126,6 +186,8 @@ export function createRuntimeClient(
 				"signedIn",
 				callOptions,
 			);
+			// The Account a ceremony just installed is the one the host is looking at.
+			session.select(accountId);
 			return { accountId, userId };
 		},
 		async quickUnlock(input, callOptions) {
@@ -134,7 +196,24 @@ export function createRuntimeClient(
 				"signedIn",
 				callOptions,
 			);
+			session.select(accountId);
 			return { accountId, userId };
+		},
+		async lock(accountId, callOptions) {
+			const answer = await call(
+				{ type: "lock", accountId },
+				"accessChanged",
+				callOptions,
+			);
+			return { accountId: answer.accountId, access: answer.access };
+		},
+		async signOut(accountId, callOptions) {
+			const answer = await call(
+				{ type: "signOut", accountId },
+				"accessChanged",
+				callOptions,
+			);
+			return { accountId: answer.accountId, access: answer.access };
 		},
 		async createLoginItem(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(
@@ -155,6 +234,15 @@ export function createRuntimeClient(
 				type: "runtimeStatus",
 				accountId: accountId ?? null,
 			} satisfies ObservationRequest);
+		},
+		session() {
+			return session.store;
+		},
+		selectAccount(accountId) {
+			session.select(accountId);
+		},
+		resolveAccount(preferred) {
+			return session.resolve(preferred);
 		},
 		close() {
 			return transport.close();

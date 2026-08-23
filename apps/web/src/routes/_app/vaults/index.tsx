@@ -23,7 +23,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 	EditItemSheet,
-	Skeleton,
 	toast,
 	type VaultOption,
 } from "@bittery/ui";
@@ -33,6 +32,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
+import { ItemListState } from "@/components/vault/item-list-state";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -51,7 +51,7 @@ function AllItemsPage() {
 	const { m } = useI18n();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 
-	const { items, isLoading } = useRuntimeItems();
+	const { items, state: itemsState } = useRuntimeItems();
 	const { vaultKeys } = useAllVaultKeys();
 	const availableTags = useAvailableTags(items);
 	const createItem = useCreateItem();
@@ -170,12 +170,8 @@ function AllItemsPage() {
 					</Button>
 				</div>
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
-					{isLoading ? (
-						<div className="space-y-2 p-2">
-							{[1, 2, 3, 4, 5].map((i) => (
-								<Skeleton key={i} className="h-16" />
-							))}
-						</div>
+					{itemsState !== "ready" ? (
+						<ItemListState state={itemsState} />
 					) : (
 						<ItemList
 							items={items}

@@ -1,6 +1,37 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { mapRuntimeItemsProjection } from "./runtime-items";
+import {
+	LOADING_SESSION,
+	type RuntimeSessionSnapshot,
+} from "@bittery/client-runtime/client";
+import type { ItemsProjection } from "@bittery/client-runtime/protocol";
+import {
+	deriveRuntimeItemsView,
+	mapRuntimeItemsProjection,
+} from "./runtime-items";
+
+function session(
+	partial: Partial<RuntimeSessionSnapshot>,
+): RuntimeSessionSnapshot {
+	return { ...LOADING_SESSION, ...partial } as RuntimeSessionSnapshot;
+}
+
+const ONE_ITEM: ItemsProjection = {
+	accountId: "account-1",
+	replicaRevision: "4",
+	items: [
+		{
+			itemId: "item-1",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			title: "Bank",
+			status: "authoritative",
+			favorite: false,
+			createdAt: "2026-08-23T00:00:00Z",
+			updatedAt: "2026-08-23T00:00:00Z",
+		},
+	],
+};
 
 const ITEM_LIST_PAGES = [
 	"../routes/_app/vaults/index.tsx",
@@ -129,8 +160,8 @@ describe("Runtime Items projection mapping", () => {
 			"utf8",
 		);
 		expect(hook).toContain("@bittery/client-runtime/react");
-		expect(hook).toContain("mapRuntimeItemsProjection");
-		expect(hook).toContain("getRuntimeAccountId");
+		expect(hook).toContain("deriveRuntimeItemsView");
+		expect(hook).not.toMatch(/\buseSyncExternalStore\b/);
 		expect(hook).not.toMatch(/\buseEffect\b/);
 		expect(hook).not.toMatch(/\buseState\b/);
 		expect(hook).not.toMatch(/\buseItems\b/);
@@ -157,5 +188,75 @@ describe("Runtime Items projection mapping", () => {
 		);
 		expect(router).toContain("<RuntimeProvider client={runtimeClient}>");
 		expect(router).not.toContain("createRuntimeClient");
+	});
+});
+
+describe("what the vault pages render", () => {
+	test("a restored but locked Account is a lock, not an empty list", () => {
+		const view = deriveRuntimeItemsView(
+			session({ state: "locked", accountId: "account-1" }),
+			{ state: "idle" },
+		);
+		expect(view.state).toBe("locked");
+		expect(view.items).toEqual([]);
+	});
+
+	test("an Account that locks underneath an open observation is a lock", () => {
+		const view = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{ state: "failed", code: "AUTHENTICATION_REQUIRED" },
+		);
+		expect(view.state).toBe("locked");
+		expect(view.code).toBe("AUTHENTICATION_REQUIRED");
+	});
+
+	test("an unlocked Account with no Items is ready and empty, not locked", () => {
+		const view = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{
+				state: "ready",
+				value: { ...ONE_ITEM, items: [] },
+			},
+		);
+		expect(view.state).toBe("ready");
+		expect(view.items).toEqual([]);
+	});
+
+	test("an unlocked Account with Items maps them", () => {
+		const view = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{ state: "ready", value: ONE_ITEM },
+		);
+		expect(view.state).toBe("ready");
+		expect(view.items.map((item) => item.id)).toEqual(["item-1"]);
+	});
+
+	test("still loading is not the same answer as empty", () => {
+		expect(
+			deriveRuntimeItemsView(session({ state: "loading" }), { state: "idle" })
+				.state,
+		).toBe("loading");
+		expect(
+			deriveRuntimeItemsView(
+				session({ state: "unlocked", accountId: "account-1" }),
+				{ state: "loading" },
+			).state,
+		).toBe("loading");
+	});
+
+	test("a broken observation says so instead of showing an empty vault", () => {
+		const view = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{ state: "failed", code: "INVARIANT_VIOLATION" },
+		);
+		expect(view.state).toBe("unavailable");
+		expect(view.code).toBe("INVARIANT_VIOLATION");
+	});
+
+	test("a signed-out Device is signed out, not empty", () => {
+		expect(
+			deriveRuntimeItemsView(session({ state: "signedOut" }), { state: "idle" })
+				.state,
+		).toBe("signedOut");
 	});
 });

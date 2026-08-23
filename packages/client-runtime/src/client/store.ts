@@ -19,10 +19,13 @@ export type RuntimeSnapshot<T> =
  * `getSnapshot` returns the same frozen object until the next publish. React 19 warns and
  * can re-render forever if a snapshot getter allocates.
  */
-export interface RuntimeStore<T> {
+export interface Subscribable<T> {
 	subscribe(onStoreChange: () => void): () => void;
-	getSnapshot(): RuntimeSnapshot<T>;
+	getSnapshot(): T;
 }
+
+/** One observation's four-state snapshot, in that shape. */
+export type RuntimeStore<T> = Subscribable<RuntimeSnapshot<T>>;
 
 export const IDLE_SNAPSHOT: RuntimeSnapshot<never> = Object.freeze({
 	state: "idle",

@@ -1,3 +1,7 @@
+import {
+	useRuntimeClient,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
 import { useSessionState } from "@bittery/core/hooks";
 import {
 	createApiClientForServer,
@@ -16,12 +20,6 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { runtime } from "@/lib/crypto";
-import {
-	getRuntimeAccountId,
-	quickUnlockWithRuntime,
-	signInWithRuntime,
-} from "@/lib/runtime-auth";
 import { forgetActiveSession, storage } from "@/lib/storage";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
@@ -35,6 +33,10 @@ export default function SignInForm({
 }) {
 	const { m } = useI18n();
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
+	// The Runtime owns Quick Unlock now, so it decides whether this Device can offer one.
+	// The transitional session store still supplies the email to show and the Secret Key to
+	// prefill; neither is needed to unlock, only to render.
+	const runtimeSession = useRuntimeSession();
 	const serverUrl = getDefaultServerUrl();
 	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
 	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
@@ -47,11 +49,13 @@ export default function SignInForm({
 			}),
 		[insecureTransportConfirmed, serverUrl],
 	);
-	const isQuickUnlock = Boolean(
-		sessionState?.canQuickUnlock &&
-			sessionState.accountId &&
-			sessionState.email,
-	);
+	const isQuickUnlock =
+		runtimeSession.state === "locked" ||
+		Boolean(
+			sessionState?.canQuickUnlock &&
+				sessionState.accountId &&
+				sessionState.email,
+		);
 	const storedSecretKeyQuery = useQuery({
 		queryKey: ["auth", "stored-secret-key", sessionState?.accountId],
 		enabled: isQuickUnlock && !!sessionState?.accountId,
@@ -127,7 +131,9 @@ export default function SignInForm({
 					initialEmail={initialEmail}
 					initialSecretKey={initialSecretKey}
 					isQuickUnlock={isQuickUnlock}
-					quickUnlockAccountId={sessionState?.accountId ?? undefined}
+					quickUnlockAccountId={
+						runtimeSession.accountId ?? sessionState?.accountId ?? undefined
+					}
 					isCloudMode={isCloudMode}
 					canShowSignup={canShowSignup}
 					hasInvitationRedirect={hasInvitationRedirect}
@@ -178,6 +184,7 @@ function SignInFormContent({
 	redirectTo?: string;
 }) {
 	const { manager } = useAccountRuntime();
+	const runtimeClient = useRuntimeClient();
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const [email, setEmail] = useState(initialEmail);
@@ -210,15 +217,17 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			if (isQuickUnlock) {
-				const accountId = getRuntimeAccountId() ?? quickUnlockAccountId;
+				// The Account this form is offering wins over any stored pointer, and the
+				// client refuses one the Runtime's catalog no longer recognises. Preferring
+				// the stored id unlocked the wrong Account with the right password.
+				const accountId = runtimeClient.resolveAccount(quickUnlockAccountId);
 				if (!accountId) {
 					throw new Error(m.toast_auth_unlock_error_failed());
 				}
-				const signedIn = await quickUnlockWithRuntime(runtime, {
+				const signedIn = await runtimeClient.quickUnlock({
 					accountId,
 					masterPassword: input.password,
 				});
-				await storage.storeAuthToken("runtime-session");
 				await manager.refresh();
 				return signedIn;
 			}
@@ -229,14 +238,13 @@ function SignInFormContent({
 			) {
 				throw new Error(m.auth_insecure_http_confirmation_required());
 			}
-			const signedIn = await signInWithRuntime(runtime, {
+			const signedIn = await runtimeClient.signIn({
 				serverUrl,
 				email: normalizedEmail,
 				masterPassword: input.password,
 				secretKey: input.secretKey,
 				insecureTransportConfirmed,
 			});
-			await storage.storeAuthToken("runtime-session");
 			await manager.refresh();
 			return signedIn;
 		},
@@ -308,7 +316,9 @@ function SignInFormContent({
 			className="space-y-4"
 			data-testid="signin-form"
 		>
-			<div>
+			{/* A Quick Unlock the Runtime offers needs the Account id and a password, not an
+			    email. The field stays only while there is a known address to show. */}
+			<div hidden={isQuickUnlock && initialEmail === ""}>
 				<form.Field name="email">
 					{(field) => (
 						<div className="space-y-2">
@@ -466,7 +476,14 @@ function SignInFormContent({
 						variant="link"
 						onClick={async () => {
 							// "Use a different account" must remove the quick-unlock offer,
-							// which a lock would keep.
+							// which a lock would keep. The Runtime owns that offer, so the
+							// request that deletes its material has to reach the Runtime too.
+							const accountId =
+								runtimeClient.resolveAccount(quickUnlockAccountId);
+							if (accountId !== null) {
+								await runtimeClient.signOut(accountId).catch(() => undefined);
+								runtimeClient.selectAccount(null);
+							}
 							await forgetActiveSession(() => manager.refresh());
 							window.location.reload();
 						}}

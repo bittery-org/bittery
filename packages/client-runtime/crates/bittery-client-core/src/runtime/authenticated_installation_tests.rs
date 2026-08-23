@@ -2522,7 +2522,9 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
     );
     restored.open().await.unwrap();
     let status = runtime_status(&restored);
-    assert_eq!(status.accounts[0].access, AccountAccessState::SignedOut);
+    // The restart kept the Quick Unlock material the first Sign-in wrote, so the Account comes
+    // back Locked and the master password alone reopens it.
+    assert_eq!(status.accounts[0].access, AccountAccessState::Locked);
     restored
         .request(
             quick_unlock_request(account_id.as_str()),

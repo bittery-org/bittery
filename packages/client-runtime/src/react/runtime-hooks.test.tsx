@@ -10,6 +10,7 @@ import {
 	RuntimeProvider,
 	useRuntimeItems,
 	useRuntimeQuickUnlock,
+	useRuntimeSession,
 	useRuntimeStatus,
 } from "./index";
 
@@ -130,6 +131,49 @@ describe("sibling consumers of one Account", () => {
 		await flush(transport);
 		expect(screen.getByTestId("layout").textContent).toBe("first");
 		second.unmount();
+	});
+});
+
+describe("Device session", () => {
+	function SessionState() {
+		const session = useRuntimeSession();
+		return (
+			<p data-testid="session">{`${session.state}:${session.accountId ?? "-"}`}</p>
+		);
+	}
+
+	test("renders a lock, not an empty vault, for a restored Account", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const view = render(host(client, <SessionState />));
+		await flush(transport);
+
+		expect(screen.getByTestId("session").textContent).toBe("loading:-");
+		expect(transport.openObservations()[0]?.request).toEqual({
+			type: "runtimeStatus",
+			accountId: null,
+		});
+
+		await act(async () => {
+			transport.publish({
+				type: "runtimeStatus",
+				value: {
+					accountId: null,
+					accounts: [
+						{
+							accountId: "account-1",
+							access: "locked",
+							failure: null,
+							replicaRevision: "3",
+						},
+					],
+					closed: false,
+					revision: "2",
+				},
+			});
+		});
+		expect(screen.getByTestId("session").textContent).toBe("locked:account-1");
+		view.unmount();
 	});
 });
 

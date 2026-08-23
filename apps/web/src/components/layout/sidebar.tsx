@@ -1,3 +1,4 @@
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import {
@@ -65,6 +66,7 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 
 function UserNav() {
 	const { manager } = useAccountRuntime();
+	const runtimeClient = useRuntimeClient();
 	const api = useApiClient();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
@@ -84,7 +86,19 @@ function UserNav() {
 	// Signing out of web removes the whole account: the secret tier is plain
 	// `localStorage`, so leaving `secret_key` behind on a shared machine is worse, and
 	// web has no UI to manage a left-behind account.
+	//
+	// The Runtime goes first. Clearing only the transitional store left the Worker holding
+	// `Unlocked`, the live master unlock key, and the decrypted Items in memory. `SignOut`
+	// destroys those, revokes every plaintext lease, and forgets the Quick Unlock material
+	// before it answers; it does not claim to reverse Operations the Server already
+	// accepted. An Account the Runtime does not have answers `signedOut` rather than
+	// failing, so a repeated sign-out is harmless and never blocks the local teardown.
 	const handleRemoveAccount = async () => {
+		const accountId = runtimeClient.resolveAccount();
+		if (accountId !== null) {
+			await runtimeClient.signOut(accountId).catch(() => undefined);
+			runtimeClient.selectAccount(null);
+		}
 		await clearActiveAccountData(() => manager.refresh());
 		queryClient.clear();
 		navigate({ to: "/login" });

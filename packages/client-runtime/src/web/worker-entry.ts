@@ -21,12 +21,15 @@ import {
 	type RuntimeWasm,
 } from "../worker-runtime";
 
+export { decodeRuntimeClientIdentity } from "./client-identity";
+
 export interface WebRuntimeWorkerScope extends WorkerRouterScope {}
 
 export interface WebRuntimeWorkerDeps {
 	/** The combined WASM module. The host supplies it; only it may import the bindings. */
 	loadWasm(): Promise<RuntimeWasm>;
-	authClient: RuntimeAuthClientConfig;
+	/** Who this client is on the Server. The host reads it; the Worker cannot. */
+	authClient?: RuntimeAuthClientConfig;
 	/** The Crypto channel, or none. Ticket 22 deletes this branch. */
 	crypto?: WorkerChannelService;
 }
@@ -46,7 +49,7 @@ export function serveWebRuntimeWorker(
 			},
 			httpExecutor: new WebHttpTransportExecutor(),
 			loadWasm: deps.loadWasm,
-			authClient: deps.authClient,
+			...(deps.authClient === undefined ? {} : { authClient: deps.authClient }),
 		}),
 	});
 }

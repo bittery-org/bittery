@@ -1,45 +1,28 @@
-import { useRuntimeItems as useRuntimeItemsSnapshot } from "@bittery/client-runtime/react";
-import type { UnifiedItem } from "@bittery/core/hooks";
-import { useMemo, useSyncExternalStore } from "react";
 import {
-	getRuntimeAccountId,
-	subscribeRuntimeAccount,
-} from "@/lib/runtime-auth";
-import { mapRuntimeItemsProjection } from "@/lib/runtime-items";
-
-const NO_ITEMS: UnifiedItem[] = [];
+	useRuntimeItems as useRuntimeItemsSnapshot,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
+import { useMemo } from "react";
+import {
+	deriveRuntimeItemsView,
+	type RuntimeItemsView,
+} from "@/lib/runtime-items";
 
 /**
- * Observe Runtime Items for the Account the last Runtime Sign-in installed, in the shape
- * the existing ItemList reads. The observation's identity and lifetime belong to the
- * Runtime client's registry, so every page and the layout around it share one, and this
- * hook only maps.
+ * Observe Runtime Items for the Account the Device session points at, in the shape the
+ * existing ItemList reads.
+ *
+ * Nothing here subscribes. The Device session and the Items observation are both the
+ * package's hooks, their identity and lifetime belong to the Runtime client's registry, and
+ * this hook only folds the two into one answer.
  */
-export function useRuntimeItems(): {
-	items: UnifiedItem[];
-	isLoading: boolean;
-} {
-	const accountId = useSyncExternalStore(
-		subscribeRuntimeAccount,
-		getRuntimeAccountId,
-		getRuntimeAccountId,
+export function useRuntimeItems(): RuntimeItemsView {
+	const session = useRuntimeSession();
+	const snapshot = useRuntimeItemsSnapshot(
+		session.state === "unlocked" ? session.accountId : null,
 	);
-	const snapshot = useRuntimeItemsSnapshot(accountId);
-	const items = useMemo(
-		() =>
-			snapshot.state === "ready"
-				? mapRuntimeItemsProjection(snapshot.value)
-				: NO_ITEMS,
-		[snapshot],
+	return useMemo(
+		() => deriveRuntimeItemsView(session, snapshot),
+		[session, snapshot],
 	);
-
-	return {
-		items,
-		// No Account means nothing to load. A failed observation has an answer, even
-		// though the answer is empty.
-		isLoading:
-			accountId !== null &&
-			snapshot.state !== "ready" &&
-			snapshot.state !== "failed",
-	};
 }

@@ -105,3 +105,26 @@ reaches an open observation. Two browsers report distinct client ids. `pnpm chec
   one drain task that the wasm-bindgen executor polls from a microtask, which is the only point
   where the Runtime holds no lock, no publication ordering, and no plaintext delivery lease. Drain
   policy lives in the host-testable `observation_buffer` module; `web.rs` only supplies the JS call.
+- The open boundary is closed. `open` now restores an installed Account as `Locked` when the
+  Device still holds its Quick Unlock document and the Device key that wraps the stored
+  master unlock key, and as `SignedOut` otherwise. That is the same line `AccessRetirement`
+  already draws: `Lock` keeps exactly that material and `SignOut` deletes it, so a restart
+  that kept it is a locked Device and nothing else. Restoring everything as `SignedOut`
+  collapsed the two states and left the host unable to tell a lock screen from a full
+  Sign-in. The presence check reuses the authentication loaders, so missing or unusable
+  material answers `SignedOut` instead of failing startup, and only a host or executor
+  failure propagates. Both documents are zeroized on drop and startup reads nothing out of
+  them. `restore_known_accounts` keeps its `SignedOut` restore: it is a Replica-only path
+  with no production caller and no platform storage to consult.
+- Web host shape. Session state is one Device-wide `RuntimeStatus` observation opened once in
+  `apps/web/src/lib/crypto.ts` and never torn down. `src/client/session.ts` folds it and the
+  injected active-Account pointer into `RuntimeSessionSnapshot`, which carries the
+  `AccountAccessState`, the `AccountWaitingReason`, and the `RuntimeErrorCode` the UI
+  branches on. The pointer is reconciled on every read and an explicit offer outranks it, so
+  Quick Unlock targets the Account the form is offering rather than a stored id.
+- One transitional gap stays open. The Runtime holds the Session and there is no route that
+  hands a token to the transitional API client, so every transitional query on the Runtime
+  path answers 401. Removing the `"runtime-session"` sentinel does not change that; the
+  sentinel was answering 401 too. What changed is that a 401 on a request that carried no
+  credential no longer locks the Account and bounces to `/login`, so it can no longer discard
+  a Sign-in the Runtime completed. Ticket 22 removes those queries.

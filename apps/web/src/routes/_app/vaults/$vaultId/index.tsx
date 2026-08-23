@@ -48,6 +48,7 @@ import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
+import { ItemListState } from "@/components/vault/item-list-state";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
@@ -78,7 +79,7 @@ function VaultDetailPage() {
 	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
-	const { items: allItems, isLoading: isLoadingItems } = useRuntimeItems();
+	const { items: allItems, state: itemsState } = useRuntimeItems();
 	const decryptedItems = useMemo(
 		() => allItems.filter((item) => item.vaultId === vaultId),
 		[allItems, vaultId],
@@ -348,12 +349,16 @@ function VaultDetailPage() {
 
 				{/* Item list */}
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
-					<ItemList
-						items={decryptedItems}
-						isLoading={isLoadingItems}
-						onItemSelect={handleItemSelect}
-						selectedItemId={selectedItemId ?? undefined}
-					/>
+					{itemsState === "ready" ? (
+						<ItemList
+							items={decryptedItems}
+							isLoading={false}
+							onItemSelect={handleItemSelect}
+							selectedItemId={selectedItemId ?? undefined}
+						/>
+					) : (
+						<ItemListState state={itemsState} />
+					)}
 				</div>
 			</div>
 

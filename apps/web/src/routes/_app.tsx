@@ -9,14 +9,24 @@ import {
 import { AppSidebar } from "@/components/layout/sidebar";
 import { RevealLoader } from "@/components/loader";
 import { useVaultKeysSync } from "@/hooks/use-vault-keys-sync";
-import { storage } from "@/lib/storage";
+import { runtimeClient } from "@/lib/crypto";
+import {
+	evaluateRuntimeSessionAccess,
+	settledRuntimeSession,
+} from "@/lib/runtime-session";
 
 export const Route = createFileRoute("/_app")({
 	component: AppLayout,
+	// The Runtime's own published session is the gate. The guard it replaces read a
+	// credential store that Sign-in had primed with the literal `"runtime-session"`, which
+	// `api-client-factory` then sent as a bearer token.
 	beforeLoad: async () => {
-		if (!(await storage.isAuthenticated())) {
-			throw redirect({ to: "/login" });
-		}
+		// A prerender has no Worker and renders nothing account-scoped.
+		if (typeof window === "undefined") return;
+		const to = evaluateRuntimeSessionAccess(
+			await settledRuntimeSession(runtimeClient.session()),
+		);
+		if (to !== null) throw redirect({ to });
 	},
 });
 

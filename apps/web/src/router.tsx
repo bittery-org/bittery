@@ -34,7 +34,7 @@ import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
 
-function handleUnauthorizedError(originAccountId: string | null) {
+async function handleUnauthorizedError(originAccountId: string | null) {
 	if (isHandlingAuthError) return;
 
 	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
@@ -44,6 +44,11 @@ function handleUnauthorizedError(originAccountId: string | null) {
 		toast.error(m.toast_auth_session_lock_failed());
 		return;
 	}
+	// A 401 on a request that carried no credential is not a rejected Session. The Runtime
+	// owns the Session on its own path and this store holds no token at all, so locking here
+	// would discard a Sign-in that succeeded. The transitional query still fails; it just no
+	// longer takes the signed-in Account down with it.
+	if (!(await storage.getAuthToken(originAccountId))) return;
 
 	isHandlingAuthError = true;
 

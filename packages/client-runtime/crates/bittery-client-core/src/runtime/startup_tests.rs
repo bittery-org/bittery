@@ -1,6 +1,9 @@
 use super::*;
 use crate::{
-    platform_storage::{AccountMetadataDocument, PendingAccountInstallIntent},
+    platform_storage::{
+        AccountMetadataDocument, DeviceKeyDocument, PendingAccountInstallIntent,
+        QuickUnlockDocument,
+    },
     protocol::Incarnation,
     replica::{
         InMemoryReplica, ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
@@ -246,6 +249,38 @@ fn seed_metadata(
     );
 }
 
+/// Seeds what a password-only unlock needs: the Device key that wraps the stored master
+/// unlock key, and the Account's Quick Unlock document.
+fn seed_quick_unlock_material(
+    platform: &MemoryPlatformExecutor,
+    account_id: &str,
+    generation: &str,
+) {
+    platform.put(
+        "deviceSecret",
+        "bittery:runtime:platform-storage:device-key".into(),
+        &DeviceKeyDocument::new([7u8; 32]),
+    );
+    platform.put(
+        "deviceSecret",
+        generation_key(account_id, generation, "quick-unlock"),
+        &QuickUnlockDocument::new(
+            account(account_id),
+            incarnation(generation),
+            bittery_crypto_core::EncryptedData {
+                ciphertext: "Y2lwaGVy".into(),
+                iv: "aXZpdml2aXZpdml2".into(),
+                algorithm: "AES-GCM-AAD-V1".into(),
+            },
+            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
+            1,
+            None,
+            false,
+        )
+        .unwrap(),
+    );
+}
+
 fn production_runtime(
     replica: Arc<MemoryReplicaExecutor>,
     platform: Arc<MemoryPlatformExecutor>,
@@ -467,4 +502,98 @@ fn close_racing_open_prevents_startup_publication() {
     assert_eq!(error.code, RuntimeErrorCode::RuntimeClosed);
     closing.join().unwrap();
     assert!(runtime.replica.snapshots().is_empty());
+}
+
+#[tokio::test]
+async fn open_restores_an_account_with_intact_quick_unlock_material_as_locked() {
+    let replica = Arc::new(MemoryReplicaExecutor::default());
+    replica
+        .state
+        .install(
+            account("account-1"),
+            "user-1".into(),
+            incarnation("generation-1"),
+        )
+        .unwrap();
+    let platform = Arc::new(MemoryPlatformExecutor::default());
+    seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+    seed_metadata(&platform, "account-1", "generation-1", "user-1");
+    seed_quick_unlock_material(&platform, "account-1", "generation-1");
+    let runtime = production_runtime(replica, platform);
+
+    runtime.open().await.unwrap();
+
+    // Locked, not SignedOut: the Device still holds everything a password-only unlock needs,
+    // so the host must offer Quick Unlock rather than a full Sign-in.
+    assert_eq!(
+        runtime.account_access_state(&account("account-1")),
+        Some(AccountAccessState::Locked)
+    );
+}
+
+#[tokio::test]
+async fn open_restores_an_account_without_the_device_key_as_signed_out() {
+    let replica = Arc::new(MemoryReplicaExecutor::default());
+    replica
+        .state
+        .install(
+            account("account-1"),
+            "user-1".into(),
+            incarnation("generation-1"),
+        )
+        .unwrap();
+    let platform = Arc::new(MemoryPlatformExecutor::default());
+    seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+    seed_metadata(&platform, "account-1", "generation-1", "user-1");
+    seed_quick_unlock_material(&platform, "account-1", "generation-1");
+    platform
+        .values
+        .lock()
+        .unwrap()
+        .remove(&(
+            "deviceSecret".into(),
+            "bittery:runtime:platform-storage:device-key".into(),
+        ))
+        .unwrap();
+    let runtime = production_runtime(replica, platform);
+
+    runtime.open().await.unwrap();
+
+    assert_eq!(
+        runtime.account_access_state(&account("account-1")),
+        Some(AccountAccessState::SignedOut)
+    );
+}
+
+#[tokio::test]
+async fn open_restores_an_account_whose_quick_unlock_material_is_unusable_as_signed_out() {
+    let replica = Arc::new(MemoryReplicaExecutor::default());
+    replica
+        .state
+        .install(
+            account("account-1"),
+            "user-1".into(),
+            incarnation("generation-1"),
+        )
+        .unwrap();
+    let platform = Arc::new(MemoryPlatformExecutor::default());
+    seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+    seed_metadata(&platform, "account-1", "generation-1", "user-1");
+    seed_quick_unlock_material(&platform, "account-1", "generation-1");
+    platform.values.lock().unwrap().insert(
+        (
+            "deviceSecret".into(),
+            generation_key("account-1", "generation-1", "quick-unlock"),
+        ),
+        "{\"version\":1}".into(),
+    );
+    let runtime = production_runtime(replica, platform);
+
+    // Unusable material is not a startup failure: it is a Device that has to sign in again.
+    runtime.open().await.unwrap();
+
+    assert_eq!(
+        runtime.account_access_state(&account("account-1")),
+        Some(AccountAccessState::SignedOut)
+    );
 }

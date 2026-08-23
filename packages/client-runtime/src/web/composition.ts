@@ -18,6 +18,11 @@ import {
 } from "../worker/owner";
 import { createWorkerRuntime, type WorkerRuntime } from "../worker-runtime";
 
+export {
+	decodeRuntimeClientIdentity,
+	encodeRuntimeClientIdentity,
+} from "./client-identity";
+
 export interface WebClientRuntimeDeps {
 	/**
 	 * Spawns the Worker. The host passes a factory rather than a URL because a bundler only
