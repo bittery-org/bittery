@@ -194,6 +194,7 @@ dependencies = [
  "uniffi",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "zeroize",
 ]
 
 [[package]]
