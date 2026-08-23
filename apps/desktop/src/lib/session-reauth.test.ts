@@ -21,13 +21,18 @@ describe("reauthenticateDesktopSession", () => {
 		const clearQueries = mock(() => {});
 		const notify = mock(() => {});
 		const navigateToUnlock = mock(() => {});
+		const lockedAccounts: string[] = [];
 
-		await reauthenticateDesktopSession(async () => outcome([]), {
-			clearQueries,
-			notify,
-			navigateToUnlock,
-		});
+		await reauthenticateDesktopSession(
+			"account-a",
+			async (accountId) => {
+				lockedAccounts.push(accountId);
+				return outcome([]);
+			},
+			{ clearQueries, notify, navigateToUnlock },
+		);
 
+		expect(lockedAccounts).toEqual(["account-a"]);
 		expect(clearQueries).toHaveBeenCalledTimes(1);
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(navigateToUnlock).toHaveBeenCalledTimes(1);
@@ -39,6 +44,7 @@ describe("reauthenticateDesktopSession", () => {
 
 		await expect(
 			reauthenticateDesktopSession(
+				"account-a",
 				async () =>
 					outcome([
 						{
@@ -63,7 +69,7 @@ describe("reauthenticateDesktopSession", () => {
 		const unresolved = { ...outcome([]), affected: [] };
 
 		await expect(
-			reauthenticateDesktopSession(async () => unresolved, {
+			reauthenticateDesktopSession("account-a", async () => unresolved, {
 				clearQueries,
 				notify: () => {},
 				navigateToUnlock: () => {},

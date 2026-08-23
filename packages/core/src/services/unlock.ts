@@ -422,14 +422,33 @@ async function acquireWithBiometric(
 			accountId,
 		);
 		if (sessionGate !== "usable") {
-			failed.push({
+			const failure: UnlockFailure = {
 				accountId,
 				email,
 				reason:
 					sessionGate === "cleanup_failed"
 						? "unlock_failed"
 						: "password_unlock_required",
-			});
+			};
+			failed.push(failure);
+			if (sessionGate === "cleanup_failed") {
+				const alreadyFailed = new Map(
+					failed.map((entry) => [entry.accountId, entry]),
+				);
+				return {
+					candidates: [],
+					failed: targets.map(
+						(target): UnlockFailure =>
+							alreadyFailed.get(target.accountId) ?? {
+								accountId: target.accountId,
+								email: target.email,
+								reason: restored.has(target.accountId)
+									? "unlock_failed"
+									: "credential_rejected",
+							},
+					),
+				};
+			}
 			continue;
 		}
 		// Refreshing client: the biometric restore has a usable current Session.

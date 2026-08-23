@@ -11,10 +11,14 @@ export interface MobileSessionReauthEffects {
 
 /** Applies host effects only after every required lock step completed. */
 export async function reauthenticateMobileSession(
-	lock: () => Promise<LifecycleOutcome>,
+	originAccountId: string | null,
+	lock: (accountId: string) => Promise<LifecycleOutcome>,
 	effects: MobileSessionReauthEffects,
 ): Promise<void> {
-	const outcome = requireCompleteLifecycleOutcome(await lock(), {
+	if (!originAccountId) {
+		throw new Error("Unauthorized response has no Account scope.");
+	}
+	const outcome = requireCompleteLifecycleOutcome(await lock(originAccountId), {
 		operation: "Mobile session reauthentication",
 		requireAffected: true,
 	});

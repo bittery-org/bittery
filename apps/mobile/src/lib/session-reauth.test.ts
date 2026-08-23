@@ -23,13 +23,18 @@ describe("reauthenticateMobileSession", () => {
 		const clearQueries = mock(() => {});
 		const notifyExpired = mock(() => {});
 		const navigate = mock((_wasActive: boolean) => {});
+		const lockedAccounts: string[] = [];
 
-		await reauthenticateMobileSession(async () => outcome(), {
-			clearQueries,
-			notifyExpired,
-			navigate,
-		});
+		await reauthenticateMobileSession(
+			"account-a",
+			async (accountId) => {
+				lockedAccounts.push(accountId);
+				return outcome();
+			},
+			{ clearQueries, notifyExpired, navigate },
+		);
 
+		expect(lockedAccounts).toEqual(["account-a"]);
 		expect(clearQueries).toHaveBeenCalledTimes(1);
 		expect(notifyExpired).toHaveBeenCalledTimes(1);
 		expect(navigate).toHaveBeenCalledWith(true);
@@ -41,7 +46,7 @@ describe("reauthenticateMobileSession", () => {
 		const navigate = mock((_wasActive: boolean) => {});
 
 		expect(
-			reauthenticateMobileSession(async () => outcome(true), {
+			reauthenticateMobileSession("account-a", async () => outcome(true), {
 				clearQueries,
 				notifyExpired,
 				navigate,
@@ -57,7 +62,7 @@ describe("reauthenticateMobileSession", () => {
 		const unresolved = { ...outcome(), affected: [] };
 
 		await expect(
-			reauthenticateMobileSession(async () => unresolved, {
+			reauthenticateMobileSession("account-a", async () => unresolved, {
 				clearQueries,
 				notifyExpired: () => {},
 				navigate: () => {},

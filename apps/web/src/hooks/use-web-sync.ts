@@ -143,8 +143,9 @@ export function useWebSync(
 					{ operation: "Web session invalidation", requireAffected: true },
 				);
 			} catch (error) {
+				console.error("[web-sync] Session invalidation failed:", error);
 				toast.error(m.toast_auth_session_lock_failed());
-				throw error;
+				return;
 			}
 			lifecycle.clear();
 			queryClient.clear();

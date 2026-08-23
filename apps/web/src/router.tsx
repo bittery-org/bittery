@@ -11,7 +11,11 @@ import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
-import { initializeStorage, lockActiveSession, storage } from "./lib/storage";
+import {
+	initializeStorage,
+	lockRejectedAccountSession,
+	storage,
+} from "./lib/storage";
 import "./index.css";
 
 import {
@@ -28,18 +32,22 @@ import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
 
-function handleUnauthorizedError() {
+function handleUnauthorizedError(originAccountId: string | null) {
 	if (isHandlingAuthError) return;
 
 	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
 	// when sync or other background queries fire without a valid token
 	if (window.location.pathname === "/login") return;
+	if (!originAccountId) {
+		toast.error(m.toast_auth_session_lock_failed());
+		return;
+	}
 
 	isHandlingAuthError = true;
 
 	// A rejected Server Session requires online reauthentication, not a local Sign-out.
 	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
-	lockActiveSession()
+	lockRejectedAccountSession(originAccountId)
 		.then((outcome) =>
 			requireCompleteLifecycleOutcome(outcome, {
 				operation: "Web session reauthentication",
@@ -62,7 +70,6 @@ export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
 				return;
 			}
 			// An answered request carries the API's own problem detail, which is
@@ -84,7 +91,7 @@ export const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
+				return;
 			}
 		},
 	}),
@@ -138,6 +145,7 @@ const apiClient = createSessionRefreshingApiClient({
 	getClientId: getApiClientId,
 	clientPlatform: "web",
 	clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+	onUnauthorized: handleUnauthorizedError,
 });
 
 export const getRouter = () => {

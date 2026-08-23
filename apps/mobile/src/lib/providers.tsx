@@ -26,22 +26,21 @@ const fallbackServerUrl = resolveFallbackServerUrl();
 
 let isHandlingAuthError = false;
 
-function handleUnauthorizedError() {
+function handleUnauthorizedError(originAccountId: string | null) {
 	if (isHandlingAuthError) return;
 
 	const path = window.location.pathname;
 	if (path === "/login" || path === "/unlock") return;
+	if (!originAccountId) {
+		toast.error(m.toast_auth_session_lock_failed());
+		return;
+	}
 
 	isHandlingAuthError = true;
 
 	void reauthenticateMobileSession(
-		async () => {
-			const accountId = await storage.getActiveAccount();
-			if (!accountId) {
-				throw new Error("Unauthorized response has no active Account scope.");
-			}
-			return lockInvalidSession({ accountId }, lifecycleDeps);
-		},
+		originAccountId,
+		(accountId) => lockInvalidSession({ accountId }, lifecycleDeps),
 		{
 			clearQueries: () => queryClient.clear(),
 			notifyExpired: () => toast.error(m.toast_auth_session_expired()),
@@ -61,7 +60,6 @@ const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
 				return;
 			}
 			toast.error(error.message, {
@@ -77,7 +75,7 @@ const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
+				return;
 			}
 		},
 	}),
@@ -103,6 +101,7 @@ export async function createMobileApiClient() {
 		defaultServerUrl: serverUrl,
 		clientPlatform: "mobile",
 		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+		onUnauthorized: handleUnauthorizedError,
 		getAccountSnapshot: async (originAccountId) => {
 			const activeAccount =
 				originAccountId ?? (await storage.getActiveAccount());

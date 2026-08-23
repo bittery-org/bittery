@@ -11,10 +11,14 @@ export interface DesktopSessionReauthEffects {
 
 /** Apply host effects only after every Account-lock lifecycle step succeeded. */
 export async function reauthenticateDesktopSession(
-	lock: () => Promise<LifecycleOutcome>,
+	originAccountId: string | null,
+	lock: (accountId: string) => Promise<LifecycleOutcome>,
 	effects: DesktopSessionReauthEffects,
 ): Promise<LifecycleOutcome> {
-	const outcome = requireCompleteLifecycleOutcome(await lock(), {
+	if (!originAccountId) {
+		throw new Error("Unauthorized response has no Account scope.");
+	}
+	const outcome = requireCompleteLifecycleOutcome(await lock(originAccountId), {
 		operation: "Desktop session reauthentication",
 		requireAffected: true,
 	});

@@ -125,14 +125,11 @@ export async function forgetActiveSession(
  * Lock after a rejected or expired Server Session. Session-bound credentials are cleared,
  * while Device-bound Quick Unlock inputs remain available for online reauthentication.
  */
-export async function lockActiveSession(
+export async function lockRejectedAccountSession(
+	accountId: string,
 	refresh?: RefreshAccountRuntime,
 ): Promise<LifecycleOutcome> {
 	await initializeStorage();
-	const accountId = await storage.getActiveAccount();
-	if (!accountId) {
-		throw new Error("Unauthorized response has no active Account scope.");
-	}
 	const outcome = await lockInvalidSession({ accountId }, lifecycleDeps);
 	await refresh?.();
 	return outcome;

@@ -401,6 +401,9 @@ describe("unlock all accounts", () => {
 		expect(outcome.failed).toEqual([]);
 		expect(port.calls.biometricAuthenticate).toBe(1);
 		expect(await storage.getActiveAccount()).toEqual("acc-1");
+		for (const accountId of outcome.unlocked) {
+			expect(await storage.getMasterUnlockKey(accountId)).not.toBeNull();
+		}
 	});
 
 	it("requires password unlock for a biometric restore without a usable Session", async () => {
@@ -421,6 +424,7 @@ describe("unlock all accounts", () => {
 			reason: "password_unlock_required",
 		});
 		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
+		expect(await storage.getMasterUnlockKey("acc-2")).not.toBeNull();
 	});
 
 	it("fails closed when clearing an unusable biometric restore fails", async () => {
@@ -441,7 +445,7 @@ describe("unlock all accounts", () => {
 			{ storage, itemCache, credentialMirror },
 		);
 
-		expect(outcome.unlocked).toEqual(["acc-2"]);
+		expect(outcome.unlocked).toEqual([]);
 		expect(outcome.failed).toContainEqual({
 			accountId: "acc-1",
 			email: "a@test.com",
@@ -454,6 +458,7 @@ describe("unlock all accounts", () => {
 			}),
 		);
 		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
+		expect(await storage.getMasterUnlockKey("acc-2")).toBeNull();
 	});
 
 	it("requires password unlock when the restored biometric Session expired", async () => {
