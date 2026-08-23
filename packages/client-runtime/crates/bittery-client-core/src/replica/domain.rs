@@ -148,7 +148,7 @@ pub(crate) enum PlanResult {
 }
 
 pub(crate) enum RecomputedPlanResult {
-    Applied { replica_revision: u64 },
+    Applied { snapshot: ReplicaSnapshot },
     Missing,
 }
 

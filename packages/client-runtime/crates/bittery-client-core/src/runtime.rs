@@ -138,6 +138,19 @@ impl Subscription {
                 .expect("observation delivery lock poisoned while closing");
         }
     }
+
+    fn is_delivering_on_current_thread(&self) -> bool {
+        self.delivery
+            .lock()
+            .expect("observation delivery lock poisoned")
+            .delivering_thread
+            == Some(std::thread::current().id())
+    }
+}
+
+fn advance_epoch(epochs: &mut HashMap<AccountId, u64>, account_id: &AccountId) {
+    let epoch = epochs.entry(account_id.clone()).or_insert(0);
+    *epoch = epoch.saturating_add(1);
 }
 
 pub struct Runtime {
@@ -148,8 +161,14 @@ pub struct Runtime {
     next_observer_id: AtomicU64,
     device_revision: AtomicU64,
     closed: AtomicBool,
+    close_complete: AtomicBool,
+    close_state_cleaned: AtomicBool,
+    close_finished: tokio::sync::Notify,
+    catalog_transition: tokio::sync::Mutex<()>,
+    publication: Mutex<()>,
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
+    account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -210,8 +229,14 @@ impl Runtime {
             next_observer_id: AtomicU64::new(1),
             device_revision: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+            close_complete: AtomicBool::new(false),
+            close_state_cleaned: AtomicBool::new(false),
+            close_finished: tokio::sync::Notify::new(),
+            catalog_transition: tokio::sync::Mutex::new(()),
+            publication: Mutex::new(()),
             unlocked_items: Mutex::new(HashMap::new()),
             account_access: Mutex::new(HashMap::new()),
+            account_lock_epochs: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
         })
     }
@@ -229,6 +254,7 @@ impl Runtime {
         incarnation: crate::protocol::Incarnation,
     ) -> Result<(), RuntimeError> {
         self.ensure_open()?;
+        let _publication = self.publication.lock().expect("publication lock poisoned");
         self.test_persistence
             .as_ref()
             .expect("test Account installation requires in-memory persistence")
@@ -249,7 +275,13 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(0);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(_publication);
         self.publish_all();
         Ok(())
     }
@@ -261,12 +293,16 @@ impl Runtime {
         user_id: String,
         incarnation: crate::protocol::Incarnation,
     ) -> Result<(), RuntimeError> {
+        let _catalog_guard = self.catalog_transition.lock().await;
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
-        self.replica
+        let snapshot = self
+            .replica
             .install_or_replace(account_id.clone(), user_id, incarnation)
             .await?;
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.cache(snapshot);
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -274,8 +310,18 @@ impl Runtime {
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
-            .insert(account_id, AccountAccessState::SignedOut);
+            .insert(account_id.clone(), AccountAccessState::SignedOut);
+        advance_epoch(
+            &mut self
+                .account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned"),
+            &account_id,
+        );
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(_publication);
+        drop(_execution_guard);
+        drop(_catalog_guard);
         self.publish_all();
         Ok(())
     }
@@ -285,6 +331,7 @@ impl Runtime {
         &self,
         account_ids: Vec<AccountId>,
     ) -> Result<(), RuntimeError> {
+        let _catalog_guard = self.catalog_transition.lock().await;
         self.ensure_open()?;
         let mut unique = HashSet::with_capacity(account_ids.len());
         for account_id in &account_ids {
@@ -314,6 +361,8 @@ impl Runtime {
         }
         self.ensure_open()?;
         let restored = self.replica.restore_known_accounts(&account_ids).await?;
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.replace_cache(&restored);
         {
             let mut access = self
                 .account_access
@@ -328,7 +377,19 @@ impl Runtime {
             .lock()
             .expect("unlocked projection lock poisoned")
             .clear();
+        {
+            let mut epochs = self
+                .account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned");
+            for account_id in &lock_ids {
+                advance_epoch(&mut epochs, account_id);
+            }
+        }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(_publication);
+        drop(execution_guards);
+        drop(_catalog_guard);
         self.publish_all();
         Ok(())
     }
@@ -344,6 +405,7 @@ impl Runtime {
                 "account is not installed",
             ));
         }
+        let _publication = self.publication.lock().expect("publication lock poisoned");
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
@@ -367,6 +429,7 @@ impl Runtime {
                 "account is not installed",
             ));
         }
+        let _publication = self.publication.lock().expect("publication lock poisoned");
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -375,7 +438,16 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::Locked);
+        advance_epoch(
+            &mut self
+                .account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned"),
+            account_id,
+        );
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(_publication);
+        drop(_execution_guard);
         self.publish_all();
         Ok(())
     }
@@ -437,6 +509,12 @@ impl Runtime {
                         "the selected Account is signed out or locked",
                     ));
                 }
+                let lock_epoch = *self
+                    .account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .entry(account_id.clone())
+                    .or_insert(0);
                 let operation_id = bittery_crypto_core::generate_uuid();
                 let item_id = bittery_crypto_core::generate_uuid();
                 let projection = LoginItemProjection {
@@ -480,14 +558,19 @@ impl Runtime {
                         ],
                     ))
                     .await?;
-                let replica_revision = match result {
-                    RecomputedPlanResult::Applied { replica_revision } => replica_revision,
+                let (replica_revision, next_snapshot) = match result {
+                    RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
                     RecomputedPlanResult::Missing => {
+                        let _publication =
+                            self.publication.lock().expect("publication lock poisoned");
+                        self.replica.remove_cached(&account_id);
                         self.unlocked_items
                             .lock()
                             .expect("unlocked projection lock poisoned")
                             .remove(&account_id);
                         self.device_revision.fetch_add(1, Ordering::SeqCst);
+                        drop(_publication);
+                        drop(_execution_guard);
                         self.publish_all();
                         return Err(RuntimeError::new(
                             RuntimeErrorCode::AccountMissing,
@@ -495,15 +578,27 @@ impl Runtime {
                         ));
                     }
                 };
-                self.unlocked_items
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                self.replica.cache(next_snapshot);
+                if self
+                    .account_lock_epochs
                     .lock()
-                    .expect("unlocked projection lock poisoned")
-                    .entry(account_id)
-                    .or_default()
-                    .push(projection);
+                    .expect("Account lock epoch lock poisoned")
+                    .get(&account_id)
+                    == Some(&lock_epoch)
+                {
+                    self.unlocked_items
+                        .lock()
+                        .expect("unlocked projection lock poisoned")
+                        .entry(account_id)
+                        .or_default()
+                        .push(projection);
+                }
                 self.device_revision.fetch_add(1, Ordering::SeqCst);
-                self.publish_all();
+                drop(_publication);
                 accepted();
+                drop(_execution_guard);
+                self.publish_all();
                 if cancellation.is_cancelled() {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::Cancelled,
@@ -568,6 +663,7 @@ impl Runtime {
         request: ObservationRequest,
         sink: Arc<dyn ObservationSink>,
     ) -> Result<Arc<ObservationHandle>, RuntimeError> {
+        let publication = self.publication.lock().expect("publication lock poisoned");
         self.ensure_open()?;
         let id = self.next_observer_id.fetch_add(1, Ordering::SeqCst);
         let subscription = Arc::new(Subscription::new(request, sink));
@@ -575,7 +671,7 @@ impl Runtime {
             .lock()
             .expect("observer lock poisoned")
             .insert(id, Arc::clone(&subscription));
-        let initial = match self.projection(&subscription.request) {
+        let initial = match self.projection_locked(&subscription.request) {
             Ok(initial) => initial,
             Err(error) => {
                 self.observers
@@ -586,6 +682,7 @@ impl Runtime {
                 return Err(error);
             }
         };
+        drop(publication);
         subscription.publish(initial);
         Ok(Arc::new(ObservationHandle {
             id,
@@ -611,7 +708,24 @@ impl Runtime {
     }
 
     pub async fn close(&self) {
-        if !self.closed.swap(true, Ordering::SeqCst) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            let reentrant_delivery = self
+                .observers
+                .lock()
+                .expect("observer lock poisoned")
+                .values()
+                .any(|subscription| subscription.is_delivering_on_current_thread());
+            loop {
+                let finished = self.close_finished.notified();
+                if self.close_complete.load(Ordering::SeqCst)
+                    || (reentrant_delivery && self.close_state_cleaned.load(Ordering::SeqCst))
+                {
+                    return;
+                }
+                finished.await;
+            }
+        } else {
+            let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks
                 .lock()
@@ -624,16 +738,14 @@ impl Runtime {
             for (_, lock) in &execution_locks {
                 execution_guards.push(lock.lock().await);
             }
+            let _publication = self.publication.lock().expect("publication lock poisoned");
             let subscriptions: Vec<_> = self
                 .observers
                 .lock()
                 .expect("observer lock poisoned")
-                .drain()
-                .map(|(_, subscription)| subscription)
+                .values()
+                .cloned()
                 .collect();
-            for subscription in subscriptions {
-                subscription.close();
-            }
             self.unlocked_items
                 .lock()
                 .expect("unlocked projection lock poisoned")
@@ -642,6 +754,27 @@ impl Runtime {
                 .lock()
                 .expect("Account access lock poisoned")
                 .clear();
+            {
+                let mut epochs = self
+                    .account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned");
+                for account_id in execution_locks.iter().map(|(account_id, _)| account_id) {
+                    advance_epoch(&mut epochs, account_id);
+                }
+            }
+            drop(_publication);
+            self.close_state_cleaned.store(true, Ordering::SeqCst);
+            self.close_finished.notify_waiters();
+            for subscription in subscriptions {
+                subscription.close();
+            }
+            self.observers
+                .lock()
+                .expect("observer lock poisoned")
+                .clear();
+            self.close_complete.store(true, Ordering::SeqCst);
+            self.close_finished.notify_waiters();
         }
     }
 
@@ -665,6 +798,14 @@ impl Runtime {
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<RuntimeProjection, RuntimeError> {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.projection_locked(request)
+    }
+
+    fn projection_locked(
+        &self,
+        request: &ObservationRequest,
+    ) -> Result<RuntimeProjection, RuntimeError> {
         match request {
             ObservationRequest::Items { account_id } => {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {

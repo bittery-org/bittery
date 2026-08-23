@@ -11,13 +11,35 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::{
+    future::Future,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, Condvar, Mutex,
     },
+    task::Wake,
     thread,
     time::Duration,
 };
+
+struct ThreadWake(thread::Thread);
+
+impl Wake for ThreadWake {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
+fn block_on_test<F: Future>(future: F) -> F::Output {
+    let waker = Arc::new(ThreadWake(thread::current())).into();
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(value) => return value,
+            std::task::Poll::Pending => thread::park(),
+        }
+    }
+}
 
 struct StaleOnceExecutor {
     state: InMemoryReplica,
@@ -662,7 +684,22 @@ fn close_waits_for_an_inflight_acceptance_before_clearing_runtime_state() {
             .block_on(close_runtime.close());
         closed_sender.send(()).unwrap();
     });
+    while !runtime.is_closed() {
+        thread::yield_now();
+    }
+    let (second_closed_sender, second_closed_receiver) = mpsc::channel();
+    let second_close_runtime = runtime.clone();
+    let second_close_thread = thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(second_close_runtime.close());
+        second_closed_sender.send(()).unwrap();
+    });
     assert!(closed_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
+    assert!(second_closed_receiver
         .recv_timeout(Duration::from_millis(30))
         .is_err());
     release_sender.send(()).unwrap();
@@ -673,7 +710,11 @@ fn close_waits_for_an_inflight_acceptance_before_clearing_runtime_state() {
     closed_receiver
         .recv_timeout(Duration::from_secs(1))
         .unwrap();
+    second_closed_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
     close_thread.join().unwrap();
+    second_close_thread.join().unwrap();
     assert!(runtime.is_closed());
     assert!(matches!(
         runtime.observe(
@@ -735,6 +776,86 @@ impl ObservationSink for BlockingSink {
     }
 }
 
+struct ReentrantRuntimeCloseSink {
+    runtime: std::sync::Weak<Runtime>,
+    revisions: Mutex<Vec<u64>>,
+    entered: (Mutex<bool>, Condvar),
+    release: (Mutex<bool>, Condvar),
+}
+
+impl ReentrantRuntimeCloseSink {
+    fn wait_until_entered(&self) {
+        let (entered, changed) = &self.entered;
+        let mut entered = entered.lock().unwrap();
+        while !*entered {
+            entered = changed.wait(entered).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        let (release, changed) = &self.release;
+        *release.lock().unwrap() = true;
+        changed.notify_all();
+    }
+}
+
+impl ObservationSink for ReentrantRuntimeCloseSink {
+    fn publish(&self, projection: RuntimeProjection) {
+        let revision = projection.revision();
+        self.revisions.lock().unwrap().push(revision);
+        if revision != 1 {
+            return;
+        }
+        let (entered, changed) = &self.entered;
+        *entered.lock().unwrap() = true;
+        changed.notify_all();
+        let (release, changed) = &self.release;
+        let mut release = release.lock().unwrap();
+        while !*release {
+            release = changed.wait(release).unwrap();
+        }
+        drop(release);
+        block_on_test(self.runtime.upgrade().unwrap().close());
+    }
+}
+
+#[test]
+fn callback_awaiting_a_concurrent_close_breaks_the_delivery_drain_cycle() {
+    let (runtime, account_id, _) = installed_runtime();
+    let sink = Arc::new(ReentrantRuntimeCloseSink {
+        runtime: Arc::downgrade(&runtime),
+        revisions: Mutex::new(Vec::new()),
+        entered: (Mutex::new(false), Condvar::new()),
+        release: (Mutex::new(false), Condvar::new()),
+    });
+    let _observation = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let publisher = {
+        let runtime = runtime.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    sink.wait_until_entered();
+    let closer = {
+        let runtime = runtime.clone();
+        thread::spawn(move || block_on_test(runtime.close()))
+    };
+    while !runtime.is_closed() {
+        thread::yield_now();
+    }
+    thread::sleep(Duration::from_millis(20));
+    sink.release();
+    publisher.join().unwrap();
+    closer.join().unwrap();
+    runtime.publish_all();
+    assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
+}
+
 #[test]
 fn concurrent_publications_are_serialized_in_strict_revision_order() {
     let (runtime, account_id, _incarnation) = installed_runtime();
@@ -763,15 +884,12 @@ fn concurrent_publications_are_serialized_in_strict_revision_order() {
             second_done_sender.send(()).unwrap();
         })
     };
-    assert!(second_done_receiver
-        .recv_timeout(Duration::from_millis(30))
-        .is_err());
-    sink.release();
-    first.join().unwrap();
     second_done_receiver
         .recv_timeout(Duration::from_secs(1))
         .unwrap();
     second.join().unwrap();
+    sink.release();
+    first.join().unwrap();
 
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1, 2]);
 }
