@@ -6,6 +6,7 @@
  * by one port is rejected by the other.
  */
 
+import { createRuntimeClient } from "@bittery/client-runtime/client";
 import { createWebClientRuntime } from "@bittery/client-runtime/web";
 import { createWasmWorkerCryptoPort } from "@bittery/crypto-port/adapters/wasm-worker";
 
@@ -22,6 +23,12 @@ export const webWorkerOwner = composition.workerOwner;
 export const crypto = createWasmWorkerCryptoPort(composition.cryptoChannel);
 /** Shared Worker Runtime. Web Items observation consumes `observe(Items)`. */
 export const runtime = composition.runtime;
+/**
+ * The typed host binding over that Worker. Built here, above React, because the
+ * observation registry inside it owns observation identity and lifetime: a client built
+ * inside a component would restart every observation on every remount.
+ */
+export const runtimeClient = createRuntimeClient({ transport: runtime });
 
 // Spawning the worker and instantiating WASM costs the first sign-in about as much as the
 // key derivation itself, so it is started at load. A failed load is not memoised, so the

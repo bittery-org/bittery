@@ -27,6 +27,15 @@
 		},
 		"./web/worker-entry": {
 			"default": "./src/web/worker-entry.ts"
+		},
+		"./client": {
+			"default": "./src/client/index.ts"
+		},
+		"./react": {
+			"default": "./src/react/index.ts"
+		},
+		"./testing": {
+			"default": "./src/testing/index.ts"
 		}
 	},
 	"scripts": {
@@ -54,11 +63,28 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
+		"@tanstack/react-query": "^5.101.4",
+		"@testing-library/react": "^16.2.0",
+		"@types/jsdom": "^21.1.7",
+		"@types/react": "catalog:",
 		"ajv": "8.17.1",
 		"fake-indexeddb": "6.2.4",
-		"json-schema-to-typescript": "15.0.4"
+		"jsdom": "^26.0.0",
+		"json-schema-to-typescript": "15.0.4",
+		"react": "catalog:",
+		"react-dom": "catalog:"
 	},
 	"peerDependencies": {
-		"typescript": "^5"
+		"typescript": "^5",
+		"react": "^19",
+		"@tanstack/react-query": "^5"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		},
+		"@tanstack/react-query": {
+			"optional": true
+		}
 	}
 }

@@ -35,6 +35,20 @@ close a package cycle that turbo rejects, so `src/web/worker-entry.ts` receives 
 injected instead. `scripts/check-architecture.mjs` cannot forbid the `crypto-port` to
 `client-runtime` edge until that inversion is gone.
 
+`packages/crypto/wasm` holds the combined WebAssembly artifact, and its Rust crate depends on
+`crates/bittery-client-bindings` and re-exports `WebClientRuntime`. That edge is a Cargo path
+dependency, so the package graph holds a cycle neither pnpm, turbo, nor
+`scripts/check-architecture.mjs` can see. Rehoming the artifact is its own ticket.
+
+The host binding above the transport is three layers. `src/client/` is platform-neutral: a
+`RuntimeTransport` seam, a `RuntimeClient` of typed calls over the generated protocol, and the
+observation registry. The registry mints observation ids, reference counts them by logical
+observation, defers and cancels teardown, and serializes per-key work, so observation identity and
+lifetime never depend on a component's lifecycle. `src/react/` holds one `useSyncExternalStore` and
+no effect at all; every feature hook is a derivation of it. `src/testing/` holds the fake transport
+those tests run against. A host supplies a transport and nothing else; only `src/react/` imports
+React, and both React and TanStack Query are optional peers.
+
 Generated Server types are a recursively closed allowlist sourced from the checked-in OpenAPI
 document. The generator is deterministic, committed output is compiled into the Core, and `--check`
 fails on either OpenAPI drift or generator drift. Expanding the allowlist is an explicit Runtime

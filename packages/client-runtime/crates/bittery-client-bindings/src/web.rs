@@ -1,3 +1,4 @@
+use crate::observation_slots::ObservationSlots;
 use bittery_client_core as core;
 use std::{
     collections::HashMap,
@@ -101,7 +102,7 @@ fn http_invoke_error(_reason: &str) -> core::RuntimeError {
 pub struct WebClientRuntime {
     inner: Arc<core::Runtime>,
     cancellations: Mutex<HashMap<String, core::RequestCancellation>>,
-    observations: Mutex<HashMap<String, Arc<WebObservation>>>,
+    observations: ObservationSlots<WebObservation>,
 }
 
 #[derive(Default)]
@@ -210,7 +211,7 @@ impl WebClientRuntime {
         Self {
             inner,
             cancellations: Mutex::new(HashMap::new()),
-            observations: Mutex::new(HashMap::new()),
+            observations: ObservationSlots::new(),
         }
     }
 
@@ -263,24 +264,19 @@ impl WebClientRuntime {
             callback,
             closed: AtomicBool::new(false),
         });
-        let previous = self
-            .observations
-            .lock()
-            .expect("Web observation lock poisoned")
-            .insert(observation_id.clone(), Arc::clone(&observation));
-        if let Some(previous) = previous {
-            previous.close();
-        }
+        // A repeated id is a host defect. Closing the previous handle instead would strand
+        // its consumer and hand its `unobserve` to whoever claimed the id last.
+        self.observations
+            .insert_new(observation_id.clone(), Arc::clone(&observation))
+            .map_err(|error| {
+                observation.close();
+                JsValue::from_str(&error.to_string())
+            })?;
         self.flush_observation(&observation_id)
     }
 
     pub fn unobserve(&self, observation_id: &str) {
-        if let Some(observation) = self
-            .observations
-            .lock()
-            .expect("Web observation lock poisoned")
-            .remove(observation_id)
-        {
+        if let Some(observation) = self.observations.remove(observation_id) {
             observation.close();
         }
     }
@@ -308,14 +304,7 @@ impl WebClientRuntime {
             cancellation.cancel();
         }
         self.inner.close().await;
-        let observations: Vec<_> = self
-            .observations
-            .lock()
-            .expect("Web observation lock poisoned")
-            .drain()
-            .map(|(_, observation)| observation)
-            .collect();
-        for observation in observations {
+        for observation in self.observations.drain() {
             observation.close();
         }
     }
@@ -323,27 +312,14 @@ impl WebClientRuntime {
 
 impl WebClientRuntime {
     fn flush_observations(&self) -> Result<(), JsValue> {
-        let ids: Vec<_> = self
-            .observations
-            .lock()
-            .expect("Web observation lock poisoned")
-            .keys()
-            .cloned()
-            .collect();
-        for id in ids {
+        for id in self.observations.ids() {
             self.flush_observation(&id)?;
         }
         Ok(())
     }
 
     fn flush_observation(&self, observation_id: &str) -> Result<(), JsValue> {
-        let observation = self
-            .observations
-            .lock()
-            .expect("Web observation lock poisoned")
-            .get(observation_id)
-            .cloned();
-        let Some(observation) = observation else {
+        let Some(observation) = self.observations.get(observation_id) else {
             return Ok(());
         };
         let projections: Vec<_> = observation

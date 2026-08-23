@@ -282,6 +282,14 @@ export function createWorkerRuntime(
 			);
 		},
 		async observe(observationId, requestJson, listener, options) {
+			// Replacing here would silently destroy the first consumer's observation and
+			// leave its `unobserve` to cancel the second's. A minted id makes this
+			// unreachable, so reaching it is a defect and says so.
+			if (observations.has(observationId)) {
+				throw invalidInput(
+					`Observation ${observationId} is already installed.`,
+				);
+			}
 			observations.set(observationId, listener);
 			try {
 				await channel.request(

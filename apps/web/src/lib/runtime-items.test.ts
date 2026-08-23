@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import {
-	mapRuntimeItemsProjection,
-	parseRuntimeItemsObservation,
-	runtimeItemsObservationJson,
-} from "./runtime-items";
+import { mapRuntimeItemsProjection } from "./runtime-items";
 
 const ITEM_LIST_PAGES = [
 	"../routes/_app/vaults/index.tsx",
@@ -14,11 +10,11 @@ const ITEM_LIST_PAGES = [
 	"../routes/_app/vaults/route.tsx",
 ] as const;
 
-describe("Runtime Items observation mapping", () => {
+describe("Runtime Items projection mapping", () => {
 	test("preserves Runtime order and does not filter or sort", () => {
 		const mapped = mapRuntimeItemsProjection({
 			accountId: "account-1",
-			replicaRevision: 4,
+			replicaRevision: "4",
 			items: [
 				{
 					itemId: "item-b",
@@ -36,6 +32,9 @@ describe("Runtime Items observation mapping", () => {
 					vaultId: "vault-1",
 					title: "Alpha",
 					status: "authoritative",
+					favorite: false,
+					createdAt: "2026-08-23T00:00:00Z",
+					updatedAt: "2026-08-23T00:00:00Z",
 				},
 			],
 		});
@@ -47,68 +46,71 @@ describe("Runtime Items observation mapping", () => {
 		expect(mapped[0]?.updatedAt).toBe("2026-08-23T01:00:00Z");
 	});
 
-	test("parses the tagged observe(Items) envelope", () => {
-		const items = parseRuntimeItemsObservation(
-			JSON.stringify({
-				type: "items",
-				value: {
+	test("carries the whole Login Item, custom fields included", () => {
+		const [mapped] = mapRuntimeItemsProjection({
+			accountId: "account-1",
+			replicaRevision: "4",
+			items: [
+				{
+					itemId: "item-1",
 					accountId: "account-1",
-					replicaRevision: 4,
-					items: [
-						{
-							itemId: "item-1",
-							accountId: "account-1",
-							vaultId: "vault-1",
-							title: "Bank",
-							status: "authoritative",
-						},
+					vaultId: "vault-1",
+					title: "Bank",
+					status: "authoritative",
+					favorite: false,
+					createdAt: "2026-08-23T00:00:00Z",
+					updatedAt: "2026-08-23T00:00:00Z",
+					username: "person",
+					password: "secret",
+					url: "https://bank.test",
+					urls: ["https://bank.test"],
+					notes: "note",
+					tags: ["finance"],
+					customFields: [
+						{ id: "field-1", label: "PIN", value: "1234", type: "password" },
 					],
 				},
-			}),
-		);
-		expect(items).toEqual([
-			{
-				id: "item-1",
-				accountId: "account-1",
-				vaultId: "vault-1",
-				title: "Bank",
-				url: undefined,
-				urls: [],
-				username: undefined,
-				password: undefined,
-				notes: undefined,
-				note: undefined,
-				tags: [],
-				category: "login",
-				favorite: false,
-				createdAt: "",
-				updatedAt: "",
-				deletedAt: null,
-				version: 1,
-				lastModifiedBy: "",
-				encryptionVersion: 1,
-				encryptedByUserId: "",
-				_encrypted: {
-					data: "",
-					iv: "",
-					algorithm: "",
-				},
-				vault: {
-					id: "vault-1",
-					name: "",
-					type: "personal",
-					icon: null,
-					imageUrl: null,
-				},
-			},
+			],
+		});
+		expect(mapped?.username).toBe("person");
+		expect(mapped?.password).toBe("secret");
+		expect(mapped?.url).toBe("https://bank.test");
+		expect(mapped?.tags).toEqual(["finance"]);
+		expect(mapped?.customFields).toEqual([
+			{ id: "field-1", label: "PIN", value: "1234", type: "password" },
 		]);
-		expect(parseRuntimeItemsObservation("{")).toEqual([]);
-		expect(parseRuntimeItemsObservation('{"type":"runtimeStatus"}')).toEqual(
-			[],
-		);
-		expect(runtimeItemsObservationJson("account-1")).toBe(
-			JSON.stringify({ type: "items", accountId: "account-1" }),
-		);
+	});
+
+	test("turns an absent optional field into undefined, not null", () => {
+		const [mapped] = mapRuntimeItemsProjection({
+			accountId: "account-1",
+			replicaRevision: "4",
+			items: [
+				{
+					itemId: "item-1",
+					accountId: "account-1",
+					vaultId: "vault-1",
+					title: "Bank",
+					status: "pending",
+					favorite: false,
+					createdAt: "2026-08-23T00:00:00Z",
+					updatedAt: "2026-08-23T00:00:00Z",
+					url: null,
+					username: null,
+					password: null,
+					notes: null,
+					note: null,
+				},
+			],
+		});
+		expect(mapped?.url).toBeUndefined();
+		expect(mapped?.username).toBeUndefined();
+		expect(mapped?.password).toBeUndefined();
+		expect(mapped?.notes).toBeUndefined();
+		expect(mapped?.note).toBeUndefined();
+		expect(mapped?.urls).toEqual([]);
+		expect(mapped?.tags).toEqual([]);
+		expect(mapped?.customFields).toBeUndefined();
 	});
 
 	test("existing ItemList still owns filter and sort", () => {
@@ -121,13 +123,16 @@ describe("Runtime Items observation mapping", () => {
 		expect(source).toContain("sortField");
 	});
 
-	test("vault ItemList pages consume Runtime observe(Items)", () => {
+	test("the Items hook only maps: the registry owns identity and lifetime", () => {
 		const hook = readFileSync(
 			new URL("../hooks/use-runtime-items.ts", import.meta.url),
 			"utf8",
 		);
-		expect(hook).toContain("bindRuntimeItemsObservation");
+		expect(hook).toContain("@bittery/client-runtime/react");
+		expect(hook).toContain("mapRuntimeItemsProjection");
 		expect(hook).toContain("getRuntimeAccountId");
+		expect(hook).not.toMatch(/\buseEffect\b/);
+		expect(hook).not.toMatch(/\buseState\b/);
 		expect(hook).not.toMatch(/\buseItems\b/);
 		expect(hook).not.toContain("useAccountSwitcher");
 
@@ -137,5 +142,20 @@ describe("Runtime Items observation mapping", () => {
 			expect(source).not.toMatch(/\buseItems\b/);
 			expect(source).not.toMatch(/\buseVaultItems\b/);
 		}
+	});
+
+	test("the Runtime client is built above React, not inside it", () => {
+		const composition = readFileSync(
+			new URL("./crypto.ts", import.meta.url),
+			"utf8",
+		);
+		expect(composition).toContain("createRuntimeClient");
+
+		const router = readFileSync(
+			new URL("../router.tsx", import.meta.url),
+			"utf8",
+		);
+		expect(router).toContain("<RuntimeProvider client={runtimeClient}>");
+		expect(router).not.toContain("createRuntimeClient");
 	});
 });

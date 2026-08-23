@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createRuntimeClient } from "@bittery/client-runtime/client";
 import {
 	getRuntimeAccountId,
 	parseRuntimeSignedIn,
@@ -7,7 +8,7 @@ import {
 	runtimeSignInRequestJson,
 	setRuntimeAccountId,
 } from "./runtime-auth";
-import { bindRuntimeItemsObservation } from "./runtime-items";
+import { mapRuntimeItemsProjection } from "./runtime-items";
 
 afterEach(() => {
 	setRuntimeAccountId(null);
@@ -104,6 +105,9 @@ describe("Runtime Sign-in", () => {
 			async unobserve() {
 				return;
 			},
+			async close() {
+				return;
+			},
 		};
 		const signedIn = await requestRuntimeSignIn(
 			host,
@@ -122,13 +126,22 @@ describe("Runtime Sign-in", () => {
 			"signIn",
 		);
 
-		const received: Array<{ id: string; favorite: boolean }> = [];
-		bindRuntimeItemsObservation(host, signedIn.accountId, (items) => {
-			received.push(
-				...items.map((item) => ({ id: item.id, favorite: item.favorite })),
-			);
-		});
-		expect(received).toEqual([{ id: "item-1", favorite: true }]);
+		const store = createRuntimeClient({ transport: host }).items(
+			signedIn.accountId,
+		);
+		store.subscribe(() => undefined);
+		for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+
+		const snapshot = store.getSnapshot();
+		if (snapshot.state !== "ready") {
+			throw new Error(`Items observation is ${snapshot.state}`);
+		}
+		expect(
+			mapRuntimeItemsProjection(snapshot.value).map((item) => ({
+				id: item.id,
+				favorite: item.favorite,
+			})),
+		).toEqual([{ id: "item-1", favorite: true }]);
 	});
 
 	test("Web Sign-in form routes Full Sign-in and Quick Unlock through Runtime", () => {

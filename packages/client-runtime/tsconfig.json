@@ -1,5 +1,9 @@
 {
 	"extends": "@bittery/config/tsconfig.base.json",
+	"compilerOptions": {
+		// The React entrypoint is optional for a consumer but always compiled here.
+		"jsx": "react-jsx"
+	},
 	"include": ["src/**/*", "generated/**/*.ts"],
 	"exclude": ["node_modules"]
 }

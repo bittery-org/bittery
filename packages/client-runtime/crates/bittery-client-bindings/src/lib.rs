@@ -778,6 +778,10 @@ impl From<core::RuntimeError> for BindingError {
     }
 }
 
+// Compiled on the host only for its own tests: the Web binding is the one caller, and
+// `cargo test` on a native target is the only place this decision can be checked.
+#[cfg(any(target_arch = "wasm32", test))]
+mod observation_slots;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]

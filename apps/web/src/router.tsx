@@ -18,12 +18,14 @@ import {
 } from "./lib/storage";
 import "./index.css";
 
+import { RuntimeProvider } from "@bittery/client-runtime/react";
 import {
 	MutationCache,
 	QueryCache,
 	QueryClient,
 	QueryClientProvider,
 } from "@tanstack/react-query";
+import { runtimeClient } from "./lib/crypto";
 import { AccountRuntimeProvider } from "./providers/account-runtime-provider";
 import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
@@ -162,11 +164,13 @@ export const getRouter = () => {
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
 					<ApiProvider apiClient={apiClient}>
-						<AccountRuntimeProvider queryClient={queryClient}>
-							<SyncProvider queryClient={queryClient}>
-								<WebPlatformProvider>{children}</WebPlatformProvider>
-							</SyncProvider>
-						</AccountRuntimeProvider>
+						<RuntimeProvider client={runtimeClient}>
+							<AccountRuntimeProvider queryClient={queryClient}>
+								<SyncProvider queryClient={queryClient}>
+									<WebPlatformProvider>{children}</WebPlatformProvider>
+								</SyncProvider>
+							</AccountRuntimeProvider>
+						</RuntimeProvider>
 					</ApiProvider>
 				</QueryClientProvider>
 			</I18nProvider>

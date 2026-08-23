@@ -1,58 +1,40 @@
+import type { ItemsProjection } from "@bittery/client-runtime/protocol";
 import type { UnifiedItem } from "@bittery/core/hooks";
 
-export const RUNTIME_ITEMS_OBSERVATION = {
-	type: "items",
-} as const;
-
-export function runtimeItemsObservationJson(accountId: string): string {
-	return JSON.stringify({
-		type: RUNTIME_ITEMS_OBSERVATION.type,
-		accountId,
-	});
-}
-
 /**
- * Maps a Runtime Items observation onto the existing list shape. Filter, sort,
- * and render stay in the host ItemList.
+ * Maps a Runtime Items projection onto the existing list shape. Filter, sort, and render
+ * stay in the host ItemList.
+ *
+ * This adapter lives in the app, not in `@bittery/client-runtime`: `UnifiedItem` is the
+ * legacy repository shape ticket 22 deletes, and a compatibility mapper for a dying type
+ * must not enter the shared package.
  */
-export function mapRuntimeItemsProjection(projection: {
-	accountId: string;
-	replicaRevision: string | number;
-	items: Array<{
-		itemId: string;
-		accountId: string;
-		vaultId: string;
-		title: string;
-		url?: string;
-		urls?: string[];
-		username?: string;
-		password?: string;
-		notes?: string;
-		note?: string;
-		tags?: string[];
-		status: string;
-		favorite?: boolean;
-		createdAt?: string;
-		updatedAt?: string;
-	}>;
-}): UnifiedItem[] {
+export function mapRuntimeItemsProjection(
+	projection: ItemsProjection,
+): UnifiedItem[] {
 	return projection.items.map((item) => ({
 		id: item.itemId,
 		accountId: item.accountId,
 		vaultId: item.vaultId,
 		title: item.title,
-		url: item.url,
+		url: item.url ?? undefined,
 		urls: item.urls ?? [],
-		username: item.username,
-		password: item.password,
-		notes: item.notes,
-		note: item.note,
+		username: item.username ?? undefined,
+		password: item.password ?? undefined,
+		notes: item.notes ?? undefined,
+		note: item.note ?? undefined,
+		customFields: item.customFields ?? undefined,
 		tags: item.tags ?? [],
 		category: "login",
 		favorite: item.favorite === true,
-		createdAt: item.createdAt ?? "",
-		updatedAt: item.updatedAt ?? "",
-		// ItemDetailPane still consumes the repository item shape until ticket 22.
+		createdAt: item.createdAt,
+		updatedAt: item.updatedAt,
+		// `item.status` has no home here yet. `optimisticFailure` needs an `operationId`
+		// and a `CreateItemRejectionCode`, and `ItemProjectionStatus` carries neither, so
+		// filling it would mean inventing both. Ticket 22 replaces `UnifiedItem`; the
+		// pending/failed distinction lands with the shape that can hold it.
+		//
+		// ItemDetailPane still consumes the repository item shape until then.
 		deletedAt: null,
 		version: 1,
 		lastModifiedBy: "",
@@ -71,54 +53,4 @@ export function mapRuntimeItemsProjection(projection: {
 			imageUrl: null,
 		},
 	}));
-}
-
-export function bindRuntimeItemsObservation(
-	host: {
-		observe(
-			observationId: string,
-			requestJson: string,
-			listener: (projectionJson: string) => void,
-		): Promise<void>;
-		unobserve(observationId: string): Promise<void>;
-	},
-	accountId: string,
-	onItems: (items: UnifiedItem[]) => void,
-	onFailure?: () => void,
-): () => void {
-	const observationId = `items:${accountId}`;
-	void host
-		.observe(
-			observationId,
-			runtimeItemsObservationJson(accountId),
-			(projectionJson) => {
-				onItems(parseRuntimeItemsObservation(projectionJson));
-			},
-		)
-		.catch(() => {
-			onFailure?.();
-		});
-	return () => {
-		void host.unobserve(observationId);
-	};
-}
-
-export function parseRuntimeItemsObservation(
-	projectionJson: string,
-): UnifiedItem[] {
-	try {
-		const parsed = JSON.parse(projectionJson) as {
-			type?: string;
-			value?: Parameters<typeof mapRuntimeItemsProjection>[0];
-		};
-		if (
-			parsed.type !== RUNTIME_ITEMS_OBSERVATION.type ||
-			parsed.value == null
-		) {
-			return [];
-		}
-		return mapRuntimeItemsProjection(parsed.value);
-	} catch {
-		return [];
-	}
 }

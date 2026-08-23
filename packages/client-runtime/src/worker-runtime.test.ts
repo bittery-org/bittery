@@ -454,7 +454,7 @@ describe("Runtime worker service", () => {
 });
 
 describe("Runtime main-thread facade", () => {
-	test("installs before observe, replaces listeners, and ignores unknown or late IDs", async () => {
+	test("installs before observe, and ignores unknown or late IDs", async () => {
 		let subscriber: ((value: unknown) => void) | undefined;
 		const requests: unknown[] = [];
 		const channel = {
@@ -478,10 +478,8 @@ describe("Runtime main-thread facade", () => {
 		};
 		const runtime = createWorkerRuntime(channel, async () => undefined);
 		const first: string[] = [];
-		const replacement: string[] = [];
 
 		await runtime.observe("vault", "{}", (value) => first.push(value));
-		await runtime.observe("vault", "{}", (value) => replacement.push(value));
 		subscriber?.({
 			type: "observation",
 			observationId: "unknown",
@@ -495,11 +493,48 @@ describe("Runtime main-thread facade", () => {
 		});
 
 		expect(first).toEqual(["initial"]);
-		expect(replacement).toEqual(["initial"]);
 		expect(requests.at(-1)).toEqual({
 			type: "unobserve",
 			observationId: "vault",
 		});
+	});
+
+	test("rejects a duplicate observation id and leaves the first listener alone", async () => {
+		let subscriber: ((value: unknown) => void) | undefined;
+		const requests: unknown[] = [];
+		const channel = {
+			async request<T = unknown>(payload: unknown): Promise<T> {
+				requests.push(payload);
+				return undefined as T;
+			},
+			subscribe(listener: (value: unknown) => void) {
+				subscriber = listener;
+				return () => {
+					subscriber = undefined;
+				};
+			},
+		};
+		const runtime = createWorkerRuntime(channel, async () => undefined);
+		const first: string[] = [];
+		const second: string[] = [];
+
+		await runtime.observe("vault", "{}", (value) => first.push(value));
+		await expect(
+			runtime.observe("vault", "{}", (value) => second.push(value)),
+		).rejects.toMatchObject({ code: "invalid-input" });
+
+		subscriber?.({
+			type: "observation",
+			observationId: "vault",
+			projectionJson: "kept",
+		});
+
+		expect(first).toEqual(["kept"]);
+		expect(second).toEqual([]);
+		// The rejected duplicate posts nothing, so it cannot close the live observation.
+		expect(requests).toEqual([
+			{ type: "observe", observationId: "vault", requestJson: "{}" },
+		]);
 	});
 
 	test("cancel before observe ACK removes the listener and compensates with unobserve", async () => {
