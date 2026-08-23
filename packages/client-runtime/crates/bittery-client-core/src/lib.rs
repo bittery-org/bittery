@@ -29,6 +29,8 @@ pub mod server_contract {
     include!("generated/server.rs");
 }
 
+#[doc(hidden)]
+pub use auth_http::{AuthClientConfig, ClientPlatform};
 #[cfg(feature = "http-transport-contract-schema")]
 #[doc(hidden)]
 pub use http_transport::http_transport_contract_schema;

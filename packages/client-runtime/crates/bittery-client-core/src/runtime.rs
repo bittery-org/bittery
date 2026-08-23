@@ -1,7 +1,8 @@
 #[cfg(test)]
 use crate::replica::PlanResult;
 use crate::{
-    authentication::VerifiedAuthentication,
+    auth_http::{AuthClientConfig, AuthHttpClient},
+    authentication::{authenticate, AuthenticationInput, VerifiedAuthentication},
     authentication_installation::{
         prepare_authenticated_installation, AuthenticationInstallationEvidence, Clock,
         InstallationEntropy, SystemClock, SystemInstallationEntropy,
@@ -349,7 +350,8 @@ impl Subscription {
 pub struct Runtime {
     replica: Arc<Replica>,
     platform_storage: Arc<PlatformStorage>,
-    _http_transport: Arc<HttpTransport>,
+    http_transport: Arc<HttpTransport>,
+    auth_client_config: Option<AuthClientConfig>,
     #[cfg(test)]
     test_persistence: Option<Arc<InMemoryReplica>>,
     observers: Mutex<HashMap<u64, Arc<Subscription>>>,
@@ -388,6 +390,7 @@ impl Runtime {
             persistence,
             Arc::new(PlatformStorage::unavailable()),
             Arc::new(HttpTransport::unavailable()),
+            None,
             true,
             #[cfg(test)]
             Some(in_memory),
@@ -395,6 +398,7 @@ impl Runtime {
     }
 
     #[doc(hidden)]
+    #[inline]
     #[cfg_attr(
         target_arch = "wasm32",
         allow(
@@ -411,6 +415,7 @@ impl Runtime {
             persistence,
             Arc::new(PlatformStorage::unavailable()),
             Arc::new(HttpTransport::unavailable()),
+            None,
             true,
             #[cfg(test)]
             None,
@@ -430,15 +435,49 @@ impl Runtime {
         platform: Arc<dyn SerializedPlatformStorageExecutor>,
         http: Arc<dyn SerializedHttpExecutor>,
     ) -> Arc<Self> {
+        Self::with_serialized_executors_and_optional_auth_config(replica, platform, http, None)
+    }
+
+    /// Keeps authentication identity on the Runtime instance. Production bindings deliberately
+    /// pass a configuration only when their host-specific wiring slice lands.
+    fn with_serialized_executors_and_optional_auth_config(
+        replica: Arc<dyn SerializedReplicaExecutor>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        http: Arc<dyn SerializedHttpExecutor>,
+        auth_config: Option<AuthClientConfig>,
+    ) -> Arc<Self> {
         let persistence: Arc<dyn ReplicaPersistence> =
             Arc::new(SerializedReplicaPersistence::new(replica));
         Self::with_persistence(
             persistence,
             Arc::new(PlatformStorage::new(platform)),
             Arc::new(HttpTransport::new(http)),
+            auth_config,
             false,
             #[cfg(test)]
             None,
+        )
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "the configured Web executors and Runtime share one single-threaded Worker"
+        )
+    )]
+    pub fn with_configured_serialized_executors(
+        replica: Arc<dyn SerializedReplicaExecutor>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        http: Arc<dyn SerializedHttpExecutor>,
+        auth_config: AuthClientConfig,
+    ) -> Arc<Self> {
+        Self::with_serialized_executors_and_optional_auth_config(
+            replica,
+            platform,
+            http,
+            Some(auth_config),
         )
     }
 
@@ -453,13 +492,15 @@ impl Runtime {
         persistence: Arc<dyn ReplicaPersistence>,
         platform_storage: Arc<PlatformStorage>,
         http_transport: Arc<HttpTransport>,
+        auth_client_config: Option<AuthClientConfig>,
         ready: bool,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             replica: Arc::new(Replica::new(persistence)),
             platform_storage,
-            _http_transport: http_transport,
+            http_transport,
+            auth_client_config,
             #[cfg(test)]
             test_persistence,
             observers: Mutex::new(HashMap::new()),
@@ -744,11 +785,7 @@ impl Runtime {
     }
 
     /// Installs one fully authenticated Account generation without exposing authentication policy
-    /// to bindings. The public Sign-in request is wired to this only after the complete slice lands.
-    #[allow(
-        dead_code,
-        reason = "private coordinator lands before the public Sign-in routing slice"
-    )]
+    /// to bindings.
     pub(crate) async fn install_verified_authentication(
         &self,
         verified: VerifiedAuthentication,
@@ -1459,34 +1496,109 @@ impl Runtime {
         request: RuntimeRequest,
         cancellation: RequestCancellation,
     ) -> Result<RuntimeResponse, RuntimeError> {
-        self.request_with_acceptance_hook(request, cancellation, || {})
+        self.request_with_hooks(request, cancellation, || {}, || {})
             .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn request_with_acceptance_hook(
         &self,
         request: RuntimeRequest,
         cancellation: RequestCancellation,
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
-        self.ensure_open()?;
-        if cancellation.is_cancelled() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::Cancelled,
-                "caller cancelled before durable acceptance",
-            ));
-        }
+        self.request_with_hooks(request, cancellation, || {}, accepted)
+            .await
+    }
 
+    async fn request_with_hooks(
+        &self,
+        request: RuntimeRequest,
+        cancellation: RequestCancellation,
+        before_acceptance: impl FnOnce(),
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
         match request {
-            RuntimeRequest::SignIn { .. } => Err(RuntimeError::new(
-                RuntimeErrorCode::AuthenticationUnavailable,
-                "authentication is implemented by a later vertical slice",
-            )),
+            RuntimeRequest::SignIn {
+                server_url,
+                email,
+                master_password,
+                secret_key,
+                insecure_transport_confirmed,
+            } => {
+                let master_password = Zeroizing::new(master_password);
+                let mut secret_key = Zeroizing::new(secret_key);
+                self.ensure_open()?;
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before durable acceptance",
+                    ));
+                }
+                let auth_config = self.auth_client_config.clone().ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationUnavailable,
+                        "authentication is implemented by a later vertical slice",
+                    )
+                })?;
+                let normalized_email = bittery_crypto_core::normalize_email(&email);
+                let http = AuthHttpClient::new(
+                    &self.http_transport,
+                    &server_url,
+                    insecure_transport_confirmed,
+                    auth_config,
+                )?;
+                if !bittery_crypto_core::validate_secret_key(&secret_key) {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationUnavailable,
+                        "Secret Key is invalid",
+                    ));
+                }
+                let pinned_kdf_profile = self
+                    .resolve_sign_in_kdf_pin(&http.normalized_server_url(), &normalized_email)
+                    .await?;
+                let verified = authenticate(
+                    &http,
+                    AuthenticationInput {
+                        email: &normalized_email,
+                        master_password: &master_password,
+                        secret_key: &secret_key,
+                        pinned_kdf_profile: pinned_kdf_profile.as_ref(),
+                    },
+                    cancellation.clone(),
+                )
+                .await?;
+                drop(master_password);
+                before_acceptance();
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before durable Account acceptance",
+                    ));
+                }
+
+                // Remote verification is complete. From this point the installer owns the accepted
+                // generation and must either publish it or fence it despite later caller cancellation.
+                accepted();
+                let evidence = AuthenticationInstallationEvidence::new(
+                    std::mem::take(&mut *secret_key),
+                    insecure_transport_confirmed,
+                );
+                self.install_verified_authentication(verified, evidence)
+                    .await
+            }
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,
                 draft,
             } => {
+                self.ensure_open()?;
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before durable acceptance",
+                    ));
+                }
                 let execution_lock = self.account_execution_lock(&account_id)?;
                 let _execution_guard = execution_lock.lock().await;
                 self.ensure_open()?;
@@ -1667,6 +1779,43 @@ impl Runtime {
                 })
             }
         }
+    }
+
+    async fn resolve_sign_in_kdf_pin(
+        &self,
+        normalized_server_url: &str,
+        normalized_email: &str,
+    ) -> Result<Option<bittery_crypto_core::KdfProfile>, RuntimeError> {
+        let _catalog_guard = self.catalog_transition.lock().await;
+        self.ensure_open()?;
+        let Some(catalog) = self.platform_storage.load_device_catalog().await? else {
+            return Ok(None);
+        };
+        let mut matching_profile = None;
+        for account in catalog.accounts {
+            let incarnation = account.active_incarnation.ok_or_else(|| {
+                startup_invariant("active catalog Account has no active incarnation")
+            })?;
+            let metadata = self
+                .platform_storage
+                .load_account_metadata(&account.account_id, &incarnation)
+                .await?
+                .ok_or_else(|| {
+                    startup_invariant("active catalog Account has no generation metadata")
+                })?;
+            if metadata.normalized_server_url == normalized_server_url
+                && bittery_crypto_core::normalize_email(&metadata.email) == normalized_email
+            {
+                if matching_profile.is_some() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationUnavailable,
+                        "Device catalog has ambiguous authentication downgrade evidence",
+                    ));
+                }
+                matching_profile = Some(metadata.pinned_kdf_profile);
+            }
+        }
+        Ok(matching_profile)
     }
 
     #[cfg(test)]
@@ -2708,6 +2857,7 @@ mod startup_tests {
 mod authenticated_installation_tests {
     use super::*;
     use crate::{
+        auth_http::{AuthClientConfig, ClientPlatform},
         authentication_installation::{
             AuthenticationInstallationEvidence, FixedClock, InstallationEntropy,
         },
@@ -2722,10 +2872,18 @@ mod authenticated_installation_tests {
         },
     };
     use async_trait::async_trait;
+    use bittery_crypto_core::{
+        current_kdf_profile, derive_keys,
+        srp6a::{HashAlgorithm, PrimeGroup},
+        SrpClient, SrpServer,
+    };
     use serde_json::{json, Value};
     use std::collections::VecDeque;
 
     const SECRET_KEY: &str = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+    const MASTER_PASSWORD: &str = "correct horse battery staple";
+    const NORMALIZED_EMAIL: &str = "user-1@example.com";
+    const SRP_SALT: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
     const NOW_MS: u64 = 1_700_000_000_000;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2782,8 +2940,10 @@ mod authenticated_installation_tests {
     struct InstallationPlatform {
         values: Mutex<HashMap<(String, String), String>>,
         events: Arc<Mutex<Vec<PersistenceStep>>>,
+        invocations: AtomicU64,
         fault: Mutex<Option<PersistenceStep>>,
         pause: Mutex<Option<Arc<Pause>>>,
+        cancel_on_next_write: Mutex<Option<RequestCancellation>>,
     }
 
     impl InstallationPlatform {
@@ -2797,10 +2957,19 @@ mod authenticated_installation_tests {
 
         fn clear_events(&self) {
             self.events.lock().unwrap().clear();
+            self.invocations.store(0, Ordering::SeqCst);
+        }
+
+        fn cancel_on_next_write(&self, cancellation: RequestCancellation) {
+            *self.cancel_on_next_write.lock().unwrap() = Some(cancellation);
         }
 
         fn events(&self) -> Vec<PersistenceStep> {
             self.events.lock().unwrap().clone()
+        }
+
+        fn invocation_count(&self) -> u64 {
+            self.invocations.load(Ordering::SeqCst)
         }
 
         fn catalog(&self) -> Option<DeviceCatalogDocument> {
@@ -2853,6 +3022,7 @@ mod authenticated_installation_tests {
             &self,
             request_json: Zeroizing<String>,
         ) -> Result<Zeroizing<String>, RuntimeError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
             let request: Value = serde_json::from_str(&request_json).unwrap();
             let area = request["area"].as_str().unwrap().to_owned();
             let key = request["key"].as_str().unwrap().to_owned();
@@ -2868,6 +3038,9 @@ mod authenticated_installation_tests {
                     let serialized = request["value"].as_str().unwrap().to_owned();
                     let step = classify_set(&key, &serialized);
                     self.events.lock().unwrap().push(step);
+                    if let Some(cancellation) = self.cancel_on_next_write.lock().unwrap().take() {
+                        cancellation.cancel();
+                    }
                     let should_fail = {
                         let mut fault = self.fault.lock().unwrap();
                         if *fault == Some(step) {
@@ -3005,6 +3178,182 @@ mod authenticated_installation_tests {
         fn cancel(&self, _dispatch_id: &str) {}
     }
 
+    #[derive(Clone, Copy)]
+    enum RoutingAuthBehavior {
+        Success,
+        BadProof,
+        FollowUpError,
+        CancelAfterStart,
+    }
+
+    struct RoutingAuthHttp {
+        state: Mutex<RoutingAuthState>,
+        kdf_profile: bittery_crypto_core::KdfProfile,
+        behavior: RoutingAuthBehavior,
+        cancellation: Option<RequestCancellation>,
+    }
+
+    struct RoutingAuthState {
+        requests: Vec<Value>,
+        server: SrpServer,
+        verifier: String,
+        server_ephemeral: bittery_crypto_core::srp6a::Ephemeral,
+    }
+
+    impl RoutingAuthHttp {
+        fn new(
+            kdf_profile: bittery_crypto_core::KdfProfile,
+            behavior: RoutingAuthBehavior,
+            cancellation: Option<RequestCancellation>,
+        ) -> Self {
+            let srp = SrpClient::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
+            let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
+            let derived =
+                derive_keys(MASTER_PASSWORD, SECRET_KEY, NORMALIZED_EMAIL, &kdf_profile).unwrap();
+            let password = Zeroizing::new(String::from_utf8_lossy(&derived.auth_key).into_owned());
+            let private_key = Zeroizing::new(
+                srp.derive_safe_private_key(SRP_SALT, &password, None)
+                    .unwrap(),
+            );
+            let verifier = srp.derive_verifier(&private_key).unwrap();
+            let server_ephemeral = server.generate_ephemeral(&verifier).unwrap();
+            Self {
+                state: Mutex::new(RoutingAuthState {
+                    requests: Vec::new(),
+                    server,
+                    verifier,
+                    server_ephemeral,
+                }),
+                kdf_profile,
+                behavior,
+                cancellation,
+            }
+        }
+
+        fn requests(&self) -> Vec<Value> {
+            self.state.lock().unwrap().requests.clone()
+        }
+    }
+
+    #[async_trait]
+    impl SerializedHttpExecutor for RoutingAuthHttp {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            let request: Value = serde_json::from_str(&request_json).unwrap();
+            assert_auth_headers(&request);
+            let url = request["url"].as_str().unwrap().to_owned();
+            let mut state = self.state.lock().unwrap();
+            state.requests.push(request);
+
+            if url.ends_with("/api/v1/auth/login-attempts") {
+                let body = routing_request_body(state.requests.last().unwrap());
+                assert_eq!(body["email"], NORMALIZED_EMAIL);
+                if matches!(self.behavior, RoutingAuthBehavior::CancelAfterStart) {
+                    self.cancellation.as_ref().unwrap().cancel();
+                }
+                return Ok(routing_completed(
+                    201,
+                    json!({
+                        "attemptId": "attempt-1",
+                        "kdfParams": {
+                            "algorithm": self.kdf_profile.algorithm,
+                            "iterations": self.kdf_profile.iterations,
+                            "schemaVersion": self.kdf_profile.schema_version
+                        },
+                        "salt": SRP_SALT,
+                        "serverPublicKey": state.server_ephemeral.public
+                    }),
+                ));
+            }
+
+            if url.ends_with("/api/v1/auth/login-attempts/attempt-1/finish") {
+                let body = routing_request_body(state.requests.last().unwrap());
+                let session = state
+                    .server
+                    .derive_session(
+                        &state.server_ephemeral.secret,
+                        body["clientPublicKey"].as_str().unwrap(),
+                        SRP_SALT,
+                        "",
+                        &state.verifier,
+                        body["clientProof"].as_str().unwrap(),
+                    )
+                    .expect("the Runtime must produce the unchanged SRP proof");
+                let proof = if matches!(self.behavior, RoutingAuthBehavior::BadProof) {
+                    "00".to_owned()
+                } else {
+                    session.proof.clone()
+                };
+                return Ok(routing_completed(
+                    200,
+                    json!({
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                        "serverProof": proof,
+                        "sessionId": "session-1",
+                        "token": "fresh-token",
+                        "user": {
+                            "email": NORMALIZED_EMAIL,
+                            "encryptedPrivateKey": "encrypted-private-key",
+                            "id": "user-1",
+                            "name": "User One",
+                            "publicKey": "public-key",
+                            "secretKeyHint": "A3-ABCDEF",
+                            "teamAvatarUrl": null,
+                            "teamName": "User One"
+                        },
+                        "vaultKeys": { "hasMore": false, "items": [], "nextCursor": null }
+                    }),
+                ));
+            }
+
+            if url.ends_with("/api/v1/travel-mode") {
+                if matches!(self.behavior, RoutingAuthBehavior::FollowUpError) {
+                    return Ok(routing_completed(500, json!({"error": "injected"})));
+                }
+                return Ok(routing_completed(
+                    200,
+                    json!({
+                        "enabled": false,
+                        "enabledAt": null,
+                        "hiddenVaultIds": [],
+                        "updatedAt": "2029-01-02T00:00:00Z"
+                    }),
+                ));
+            }
+
+            Err(startup_invariant("unexpected authentication test request"))
+        }
+
+        fn cancel(&self, _dispatch_id: &str) {}
+    }
+
+    fn assert_auth_headers(request: &Value) {
+        let headers = request["headers"].as_array().unwrap();
+        for (name, value) in [
+            ("Bittery-Client-Id", "client-routing"),
+            ("Bittery-Client-Platform", "desktop"),
+            ("Bittery-Client-Version", "0.5.2-test"),
+        ] {
+            assert!(headers
+                .iter()
+                .any(|header| header["name"] == name && header["value"] == value));
+        }
+    }
+
+    fn routing_request_body(request: &Value) -> Value {
+        let body: Vec<u8> = serde_json::from_value(request["body"].clone()).unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn routing_completed(status: u16, body: Value) -> String {
+        json!({
+            "type": "completed",
+            "status": status,
+            "headers": [{"name": "Content-Type", "value": "application/json"}],
+            "body": serde_json::to_vec(&body).unwrap()
+        })
+        .to_string()
+    }
+
     fn vault_key(id: &str) -> AuthVaultKeyResponse {
         AuthVaultKeyResponse {
             encrypted_vault_key: format!("wrapped-{id}"),
@@ -3070,6 +3419,35 @@ mod authenticated_installation_tests {
         (runtime, replica, platform)
     }
 
+    async fn routing_harness(
+        http: Arc<RoutingAuthHttp>,
+    ) -> (
+        Arc<Runtime>,
+        Arc<InstallationReplica>,
+        Arc<InstallationPlatform>,
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let replica = Arc::new(InstallationReplica::new(events.clone()));
+        let platform = Arc::new(InstallationPlatform {
+            events,
+            ..InstallationPlatform::default()
+        });
+        let runtime = Runtime::with_configured_serialized_executors(
+            replica.clone(),
+            platform.clone(),
+            http,
+            AuthClientConfig::new(
+                "client-routing".into(),
+                ClientPlatform::Desktop,
+                "0.5.2-test".into(),
+            )
+            .unwrap(),
+        );
+        runtime.open().await.unwrap();
+        platform.clear_events();
+        (runtime, replica, platform)
+    }
+
     async fn install(
         runtime: &Runtime,
         user_id: &str,
@@ -3111,6 +3489,328 @@ mod authenticated_installation_tests {
                 tags: Vec::new(),
             },
         }
+    }
+
+    fn sign_in_request(email: &str) -> RuntimeRequest {
+        RuntimeRequest::SignIn {
+            server_url: "https://vault.example.com".into(),
+            email: email.into(),
+            master_password: MASTER_PASSWORD.into(),
+            secret_key: SECRET_KEY.into(),
+            insecure_transport_confirmed: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_in_routes_the_verified_ceremony_into_one_published_unlocked_account() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        let status_sink = Arc::new(Sink::default());
+        let _status = runtime
+            .observe(
+                ObservationRequest::RuntimeStatus { account_id: None },
+                status_sink.clone(),
+            )
+            .unwrap();
+
+        let response = runtime
+            .request(
+                sign_in_request("  ＵＳＥＲ-1＠ＥＸＡＭＰＬＥ．ＣＯＭ  "),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let RuntimeResponse::SignedIn {
+            account_id,
+            user_id,
+        } = response
+        else {
+            panic!("Sign-in returned another response");
+        };
+
+        assert_eq!(user_id, "user-1");
+        assert_eq!(http.requests().len(), 3);
+        assert_eq!(platform.catalog().unwrap().accounts.len(), 1);
+        let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+        assert!(runtime.has_live_master_unlock_key(&account_id, &snapshot.incarnation));
+        assert_eq!(
+            runtime.account_access_state(&account_id),
+            Some(AccountAccessState::Unlocked)
+        );
+        let projections = status_sink.0.lock().unwrap();
+        assert_eq!(projections.len(), 2);
+        let RuntimeProjection::RuntimeStatus(status) = projections.last().unwrap() else {
+            panic!("status observer received another projection");
+        };
+        assert_eq!(status.accounts.len(), 1);
+        assert_eq!(status.accounts[0].account_id, account_id);
+        assert_eq!(status.accounts[0].access, AccountAccessState::Unlocked);
+    }
+
+    #[tokio::test]
+    async fn confirmed_remote_http_is_used_and_persisted_as_account_local_evidence() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+        let mut request = sign_in_request(NORMALIZED_EMAIL);
+        let RuntimeRequest::SignIn {
+            server_url,
+            insecure_transport_confirmed,
+            ..
+        } = &mut request
+        else {
+            unreachable!()
+        };
+        *server_url = "http://vault.example.com".into();
+        *insecure_transport_confirmed = true;
+
+        let RuntimeResponse::SignedIn { account_id, .. } = runtime
+            .request(request, RequestCancellation::new())
+            .await
+            .unwrap()
+        else {
+            panic!("Sign-in returned another response");
+        };
+        assert!(http.requests().iter().all(|request| request["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://vault.example.com/")));
+        let incarnation = runtime.replica.snapshot(&account_id).unwrap().incarnation;
+        let metadata = runtime
+            .platform_storage
+            .load_account_metadata(&account_id, &incarnation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(metadata.normalized_server_url, "http://vault.example.com");
+        assert!(metadata.insecure_transport_confirmed);
+    }
+
+    #[tokio::test]
+    async fn unavailable_invalid_and_pre_cancelled_sign_in_contact_no_host() {
+        let (runtime, _replica, platform) = harness().await;
+        let error = runtime
+            .request(
+                sign_in_request(NORMALIZED_EMAIL),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(platform.invocation_count(), 0);
+
+        assert_eq!(
+            AuthClientConfig::new("bad\rclient".into(), ClientPlatform::Web, "0.5.2".into(),)
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+
+        for (request, cancellation) in [
+            {
+                let mut request = sign_in_request(NORMALIZED_EMAIL);
+                let RuntimeRequest::SignIn { secret_key, .. } = &mut request else {
+                    unreachable!()
+                };
+                *secret_key = "invalid-secret-key".into();
+                (request, RequestCancellation::new())
+            },
+            {
+                let cancellation = RequestCancellation::new();
+                cancellation.cancel();
+                (sign_in_request(NORMALIZED_EMAIL), cancellation)
+            },
+            {
+                let mut request = sign_in_request(NORMALIZED_EMAIL);
+                let RuntimeRequest::SignIn {
+                    server_url,
+                    insecure_transport_confirmed,
+                    ..
+                } = &mut request
+                else {
+                    unreachable!()
+                };
+                *server_url = "http://vault.example.com".into();
+                *insecure_transport_confirmed = false;
+                (request, RequestCancellation::new())
+            },
+        ] {
+            let http = Arc::new(RoutingAuthHttp::new(
+                current_kdf_profile(),
+                RoutingAuthBehavior::Success,
+                None,
+            ));
+            let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+            assert!(runtime.request(request, cancellation).await.is_err());
+            assert!(http.requests().is_empty());
+            assert_eq!(platform.invocation_count(), 0);
+            assert!(runtime.replica.snapshots().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_remote_authentication_failures_never_start_installation() {
+        for behavior in [
+            RoutingAuthBehavior::CancelAfterStart,
+            RoutingAuthBehavior::BadProof,
+            RoutingAuthBehavior::FollowUpError,
+        ] {
+            let cancellation = RequestCancellation::new();
+            let http = Arc::new(RoutingAuthHttp::new(
+                current_kdf_profile(),
+                behavior,
+                Some(cancellation.clone()),
+            ));
+            let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+            assert!(runtime
+                .request(sign_in_request(NORMALIZED_EMAIL), cancellation)
+                .await
+                .is_err());
+            assert!(http.requests().len() <= 3);
+            assert!(platform.events().is_empty());
+            assert!(platform.catalog().is_none());
+            assert!(runtime.replica.snapshots().is_empty());
+            assert!(runtime_status(&runtime).accounts.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn final_cancellation_check_precedes_acceptance_and_later_cancellation_is_fenced() {
+        let cancellation = RequestCancellation::new();
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http).await;
+        let error = runtime
+            .request_with_hooks(
+                sign_in_request(NORMALIZED_EMAIL),
+                cancellation.clone(),
+                || cancellation.cancel(),
+                || panic!("cancelled authentication must not be accepted"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+        assert!(platform.events().is_empty());
+        assert!(runtime.replica.snapshots().is_empty());
+
+        for cancel_from_first_write in [false, true] {
+            let cancellation = RequestCancellation::new();
+            let http = Arc::new(RoutingAuthHttp::new(
+                current_kdf_profile(),
+                RoutingAuthBehavior::Success,
+                None,
+            ));
+            let (runtime, _replica, platform) = routing_harness(http).await;
+            if cancel_from_first_write {
+                platform.cancel_on_next_write(cancellation.clone());
+            }
+            let response = if cancel_from_first_write {
+                runtime
+                    .request(sign_in_request(NORMALIZED_EMAIL), cancellation)
+                    .await
+            } else {
+                runtime
+                    .request_with_acceptance_hook(
+                        sign_in_request(NORMALIZED_EMAIL),
+                        cancellation.clone(),
+                        || cancellation.cancel(),
+                    )
+                    .await
+            }
+            .unwrap();
+            let RuntimeResponse::SignedIn { account_id, .. } = response else {
+                panic!("accepted Sign-in returned another response");
+            };
+            let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+            assert!(runtime.has_live_master_unlock_key(&account_id, &snapshot.incarnation));
+            assert_eq!(
+                runtime.account_access_state(&account_id),
+                Some(AccountAccessState::Unlocked)
+            );
+            assert!(platform.catalog().unwrap().accounts[0]
+                .pending_install
+                .is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn route_uses_only_matching_kdf_pin_and_existing_installation_fence() {
+        let stronger = bittery_crypto_core::KdfProfile {
+            iterations: current_kdf_profile().iterations + 1,
+            ..current_kdf_profile()
+        };
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        let mut existing = verified("user-1");
+        existing.kdf_profile = stronger.clone();
+        runtime
+            .install_verified_authentication_with(
+                existing,
+                evidence(),
+                &FixedClock(NOW_MS),
+                &FixedEntropy::new(&["account-1", "generation-1"]),
+            )
+            .await
+            .unwrap();
+        platform.clear_events();
+        let error = runtime
+            .request(
+                sign_in_request(NORMALIZED_EMAIL),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(http.requests().len(), 1);
+        assert!(platform.events().is_empty());
+
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http).await;
+        let mut unrelated = verified("user-2");
+        unrelated.kdf_profile = stronger;
+        runtime
+            .install_verified_authentication_with(
+                unrelated,
+                evidence(),
+                &FixedClock(NOW_MS),
+                &FixedEntropy::new(&["account-2", "generation-2"]),
+            )
+            .await
+            .unwrap();
+        platform.clear_events();
+        platform.fail_at(PersistenceStep::CurrentSession);
+        let error = runtime
+            .request(
+                sign_in_request(NORMALIZED_EMAIL),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        let status = runtime_status(&runtime);
+        assert_eq!(status.accounts.len(), 2);
+        assert!(status.accounts.iter().any(|account| {
+            account.account_id != AccountId::from("account-2")
+                && account.access == AccountAccessState::SignedOut
+        }));
     }
 
     #[tokio::test]

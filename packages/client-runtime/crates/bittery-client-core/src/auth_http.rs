@@ -17,8 +17,9 @@ const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
 const MAX_AUTH_VAULT_KEYS: usize = 21_000;
 const MAX_AUTH_VAULT_KEY_BYTES: usize = 32 * 1024 * 1024;
 
-#[derive(Clone, Copy)]
-pub(crate) enum ClientPlatform {
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub enum ClientPlatform {
     Web,
     Desktop,
     Mobile,
@@ -36,17 +37,36 @@ impl ClientPlatform {
     }
 }
 
-pub(crate) struct AuthClientMetadata {
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct AuthClientConfig {
     pub(crate) client_id: String,
     pub(crate) platform: ClientPlatform,
     pub(crate) version: String,
+}
+
+impl AuthClientConfig {
+    #[inline]
+    pub fn new(
+        client_id: String,
+        platform: ClientPlatform,
+        version: String,
+    ) -> Result<Self, RuntimeError> {
+        let config = Self {
+            client_id,
+            platform,
+            version,
+        };
+        validate_config(&config)?;
+        Ok(config)
+    }
 }
 
 /// Typed authentication requests and response policy over the primitive host transport seam.
 pub(crate) struct AuthHttpClient<'transport> {
     transport: &'transport HttpTransport,
     base_url: Url,
-    metadata: AuthClientMetadata,
+    config: AuthClientConfig,
 }
 
 impl<'transport> AuthHttpClient<'transport> {
@@ -54,14 +74,14 @@ impl<'transport> AuthHttpClient<'transport> {
         transport: &'transport HttpTransport,
         server_url: &str,
         insecure_transport_confirmed: bool,
-        metadata: AuthClientMetadata,
+        config: AuthClientConfig,
     ) -> Result<Self, RuntimeError> {
-        validate_metadata(&metadata)?;
+        validate_config(&config)?;
         let base_url = normalize_server_url(server_url, insecure_transport_confirmed)?;
         Ok(Self {
             transport,
             base_url,
-            metadata,
+            config,
         })
     }
 
@@ -265,15 +285,15 @@ impl<'transport> AuthHttpClient<'transport> {
         let mut headers = vec![
             HttpHeader {
                 name: "Bittery-Client-Id".to_owned(),
-                value: self.metadata.client_id.clone(),
+                value: self.config.client_id.clone(),
             },
             HttpHeader {
                 name: "Bittery-Client-Platform".to_owned(),
-                value: self.metadata.platform.as_str().to_owned(),
+                value: self.config.platform.as_str().to_owned(),
             },
             HttpHeader {
                 name: "Bittery-Client-Version".to_owned(),
-                value: self.metadata.version.clone(),
+                value: self.config.version.clone(),
             },
         ];
         if let Some(token) = bearer {
@@ -478,15 +498,17 @@ fn is_unspecified_ipv4(host: &Host<&str>) -> bool {
     matches!(host, Host::Ipv4(address) if address.is_unspecified())
 }
 
-fn validate_metadata(metadata: &AuthClientMetadata) -> Result<(), RuntimeError> {
-    for value in [&metadata.client_id, &metadata.version] {
+fn validate_config(config: &AuthClientConfig) -> Result<(), RuntimeError> {
+    for value in [&config.client_id, &config.version] {
         if value.is_empty()
             || value
                 .as_bytes()
                 .iter()
                 .any(|byte| byte.is_ascii_control() || matches!(byte, b'\r' | b'\n'))
         {
-            return Err(invariant("Authentication client metadata is invalid"));
+            return Err(authentication_failure(
+                "Authentication client configuration is invalid",
+            ));
         }
     }
     Ok(())
@@ -613,12 +635,8 @@ mod tests {
         .unwrap()
     }
 
-    fn metadata() -> AuthClientMetadata {
-        AuthClientMetadata {
-            client_id: "client-7".into(),
-            platform: ClientPlatform::Web,
-            version: "0.5.2".into(),
-        }
+    fn metadata() -> AuthClientConfig {
+        AuthClientConfig::new("client-7".into(), ClientPlatform::Web, "0.5.2".into()).unwrap()
     }
 
     fn vault_key(id: &str) -> Value {

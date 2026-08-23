@@ -161,7 +161,7 @@ fn authentication_failure(message: &'static str) -> RuntimeError {
 mod tests {
     use super::*;
     use crate::{
-        auth_http::{AuthClientMetadata, ClientPlatform},
+        auth_http::{AuthClientConfig, ClientPlatform},
         http_transport::{HttpTransport, SerializedHttpExecutor},
     };
     use async_trait::async_trait;
@@ -320,12 +320,8 @@ mod tests {
         fn cancel(&self, _dispatch_id: &str) {}
     }
 
-    fn metadata() -> AuthClientMetadata {
-        AuthClientMetadata {
-            client_id: "client-7".into(),
-            platform: ClientPlatform::Web,
-            version: "0.5.2".into(),
-        }
+    fn metadata() -> AuthClientConfig {
+        AuthClientConfig::new("client-7".into(), ClientPlatform::Web, "0.5.2".into()).unwrap()
     }
 
     fn client(executor: Arc<dyn SerializedHttpExecutor>) -> (HttpTransport, String) {
