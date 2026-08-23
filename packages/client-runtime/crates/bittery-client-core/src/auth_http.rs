@@ -2,16 +2,20 @@ use crate::{
     http_transport::{HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpTransport},
     server_contract::{
         AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, FinishLoginRequest,
-        FinishLoginResponse, KdfParamsResponse, LoginAttemptResponse, LoginUserResponse,
-        StartLoginRequest, TravelModeResponse, VaultRole, VaultType,
+        FinishLoginResponse, LoginAttemptResponse, StartLoginRequest, TravelModeResponse,
     },
     RequestCancellation, RuntimeError, RuntimeErrorCode,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashSet, net::IpAddr};
+use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashSet;
+use url::{Host, Url};
 
 const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+// Authentication is all-or-nothing. These maintainer-approved aggregate bounds cover the initial
+// Finish-login page and every cursor page so a hostile Server cannot grow unique cursors forever.
+const MAX_AUTH_VAULT_KEYS: usize = 21_000;
+const MAX_AUTH_VAULT_KEY_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 pub(crate) enum ClientPlatform {
@@ -41,7 +45,7 @@ pub(crate) struct AuthClientMetadata {
 /// Typed authentication requests and response policy over the primitive host transport seam.
 pub(crate) struct AuthHttpClient<'transport> {
     transport: &'transport HttpTransport,
-    base_url: ServerBaseUrl,
+    base_url: Url,
     metadata: AuthClientMetadata,
 }
 
@@ -62,7 +66,7 @@ impl<'transport> AuthHttpClient<'transport> {
     }
 
     pub(crate) fn normalized_server_url(&self) -> String {
-        self.base_url.normalized.clone()
+        self.base_url.as_str().trim_end_matches('/').to_owned()
     }
 
     pub(crate) async fn start_login(
@@ -70,26 +74,15 @@ impl<'transport> AuthHttpClient<'transport> {
         request: &StartLoginRequest,
         cancellation: RequestCancellation,
     ) -> Result<LoginAttemptResponse, RuntimeError> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct WireRequest<'a> {
-            email: &'a str,
-            client_public_key: &'a str,
-        }
-
         self.post_json(
             &["api", "v1", "auth", "login-attempts"],
-            &WireRequest {
-                email: &request.email,
-                client_public_key: &request.client_public_key,
-            },
+            request,
             201,
             SMALL_AUTH_RESPONSE_BYTES,
             None,
             cancellation,
         )
         .await
-        .map(WireLoginAttemptResponse::into_contract)
     }
 
     pub(crate) async fn finish_login(
@@ -98,26 +91,15 @@ impl<'transport> AuthHttpClient<'transport> {
         request: &FinishLoginRequest,
         cancellation: RequestCancellation,
     ) -> Result<FinishLoginResponse, RuntimeError> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct WireRequest<'a> {
-            client_public_key: &'a str,
-            client_proof: &'a str,
-        }
-
         self.post_json(
             &["api", "v1", "auth", "login-attempts", attempt_id, "finish"],
-            &WireRequest {
-                client_public_key: &request.client_public_key,
-                client_proof: &request.client_proof,
-            },
+            request,
             200,
             VAULT_KEY_RESPONSE_BYTES,
             None,
             cancellation,
         )
         .await
-        .map(WireFinishLoginResponse::into_contract)
     }
 
     pub(crate) async fn drain_vault_keys(
@@ -127,7 +109,8 @@ impl<'transport> AuthHttpClient<'transport> {
         cancellation: RequestCancellation,
     ) -> Result<Vec<AuthVaultKeyResponse>, RuntimeError> {
         validate_bearer(token)?;
-        let mut items = initial_page.items;
+        let mut vault_keys = VaultKeyAccumulator::new();
+        vault_keys.append(initial_page.items)?;
         let mut cursor = next_cursor(initial_page.has_more, initial_page.next_cursor)?;
         let mut seen = HashSet::new();
 
@@ -137,12 +120,9 @@ impl<'transport> AuthHttpClient<'transport> {
                     "Server returned a repeated Vault-key cursor",
                 ));
             }
-            let url = format!(
-                "{}?cursor={}",
-                self.endpoint(&["api", "v1", "users", "me", "vault-keys"]),
-                encode_query_value(&current)
-            );
-            let page: WireVaultKeyPage = self
+            let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
+            url.query_pairs_mut().append_pair("cursor", &current);
+            let page: CursorPageAuthVaultKeyResponse = self
                 .get_json(
                     url,
                     200,
@@ -151,10 +131,10 @@ impl<'transport> AuthHttpClient<'transport> {
                     cancellation.clone(),
                 )
                 .await?;
-            items.extend(page.items.into_iter().map(WireVaultKey::into_contract));
+            vault_keys.append(page.items)?;
             cursor = next_cursor(page.has_more, page.next_cursor)?;
         }
-        Ok(items)
+        Ok(vault_keys.into_items())
     }
 
     pub(crate) async fn get_travel_mode(
@@ -163,7 +143,7 @@ impl<'transport> AuthHttpClient<'transport> {
         cancellation: RequestCancellation,
     ) -> Result<TravelModeResponse, RuntimeError> {
         validate_bearer(token)?;
-        let url = self.endpoint(&["api", "v1", "travel-mode"]);
+        let url = self.endpoint(&["api", "v1", "travel-mode"])?;
         self.get_json(
             url,
             200,
@@ -172,7 +152,6 @@ impl<'transport> AuthHttpClient<'transport> {
             cancellation,
         )
         .await
-        .map(WireTravelModeResponse::into_contract)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -201,7 +180,7 @@ impl<'transport> AuthHttpClient<'transport> {
         );
         self.execute_json(
             HttpMethod::Post,
-            self.endpoint(path),
+            self.endpoint(path)?,
             headers,
             body,
             expected_status,
@@ -213,7 +192,7 @@ impl<'transport> AuthHttpClient<'transport> {
 
     async fn get_json<Response: DeserializeOwned>(
         &self,
-        url: String,
+        url: Url,
         expected_status: u16,
         max_response_bytes: u32,
         bearer: Option<&str>,
@@ -235,7 +214,7 @@ impl<'transport> AuthHttpClient<'transport> {
     async fn execute_json<Response: DeserializeOwned>(
         &self,
         method: HttpMethod,
-        url: String,
+        url: Url,
         headers: Vec<HttpHeader>,
         body: Vec<u8>,
         expected_status: u16,
@@ -245,7 +224,7 @@ impl<'transport> AuthHttpClient<'transport> {
         let response = self
             .transport
             .execute(
-                HttpDispatch::new(method, url, headers, body, max_response_bytes),
+                HttpDispatch::new(method, url.into(), headers, body, max_response_bytes),
                 cancellation,
             )
             .await?;
@@ -301,248 +280,148 @@ impl<'transport> AuthHttpClient<'transport> {
         Ok(headers)
     }
 
-    fn endpoint(&self, segments: &[&str]) -> String {
-        let mut url = self.base_url.normalized.clone();
-        for segment in segments {
-            url.push('/');
-            url.push_str(&encode_path_segment(segment));
-        }
-        url
+    fn endpoint(&self, segments: &[&str]) -> Result<Url, RuntimeError> {
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|_| invariant("Normalized Server URL cannot own path segments"))?
+            .extend(segments);
+        Ok(url)
     }
 }
 
-#[derive(Clone)]
-struct ServerBaseUrl {
-    normalized: String,
+struct VaultKeyAccumulator {
+    items: Vec<AuthVaultKeyResponse>,
+    // Exact serialized JSON-array size: opening/closing brackets, item bytes and separators.
+    serialized_bytes: usize,
 }
 
-fn normalize_server_url(value: &str, confirmed: bool) -> Result<ServerBaseUrl, RuntimeError> {
+impl VaultKeyAccumulator {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            serialized_bytes: 2,
+        }
+    }
+
+    fn append(&mut self, incoming: Vec<AuthVaultKeyResponse>) -> Result<(), RuntimeError> {
+        self.append_with_limits(incoming, MAX_AUTH_VAULT_KEYS, MAX_AUTH_VAULT_KEY_BYTES)
+    }
+
+    fn append_with_limits(
+        &mut self,
+        incoming: Vec<AuthVaultKeyResponse>,
+        max_items: usize,
+        max_bytes: usize,
+    ) -> Result<(), RuntimeError> {
+        let new_count = self
+            .items
+            .len()
+            .checked_add(incoming.len())
+            .ok_or_else(|| authentication_failure("Server returned too many Vault keys"))?;
+        if new_count > max_items {
+            return Err(authentication_failure(
+                "Server returned too many Vault keys",
+            ));
+        }
+
+        let mut additional_bytes = 0usize;
+        for (index, item) in incoming.iter().enumerate() {
+            let item_bytes = serde_json::to_vec(item)
+                .map_err(|_| invariant("Vault key could not be measured"))?
+                .len();
+            let separator = usize::from(!self.items.is_empty() || index > 0);
+            additional_bytes = additional_bytes
+                .checked_add(separator)
+                .and_then(|bytes| bytes.checked_add(item_bytes))
+                .ok_or_else(|| authentication_failure("Server returned too much Vault-key data"))?;
+        }
+        let new_bytes = self
+            .serialized_bytes
+            .checked_add(additional_bytes)
+            .ok_or_else(|| authentication_failure("Server returned too much Vault-key data"))?;
+        if new_bytes > max_bytes {
+            return Err(authentication_failure(
+                "Server returned too much Vault-key data",
+            ));
+        }
+        self.serialized_bytes = new_bytes;
+        self.items.extend(incoming);
+        Ok(())
+    }
+
+    fn into_items(self) -> Vec<AuthVaultKeyResponse> {
+        self.items
+    }
+}
+
+fn normalize_server_url(value: &str, confirmed: bool) -> Result<Url, RuntimeError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(authentication_failure("Server URL is invalid"));
     }
-    if !trimmed.is_ascii()
-        || trimmed
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
-        || trimmed.contains(['?', '#'])
-    {
-        return Err(authentication_failure("Server URL is invalid"));
-    }
-    let candidate = if trimmed.contains("://") {
+    let candidate = if has_explicit_scheme(trimmed) {
         trimmed.to_owned()
     } else {
-        let authority = trimmed.split('/').next().unwrap_or_default();
-        let inferred_http = parse_authority(authority)
-            .map(|authority| is_local_development_host(&authority.host))
-            .unwrap_or(false);
+        let parsed_http = Url::parse(&format!("http://{trimmed}"))
+            .map_err(|_| authentication_failure("Server URL is invalid"))?;
+        let inferred_http = parsed_http
+            .host()
+            .is_some_and(|host| is_loopback_host(&host) || is_unspecified_ipv4(&host));
         format!(
             "{}://{trimmed}",
             if inferred_http { "http" } else { "https" }
         )
     };
-    let Some((scheme, remainder)) = candidate.split_once("://") else {
-        return Err(authentication_failure("Server URL is invalid"));
-    };
-    let scheme = scheme.to_ascii_lowercase();
-    if !matches!(scheme.as_str(), "http" | "https") {
+    let mut url =
+        Url::parse(&candidate).map_err(|_| authentication_failure("Server URL is invalid"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return Err(authentication_failure("Server URL is invalid"));
     }
-    let (authority_text, path) = remainder
-        .split_once('/')
-        .map_or((remainder, ""), |(authority, path)| (authority, path));
-    let authority = parse_authority(authority_text)?;
-    if scheme == "http" && !is_loopback_host(&authority.host) && !confirmed {
+    if url.scheme() == "http"
+        && !url.host().is_some_and(|host| is_loopback_host(&host))
+        && !confirmed
+    {
         return Err(authentication_failure(
             "Remote plain HTTP requires explicit confirmation",
         ));
     }
-    let path = normalize_base_path(path)?;
-    let default_port = matches!(
-        (scheme.as_str(), authority.port),
-        ("http", Some(80)) | ("https", Some(443))
-    );
-    let port = if default_port {
-        String::new()
+    url.set_query(None);
+    url.set_fragment(None);
+    let normalized_path = url.path().trim_end_matches('/').to_owned();
+    url.set_path(if normalized_path.is_empty() {
+        "/"
     } else {
-        authority
-            .port
-            .map(|port| format!(":{port}"))
-            .unwrap_or_default()
+        &normalized_path
+    });
+    Ok(url)
+}
+
+fn has_explicit_scheme(value: &str) -> bool {
+    let Some((scheme, _)) = value.split_once("://") else {
+        return false;
     };
-    Ok(ServerBaseUrl {
-        normalized: format!("{scheme}://{}{port}{path}", authority.serialized_host),
-    })
+    !scheme.is_empty()
+        && scheme.bytes().enumerate().all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'A'..=b'Z' => true,
+            b'0'..=b'9' | b'+' | b'-' | b'.' => index > 0,
+            _ => false,
+        })
 }
 
-struct ParsedAuthority {
-    host: String,
-    serialized_host: String,
-    port: Option<u16>,
-}
-
-fn parse_authority(value: &str) -> Result<ParsedAuthority, RuntimeError> {
-    if value.is_empty() || value.contains('@') {
-        return Err(authentication_failure("Server URL is invalid"));
-    }
-    let (host, serialized_host, port) = if let Some(ipv6) = value.strip_prefix('[') {
-        let Some((host, suffix)) = ipv6.split_once(']') else {
-            return Err(authentication_failure("Server URL is invalid"));
-        };
-        let address = host
-            .parse::<std::net::Ipv6Addr>()
-            .map_err(|_| authentication_failure("Server URL is invalid"))?;
-        let port = parse_port_suffix(suffix)?;
-        (address.to_string(), format!("[{address}]"), port)
-    } else {
-        let (host, port) = match value.rsplit_once(':') {
-            Some((host, port)) if !host.contains(':') => (host, Some(parse_port(port)?)),
-            Some(_) => return Err(authentication_failure("Server URL is invalid")),
-            None => (value, None),
-        };
-        if host.is_empty()
-            || host.starts_with('.')
-            || host.ends_with('.')
-            || host.split('.').any(|label| {
-                label.is_empty()
-                    || label.starts_with('-')
-                    || label.ends_with('-')
-                    || !label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            })
-        {
-            return Err(authentication_failure("Server URL is invalid"));
-        }
-        let host = host.to_ascii_lowercase();
-        (host.clone(), host, port)
-    };
-    Ok(ParsedAuthority {
-        host,
-        serialized_host,
-        port,
-    })
-}
-
-fn parse_port_suffix(value: &str) -> Result<Option<u16>, RuntimeError> {
-    if value.is_empty() {
-        Ok(None)
-    } else if let Some(port) = value.strip_prefix(':') {
-        Ok(Some(parse_port(port)?))
-    } else {
-        Err(authentication_failure("Server URL is invalid"))
+fn is_loopback_host(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+        Host::Ipv4(address) => address.is_loopback(),
+        Host::Ipv6(address) => address.is_loopback(),
     }
 }
 
-fn parse_port(value: &str) -> Result<u16, RuntimeError> {
-    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(authentication_failure("Server URL is invalid"));
-    }
-    value
-        .parse()
-        .map_err(|_| authentication_failure("Server URL is invalid"))
-}
-
-fn normalize_base_path(value: &str) -> Result<String, RuntimeError> {
-    let path = value.trim_end_matches('/');
-    if path.is_empty() {
-        return Ok(String::new());
-    }
-    for segment in path.split('/') {
-        if segment.is_empty()
-            || matches!(segment, "." | "..")
-            || !valid_encoded_path_segment(segment)
-        {
-            return Err(authentication_failure("Server URL is invalid"));
-        }
-    }
-    Ok(format!("/{path}"))
-}
-
-fn valid_encoded_path_segment(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if byte == b'%' {
-            if index + 2 >= bytes.len()
-                || !bytes[index + 1].is_ascii_hexdigit()
-                || !bytes[index + 2].is_ascii_hexdigit()
-            {
-                return false;
-            }
-            let encoded = &value[index + 1..index + 3];
-            if encoded.eq_ignore_ascii_case("2e") || encoded.eq_ignore_ascii_case("2f") {
-                return false;
-            }
-            index += 3;
-            continue;
-        }
-        if !(byte.is_ascii_alphanumeric()
-            || matches!(
-                byte,
-                b'-' | b'.'
-                    | b'_'
-                    | b'~'
-                    | b'!'
-                    | b'$'
-                    | b'&'
-                    | b'\''
-                    | b'('
-                    | b')'
-                    | b'*'
-                    | b'+'
-                    | b','
-                    | b';'
-                    | b'='
-                    | b':'
-                    | b'@'
-            ))
-        {
-            return false;
-        }
-        index += 1;
-    }
-    true
-}
-
-fn encode_path_segment(value: &str) -> String {
-    percent_encode(value, false)
-}
-
-fn encode_query_value(value: &str) -> String {
-    percent_encode(value, true)
-}
-
-fn percent_encode(value: &str, form_query: bool) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(char::from(byte));
-        } else if form_query && byte == b' ' {
-            encoded.push('+');
-        } else {
-            encoded.push('%');
-            encoded.push(char::from(HEX[(byte >> 4) as usize]));
-            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
-        }
-    }
-    encoded
-}
-
-fn is_local_development_host(host: &str) -> bool {
-    is_loopback_host(host) || host == "0.0.0.0"
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost")
-        || host
-            .strip_prefix('[')
-            .and_then(|value| value.strip_suffix(']'))
-            .unwrap_or(host)
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
+fn is_unspecified_ipv4(host: &Host<&str>) -> bool {
+    matches!(host, Host::Ipv4(address) if address.is_unspecified())
 }
 
 fn validate_metadata(metadata: &AuthClientMetadata) -> Result<(), RuntimeError> {
@@ -616,168 +495,11 @@ fn authentication_failure(message: &'static str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::AuthenticationUnavailable, message)
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireKdfParams {
-    algorithm: String,
-    iterations: i32,
-    schema_version: i32,
-}
-
-impl WireKdfParams {
-    fn into_contract(self) -> KdfParamsResponse {
-        KdfParamsResponse {
-            algorithm: self.algorithm,
-            iterations: self.iterations,
-            schema_version: self.schema_version,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireLoginAttemptResponse {
-    attempt_id: String,
-    kdf_params: WireKdfParams,
-    salt: String,
-    server_public_key: String,
-}
-
-impl WireLoginAttemptResponse {
-    fn into_contract(self) -> LoginAttemptResponse {
-        LoginAttemptResponse {
-            attempt_id: self.attempt_id,
-            kdf_params: self.kdf_params.into_contract(),
-            salt: self.salt,
-            server_public_key: self.server_public_key,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireLoginUser {
-    email: String,
-    encrypted_private_key: String,
-    id: String,
-    name: String,
-    public_key: String,
-    secret_key_hint: String,
-    team_avatar_url: Option<String>,
-    team_name: Option<String>,
-}
-
-impl WireLoginUser {
-    fn into_contract(self) -> LoginUserResponse {
-        LoginUserResponse {
-            email: self.email,
-            encrypted_private_key: self.encrypted_private_key,
-            id: self.id,
-            name: self.name,
-            public_key: self.public_key,
-            secret_key_hint: self.secret_key_hint,
-            team_avatar_url: self.team_avatar_url,
-            team_name: self.team_name,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireVaultKey {
-    encrypted_vault_key: String,
-    role: VaultRole,
-    vault_icon: Option<String>,
-    vault_id: String,
-    vault_image_url: Option<String>,
-    vault_name: String,
-    vault_type: VaultType,
-}
-
-impl WireVaultKey {
-    fn into_contract(self) -> AuthVaultKeyResponse {
-        AuthVaultKeyResponse {
-            encrypted_vault_key: self.encrypted_vault_key,
-            role: self.role,
-            vault_icon: self.vault_icon,
-            vault_id: self.vault_id,
-            vault_image_url: self.vault_image_url,
-            vault_name: self.vault_name,
-            vault_type: self.vault_type,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireVaultKeyPage {
-    has_more: bool,
-    items: Vec<WireVaultKey>,
-    next_cursor: Option<String>,
-}
-
-impl WireVaultKeyPage {
-    fn into_contract(self) -> CursorPageAuthVaultKeyResponse {
-        CursorPageAuthVaultKeyResponse {
-            has_more: self.has_more,
-            items: self
-                .items
-                .into_iter()
-                .map(WireVaultKey::into_contract)
-                .collect(),
-            next_cursor: self.next_cursor,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireFinishLoginResponse {
-    expires_at: String,
-    server_proof: String,
-    session_id: String,
-    token: String,
-    user: WireLoginUser,
-    vault_keys: WireVaultKeyPage,
-}
-
-impl WireFinishLoginResponse {
-    fn into_contract(self) -> FinishLoginResponse {
-        FinishLoginResponse {
-            expires_at: self.expires_at,
-            server_proof: self.server_proof,
-            session_id: self.session_id,
-            token: self.token,
-            user: self.user.into_contract(),
-            vault_keys: self.vault_keys.into_contract(),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireTravelModeResponse {
-    enabled: bool,
-    enabled_at: Option<String>,
-    hidden_vault_ids: Vec<String>,
-    updated_at: String,
-}
-
-impl WireTravelModeResponse {
-    fn into_contract(self) -> TravelModeResponse {
-        TravelModeResponse {
-            enabled: self.enabled,
-            enabled_at: self.enabled_at,
-            hidden_vault_ids: self.hidden_vault_ids,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::http_transport::SerializedHttpExecutor;
+    use crate::server_contract::{VaultRole, VaultType};
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
@@ -848,6 +570,18 @@ mod tests {
             "vaultName": format!("Vault {id}"),
             "vaultType": "personal"
         })
+    }
+
+    fn contract_vault_key(id: &str, encrypted_vault_key: &str) -> AuthVaultKeyResponse {
+        AuthVaultKeyResponse {
+            encrypted_vault_key: encrypted_vault_key.into(),
+            role: VaultRole::Owner,
+            vault_icon: None,
+            vault_id: id.into(),
+            vault_image_url: None,
+            vault_name: format!("Vault {id}"),
+            vault_type: VaultType::Personal,
+        }
     }
 
     fn expect_error<T>(result: Result<T, RuntimeError>) -> RuntimeError {
@@ -1037,11 +771,27 @@ mod tests {
         for (input, confirmed, expected) in [
             ("localhost:3000", false, "http://localhost:3000"),
             ("127.0.0.1:3000/", false, "http://127.0.0.1:3000"),
+            ("127.1:3000/", false, "http://127.0.0.1:3000"),
             ("[::1]:3000", false, "http://[::1]:3000"),
+            (
+                "bücher.example/bittery",
+                false,
+                "https://xn--bcher-kva.example/bittery",
+            ),
             (
                 "vault.example.test/base/",
                 false,
                 "https://vault.example.test/base",
+            ),
+            (
+                "https://vault.example.test:443/base//nested///?tenant=one#section",
+                false,
+                "https://vault.example.test/base//nested",
+            ),
+            (
+                "https://vault.example.test/root/../bittery/./",
+                false,
+                "https://vault.example.test/bittery",
             ),
             ("0.0.0.0:3000", true, "http://0.0.0.0:3000"),
             (
@@ -1059,8 +809,6 @@ mod tests {
             "ftp://vault.example.test",
             "0.0.0.0:3000",
             "https://user@vault.example.test",
-            "https://vault.example.test?tenant=one",
-            "https://vault.example.test#fragment",
             "http://vault.example.test",
         ] {
             assert!(AuthHttpClient::new(&transport, input, false, metadata()).is_err());
@@ -1112,6 +860,54 @@ mod tests {
         assert_eq!(executor.requests().len(), 1);
     }
 
+    #[test]
+    fn aggregate_vault_key_count_and_serialized_bytes_are_exact_and_all_or_nothing() {
+        assert_eq!(MAX_AUTH_VAULT_KEYS, 21_000);
+        assert_eq!(MAX_AUTH_VAULT_KEY_BYTES, 32 * 1024 * 1024);
+
+        let first = contract_vault_key("one", "wrapped-one");
+        let second = contract_vault_key("two", "wrapped-two");
+        let exact_two_bytes = serde_json::to_vec(&vec![first.clone(), second.clone()])
+            .unwrap()
+            .len();
+        let mut accumulator = VaultKeyAccumulator::new();
+        accumulator
+            .append_with_limits(vec![first, second], 2, exact_two_bytes)
+            .unwrap();
+        assert_eq!(accumulator.items.len(), 2);
+        assert_eq!(accumulator.serialized_bytes, exact_two_bytes);
+
+        let count_error = accumulator
+            .append_with_limits(
+                vec![contract_vault_key("three", "wrapped-three")],
+                2,
+                usize::MAX,
+            )
+            .unwrap_err();
+        assert_eq!(
+            count_error.code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(accumulator.items.len(), 2);
+
+        let mut byte_limited = VaultKeyAccumulator::new();
+        let one = contract_vault_key("one", "wrapped-one");
+        let exact_one_byte_limit = serde_json::to_vec(&vec![one.clone()]).unwrap().len();
+        byte_limited
+            .append_with_limits(vec![one], usize::MAX, exact_one_byte_limit)
+            .unwrap();
+        let byte_error = byte_limited
+            .append_with_limits(
+                vec![contract_vault_key("two", "wrapped-two")],
+                usize::MAX,
+                exact_one_byte_limit,
+            )
+            .unwrap_err();
+        assert_eq!(byte_error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(byte_limited.items.len(), 1);
+        assert_eq!(byte_limited.serialized_bytes, exact_one_byte_limit);
+    }
+
     #[tokio::test]
     async fn rejects_redirect_opaque_wrong_content_type_and_malformed_json() {
         for response in [
@@ -1123,10 +919,14 @@ mod tests {
                 "application/json",
                 json!({
                     "attemptId": "attempt-1",
-                    "kdfParams": { "algorithm": "pbkdf2", "iterations": 1, "schemaVersion": 1 },
+                    "kdfParams": {
+                        "algorithm": "pbkdf2",
+                        "iterations": 1,
+                        "schemaVersion": 1,
+                        "unexpectedNested": true
+                    },
                     "salt": "salt",
-                    "serverPublicKey": "key",
-                    "unexpected": true
+                    "serverPublicKey": "key"
                 }),
             ),
             r#"{"type":"networkFailure"}"#.to_owned(),

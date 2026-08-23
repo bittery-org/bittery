@@ -3,6 +3,7 @@
 // Source: packages/api-contract/openapi.v1.json (sha256 65b4180114659564847346bd961c5ce3ff572b63c4013361f9795203644b862f)
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthVaultKeyResponse {
     #[serde(rename = "encryptedVaultKey")]
     pub encrypted_vault_key: String,
@@ -20,6 +21,7 @@ pub struct AuthVaultKeyResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapAttachmentResponse {
     #[serde(rename = "attachmentKeyAlgorithm")]
     pub attachment_key_algorithm: String,
@@ -55,6 +57,7 @@ pub struct BootstrapAttachmentResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapItemResponse {
     pub attachments: Vec<BootstrapAttachmentResponse>,
     pub category: ItemCategory,
@@ -85,6 +88,7 @@ pub struct BootstrapItemResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapItemsResponse {
     #[serde(rename = "hasMore")]
     pub has_more: bool,
@@ -96,6 +100,7 @@ pub struct BootstrapItemsResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapVaultSummary {
     #[serde(rename = "encryptedVaultKey")]
     pub encrypted_vault_key: String,
@@ -110,6 +115,7 @@ pub struct BootstrapVaultSummary {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateItemBody {
     pub category: ItemCategory,
     #[serde(rename = "encryptedData")]
@@ -121,6 +127,7 @@ pub struct CreateItemBody {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateItemOperationOutcome {
     pub kind: OperationKind,
     #[serde(rename = "operationId")]
@@ -129,7 +136,7 @@ pub struct CreateItemOperationOutcome {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
+#[serde(tag = "status", rename_all = "camelCase", deny_unknown_fields)]
 pub enum CreateItemOperationResult {
     #[serde(rename = "applied")]
     Applied {
@@ -157,6 +164,7 @@ pub enum CreateItemRejectionCode {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CursorPageAuthVaultKeyResponse {
     #[serde(rename = "hasMore")]
     pub has_more: bool,
@@ -250,14 +258,16 @@ pub enum ErrorCode {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FinishLoginRequest {
-    #[serde(rename = "clientProof")]
-    pub client_proof: String,
     #[serde(rename = "clientPublicKey")]
     pub client_public_key: String,
+    #[serde(rename = "clientProof")]
+    pub client_proof: String,
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FinishLoginResponse {
     #[serde(rename = "expiresAt")]
     pub expires_at: String,
@@ -286,6 +296,7 @@ pub enum ItemCategory {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct KdfParamsResponse {
     pub algorithm: String,
     pub iterations: i32,
@@ -294,6 +305,7 @@ pub struct KdfParamsResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginAttemptResponse {
     #[serde(rename = "attemptId")]
     pub attempt_id: String,
@@ -305,6 +317,7 @@ pub struct LoginAttemptResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginUserResponse {
     pub email: String,
     #[serde(rename = "encryptedPrivateKey")]
@@ -330,6 +343,7 @@ pub enum OperationKind {
 pub type PageCursor = String;
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProblemDetails {
     pub code: ErrorCode,
     pub detail: String,
@@ -344,12 +358,14 @@ pub struct ProblemDetails {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProblemFieldError {
     pub code: String,
     pub pointer: String,
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RefreshSessionResponse {
     #[serde(rename = "expiresAt")]
     pub expires_at: String,
@@ -359,13 +375,15 @@ pub struct RefreshSessionResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StartLoginRequest {
+    pub email: String,
     #[serde(rename = "clientPublicKey")]
     pub client_public_key: String,
-    pub email: String,
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncChangesResponse {
     pub cursor: Option<SyncCursorResponse>,
     pub events: Vec<SyncEventResponse>,
@@ -376,6 +394,7 @@ pub struct SyncChangesResponse {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncCursorResponse {
     pub id: String,
 }
@@ -397,6 +416,7 @@ pub enum SyncEntityType {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncEventResponse {
     #[serde(rename = "clientId")]
     pub client_id: Option<String>,
@@ -450,6 +470,7 @@ pub enum SyncEventType {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TravelModeResponse {
     pub enabled: bool,
     #[serde(rename = "enabledAt")]

@@ -39,6 +39,14 @@ const FREE_JSON_FIELDS = new Set([
 	"SyncEventResponse.metadata",
 ]);
 
+// Authentication request bytes are part of the established SRP protocol evidence. OpenAPI object
+// property order is not semantic and Utoipa may reorder it, so keep the two audited wire orders
+// explicit in the generator instead of hand-declaring duplicate request DTOs in the Runtime.
+const WIRE_FIELD_ORDER = new Map([
+	["StartLoginRequest", ["email", "clientPublicKey"]],
+	["FinishLoginRequest", ["clientPublicKey", "clientProof"]],
+]);
+
 const RUST_RESERVED = new Set([
 	"as",
 	"break",
@@ -86,6 +94,24 @@ function referencedName(schema) {
 
 function compareCodePoints(left, right) {
 	return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function orderedProperties(owner, properties) {
+	const preferred = WIRE_FIELD_ORDER.get(owner);
+	if (!preferred) {
+		return Object.entries(properties).sort(([left], [right]) =>
+			compareCodePoints(left, right),
+		);
+	}
+	const rank = new Map(preferred.map((field, index) => [field, index]));
+	return Object.entries(properties).sort(([left], [right]) => {
+		const leftRank = rank.get(left);
+		const rightRank = rank.get(right);
+		if (leftRank !== undefined || rightRank !== undefined) {
+			return (leftRank ?? preferred.length) - (rightRank ?? preferred.length);
+		}
+		return compareCodePoints(left, right);
+	});
 }
 
 function schemaLocation(owner, field) {
@@ -300,7 +326,7 @@ function renderTaggedOneOf(name, schema) {
 	});
 	return [
 		"#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]",
-		'#[serde(tag = "status", rename_all = "camelCase")]',
+		'#[serde(tag = "status", rename_all = "camelCase", deny_unknown_fields)]',
 		`pub enum ${rustTypeName(name)} {`,
 		...variants,
 		"}",
@@ -337,8 +363,7 @@ function renderSchema(name, schema) {
 			"map/object additionalProperties are not supported",
 		);
 	const required = new Set(schema.required ?? []);
-	const fields = Object.entries(schema.properties ?? {})
-		.sort(([left], [right]) => compareCodePoints(left, right))
+	const fields = orderedProperties(name, schema.properties ?? {})
 		.map(([field, fieldSchema]) => {
 			const base = rustType(fieldSchema, name, field);
 			const type =
@@ -354,6 +379,7 @@ function renderSchema(name, schema) {
 		});
 	return [
 		"#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]",
+		"#[serde(deny_unknown_fields)]",
 		`pub struct ${rustTypeName(name)} {`,
 		...fields,
 		"}",

@@ -37,6 +37,10 @@ test("generation is deterministic and contains only the recursive allowlist", as
 	}
 	assert.doesNotMatch(first, /CheckoutSessionResponse/);
 	assert.doesNotMatch(first, /derive\([^)]*Debug/);
+	assert.match(
+		first,
+		/#\[serde\(deny_unknown_fields\)\]\npub struct LoginAttemptResponse/,
+	);
 });
 
 test("generation rejects unsupported shapes except audited free JSON fields", async () => {
@@ -112,6 +116,26 @@ test("tagged operation results use exact camelCase wire fields", async () => {
 	);
 	assert.match(generated, /enum ErrorCode \{[\s\S]*InternalError/);
 	assert.doesNotMatch(generated, /INTERNALERROR/);
+});
+
+test("generated auth requests preserve the established immutable JSON field order", async () => {
+	const source = await readFile(
+		new URL("../../api-contract/openapi.v1.json", import.meta.url),
+	);
+	const generated = generateServerContract(JSON.parse(source), source);
+	const start = generated.slice(
+		generated.indexOf("pub struct StartLoginRequest"),
+		generated.indexOf("pub struct SyncChangesResponse"),
+	);
+	assert.ok(start.indexOf("pub email: String") < start.indexOf("pub client_public_key: String"));
+	const finish = generated.slice(
+		generated.indexOf("pub struct FinishLoginRequest"),
+		generated.indexOf("pub struct FinishLoginResponse"),
+	);
+	assert.ok(
+		finish.indexOf("pub client_public_key: String") <
+			finish.indexOf("pub client_proof: String"),
+	);
 });
 
 test("tagged unions reject an optional discriminator", async () => {

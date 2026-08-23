@@ -1891,12 +1891,12 @@ export interface InitOutput {
     c: bigint,
     d: number,
   ) => void;
-  readonly wasm_bindgen_f02c8b728ac53f20___convert__closures_____invoke___wasm_bindgen_f02c8b728ac53f20___JsValue__core_9b3796e30d99ddb7___result__Result_____wasm_bindgen_f02c8b728ac53f20___JsError___true_: (
+  readonly wasm_bindgen_68d88193d3b0622c___convert__closures_____invoke___wasm_bindgen_68d88193d3b0622c___JsValue__core_9b3796e30d99ddb7___result__Result_____wasm_bindgen_68d88193d3b0622c___JsError___true_: (
     a: number,
     b: number,
     c: any,
   ) => [number, number];
-  readonly wasm_bindgen_f02c8b728ac53f20___convert__closures_____invoke___js_sys_ba9ff22ff446bd20___Function_fn_wasm_bindgen_f02c8b728ac53f20___JsValue_____wasm_bindgen_f02c8b728ac53f20___sys__Undefined___js_sys_ba9ff22ff446bd20___Function_fn_wasm_bindgen_f02c8b728ac53f20___JsValue_____wasm_bindgen_f02c8b728ac53f20___sys__Undefined_______true_: (
+  readonly wasm_bindgen_68d88193d3b0622c___convert__closures_____invoke___js_sys_111dd60f12cd5482___Function_fn_wasm_bindgen_68d88193d3b0622c___JsValue_____wasm_bindgen_68d88193d3b0622c___sys__Undefined___js_sys_111dd60f12cd5482___Function_fn_wasm_bindgen_68d88193d3b0622c___JsValue_____wasm_bindgen_68d88193d3b0622c___sys__Undefined_______true_: (
     a: number,
     b: number,
     c: any,
