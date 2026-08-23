@@ -3,7 +3,7 @@ import {
 	isWorkerRequest,
 	type WorkerReply,
 	WorkerRpcError,
-} from "./worker-wire";
+} from "./wire";
 
 export interface WorkerHostRpcScope {
 	addEventListener(

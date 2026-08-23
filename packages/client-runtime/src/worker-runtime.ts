@@ -1,3 +1,5 @@
+import type { WorkerRpcChannel } from "./worker/owner";
+
 export interface ReplicaExecutor {
 	invoke(requestJson: string): Promise<string>;
 }
@@ -234,14 +236,6 @@ export function createRuntimeWorkerService(
 	};
 }
 
-export interface RuntimeRpcChannel {
-	request<T = unknown>(
-		payload: unknown,
-		options?: { signal?: AbortSignal },
-	): Promise<T>;
-	subscribe(listener: (value: unknown) => void): () => void;
-}
-
 export interface WorkerRuntime {
 	request(
 		requestId: string,
@@ -269,7 +263,7 @@ function notification(value: unknown): RuntimeNotification | null {
 }
 
 export function createWorkerRuntime(
-	channel: RuntimeRpcChannel,
+	channel: WorkerRpcChannel,
 	closeOwner: () => Promise<void>,
 ): WorkerRuntime {
 	const observations = new Map<string, (projectionJson: string) => void>();

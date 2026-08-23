@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test";
-import type { CryptoWorkerHandle } from "@bittery/crypto-port/adapters/wasm-worker";
-import { createWebWorkerComposition } from "./crypto";
+import {
+	createWebClientRuntime,
+	type WebClientRuntimeDeps,
+} from "@bittery/client-runtime/web";
+import {
+	type CryptoWorkerHandle,
+	createWasmWorkerCryptoPort,
+} from "@bittery/crypto-port/adapters/wasm-worker";
+
+/** What `./crypto` composes at module scope, minus its process-wide singleton. */
+function composeWeb(deps: WebClientRuntimeDeps) {
+	const composition = createWebClientRuntime(deps);
+	return {
+		...composition,
+		crypto: createWasmWorkerCryptoPort(composition.cryptoChannel),
+	};
+}
 
 class UnifiedWorkerDouble implements CryptoWorkerHandle {
 	onmessage: ((event: MessageEvent) => void) | null = null;
@@ -70,7 +85,7 @@ class UnifiedWorkerDouble implements CryptoWorkerHandle {
 test("Web composes cold Crypto and Runtime facades over exactly one worker", async () => {
 	const worker = new UnifiedWorkerDouble();
 	let workersCreated = 0;
-	const composition = createWebWorkerComposition({
+	const composition = composeWeb({
 		createWorker: () => {
 			workersCreated += 1;
 			return worker;
@@ -94,7 +109,7 @@ test("Web composes cold Crypto and Runtime facades over exactly one worker", asy
 test("Web preserves a custom reverse-RPC host handler", async () => {
 	const worker = new UnifiedWorkerDouble();
 	const seen: unknown[] = [];
-	const composition = createWebWorkerComposition({
+	const composition = composeWeb({
 		createWorker: () => worker,
 		handleHostRequest: async (payload) => {
 			seen.push(payload);

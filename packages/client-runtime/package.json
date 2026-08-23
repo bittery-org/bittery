@@ -7,6 +7,9 @@
 		"./protocol": {
 			"default": "./generated/runtime-protocol/contract.ts"
 		},
+		"./worker": {
+			"default": "./src/worker/index.ts"
+		},
 		"./indexeddb-executor": {
 			"default": "./src/indexeddb-executor.ts"
 		},
@@ -18,6 +21,12 @@
 		},
 		"./web-platform-storage-host": {
 			"default": "./src/web-platform-storage-host.ts"
+		},
+		"./web": {
+			"default": "./src/web/composition.ts"
+		},
+		"./web/worker-entry": {
+			"default": "./src/web/worker-entry.ts"
 		}
 	},
 	"scripts": {

@@ -1,34 +1,23 @@
-import { IndexedDbReplicaExecutor } from "@bittery/client-runtime/indexeddb-executor";
-import { WebHttpTransportExecutor } from "@bittery/client-runtime/web-http-transport-executor";
-import { createRuntimeWorkerService } from "@bittery/client-runtime/worker-runtime";
+import {
+	serveWebRuntimeWorker,
+	type WebRuntimeWorkerScope,
+} from "@bittery/client-runtime/web/worker-entry";
 import {
 	createCryptoUniffiBackend,
 	createCryptoWorkerService,
-	createWorkerHostRpc,
 	loadCombinedWebWasm,
-	serveWorkerChannels,
-	type WorkerRouterScope,
 } from "@bittery/crypto-port/worker";
 
-const scope = globalThis as unknown as WorkerRouterScope;
-const hostRpc = createWorkerHostRpc(scope);
-const httpExecutor = new WebHttpTransportExecutor();
-
-serveWorkerChannels(scope, {
+// The Crypto channel is supplied here because only `crypto-port` may import the generated
+// bindings. Ticket 22 removes the channel and leaves the Runtime alone in this worker.
+serveWebRuntimeWorker(globalThis as unknown as WebRuntimeWorkerScope, {
+	loadWasm: loadCombinedWebWasm,
 	crypto: createCryptoWorkerService(async () =>
 		createCryptoUniffiBackend(await loadCombinedWebWasm()),
 	),
-	runtime: createRuntimeWorkerService({
-		executor: new IndexedDbReplicaExecutor(),
-		platformStorageExecutor: {
-			invoke: (requestJson) => hostRpc.request<string>(requestJson),
-		},
-		httpExecutor,
-		loadWasm: loadCombinedWebWasm,
-		authClient: {
-			clientId: "bittery-web",
-			platform: "web",
-			version: "0.5.2",
-		},
-	}),
+	authClient: {
+		clientId: "bittery-web",
+		platform: "web",
+		version: "0.5.2",
+	},
 });

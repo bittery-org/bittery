@@ -1,3 +1,4 @@
+import type { WorkerChannelService } from "@bittery/client-runtime/worker";
 import type { KeyHandleLike } from "@bittery/crypto-wasm";
 import type { CryptoPortCall, WorkerKeyToken } from "./adapters/wasm-worker";
 import {
@@ -6,7 +7,6 @@ import {
 	memoizedBackendLoader,
 	type UniffiBackend,
 } from "./uniffi-bindings";
-import type { WorkerChannelService } from "./worker-router";
 
 /** The side-effect-free Crypto channel; its caller owns Worker registration. */
 export function createCryptoWorkerService(

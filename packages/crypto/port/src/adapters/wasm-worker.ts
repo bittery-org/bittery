@@ -1,3 +1,10 @@
+import {
+	createSharedWorkerOwner,
+	type SharedWorkerHandle,
+	type SharedWorkerOwner,
+	type WorkerRpcChannel,
+	type WorkerRpcError,
+} from "@bittery/client-runtime/worker";
 import type { CryptoPort, KeyRef } from "../crypto-port";
 import {
 	CRYPTO_PORT_ERROR_CODES,
@@ -6,13 +13,6 @@ import {
 } from "../errors";
 import { createKeyRefTable } from "../key-ref";
 import { CRYPTO_PORT_MEMBERS } from "../port-members";
-import {
-	createSharedWorkerOwner,
-	type SharedWorkerHandle,
-	type SharedWorkerOwner,
-	type WorkerRpcChannel,
-	type WorkerRpcError,
-} from "../shared-worker-rpc";
 
 /** KeyRefs cross `postMessage` as worker tokens; raw import bytes remain `Uint8Array`. */
 export interface WorkerKeyToken {

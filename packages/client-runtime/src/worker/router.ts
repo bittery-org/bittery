@@ -3,7 +3,7 @@ import {
 	isWorkerRequest,
 	type WorkerChannelName,
 	type WorkerReply,
-} from "./worker-wire";
+} from "./wire";
 
 export interface WorkerRouterScope {
 	addEventListener(

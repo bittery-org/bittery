@@ -1,22 +1,13 @@
+/**
+ * The Crypto Worker channel and its backend loaders.
+ *
+ * The generic transport this channel plugs into now lives in
+ * `@bittery/client-runtime/worker`; only the crypto half remains here.
+ */
+
 export { createCryptoWorkerService } from "./crypto-worker-service";
-export {
-	createSharedWorkerOwner,
-	type SharedWorkerHandle,
-	type SharedWorkerOwner,
-	type WorkerRpcChannel,
-} from "./shared-worker-rpc";
 export {
 	createCryptoUniffiBackend,
 	loadCombinedWebWasm,
 	loadCryptoWebBackend,
 } from "./uniffi-bindings";
-export {
-	createWorkerHostRpc,
-	type WorkerHostRpc,
-	type WorkerHostRpcScope,
-} from "./worker-host-rpc";
-export {
-	serveWorkerChannels,
-	type WorkerChannelService,
-	type WorkerRouterScope,
-} from "./worker-router";

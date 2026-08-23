@@ -738,6 +738,9 @@ importers:
 
   packages/crypto/port:
     dependencies:
+      '@bittery/client-runtime':
+        specifier: workspace:*
+        version: link:../../client-runtime
       typescript:
         specifier: ^5
         version: 5.9.3

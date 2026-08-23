@@ -23,6 +23,18 @@ drafts, Custom fields, and decrypted Login projections therefore cross the nativ
 objects with explicit constructors/accessors rather than generated value records. Artifact tests pin
 that generated Kotlin/Swift shape so host logging cannot recursively print their plaintext fields.
 
+The generic Worker transport lives in `src/worker/`. It carries correlation, cancellation,
+lifetime and a clone-safe wire vocabulary for every channel, and contains no crypto. The Runtime is
+the top-level abstraction, so it owns the transport it is assembled from. `src/web/` holds the two
+Web composition roots: `worker-entry.ts` inside the Worker and `composition.ts` on the main thread.
+One owner means one Worker, and therefore one Crypto key table.
+
+`@bittery/crypto-port` still imports that transport, because it still hosts Desktop's and Mobile's
+own Worker roots (ADR 0010). Until those move, an import from this package into `crypto-port` would
+close a package cycle that turbo rejects, so `src/web/worker-entry.ts` receives the Crypto channel
+injected instead. `scripts/check-architecture.mjs` cannot forbid the `crypto-port` to
+`client-runtime` edge until that inversion is gone.
+
 Generated Server types are a recursively closed allowlist sourced from the checked-in OpenAPI
 document. The generator is deterministic, committed output is compiled into the Core, and `--check`
 fails on either OpenAPI drift or generator drift. Expanding the allowlist is an explicit Runtime

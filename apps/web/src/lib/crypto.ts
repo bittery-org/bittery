@@ -1,48 +1,25 @@
 /**
- * The web app's crypto backend: one `CryptoPort` over one WASM worker.
+ * The web app's Worker composition: one Worker, one `CryptoPort`, one Runtime.
  *
  * Built here rather than inside a component because `AccountStore` needs it before React
  * mounts, and because a second instance would mean a second key table — a `KeyRef` minted
  * by one port is rejected by the other.
  */
 
-import { WebPlatformStorageHost } from "@bittery/client-runtime/web-platform-storage-host";
-import { createWorkerRuntime } from "@bittery/client-runtime/worker-runtime";
-import {
-	createWasmWorkerCryptoPort,
-	createWasmWorkerOwner,
-	type WasmWorkerDeps,
-} from "@bittery/crypto-port/adapters/wasm-worker";
+import { createWebClientRuntime } from "@bittery/client-runtime/web";
+import { createWasmWorkerCryptoPort } from "@bittery/crypto-port/adapters/wasm-worker";
 
-// This process-wide owner is the single channel multiplexer for production Crypto and the cold
-// Runtime transport. Product authentication/bootstrap remains outside this bounded batch.
-export function createWebWorkerComposition(deps?: WasmWorkerDeps) {
-	const platformStorage = new WebPlatformStorageHost();
-	const workerDeps: WasmWorkerDeps = deps ?? {
-		createWorker: () =>
-			new Worker(new URL("./runtime.worker.ts", import.meta.url), {
-				type: "module",
-			}),
-	};
-	const workerOwner = createWasmWorkerOwner({
-		...workerDeps,
-		handleHostRequest:
-			workerDeps.handleHostRequest ??
-			platformStorage.invoke.bind(platformStorage),
-	});
-	return {
-		workerOwner,
-		crypto: createWasmWorkerCryptoPort(workerOwner.channel("crypto")),
-		runtime: createWorkerRuntime(
-			workerOwner.channel("runtime"),
-			workerOwner.close,
-		),
-	};
-}
+// The `new URL(..., import.meta.url)` literal has to sit inside `new Worker(...)` here: it
+// resolves against this file, and it is the only form Vite recognises as a Worker entry.
+const composition = createWebClientRuntime({
+	createWorker: () =>
+		new Worker(new URL("./runtime.worker.ts", import.meta.url), {
+			type: "module",
+		}),
+});
 
-const composition = createWebWorkerComposition();
 export const webWorkerOwner = composition.workerOwner;
-export const crypto = composition.crypto;
+export const crypto = createWasmWorkerCryptoPort(composition.cryptoChannel);
 /** Shared Worker Runtime. Web Items observation consumes `observe(Items)`. */
 export const runtime = composition.runtime;
 

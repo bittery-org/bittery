@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { createKeyRefTable } from "./key-ref";
-import {
-	createSharedWorkerOwner,
-	type SharedWorkerHandle,
-} from "./shared-worker-rpc";
-import { createWorkerHostRpc, type WorkerHostRpc } from "./worker-host-rpc";
+import { createWorkerHostRpc, type WorkerHostRpc } from "./host-rpc";
+import { createSharedWorkerOwner, type SharedWorkerHandle } from "./owner";
 import {
 	serveWorkerChannels,
 	type WorkerChannelService,
 	type WorkerRouterScope,
-} from "./worker-router";
+} from "./router";
+
+/** Stands in for a `KeyRef`: an opaque token whose prototype is not `Object.prototype`. */
+class OpaqueTokenDouble {}
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -236,7 +235,7 @@ describe("shared worker RPC", () => {
 			},
 		});
 
-		const keyRef = createKeyRefTable<number>().create(1);
+		const keyRef = new OpaqueTokenDouble();
 		const forbidden = [
 			() => undefined,
 			new Error("secret detail"),

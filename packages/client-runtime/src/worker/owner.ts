@@ -5,9 +5,9 @@ import {
 	type WorkerReply,
 	type WorkerRequest,
 	WorkerRpcError,
-} from "./worker-wire";
+} from "./wire";
 
-export { copyWorkerValue, WorkerRpcError } from "./worker-wire";
+export { copyWorkerValue, WorkerRpcError } from "./wire";
 
 export interface SharedWorkerHandle {
 	postMessage(message: unknown): void;

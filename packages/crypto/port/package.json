@@ -28,6 +28,9 @@
 		"check-types": "tsc --noEmit",
 		"test": "bun test src"
 	},
+	"dependencies": {
+		"@bittery/client-runtime": "workspace:*"
+	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*"
