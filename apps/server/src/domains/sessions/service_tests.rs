@@ -1,4 +1,5 @@
 use super::*;
+use sqlx::postgres::PgPoolOptions;
 use time::{Duration, OffsetDateTime};
 
 #[test]
@@ -55,6 +56,35 @@ fn device_helpers_prefer_explicit_platform_and_build_expected_labels() {
 }
 
 #[tokio::test]
+async fn postgres_verification_propagates_backend_failures() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://test:test@127.0.0.1:1/bittery_session_failure")
+        .expect("fixed unavailable database URL should parse");
+    let sessions = SessionService::from_pool(pool.clone());
+    pool.close().await;
+
+    let error = sessions
+        .verify_token("token")
+        .await
+        .expect_err("an unavailable session store must not look like a missing session");
+
+    assert_eq!(error.code, crate::error::AppErrorCode::InternalServerError);
+    assert_eq!(error.message, "Session store is unavailable");
+}
+
+#[tokio::test]
+async fn unknown_token_is_a_successful_missing_session_lookup() {
+    let sessions = SessionService::default();
+
+    let session = sessions
+        .verify_token("unknown-token")
+        .await
+        .expect("memory session lookup should succeed");
+
+    assert!(session.is_none());
+}
+
+#[tokio::test]
 async fn refresh_rotates_the_previous_session() {
     let sessions = SessionService::default();
     let seeded = sessions
@@ -63,6 +93,7 @@ async fn refresh_rotates_the_previous_session() {
     let current = sessions
         .verify_token(&seeded.token)
         .await
+        .expect("session lookup should succeed")
         .expect("seeded session should be valid");
 
     let next = sessions
@@ -71,8 +102,16 @@ async fn refresh_rotates_the_previous_session() {
         .expect("refresh should succeed");
 
     assert_ne!(next.session_id, seeded.session_id);
-    assert!(sessions.verify_token(&seeded.token).await.is_none());
-    assert!(sessions.verify_token(&next.token).await.is_some());
+    assert!(sessions
+        .verify_token(&seeded.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
+    assert!(sessions
+        .verify_token(&next.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_some());
 }
 
 #[tokio::test]
@@ -89,6 +128,7 @@ async fn refresh_preserves_platform_duration_policy() {
     let refreshed = sessions
         .verify_token(&next.token)
         .await
+        .expect("session lookup should succeed")
         .expect("refreshed token should remain valid");
 
     assert_eq!(refreshed.platform, "extension");
@@ -130,8 +170,16 @@ async fn delete_session_removes_only_the_target_session() {
         .await
         .expect("delete_session should succeed");
 
-    assert!(sessions.verify_token(&seeded.token).await.is_none());
-    assert!(sessions.verify_token(&other.token).await.is_some());
+    assert!(sessions
+        .verify_token(&seeded.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
+    assert!(sessions
+        .verify_token(&other.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_some());
 }
 
 #[tokio::test]
@@ -149,8 +197,16 @@ async fn delete_all_user_sessions_keeps_other_users_signed_in() {
         .await
         .expect("delete_all_user_sessions should succeed");
 
-    assert!(sessions.verify_token(&target.token).await.is_none());
-    assert!(sessions.verify_token(&other.token).await.is_some());
+    assert!(sessions
+        .verify_token(&target.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
+    assert!(sessions
+        .verify_token(&other.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_some());
 }
 
 #[tokio::test]
@@ -215,8 +271,16 @@ async fn create_session_reuses_existing_desktop_client_id() {
         .await
         .expect("second session should be created");
 
-    assert!(sessions.verify_token(&first.token).await.is_none());
-    assert!(sessions.verify_token(&second.token).await.is_some());
+    assert!(sessions
+        .verify_token(&first.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
+    assert!(sessions
+        .verify_token(&second.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_some());
 
     let devices = sessions
         .list_devices("user-desktop", &second.session_id)
@@ -253,7 +317,11 @@ async fn rename_device_updates_active_grouped_web_sessions() {
         .iter()
         .filter(|device| device.platform == "web")
         .all(|device| device.device_name.as_deref() == Some("Unified Browser")));
-    assert!(sessions.verify_token(&grouped_b.token).await.is_some());
+    assert!(sessions
+        .verify_token(&grouped_b.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_some());
 }
 
 #[tokio::test]
@@ -272,8 +340,16 @@ async fn revoke_device_revokes_grouped_web_sessions() {
         .expect("revoke_device should succeed");
 
     assert_eq!(revoked.len(), 2);
-    assert!(sessions.verify_token(&grouped_a.token).await.is_none());
-    assert!(sessions.verify_token(&grouped_b.token).await.is_none());
+    assert!(sessions
+        .verify_token(&grouped_a.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
+    assert!(sessions
+        .verify_token(&grouped_b.token)
+        .await
+        .expect("session lookup should succeed")
+        .is_none());
 }
 
 #[tokio::test]

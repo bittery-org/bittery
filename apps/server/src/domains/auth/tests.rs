@@ -773,6 +773,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .sessions
                     .verify_token(&existing_session.token)
                     .await
+                    .expect("session lookup should succeed")
                     .is_none());
             },
         )
@@ -844,6 +845,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                 .sessions
                 .verify_token(&update_session.token)
                 .await
+                .expect("session lookup should succeed")
                 .is_none());
 
             let updated_email =
@@ -902,6 +904,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                 .sessions
                 .verify_token(&change_session.token)
                 .await
+                .expect("session lookup should succeed")
                 .is_none());
 
             let current_session = app.issue_session(&fixture.user_id).await;
@@ -953,12 +956,14 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                 .sessions
                 .verify_token(&current_session.token)
                 .await
+                .expect("session lookup should succeed")
                 .is_some());
             assert!(app
                 .state
                 .sessions
                 .verify_token(&other_session.token)
                 .await
+                .expect("session lookup should succeed")
                 .is_none());
 
             let recovery_session = app.issue_session(&fixture.user_id).await;
@@ -1073,6 +1078,7 @@ async fn auth_session_management_and_account_deletion_flow() {
                 .sessions
                 .verify_token(&other_session.token)
                 .await
+                .expect("session lookup should succeed")
                 .is_none());
 
             let delete_session = app.issue_session(&fixture.user_id).await;

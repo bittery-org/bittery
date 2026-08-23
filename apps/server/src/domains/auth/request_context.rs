@@ -3,11 +3,14 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{header::HeaderName, HeaderValue, Request},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use std::net::SocketAddr;
 
-use crate::{config::TrustProxyMode, domains::sessions::service::RequestMetadata, AppState};
+use crate::{
+    config::TrustProxyMode, domains::sessions::service::RequestMetadata, http::error::ApiError,
+    AppState,
+};
 
 const AUTHORIZATION_HEADER: &str = "authorization";
 const CLIENT_ID_HEADER: &str = "bittery-client-id";
@@ -33,7 +36,11 @@ pub async fn request_context_middleware(
 
     let verified_session = match verified_session {
         Some(future) => future.await,
-        None => None,
+        None => Ok(None),
+    };
+    let verified_session = match verified_session {
+        Ok(session) => session,
+        Err(error) => return ApiError::from(error).into_response(),
     };
 
     request.extensions_mut().insert(metadata);
@@ -103,4 +110,57 @@ fn client_ip_address(mode: TrustProxyMode, request: &Request<axum::body::Body>) 
 
 fn session_expiry_header_name() -> HeaderName {
     HeaderName::from_static(SESSION_EXPIRY_HEADER)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+        middleware,
+        routing::get,
+        Router,
+    };
+    use serde_json::Value;
+    use sqlx::postgres::PgPoolOptions;
+    use tower::ServiceExt;
+
+    use crate::AppState;
+
+    use super::request_context_middleware;
+
+    #[tokio::test]
+    async fn session_store_failure_returns_internal_error_instead_of_unauthorized() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@127.0.0.1:1/bittery_auth_context_failure")
+            .expect("fixed unavailable database URL should parse");
+        let state = AppState::from_pool(pool.clone());
+        pool.close().await;
+        let app = Router::new()
+            .route("/", get(|| async { StatusCode::NO_CONTENT }))
+            .layer(middleware::from_fn_with_state(
+                state,
+                request_context_middleware,
+            ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("authorization", "Bearer token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("middleware should respond");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("problem body should be readable"),
+        )
+        .expect("problem body should be JSON");
+        assert_eq!(body["code"], "INTERNAL_ERROR");
+    }
 }
