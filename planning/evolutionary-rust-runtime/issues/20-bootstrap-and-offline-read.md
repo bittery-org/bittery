@@ -1,7 +1,7 @@
 # Bootstrap and offline read
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 18, 19
 Spec: ../spec.md#bootstrap
 
@@ -28,6 +28,20 @@ pass with no staged or plaintext leakage.
 
 ## Comments
 
+### 2026-08-23 — Runtime-owned Bootstrap and offline Item reads
+
+Rust now owns Bootstrap on the staged Replica authority from `522e1681`: bounded pages, pinned
+tagged watermark, page fingerprint/resume, old-or-new promotion, Cursor expiry refresh, changes
+fetch plus authoritative Item fetch, and hint-only SSE. Persisted rows are encrypted authority
+and wrapped keys; Login projections decrypt in memory under the current lock epoch.
+
+Verification covered: cold vs captured-empty, watermark races without a mixed generation,
+fingerprint mismatch without promotion, stale Server versions leaving the Cursor unchanged,
+Session refresh success and 401-with-preserved Operations, IndexedDB same-revision page writes
+and no plaintext markers, and restart-from-durable-Replica: signed-out restore, one online
+unlock, disconnected transport, same Items with no further Server fetch. Web ItemList still
+owns filter/sort/render.
+
 ### 2026-08-23 — Web offline acceptance starts after an online unlock
 
 - A recreated Web Worker or browser session restores encrypted Replica authority with the Account
@@ -38,3 +52,12 @@ pass with no staged or plaintext leakage.
   password shortcut, a WebAuthn/platform-authenticator port, or another persistable login credential.
 - The separately accepted biometric exception remains available only to hosts that provide its local
   operating-system capability and still does not mint or refresh a Server Session.
+
+### 2026-08-23 — Remaining Bootstrap verification cases
+
+Vault ItemList now consumes Runtime `observe(Items)`; filter, sort, and render stay in the host.
+An expired Cursor (`requiresFullRefresh`) marks `RefreshRequired`, starts a new staging generation,
+and keeps the previous complete projection readable. Lock during decrypt publishes no plaintext.
+Failed authority fetch or commit leaves the prior generation and Cursor unchanged.
+
+Ready for adversarial review of this ticket. Tickets 18 and 21–24 are unchanged.

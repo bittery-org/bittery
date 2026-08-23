@@ -113,6 +113,14 @@ encrypted optimistic overlays.
   previous Server Session while the Extension already allowed the full online ceremony without that
   lifetime gate. There are no users and no stored v1/v2 format migration.
 
+### 2026-08-23 — Session renewal in Rust
+
+Session renewal runs through `POST /api/v1/sessions/current/refresh`. A successful refresh
+installs the new token on the current generation. An HTTP 401 is the reauthentication
+boundary: pending Operations stay durable and the Account status waiting reason becomes
+`reauthenticationRequired`. Sign-in and password Quick Unlock remain the Rust-owned SRP
+ceremony; this ticket's remaining Session work is done.
+
 ### 2026-08-23 — Biometric unlock remains the local exception
 
 - Biometric unlock remains available and unwraps only the existing Device-bound master unlock key

@@ -100,7 +100,8 @@ or rollout order.
 ## Not yet specified
 
 - First Web slice implementation is specified in [the accepted specification](spec.md) and queued in
-  [tickets 15 through 23](issues/15-binding-compile-spike.md).
+  [tickets 15 through 23](issues/15-binding-compile-spike.md), with the host binding
+  architecture split out into [tickets 25 through 27](issues/25-runtime-protocol-contract.md).
 - The eleven remaining response-cache call sites are inventoried in
   [ticket 24](issues/24-remaining-server-operation-outcomes.md). Its cross-kind outcome and rejection
   contract remains a maintainer frontier, so the ticket is `needs-info`; old idempotency cleanup is
