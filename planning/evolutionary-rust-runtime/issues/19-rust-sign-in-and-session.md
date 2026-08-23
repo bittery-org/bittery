@@ -86,3 +86,16 @@ encrypted optimistic overlays.
 - Rust owns the closed, versioned document shapes and their storage lifetimes. Hosts only execute
   primitive string `get`, `set`, and `delete` requests; master password and raw master unlock key have
   no persistable document field.
+
+### 2026-08-23 — Authentication transport resource boundary
+
+- Rust normalizes Server URLs with the existing WHATWG behavior and requires explicit Account-local
+  confirmation before dispatching to a remote plain HTTP Server. Query and fragment input do not
+  become part of the normalized Account identity.
+- Generated Server DTOs are the only auth wire definitions. Their generated Rust deserializers reject
+  unknown fields, so strict Server evidence does not require a parallel hand-written contract.
+- One authentication ceremony accepts at most 21,000 Vault keys and 32 MiB of their serialized JSON
+  array representation across the initial response and every cursor page. Crossing either bound
+  fails the complete ceremony without returning or installing a partial Account. Per-page Server
+  bounds remain independent defenses; the aggregate bounds protect Web and native client memory from
+  an unlimited sequence of unique cursors.
