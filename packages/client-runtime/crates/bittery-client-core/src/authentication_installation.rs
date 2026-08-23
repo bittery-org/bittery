@@ -106,30 +106,40 @@ impl Clock for SystemClock {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn prepare_authenticated_installation(
+/// Server-authenticated material after the policy shared by Sign-in and Quick Unlock has passed.
+/// The two callers add only their distinct local identity and document-installation rules.
+struct ValidatedAuthentication {
+    now_ms: u64,
+    normalized_server_url: String,
+    kdf_profile: bittery_crypto_core::KdfProfile,
+    master_unlock_key: Zeroizing<[u8; MASTER_UNLOCK_KEY_BYTES]>,
+    token: Zeroizing<String>,
+    session_id: String,
+    user: crate::server_contract::LoginUserResponse,
+    vault_keys: Vec<crate::server_contract::AuthVaultKeyResponse>,
+    verified_travel_mode: VerifiedTravelModePolicy,
+    expires_at_ms: u64,
+    server_expires_at_ms: u64,
+}
+
+fn validate_authenticated_session(
     verified: VerifiedAuthentication,
-    mut evidence: AuthenticationInstallationEvidence,
-    account_id: AccountId,
-    incarnation: Incarnation,
-    previous_metadata: Option<&AccountMetadataDocument>,
-    device_key: &[u8; MASTER_UNLOCK_KEY_BYTES],
+    pinned_kdf_profile: Option<&bittery_crypto_core::KdfProfile>,
     clock: &dyn Clock,
-) -> Result<PreparedAuthenticatedInstallation, RuntimeError> {
+) -> Result<ValidatedAuthentication, RuntimeError> {
     let now_ms = clock.now_ms()?;
-    bittery_crypto_core::validate_kdf_profile(
-        &verified.kdf_profile,
-        previous_metadata.map(|metadata| &metadata.pinned_kdf_profile),
-    )
-    .map_err(|_| {
-        RuntimeError::new(
-            RuntimeErrorCode::AuthenticationUnavailable,
-            "Authenticated KDF profile does not match the installed Account",
-        )
-    })?;
+    bittery_crypto_core::validate_kdf_profile(&verified.kdf_profile, pinned_kdf_profile).map_err(
+        |_| {
+            RuntimeError::new(
+                RuntimeErrorCode::AuthenticationUnavailable,
+                "Authenticated KDF profile does not match the installed Account",
+            )
+        },
+    )?;
     if verified.session_id.is_empty() {
         return Err(invalid_authenticated_session());
     }
+
     let mut authenticated_vault_ids = std::collections::HashSet::new();
     for vault_key in &verified.vault_keys {
         if vault_key.vault_id.is_empty()
@@ -145,6 +155,7 @@ pub(crate) fn prepare_authenticated_installation(
             return Err(invalid_authenticated_session());
         }
     }
+
     let server_expires_at_ms = parse_session_expiry_ms(&verified.expires_at)?;
     if server_expires_at_ms <= now_ms {
         return Err(RuntimeError::new(
@@ -161,147 +172,6 @@ pub(crate) fn prepare_authenticated_installation(
             )
         })?;
 
-    if verified.travel_mode.enabled != verified.travel_mode.enabled_at.is_some() {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::AuthenticationUnavailable,
-            "Server Travel Mode activation timestamp is inconsistent",
-        ));
-    }
-    let server_enabled_at_ms = verified
-        .travel_mode
-        .enabled_at
-        .as_deref()
-        .map(parse_server_timestamp_ms)
-        .transpose()?;
-    let server_updated_at_ms = Some(parse_server_timestamp_ms(&verified.travel_mode.updated_at)?);
-    let verified_travel_mode = VerifiedTravelModePolicy {
-        enabled: verified.travel_mode.enabled,
-        hidden_vault_ids: verified.travel_mode.hidden_vault_ids.clone(),
-        server_enabled_at_ms,
-        server_updated_at_ms,
-        verified_at_ms: now_ms,
-    };
-
-    if !verified.travel_mode.enabled {
-        hidden_vault_ids.clear();
-    }
-    let vault_keys = verified
-        .vault_keys
-        .into_iter()
-        .filter(|vault_key| !hidden_vault_ids.contains(vault_key.vault_id.as_str()))
-        .collect();
-
-    let added_at_ms = previous_metadata.map_or(now_ms, |metadata| metadata.added_at_ms);
-    let biometric_enabled = previous_metadata.is_some_and(|metadata| metadata.biometric_enabled);
-    let encrypted_master_unlock_key =
-        wrap_master_unlock_key(&verified.master_unlock_key, device_key)?;
-    let secret_key = std::mem::take(&mut *evidence.secret_key);
-    let metadata = AccountMetadataDocument::new(
-        account_id.clone(),
-        incarnation.clone(),
-        verified.user.id.clone(),
-        verified.user.email.clone(),
-        verified.user.name.clone(),
-        verified.normalized_server_url,
-        verified.user.team_name.clone(),
-        verified.user.team_avatar_url.clone(),
-        verified.user.secret_key_hint.clone(),
-        added_at_ms,
-        now_ms,
-        biometric_enabled,
-        evidence.insecure_transport_confirmed,
-        verified.kdf_profile,
-        Some(verified_travel_mode),
-    )?;
-    let quick_unlock = QuickUnlockDocument::new(
-        account_id.clone(),
-        incarnation.clone(),
-        encrypted_master_unlock_key,
-        secret_key,
-        metadata.last_active_at_ms,
-        Some(now_ms),
-        biometric_enabled,
-    )?;
-    let mut token = verified.token;
-    let current_session = CurrentSessionDocument::new(
-        account_id,
-        incarnation,
-        std::mem::take(&mut *token),
-        Some(verified.session_id),
-        expires_at_ms,
-        Some(server_expires_at_ms),
-        vault_keys,
-        verified.user.encrypted_private_key,
-    )?;
-
-    Ok(PreparedAuthenticatedInstallation {
-        metadata,
-        quick_unlock,
-        current_session,
-        master_unlock_key: verified.master_unlock_key,
-    })
-}
-
-/// Validates fresh Server evidence against the exact installed generation before any Quick Unlock
-/// write is allowed. The existing Replica and generation identities are intentionally absent from
-/// the returned write set.
-pub(crate) fn prepare_quick_unlock(
-    verified: VerifiedAuthentication,
-    metadata: AccountMetadataDocument,
-    quick_unlock: QuickUnlockDocument,
-    stored_master_unlock_key: &Zeroizing<[u8; MASTER_UNLOCK_KEY_BYTES]>,
-    clock: &dyn Clock,
-) -> Result<PreparedQuickUnlock, RuntimeError> {
-    let now_ms = clock.now_ms()?;
-    if verified.normalized_server_url != metadata.normalized_server_url
-        || verified.user.id != metadata.user_id
-        || verified.kdf_profile != metadata.pinned_kdf_profile
-    {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::AuthenticationUnavailable,
-            "Authenticated Account evidence does not match the installed Account",
-        ));
-    }
-    if !bool::from(
-        verified
-            .master_unlock_key
-            .as_slice()
-            .ct_eq(stored_master_unlock_key.as_slice()),
-    ) {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::AuthenticationRequired,
-            "Stored master unlock key does not match the installed Account",
-        ));
-    }
-    bittery_crypto_core::validate_kdf_profile(
-        &verified.kdf_profile,
-        Some(&metadata.pinned_kdf_profile),
-    )
-    .map_err(|_| {
-        RuntimeError::new(
-            RuntimeErrorCode::AuthenticationUnavailable,
-            "Authenticated KDF profile does not match the installed Account",
-        )
-    })?;
-    if verified.session_id.is_empty() {
-        return Err(invalid_authenticated_session());
-    }
-
-    let mut authenticated_vault_ids = std::collections::HashSet::new();
-    for vault_key in &verified.vault_keys {
-        if vault_key.vault_id.is_empty()
-            || vault_key.encrypted_vault_key.is_empty()
-            || !authenticated_vault_ids.insert(vault_key.vault_id.as_str())
-        {
-            return Err(invalid_authenticated_session());
-        }
-    }
-    let mut hidden_vault_ids = std::collections::HashSet::new();
-    for vault_id in &verified.travel_mode.hidden_vault_ids {
-        if vault_id.is_empty() || !hidden_vault_ids.insert(vault_id.as_str()) {
-            return Err(invalid_authenticated_session());
-        }
-    }
     if verified.travel_mode.enabled != verified.travel_mode.enabled_at.is_some() {
         return Err(RuntimeError::new(
             RuntimeErrorCode::AuthenticationUnavailable,
@@ -329,28 +199,128 @@ pub(crate) fn prepare_quick_unlock(
         .into_iter()
         .filter(|vault_key| !hidden_vault_ids.contains(vault_key.vault_id.as_str()))
         .collect();
-    let server_expires_at_ms = parse_session_expiry_ms(&verified.expires_at)?;
-    if server_expires_at_ms <= now_ms {
+
+    Ok(ValidatedAuthentication {
+        now_ms,
+        normalized_server_url: verified.normalized_server_url,
+        kdf_profile: verified.kdf_profile,
+        master_unlock_key: verified.master_unlock_key,
+        token: verified.token,
+        session_id: verified.session_id,
+        user: verified.user,
+        vault_keys,
+        verified_travel_mode,
+        expires_at_ms,
+        server_expires_at_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_authenticated_installation(
+    verified: VerifiedAuthentication,
+    mut evidence: AuthenticationInstallationEvidence,
+    account_id: AccountId,
+    incarnation: Incarnation,
+    previous_metadata: Option<&AccountMetadataDocument>,
+    device_key: &[u8; MASTER_UNLOCK_KEY_BYTES],
+    clock: &dyn Clock,
+) -> Result<PreparedAuthenticatedInstallation, RuntimeError> {
+    let mut authenticated = validate_authenticated_session(
+        verified,
+        previous_metadata.map(|metadata| &metadata.pinned_kdf_profile),
+        clock,
+    )?;
+
+    let added_at_ms =
+        previous_metadata.map_or(authenticated.now_ms, |metadata| metadata.added_at_ms);
+    let biometric_enabled = previous_metadata.is_some_and(|metadata| metadata.biometric_enabled);
+    let encrypted_master_unlock_key =
+        wrap_master_unlock_key(&authenticated.master_unlock_key, device_key)?;
+    let secret_key = std::mem::take(&mut *evidence.secret_key);
+    let metadata = AccountMetadataDocument::new(
+        account_id.clone(),
+        incarnation.clone(),
+        authenticated.user.id.clone(),
+        authenticated.user.email.clone(),
+        authenticated.user.name.clone(),
+        authenticated.normalized_server_url,
+        authenticated.user.team_name.clone(),
+        authenticated.user.team_avatar_url.clone(),
+        authenticated.user.secret_key_hint.clone(),
+        added_at_ms,
+        authenticated.now_ms,
+        biometric_enabled,
+        evidence.insecure_transport_confirmed,
+        authenticated.kdf_profile,
+        Some(authenticated.verified_travel_mode),
+    )?;
+    let quick_unlock = QuickUnlockDocument::new(
+        account_id.clone(),
+        incarnation.clone(),
+        encrypted_master_unlock_key,
+        secret_key,
+        metadata.last_active_at_ms,
+        Some(authenticated.now_ms),
+        biometric_enabled,
+    )?;
+    let current_session = CurrentSessionDocument::new(
+        account_id,
+        incarnation,
+        std::mem::take(&mut *authenticated.token),
+        Some(authenticated.session_id),
+        authenticated.expires_at_ms,
+        Some(authenticated.server_expires_at_ms),
+        authenticated.vault_keys,
+        authenticated.user.encrypted_private_key,
+    )?;
+
+    Ok(PreparedAuthenticatedInstallation {
+        metadata,
+        quick_unlock,
+        current_session,
+        master_unlock_key: authenticated.master_unlock_key,
+    })
+}
+
+/// Validates fresh Server evidence against the exact installed generation before any Quick Unlock
+/// write is allowed. The existing Replica and generation identities are intentionally absent from
+/// the returned write set.
+pub(crate) fn prepare_quick_unlock(
+    verified: VerifiedAuthentication,
+    metadata: AccountMetadataDocument,
+    quick_unlock: QuickUnlockDocument,
+    stored_master_unlock_key: &Zeroizing<[u8; MASTER_UNLOCK_KEY_BYTES]>,
+    clock: &dyn Clock,
+) -> Result<PreparedQuickUnlock, RuntimeError> {
+    if verified.normalized_server_url != metadata.normalized_server_url
+        || verified.user.id != metadata.user_id
+        || verified.kdf_profile != metadata.pinned_kdf_profile
+    {
         return Err(RuntimeError::new(
             RuntimeErrorCode::AuthenticationUnavailable,
-            "Server Session is already expired",
+            "Authenticated Account evidence does not match the installed Account",
         ));
     }
-    let expires_at_ms = now_ms
-        .checked_add(DEFAULT_SESSION_EXPIRY_MS)
-        .ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Device Session expiry overflowed",
-            )
-        })?;
+    if !bool::from(
+        verified
+            .master_unlock_key
+            .as_slice()
+            .ct_eq(stored_master_unlock_key.as_slice()),
+    ) {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationRequired,
+            "Stored master unlock key does not match the installed Account",
+        ));
+    }
+    let mut authenticated =
+        validate_authenticated_session(verified, Some(&metadata.pinned_kdf_profile), clock)?;
 
     let account_id = metadata.account_id.clone();
     let incarnation = metadata.incarnation.clone();
-    let refreshed_name = if verified.user.name.is_empty() {
+    let refreshed_name = if authenticated.user.name.is_empty() {
         metadata.name
     } else {
-        verified.user.name
+        authenticated.user.name
     };
     let updated_metadata = AccountMetadataDocument::new(
         account_id.clone(),
@@ -359,8 +329,11 @@ pub(crate) fn prepare_quick_unlock(
         metadata.email,
         refreshed_name,
         metadata.normalized_server_url,
-        verified.user.team_name.or(metadata.team_name),
-        verified.user.team_avatar_url.or(metadata.team_avatar_url),
+        authenticated.user.team_name.or(metadata.team_name),
+        authenticated
+            .user
+            .team_avatar_url
+            .or(metadata.team_avatar_url),
         // Quick Unlock reuses the installed Secret Key, so its installed hint remains authoritative.
         metadata.secret_key_hint,
         metadata.added_at_ms,
@@ -368,26 +341,25 @@ pub(crate) fn prepare_quick_unlock(
         metadata.biometric_enabled,
         metadata.insecure_transport_confirmed,
         metadata.pinned_kdf_profile,
-        Some(verified_travel_mode),
+        Some(authenticated.verified_travel_mode),
     )?;
-    let updated_quick_unlock = quick_unlock.record_master_password_entry(now_ms)?;
-    let mut token = verified.token;
+    let updated_quick_unlock = quick_unlock.record_master_password_entry(authenticated.now_ms)?;
     let current_session = CurrentSessionDocument::new(
         account_id,
         incarnation,
-        std::mem::take(&mut *token),
-        Some(verified.session_id),
-        expires_at_ms,
-        Some(server_expires_at_ms),
-        vault_keys,
-        verified.user.encrypted_private_key,
+        std::mem::take(&mut *authenticated.token),
+        Some(authenticated.session_id),
+        authenticated.expires_at_ms,
+        Some(authenticated.server_expires_at_ms),
+        authenticated.vault_keys,
+        authenticated.user.encrypted_private_key,
     )?;
 
     Ok(PreparedQuickUnlock {
         metadata: updated_metadata,
         quick_unlock: updated_quick_unlock,
         current_session,
-        master_unlock_key: verified.master_unlock_key,
+        master_unlock_key: authenticated.master_unlock_key,
     })
 }
 
