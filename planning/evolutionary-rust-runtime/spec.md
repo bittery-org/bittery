@@ -95,7 +95,9 @@ close() async
 
 The first closed request variants are:
 
-- `SignIn { server_url, email, master_password, secret_key }`
+- `SignIn { server_url, email, master_password, secret_key, insecure_transport_confirmed }`
+  -> `SignedIn { account_id, user_id }`;
+- `QuickUnlock { account_id, master_password }`
   -> `SignedIn { account_id, user_id }`; and
 - `CreateLoginItem { account_id, vault_id, draft }`
   -> `Accepted { operation_id, item_id, replica_revision }`.
@@ -258,13 +260,26 @@ Rust ports the existing sequence and characterization cases from the TypeScript 
 
 1. validate Secret Key;
 2. create SRP client ephemeral;
-3. start login;
-4. validate the Server KDF profile against the pinned/default policy before expensive derivation;
-5. derive the existing auth key and MUK;
-6. finish SRP and verify the Server proof;
-7. load all wrapped Vault-key pages and required Account material; and
-8. install Account, quick-unlock data, live keys, and current Session according to existing storage
+3. normalize the Server URL and require the request's explicit `insecure_transport_confirmed` field
+   before contacting a remote plain HTTP Server;
+4. start login;
+5. validate the Server KDF profile against the pinned/default policy before expensive derivation;
+6. derive the existing auth key and MUK;
+7. finish SRP and verify the Server proof;
+8. load all wrapped Vault-key pages and required Account material;
+9. verify and apply Travel Mode with the freshly issued Session token; and
+10. install Account, quick-unlock data, live keys, and current Session according to existing storage
    lifetime rules.
+
+The HTTP confirmation is part of `SignIn`, not transport-adapter policy. Rust refuses a remote plain
+HTTP Server unless `insecure_transport_confirmed` is true and stores that confirmation with the
+Account. Active account and previously confirmed unrelated Accounts never supply it implicitly.
+
+After the verified Server response supplies the User ID, Rust resolves the installation by normalized
+Server URL and Server User ID. Repeated full Sign-in preserves the stable local Account ID and
+atomically replaces its installation with a new random incarnation. First Sign-in creates a new
+stable Account ID and incarnation. Replacement has no observable deleted or partially installed
+state, and the new incarnation rejects late work from the replaced installation.
 
 The Device key is created and stored before it is needed for installation. A crash can leave an
 unused Device key or orphaned Server Session, neither of which exposes Account data. Device-bound
@@ -272,9 +287,15 @@ Account/quick-unlock data commits before publication. Session-bound credentials 
 platform scope. `SignedIn` is returned only when both are usable.
 
 If a crash leaves Device-bound Account data without Session-bound credentials, startup presents that
-Account as signed out and requires the existing full Sign-in behavior. It never publishes an unlocked
-Account or treats missing credentials as a successful Session. This recoverable boundary is explicit
-because browser session storage cannot join an IndexedDB transaction.
+Account as signed out and locked. When its stored Secret Key, pinned KDF profile, and quick-unlock
+lifetime remain valid, `QuickUnlock { account_id, master_password }` reads that material inside Rust
+and runs the complete existing SRP ceremony, including Server-proof verification, all Vault-key
+pages, Travel Mode verification, and fresh Session installation. Password-only describes the host
+input, not an offline or shortened authentication path. The Account remains signed out and locked
+until the sequence succeeds. Missing, expired, or corrupt quick-unlock material requires full
+Sign-in with email, master password, and Secret Key. The Runtime never publishes an unlocked Account
+or treats missing credentials as a successful Session. This recoverable boundary is explicit because
+browser session storage cannot join an IndexedDB transaction.
 
 Session renewal runs in Rust through the current refresh route. A missing/expired Session during a
 pending Operation changes its visible waiting reason and preserves the Operation. Flows that require

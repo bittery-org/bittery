@@ -1,7 +1,7 @@
 # Rust Sign-in and Session
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 16, 18
 Spec: ../spec.md#sign-in-and-session-behavior
 
@@ -26,3 +26,27 @@ Existing and added vectors cover invalid Secret Key, downgraded/mismatched KDF, 
 partial Vault-key pages, cancellation/zeroization, crash at each persistence boundary, refresh, and
 successful Web Sign-in. No persisted marker contains master password, raw MUK, or unintended Session
 credential lifetime.
+
+## Comments
+
+### 2026-08-23 — Sign-in frontier resolved
+
+- `SignIn` carries an explicit `insecure_transport_confirmed` boolean. Rust refuses a remote plain
+  HTTP Server unless that field is true and persists the confirmation with the installed Account;
+  neither the transport adapter nor Active account infers consent.
+- After the Server proof identifies the User, Rust resolves an existing installation by normalized
+  Server URL and Server User ID. A repeated full Sign-in keeps its stable local Account ID, atomically
+  replaces the Account installation with a new random incarnation, and leaves no observable deleted
+  or partially replaced state. A first Sign-in creates both a new stable Account ID and incarnation.
+- Rust verifies and applies Travel Mode with the freshly issued Session token after loading all
+  required Account material and before committing any usable local Session. Failure leaves no
+  published or unlocked local Session; an orphaned Server Session remains safe and recoverable.
+- `QuickUnlock` accepts only the stable Account ID and master password. Rust reads the stored Secret
+  Key and pinned KDF profile, runs the complete existing SRP ceremony, verifies Travel Mode, and
+  installs fresh Session credentials. The Account remains signed out and locked until that sequence
+  succeeds. Missing, expired, or corrupt quick-unlock material requires full Sign-in with email,
+  master password, and Secret Key.
+- There are no users to migrate. Server, Runtime, and Web change directly in place without a Legacy
+  Device-storage migration and without a parallel v2 key, schema, or client stack. The Runtime
+  preserves the established storage lifetimes and authentication behavior, not the old Account-store
+  representation.
