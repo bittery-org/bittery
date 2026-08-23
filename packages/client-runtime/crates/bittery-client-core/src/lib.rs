@@ -12,6 +12,9 @@ mod http_transport;
 // Ticket 19 keeps Server authentication policy behind one typed Rust-owned HTTP seam.
 #[allow(dead_code)]
 mod auth_http;
+// Ticket 19 keeps the complete unchanged SRP/KDF ceremony behind one private deep module.
+#[allow(dead_code)]
+mod authentication;
 mod protocol;
 mod replica;
 mod runtime;
