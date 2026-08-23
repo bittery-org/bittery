@@ -611,7 +611,7 @@ where
     })
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, PartialEq, Eq, Serialize, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -648,7 +648,83 @@ enum PlatformStorageRequest {
     },
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+impl<'de> Deserialize<'de> for PlatformStorageRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct RequestVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RequestVisitor {
+            type Value = PlatformStorageRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a platform-storage request")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut request_type = None;
+                let mut area = None;
+                let mut key = None;
+                let mut value = None;
+                let mut value_present = false;
+                let mut unknown_field = None;
+
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_str() {
+                        "type" => read_buffered_field(&mut map, &mut request_type, "type")?,
+                        "area" => read_buffered_field(&mut map, &mut area, "area")?,
+                        "key" => read_buffered_field(&mut map, &mut key, "key")?,
+                        "value" => {
+                            if value_present {
+                                return Err(serde::de::Error::duplicate_field("value"));
+                            }
+                            value_present = true;
+                            value = Some(map.next_value::<SecretString>()?);
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            unknown_field.get_or_insert(field);
+                        }
+                    }
+                }
+
+                if let Some(field) = unknown_field {
+                    return Err(serde::de::Error::custom(format!(
+                        "unknown field `{field}` in platform-storage request"
+                    )));
+                }
+
+                let request_type: String = decode_buffered_field(request_type, "type")?;
+                let area = decode_buffered_field(area, "area")?;
+                let key = decode_buffered_field(key, "key")?;
+                match request_type.as_str() {
+                    "get" if !value_present => Ok(PlatformStorageRequest::Get { area, key }),
+                    "set" => Ok(PlatformStorageRequest::Set {
+                        area,
+                        key,
+                        value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
+                    }),
+                    "delete" if !value_present => Ok(PlatformStorageRequest::Delete { area, key }),
+                    "get" | "delete" => Err(serde::de::Error::custom(format!(
+                        "unknown field `value` in platform-storage {request_type} request"
+                    ))),
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &request_type,
+                        &["get", "set", "delete"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(RequestVisitor)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -670,6 +746,99 @@ enum PlatformStorageResponse {
     },
     #[zeroize(skip)]
     Done,
+}
+
+impl<'de> Deserialize<'de> for PlatformStorageResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ResponseVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ResponseVisitor {
+            type Value = PlatformStorageResponse;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a platform-storage response")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut response_type = None;
+                let mut value = None;
+                let mut value_present = false;
+                let mut unknown_field = None;
+
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_str() {
+                        "type" => read_buffered_field(&mut map, &mut response_type, "type")?,
+                        "value" => {
+                            if value_present {
+                                return Err(serde::de::Error::duplicate_field("value"));
+                            }
+                            value_present = true;
+                            value = Some(map.next_value::<Option<SecretString>>()?);
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            unknown_field.get_or_insert(field);
+                        }
+                    }
+                }
+
+                if let Some(field) = unknown_field {
+                    return Err(serde::de::Error::custom(format!(
+                        "unknown field `{field}` in platform-storage response"
+                    )));
+                }
+
+                let response_type: String = decode_buffered_field(response_type, "type")?;
+                match response_type.as_str() {
+                    "value" => Ok(PlatformStorageResponse::Value {
+                        value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
+                    }),
+                    "done" if !value_present => Ok(PlatformStorageResponse::Done),
+                    "done" => Err(serde::de::Error::custom(
+                        "unknown field `value` in platform-storage done response",
+                    )),
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &response_type,
+                        &["value", "done"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(ResponseVisitor)
+    }
+}
+
+fn read_buffered_field<'de, A>(
+    map: &mut A,
+    slot: &mut Option<serde_json::Value>,
+    field: &'static str,
+) -> Result<(), A::Error>
+where
+    A: serde::de::MapAccess<'de>,
+{
+    if slot.is_some() {
+        return Err(serde::de::Error::duplicate_field(field));
+    }
+    *slot = Some(map.next_value()?);
+    Ok(())
+}
+
+fn decode_buffered_field<T, E>(
+    value: Option<serde_json::Value>,
+    field: &'static str,
+) -> Result<T, E>
+where
+    T: DeserializeOwned,
+    E: serde::de::Error,
+{
+    serde_json::from_value(value.ok_or_else(|| E::missing_field(field))?).map_err(E::custom)
 }
 
 #[cfg(feature = "platform-storage-contract-schema")]
@@ -1299,6 +1468,34 @@ mod tests {
         );
         assert!(serde_json::from_str::<DeviceKeyDocument>(&raw_device_key).is_err());
         assert_eq!(take_secret_drop_observations(), (0, 1));
+    }
+
+    #[test]
+    fn secret_wire_fields_bypass_no_tagged_envelope_error_path() {
+        // Escapes force serde_json to allocate the decoded plaintext instead of borrowing the
+        // zeroizing input buffer. Field validation is deliberately deferred until `value` has
+        // entered SecretString, so source order cannot bypass its Drop protection.
+        let _ = take_secret_drop_observations();
+        for request in [
+            r#"{"unexpected":true,"type":"set","area":"sessionSecret","key":"session","value":"{\"token\":\"request-secret\"}"}"#,
+            r#"{"type":"set","area":7,"key":"session","value":"{\"token\":\"request-secret\"}"}"#,
+            r#"{"type":"set","area":"sessionSecret","key":[],"value":"{\"token\":\"request-secret\"}"}"#,
+            r#"{"type":"set","area":"sessionSecret","key":"session","value":"{\"token\":\"request-secret\"}","type":"set"}"#,
+            r#"{"type":"set","area":"sessionSecret","key":"session","value":"{\"token\":\"request-secret\"}","#,
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageRequest>(request).is_err());
+            assert_eq!(take_secret_drop_observations(), (1, 0));
+        }
+
+        for response in [
+            r#"{"unexpected":true,"type":"value","value":"{\"token\":\"response-secret\"}"}"#,
+            r#"{"type":7,"value":"{\"token\":\"response-secret\"}"}"#,
+            r#"{"type":"value","value":"{\"token\":\"response-secret\"}","type":"value"}"#,
+            r#"{"type":"value","value":"{\"token\":\"response-secret\"}","#,
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageResponse>(response).is_err());
+            assert_eq!(take_secret_drop_observations(), (1, 0));
+        }
     }
 
     #[test]
