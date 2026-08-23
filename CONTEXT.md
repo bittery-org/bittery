@@ -166,11 +166,11 @@ Destroy the account on the server, then remove it locally. The only one of these
 _Avoid_: close account, deactivate
 
 **Full sign-in**:
-Signing in with email, master password *and* Secret Key. This is what a sign-out, a removal or an expired quick-unlock window forces next time.
+Signing in with email, master password *and* Secret Key. This is what a sign-out, a removal, a Wipe, or missing or corrupt Quick Unlock material forces next time.
 _Avoid_: full login, fresh login, re-login
 
 **Quick unlock**:
-Getting back into a locked account with the master password alone, using material already on the device. It has a lifetime; once that runs out, a full sign-in is required.
+Getting back into a locked account with the master password alone, using the stored Secret Key and pinned KDF profile to run a fresh complete online sign-in ceremony. It has no time-based expiry. It remains available until Sign out, Remove, or Wipe deletes its Device-bound material.
 _Avoid_: fast unlock, resume, remember me
 
 **Biometric unlock**:

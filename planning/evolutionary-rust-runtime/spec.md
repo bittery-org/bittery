@@ -303,7 +303,7 @@ and runs the complete existing SRP ceremony, including Server-proof verification
 pages, Travel Mode verification, and fresh Session installation. Password-only describes the host
 input, not an offline or shortened authentication path. The Account remains signed out and locked
 until the sequence succeeds. Quick-unlock material has no time-based expiry; explicit Sign-out,
-Account removal, or Device reset deletes it. Missing or corrupt quick-unlock material requires full
+Account removal, or Wipe deletes it. Missing or corrupt quick-unlock material requires full
 Sign-in with email, master password, and Secret Key. The Runtime never publishes an unlocked Account
 or treats missing credentials as a successful Session. This recoverable boundary is explicit because
 browser session storage cannot join an IndexedDB transaction.

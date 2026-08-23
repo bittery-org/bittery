@@ -131,8 +131,8 @@ export function useWebSync(
 
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
-			// Server-side revocation is a sign-out, not a lock: the quick-unlock prompt must
-			// not reappear for a session the server has already killed.
+			// The old Server Session is gone, so lock its Account and reauthenticate online.
+			// Device-bound Quick Unlock inputs remain; this is not explicit Sign out.
 			await accountSync.invalidateSession(payload);
 			lifecycle.clear();
 			queryClient.clear();

@@ -192,16 +192,17 @@ export interface AccountStore {
 	 */
 	tryRestoreSessionWithoutPrompt(accountId?: string): Promise<boolean>;
 	isAuthenticated(accountId?: string): Promise<boolean>;
+	/** Whether stored Device-bound inputs can run password-only online reauthentication. */
 	canQuickUnlock(accountId?: string): Promise<boolean>;
 	/**
 	 * Lock. Drops the session-bound secrets (`jwt_token`, `vault_keys`,
-	 * `encrypted_private_key`) and the in-memory MUK, but **keeps `session_data`** so
-	 * quick-unlock still works.
+	 * `encrypted_private_key`) and the in-memory MUK, but keeps the Device-bound Secret
+	 * Key, pinned KDF profile and wrapped MUK so Quick Unlock still works.
 	 */
 	clearSession(accountId?: string): Promise<void>;
 	/**
-	 * Sign out of this account. Everything `clearSession` does, plus deleting
-	 * `session_data` — quick-unlock is gone and the master password is required.
+	 * Sign out of this account. Everything `clearSession` does, plus deleting every
+	 * Device-bound Quick Unlock input — full Sign-in is required next time.
 	 */
 	forgetSession(accountId?: string): Promise<void>;
 	clearAllStoredData(accountId?: string): Promise<void>;
@@ -1314,19 +1315,20 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		},
 
 		/**
-		 * Whether the password alone can unlock: the secret key is stored and the session
-		 * has not expired.
-		 *
-		 * Deliberately not `isSessionValid` — that also demands a live auth token, and the
-		 * token is session-bound, so on web it dies with the tab. A missing token is exactly
-		 * the state quick unlock exists for: the password re-runs SRP and mints a new one.
+		 * Whether the password alone can start a complete online SRP ceremony. The stored
+		 * Secret Key and pinned KDF profile are the reusable inputs; the previous Session,
+		 * its expiry and its token are not. Successful Quick Unlock mints a fresh Session.
 		 */
 		async canQuickUnlock(accountId?: string): Promise<boolean> {
-			if ((await store.getStoredSecretKey(accountId)) === null) {
+			const resolved = await resolveAccountId(accountId);
+			if (!resolved) {
 				return false;
 			}
-			const session = await getStoredSessionData(accountId);
-			return session !== null && now() < effectiveSessionExpiry(session);
+			const [secretKey, pinnedKdfProfile] = await Promise.all([
+				store.getStoredSecretKey(resolved),
+				store.getPinnedKdfProfile(resolved),
+			]);
+			return secretKey !== null && pinnedKdfProfile !== null;
 		},
 
 		/**
@@ -1351,7 +1353,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			}
 		},
 
-		/** Sign out: lock, then destroy the quick-unlock material as well. */
+		/** Sign out: lock, then destroy every Device-bound Quick Unlock input as well. */
 		async forgetSession(accountId?: string): Promise<void> {
 			const resolved = await resolveAccountId(accountId);
 			if (!resolved) {
@@ -1360,6 +1362,8 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 			await store.clearSession(resolved);
 			await deleteAccount("session_data", resolved);
+			await deleteAccount("secret_key", resolved);
+			await deleteAccount("pinned_kdf_params", resolved);
 		},
 
 		async clearAllStoredData(accountId?: string): Promise<void> {

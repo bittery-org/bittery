@@ -10,7 +10,7 @@ import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
-import { forgetActiveSession, initializeStorage, storage } from "./lib/storage";
+import { initializeStorage, lockActiveSession, storage } from "./lib/storage";
 import "./index.css";
 
 import {
@@ -38,8 +38,9 @@ function handleUnauthorizedError() {
 
 	queryClient.clear();
 
-	// An expired session is a sign-out, so the quick-unlock offer in `session_data` goes too.
-	forgetActiveSession()
+	// A rejected Server Session requires online reauthentication, not a local Sign-out.
+	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
+	lockActiveSession()
 		.then(() => {
 			toast.error(m.toast_auth_session_expired());
 			window.location.href = "/login";

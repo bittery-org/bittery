@@ -26,6 +26,7 @@ const setMasterUnlockKeyCalls: unknown[] = [];
 const forgetSessionCalls: (string | undefined)[] = [];
 const clearItemCacheCalls: (string | undefined)[] = [];
 let forgetSessionError: Error | null = null;
+let canQuickUnlock = true;
 
 mock.module(path.join(bgDir, "services/account-resolution.ts"), () => ({
 	resolveEmailFromAccountId: async (accountId: string) =>
@@ -35,6 +36,7 @@ mock.module(path.join(bgDir, "services/account-resolution.ts"), () => ({
 const storageMock = {
 	getAccountsList: async () => accounts,
 	hasStoredSecretKey: async () => true,
+	canQuickUnlock: async () => canQuickUnlock,
 	getAuthToken: async () => "token",
 	getServerUrl: async () => "http://localhost:3000",
 	getActiveAccount: async () => activeAccount,
@@ -162,9 +164,8 @@ mock.module("@bittery/shared/api-client-factory", () => ({
 	createApiClientForServer: () => ({}),
 }));
 
-const { handleLogout, handleQuickUnlockAll } = await import(
-	path.join(bgDir, "auth-handlers.ts")
-);
+const { handleCanQuickUnlock, handleLogout, handleQuickUnlockAll } =
+	await import(path.join(bgDir, "auth-handlers.ts"));
 
 beforeEach(() => {
 	accounts = [];
@@ -177,9 +178,28 @@ beforeEach(() => {
 	reconciledRuntime = undefined;
 	clearItemCacheCalls.length = 0;
 	forgetSessionError = null;
+	canQuickUnlock = true;
 	desktopStatus = null;
 	triggerDesktopUnlockResult = true;
 	triggerDesktopUnlockCalls = 0;
+});
+
+describe("handleCanQuickUnlock", () => {
+	test("uses the shared Device-bound material availability rule", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		activeAccount = "acc-uuid-1";
+
+		expect(await handleCanQuickUnlock()).toEqual({
+			success: true,
+			canQuickUnlock: true,
+		});
+
+		canQuickUnlock = false;
+		expect(await handleCanQuickUnlock()).toEqual({
+			success: true,
+			canQuickUnlock: false,
+		});
+	});
 });
 
 describe("handleQuickUnlockAll", () => {

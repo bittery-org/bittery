@@ -8,7 +8,8 @@ Spec: ../spec.md#sign-in-and-session-behavior
 ## Outcome
 
 Move full existing SRP Sign-in, KDF validation, proof verification, Account installation, quick-unlock
-material, and Session creation/renewal into Rust without changing crypto behavior or storage lifetime.
+material, and Session creation/renewal into Rust without changing cryptographic behavior or storage
+tier. Intentionally remove the old time-based Quick Unlock availability gate.
 
 ## Work
 
@@ -69,7 +70,7 @@ encrypted optimistic overlays.
   Key and pinned KDF profile, runs the complete existing SRP ceremony, verifies Travel Mode, and
   installs fresh Session credentials. The Account remains signed out and locked until that sequence
   succeeds. Quick-unlock material has no time-based expiry and survives ordinary locking and Server
-  Session expiry. Explicit Sign-out, Account removal, or Device reset deletes it. Missing or corrupt
+  Session expiry. Explicit Sign-out, Account removal, or Wipe deletes it. Missing or corrupt
   material requires full Sign-in with email, master password, and Secret Key.
 - There are no users to migrate. Server, Runtime, and Web change directly in place without a Legacy
   Device-storage migration and without a parallel v2 key, schema, or client stack. The Runtime
@@ -106,7 +107,7 @@ encrypted optimistic overlays.
 - Quick-unlock material has no time-based expiry. Ordinary locking and Server Session expiry retain
   the Device-bound Secret Key and pinned KDF profile so password-only Quick Unlock can always run a
   fresh complete online SRP ceremony.
-- Explicit Sign-out, Account removal, or Device reset deletes the material. Missing or corrupt
+- Explicit Sign-out, Account removal, or Wipe deletes the material. Missing or corrupt
   material still requires full Sign-in with email, master password, and Secret Key.
 - This directly replaces the inconsistent Legacy behavior: generic clients tied availability to the
   previous Server Session while the Extension already allowed the full online ceremony without that

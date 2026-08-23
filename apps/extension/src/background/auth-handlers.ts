@@ -246,12 +246,8 @@ async function ensureActiveAccountSet(runtime: ClientRuntime): Promise<void> {
 /**
  * Handle CAN_QUICK_UNLOCK message - Check if quick unlock is available
  *
- * Deliberately NOT `storage.canQuickUnlock()`, which additionally requires unexpired
- * `session_data`. Quick unlock does not need it: `performSRPUnlock` re-authenticates against
- * the server and re-issues both the token and the vault keys, so everything it consumes —
- * the accounts list, the stored `secret_key` and the pinned KDF profile — is device-bound
- * and survives a browser restart. The honest question is "can we re-derive?", and that is
- * what this asks.
+ * The shared store asks whether the Device-bound Secret Key and pinned KDF profile can
+ * start a fresh online SRP ceremony. It deliberately ignores the previous Server Session.
  */
 export async function handleCanQuickUnlock(): Promise<CanQuickUnlockResponse> {
 	const activeAccount = await storage.getActiveAccount();
@@ -259,12 +255,10 @@ export async function handleCanQuickUnlock(): Promise<CanQuickUnlockResponse> {
 		return { success: true, canQuickUnlock: false };
 	}
 
-	const accountId = activeAccount;
-	const canQuickUnlock =
-		(await storage.hasStoredSecretKey(accountId)) &&
-		(await storage.getPinnedKdfProfile(accountId)) !== null;
-
-	return { success: true, canQuickUnlock };
+	return {
+		success: true,
+		canQuickUnlock: await storage.canQuickUnlock(activeAccount),
+	};
 }
 
 /**

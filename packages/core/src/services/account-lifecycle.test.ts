@@ -24,6 +24,7 @@ import {
 	type LifecycleDeps,
 	lockAccount,
 	lockAllAccounts,
+	lockInvalidSession,
 	removeAccount,
 	type SessionCredentialRef,
 	signOutAccount,
@@ -392,17 +393,35 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-2"));
 	});
 
-	it("keeps the secret key, server url, biometric flag and the accounts-list row", async () => {
+	it("deletes the Secret Key while keeping account metadata after explicit Sign out", async () => {
 		const fixture = await createFixture();
 
 		await signOutAccount("acc-1", fixture.deps);
 
-		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBe(
-			"secret-acc-1",
-		);
+		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBeNull();
 		expect(await fixture.storage.getServerUrl("acc-1")).toBe(SERVER_URL);
 		expect(await fixture.storage.isBiometricEnabled("acc-1")).toBe(true);
 		expect(await accountIds(fixture.storage)).toEqual(["acc-1", "acc-2"]);
+	});
+
+	it("locks a rejected Server Session without deleting Quick Unlock material", async () => {
+		const fixture = await createFixture();
+		await fixture.storage.updateStoredSessionMetadata("acc-1", {
+			sessionId: "session-acc-1",
+			expiresAt: Date.now() + 60_000,
+		});
+
+		const outcome = await lockInvalidSession(
+			{ sessionId: "session-acc-1" },
+			fixture.deps,
+		);
+
+		expect(outcome.failures).toEqual([]);
+		expect(await fixture.storage.getAuthToken("acc-1")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
+		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBe(
+			"secret-acc-1",
+		);
 	});
 
 	it("leaves the active pointer on the signed-out account", async () => {

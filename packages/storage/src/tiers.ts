@@ -61,8 +61,8 @@ export const STORAGE_TIERS = {
 	vault_keys: { tier: "secret", class: "session-bound" },
 	encrypted_private_key: { tier: "secret", class: "session-bound" },
 
-	// --- secret, device-bound: the quick-unlock pair. `session_data` holds the MUK
-	// --- encrypted under `device_key`; neither is useful without the other.
+	// --- secret, device-bound: wrapped-key restoration and the stored Secret Key used
+	// --- with the plain pinned KDF profile for a fresh online Quick Unlock ceremony.
 	session_data: { tier: "secret", class: "device-bound" },
 	device_key: { tier: "secret", class: "device-bound" },
 	secret_key: { tier: "secret", class: "device-bound" },

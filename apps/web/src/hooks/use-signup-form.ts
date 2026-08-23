@@ -11,7 +11,6 @@ import {
 import { apiQueryKeys } from "@bittery/shared/api-query";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
-import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -414,13 +413,7 @@ export function useSignupForm({
 			);
 
 			toast.success(m.auth_signup_toast_account_created());
-			toast.success(
-				m.auth_signup_toast_quick_unlock_days({
-					daysUntil: String(
-						Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24)),
-					),
-				}),
-			);
+			toast.success(m.auth_signup_toast_quick_unlock());
 
 			await goAfterSignup(value);
 		} catch (error) {

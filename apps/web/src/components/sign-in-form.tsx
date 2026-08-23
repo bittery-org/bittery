@@ -9,7 +9,6 @@ import {
 } from "@bittery/shared/api-client-factory";
 import { apiQueryKeys } from "@bittery/shared/api-query";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
-import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Checkbox, Input, Label, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
@@ -240,10 +239,7 @@ function SignInFormContent({
 			return result;
 		},
 		onSuccess: () => {
-			const daysUntil = Math.floor(
-				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
-			);
-			toast.success(m.toast_auth_signin_success({ daysUntil }));
+			toast.success(m.toast_auth_signin_success());
 			if (redirectTo) {
 				navigate({ to: redirectTo });
 			} else {

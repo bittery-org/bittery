@@ -401,6 +401,29 @@ export async function lockAccount(
 	);
 }
 
+/**
+ * Lock the Account whose Server Session was rejected. Unlike explicit Sign out, this keeps
+ * Device-bound Quick Unlock inputs so a fresh online ceremony can reauthenticate it.
+ */
+export async function lockInvalidSession(
+	target: InvalidationTarget,
+	deps: LifecycleDeps,
+): Promise<LifecycleOutcome> {
+	const failures: LifecycleStepFailure[] = [];
+	const pre = await readPreState(deps.storage, failures);
+	const accountId = await resolveTarget(target, pre, deps.storage, failures);
+	if (!accountId) {
+		return buildOutcome(deps.storage, pre, [], failures);
+	}
+	await lockOne(accountId, deps, failures);
+	return buildOutcome(
+		deps.storage,
+		pre,
+		affectedOf(pre.accounts, accountId),
+		failures,
+	);
+}
+
 /** Lock every account. Deliberately weaker than N × `lockAccount` — see the header. */
 export async function lockAllAccounts(
 	deps: LifecycleDeps,

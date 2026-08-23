@@ -9,7 +9,6 @@ import {
 	test,
 	waitForAppReady,
 } from "../fixtures/auth";
-import { uiText } from "../fixtures/messages";
 
 /**
  * Sign-in, quick unlock, sign-out and the states the login screen shows in
@@ -90,9 +89,8 @@ test("a fresh device signs in with email, Secret Key and password, and is offere
 test("quick unlock takes the master password alone", async ({ page }) => {
 	test.setTimeout(SIGN_IN_MS * 2 + COLD_START_MS);
 
-	// Quick unlock is offered exactly when the device still holds the Secret Key
-	// and an unexpired session, which is what the sign-in just above leaves
-	// behind - so signing in first is what makes this deterministic.
+	// Quick unlock is offered exactly when the device still holds the Secret Key and
+	// pinned KDF profile, which is what the sign-in just above leaves behind.
 	await signIn(page, user);
 
 	await page.goto("/login");
@@ -165,16 +163,15 @@ test("signing out removes the account from the device and forces a full sign-in"
 	).toEqual([]);
 });
 
-test("an expired session shows the session-expired banner and asks for the Secret Key again", async ({
+test("an expired session keeps password-only Quick Unlock available", async ({
 	page,
 }) => {
 	test.setTimeout(SIGN_IN_MS + COLD_START_MS);
 
 	await signIn(page, user);
 
-	// `session_data` is the device-bound half of the quick-unlock pair and lives
-	// in localStorage as plain JSON; backdating both expiries is the only way to
-	// reach this state without waiting out the real 14-day window.
+	// Backdate both legacy Session expiry fields without deleting the Device-bound
+	// Secret Key or pinned KDF profile used by the fresh online SRP ceremony.
 	const expiredCount = await page.evaluate(() => {
 		const suffix = "_session_data";
 		const past = Date.now() - 24 * 60 * 60 * 1000;
@@ -196,16 +193,10 @@ test("an expired session shows the session-expired banner and asks for the Secre
 	expect(expiredCount).toBe(1);
 
 	await page.goto("/login");
-	await expect(
-		page.getByText(uiText("auth_signin_session_expired_title")),
-	).toBeVisible({ timeout: COLD_START_MS });
-	await expect(
-		page.getByText(uiText("auth_signin_session_expired_description")),
-	).toBeVisible();
-	// Quick unlock is gone with the session, so the full form is back.
-	await expect(
-		page.getByTestId("signin-form").locator("#secretKey"),
-	).toBeVisible();
+	const form = page.getByTestId("signin-form");
+	await expect(form.locator("#email")).toBeDisabled({ timeout: COLD_START_MS });
+	await expect(form.locator("#email")).toHaveValue(user.email);
+	await expect(form.locator("#secretKey")).toHaveCount(0);
 });
 
 test("an unauthenticated deep link bounces to /login, and ?redirect= lands there after sign-in", async ({

@@ -12,6 +12,7 @@
 
 import {
 	invalidateAccountSession,
+	lockAccount,
 	removeAccount,
 } from "@bittery/core/services/account-lifecycle";
 import {
@@ -113,6 +114,21 @@ export async function forgetActiveSession(
 ): Promise<void> {
 	await initializeStorage();
 	await invalidateAccountSession("active", lifecycleDeps);
+	await refresh?.();
+}
+
+/**
+ * Lock after a rejected or expired Server Session. Session-bound credentials are cleared,
+ * while Device-bound Quick Unlock inputs remain available for online reauthentication.
+ */
+export async function lockActiveSession(
+	refresh?: RefreshAccountRuntime,
+): Promise<void> {
+	await initializeStorage();
+	const accountId = await storage.getActiveAccount();
+	if (accountId) {
+		await lockAccount(accountId, lifecycleDeps);
+	}
 	await refresh?.();
 }
 

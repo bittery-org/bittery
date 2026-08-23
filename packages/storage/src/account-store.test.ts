@@ -102,6 +102,11 @@ const MUK_BYTES = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
 const OTHER_MUK_BYTES = new Uint8Array(
 	Array.from({ length: 32 }, (_, i) => 200 - i),
 );
+const KDF_PROFILE = {
+	schemaVersion: 1 as const,
+	algorithm: "pbkdf2-sha256" as const,
+	iterations: 600_000,
+};
 
 /** Advance the wall clock far enough that a zero-length period has provably elapsed. */
 const tick = (): Promise<void> =>
@@ -1393,15 +1398,16 @@ describe("AccountStore — accounts and settings", () => {
 		expect(await store.getBackgroundTimestamp()).toBeNull();
 	});
 
-	it("reports quick unlock only with a secret key and an unexpired session", async () => {
-		const { store, muk } = await makeStore();
+	it("offers quick unlock only with a stored Secret Key and pinned KDF profile", async () => {
+		const { store } = await makeStore();
 		await seedAccount(store, "a", { active: true });
-		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
 		expect(await store.canQuickUnlock()).toBe(false);
 
 		await store.storeSecretKey("secret-a");
+		expect(await store.canQuickUnlock()).toBe(false);
+
+		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 
 		expect(await store.canQuickUnlock()).toBe(true);
 		expect(await store.hasStoredSecretKey()).toBe(true);
@@ -1414,6 +1420,7 @@ describe("AccountStore — accounts and settings", () => {
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
 		await store.storeSecretKey("secret-a");
+		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
 		port.simulateRestart();
@@ -1424,12 +1431,22 @@ describe("AccountStore — accounts and settings", () => {
 		expect(await store.canQuickUnlock("a")).toBe(true);
 	});
 
-	it("stops offering quick unlock once the stored session has expired", async () => {
+	it("keeps offering quick unlock after the stored Server session expires", async () => {
 		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
 		await store.storeSecretKey("secret-a");
+		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await store.storeSessionData(muk, "a", "a@example.com", "user-a", -1);
+
+		expect(await store.canQuickUnlock()).toBe(true);
+	});
+
+	it("does not offer quick unlock with corrupt pinned KDF material", async () => {
+		const { port, store } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		await store.storeSecretKey("secret-a");
+		await port.kvSet(accountKey("a", "pinned_kdf_params"), "{oops", "device");
 
 		expect(await store.canQuickUnlock()).toBe(false);
 	});
@@ -1439,6 +1456,7 @@ describe("AccountStore — accounts and settings", () => {
 		await seedAccount(harness.store, "a", { active: true });
 		await harness.store.storeAuthToken("jwt-value");
 		await harness.store.storeSecretKey("secret-a");
+		await harness.store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await harness.store.storeVaultKeys([]);
 		await harness.store.storeEncryptedPrivateKey("pk");
 		await harness.store.storeSessionData(
@@ -1495,6 +1513,8 @@ describe("AccountStore — accounts and settings", () => {
 		expect(await store.getUnlockedAccounts()).toEqual([]);
 		expect(await store.getStoredSessionData("a")).toBeNull();
 		expect(await store.decryptStoredMasterUnlockKey("a")).toBeNull();
+		expect(await store.getStoredSecretKey("a")).toBeNull();
+		expect(await store.getPinnedKdfProfile("a")).toBeNull();
 
 		await store.storeAuthToken("jwt-value-2");
 		expect(await store.canQuickUnlock()).toBe(false);

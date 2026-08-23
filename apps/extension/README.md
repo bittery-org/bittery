@@ -6,7 +6,7 @@ Chrome extension (Manifest V3) for the Bittery password manager with secure auto
 
 - **Zero-knowledge architecture**: Master Unlock Key never leaves your device
 - **Secure autofill**: Shadow DOM + iframe isolation (1Password pattern)
-- **Quick unlock**: Password-only unlock for 14 days after full login
+- **Quick unlock**: Password-only online reauthentication until explicit sign-out or removal
 - **Time-based re-authentication**: 5-minute window for autofill security
 - **Hot reload development**: Fast development with @crxjs/vite-plugin
 
@@ -47,7 +47,7 @@ Uses `chrome.storage` APIs via adapter in `@bittery/crypto`:
 
 ### Security Features
 
-- **14-day quick unlock window**: Secret Key stored on device, encrypted Master Unlock Key
+- **Quick Unlock lifetime**: Device-bound Secret Key and pinned KDF profile remain until explicit sign-out, account removal, or Wipe
 - **5-minute autofill re-auth**: Requires re-authentication if >5min since last autofill
 - **Shadow DOM isolation**: Autofill UI isolated from page scripts
 - **iframe security**: Additional isolation layer for credential display
