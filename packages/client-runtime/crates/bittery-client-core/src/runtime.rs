@@ -11,6 +11,7 @@ use crate::{
     RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -19,11 +20,71 @@ use std::{
     thread::ThreadId,
 };
 
+thread_local! {
+    static ACTIVE_RUNTIME_DELIVERIES: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
+}
+
+struct ActiveRuntimeDelivery {
+    runtime_identity: usize,
+}
+
+impl ActiveRuntimeDelivery {
+    fn enter(runtime_identity: usize) -> Self {
+        ACTIVE_RUNTIME_DELIVERIES.with(|deliveries| {
+            *deliveries.borrow_mut().entry(runtime_identity).or_insert(0) += 1;
+        });
+        Self { runtime_identity }
+    }
+
+    fn is_active(runtime_identity: usize) -> bool {
+        ACTIVE_RUNTIME_DELIVERIES.with(|deliveries| {
+            deliveries
+                .borrow()
+                .get(&runtime_identity)
+                .is_some_and(|depth| *depth > 0)
+        })
+    }
+}
+
+impl Drop for ActiveRuntimeDelivery {
+    fn drop(&mut self) {
+        ACTIVE_RUNTIME_DELIVERIES.with(|deliveries| {
+            let mut deliveries = deliveries.borrow_mut();
+            let depth = deliveries
+                .get_mut(&self.runtime_identity)
+                .expect("active Runtime delivery depth must exist");
+            *depth -= 1;
+            if *depth == 0 {
+                deliveries.remove(&self.runtime_identity);
+            }
+        });
+    }
+}
+
+#[derive(Clone)]
+struct AccountEpoch {
+    account_id: AccountId,
+    incarnation: crate::protocol::Incarnation,
+    epoch: u64,
+}
+
+struct ProjectedDelivery {
+    projection: RuntimeProjection,
+    account_epoch: Option<AccountEpoch>,
+}
+
+struct QueuedDelivery {
+    projection: RuntimeProjection,
+    account_epoch: Option<AccountEpoch>,
+}
+
 struct Subscription {
     request: ObservationRequest,
     sink: Arc<dyn ObservationSink>,
     delivery: Mutex<DeliveryState>,
     delivery_finished: Condvar,
+    runtime: Weak<Runtime>,
+    runtime_identity: usize,
 }
 
 #[derive(Default)]
@@ -31,7 +92,7 @@ struct DeliveryState {
     closed: bool,
     delivering_thread: Option<ThreadId>,
     last_queued_revision: Option<u64>,
-    queue: VecDeque<RuntimeProjection>,
+    queue: VecDeque<QueuedDelivery>,
 }
 
 struct DeliveryGuard<'a> {
@@ -63,17 +124,24 @@ impl Drop for DeliveryGuard<'_> {
 }
 
 impl Subscription {
-    fn new(request: ObservationRequest, sink: Arc<dyn ObservationSink>) -> Self {
+    fn new(
+        request: ObservationRequest,
+        sink: Arc<dyn ObservationSink>,
+        runtime: Weak<Runtime>,
+        runtime_identity: usize,
+    ) -> Self {
         Self {
             request,
             sink,
             delivery: Mutex::new(DeliveryState::default()),
             delivery_finished: Condvar::new(),
+            runtime,
+            runtime_identity,
         }
     }
 
-    fn publish(&self, projection: RuntimeProjection) {
-        let revision = projection.revision();
+    fn publish(&self, projected: ProjectedDelivery) {
+        let revision = projected.projection.revision();
         let current_thread = std::thread::current().id();
         {
             let mut delivery = self
@@ -88,7 +156,10 @@ impl Subscription {
                 return;
             }
             delivery.last_queued_revision = Some(revision);
-            delivery.queue.push_back(projection);
+            delivery.queue.push_back(QueuedDelivery {
+                projection: projected.projection,
+                account_epoch: projected.account_epoch,
+            });
             if delivery.delivering_thread.is_some() {
                 return;
             }
@@ -116,7 +187,32 @@ impl Subscription {
                 };
                 next
             };
-            self.sink.publish(next);
+            if let Some(account_epoch) = &next.account_epoch {
+                let Some(runtime) = self.runtime.upgrade() else {
+                    return;
+                };
+                if runtime
+                    .account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .get(&account_epoch.account_id)
+                    != Some(&account_epoch.epoch)
+                    || runtime
+                        .replica
+                        .snapshot(&account_epoch.account_id)
+                        .is_none_or(|snapshot| snapshot.incarnation != account_epoch.incarnation)
+                    || runtime
+                        .account_access
+                        .lock()
+                        .expect("Account access lock poisoned")
+                        .get(&account_epoch.account_id)
+                        != Some(&AccountAccessState::Unlocked)
+                {
+                    continue;
+                }
+            }
+            let _active_delivery = ActiveRuntimeDelivery::enter(self.runtime_identity);
+            self.sink.publish(next.projection);
         }
     }
 
@@ -138,19 +234,20 @@ impl Subscription {
                 .expect("observation delivery lock poisoned while closing");
         }
     }
-
-    fn is_delivering_on_current_thread(&self) -> bool {
-        self.delivery
-            .lock()
-            .expect("observation delivery lock poisoned")
-            .delivering_thread
-            == Some(std::thread::current().id())
-    }
 }
 
-fn advance_epoch(epochs: &mut HashMap<AccountId, u64>, account_id: &AccountId) {
+fn advance_epoch(
+    epochs: &mut HashMap<AccountId, u64>,
+    account_id: &AccountId,
+) -> Result<(), RuntimeError> {
     let epoch = epochs.entry(account_id.clone()).or_insert(0);
-    *epoch = epoch.saturating_add(1);
+    *epoch = epoch.checked_add(1).ok_or_else(|| {
+        RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "Account lock epoch overflowed",
+        )
+    })?;
+    Ok(())
 }
 
 pub struct Runtime {
@@ -247,6 +344,23 @@ impl Runtime {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_lock_epoch(&self, account_id: &AccountId, epoch: u64) {
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), epoch);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lock_epoch(&self, account_id: &AccountId) -> Option<u64> {
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .get(account_id)
+            .copied()
+    }
+
+    #[cfg(test)]
     pub(crate) fn install_account(
         &self,
         account_id: AccountId,
@@ -297,10 +411,15 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
+        let previous_incarnation = self
+            .replica
+            .snapshot(&account_id)
+            .map(|snapshot| snapshot.incarnation);
         let snapshot = self
             .replica
             .install_or_replace(account_id.clone(), user_id, incarnation)
             .await?;
+        let next_incarnation = snapshot.incarnation.clone();
         let _publication = self.publication.lock().expect("publication lock poisoned");
         self.replica.cache(snapshot);
         self.unlocked_items
@@ -311,13 +430,16 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::SignedOut);
-        advance_epoch(
-            &mut self
-                .account_lock_epochs
-                .lock()
-                .expect("Account lock epoch lock poisoned"),
-            &account_id,
-        );
+        let mut epochs = self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned");
+        if previous_incarnation.as_ref() == Some(&next_incarnation) {
+            epochs.entry(account_id.clone()).or_insert(0);
+        } else {
+            epochs.insert(account_id.clone(), 0);
+        }
+        drop(epochs);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
         drop(_execution_guard);
@@ -383,7 +505,7 @@ impl Runtime {
                 .lock()
                 .expect("Account lock epoch lock poisoned");
             for account_id in &lock_ids {
-                advance_epoch(&mut epochs, account_id);
+                advance_epoch(&mut epochs, account_id)?;
             }
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
@@ -415,6 +537,11 @@ impl Runtime {
             .expect("unlocked projection lock poisoned")
             .entry(account_id.clone())
             .or_default();
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(0);
         Ok(())
     }
 
@@ -444,7 +571,7 @@ impl Runtime {
                 .lock()
                 .expect("Account lock epoch lock poisoned"),
             account_id,
-        );
+        )?;
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
         drop(_execution_guard);
@@ -666,7 +793,12 @@ impl Runtime {
         let publication = self.publication.lock().expect("publication lock poisoned");
         self.ensure_open()?;
         let id = self.next_observer_id.fetch_add(1, Ordering::SeqCst);
-        let subscription = Arc::new(Subscription::new(request, sink));
+        let subscription = Arc::new(Subscription::new(
+            request,
+            sink,
+            Arc::downgrade(self),
+            self.identity(),
+        ));
         self.observers
             .lock()
             .expect("observer lock poisoned")
@@ -709,12 +841,7 @@ impl Runtime {
 
     pub async fn close(&self) {
         if self.closed.swap(true, Ordering::SeqCst) {
-            let reentrant_delivery = self
-                .observers
-                .lock()
-                .expect("observer lock poisoned")
-                .values()
-                .any(|subscription| subscription.is_delivering_on_current_thread());
+            let reentrant_delivery = ActiveRuntimeDelivery::is_active(self.identity());
             loop {
                 let finished = self.close_finished.notified();
                 if self.close_complete.load(Ordering::SeqCst)
@@ -760,7 +887,9 @@ impl Runtime {
                     .lock()
                     .expect("Account lock epoch lock poisoned");
                 for account_id in execution_locks.iter().map(|(account_id, _)| account_id) {
-                    advance_epoch(&mut epochs, account_id);
+                    if advance_epoch(&mut epochs, account_id).is_err() {
+                        epochs.remove(account_id);
+                    }
                 }
             }
             drop(_publication);
@@ -797,7 +926,11 @@ impl Runtime {
             .clone())
     }
 
-    fn projection(&self, request: &ObservationRequest) -> Result<RuntimeProjection, RuntimeError> {
+    fn identity(&self) -> usize {
+        std::ptr::from_ref(self).addr()
+    }
+
+    fn projection(&self, request: &ObservationRequest) -> Result<ProjectedDelivery, RuntimeError> {
         let _publication = self.publication.lock().expect("publication lock poisoned");
         self.projection_locked(request)
     }
@@ -805,7 +938,7 @@ impl Runtime {
     fn projection_locked(
         &self,
         request: &ObservationRequest,
-    ) -> Result<RuntimeProjection, RuntimeError> {
+    ) -> Result<ProjectedDelivery, RuntimeError> {
         match request {
             ObservationRequest::Items { account_id } => {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
@@ -823,17 +956,30 @@ impl Runtime {
                         "the selected Account is signed out or locked",
                     ));
                 }
-                Ok(RuntimeProjection::Items(ItemsProjection {
-                    account_id: account_id.clone(),
-                    replica_revision: snapshot.revision,
-                    items: self
-                        .unlocked_items
-                        .lock()
-                        .expect("unlocked projection lock poisoned")
-                        .get(account_id)
-                        .cloned()
-                        .unwrap_or_default(),
-                }))
+                let epoch = *self
+                    .account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .get(account_id)
+                    .unwrap_or(&0);
+                Ok(ProjectedDelivery {
+                    projection: RuntimeProjection::Items(ItemsProjection {
+                        account_id: account_id.clone(),
+                        replica_revision: snapshot.revision,
+                        items: self
+                            .unlocked_items
+                            .lock()
+                            .expect("unlocked projection lock poisoned")
+                            .get(account_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    }),
+                    account_epoch: Some(AccountEpoch {
+                        account_id: account_id.clone(),
+                        incarnation: snapshot.incarnation,
+                        epoch,
+                    }),
+                })
             }
             ObservationRequest::RuntimeStatus { account_id } => {
                 let snapshots = match account_id {
@@ -848,26 +994,29 @@ impl Runtime {
                     None => self.replica.snapshots(),
                 };
                 let revision = self.device_revision.load(Ordering::SeqCst);
-                Ok(RuntimeProjection::RuntimeStatus(RuntimeStatusProjection {
-                    account_id: account_id.clone(),
-                    revision,
-                    accounts: snapshots
-                        .into_iter()
-                        .map(|value| AccountStatus {
-                            access: self
-                                .account_access
-                                .lock()
-                                .expect("Account access lock poisoned")
-                                .get(&value.account_id)
-                                .copied()
-                                .unwrap_or(AccountAccessState::SignedOut),
-                            account_id: value.account_id,
-                            replica_revision: value.revision,
-                            failure: value.failure,
-                        })
-                        .collect(),
-                    closed: self.is_closed(),
-                }))
+                Ok(ProjectedDelivery {
+                    projection: RuntimeProjection::RuntimeStatus(RuntimeStatusProjection {
+                        account_id: account_id.clone(),
+                        revision,
+                        accounts: snapshots
+                            .into_iter()
+                            .map(|value| AccountStatus {
+                                access: self
+                                    .account_access
+                                    .lock()
+                                    .expect("Account access lock poisoned")
+                                    .get(&value.account_id)
+                                    .copied()
+                                    .unwrap_or(AccountAccessState::SignedOut),
+                                account_id: value.account_id,
+                                replica_revision: value.revision,
+                                failure: value.failure,
+                            })
+                            .collect(),
+                        closed: self.is_closed(),
+                    }),
+                    account_epoch: None,
+                })
             }
         }
     }

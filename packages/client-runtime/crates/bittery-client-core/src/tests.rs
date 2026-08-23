@@ -353,6 +353,27 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
 }
 
 #[tokio::test]
+async fn replacement_starts_a_fresh_lock_epoch_while_replay_preserves_it() {
+    let (runtime, account_id, incarnation) = installed_runtime();
+    runtime.set_lock_epoch(&account_id, u64::MAX);
+    runtime
+        .install_or_replace_account(account_id.clone(), "user-1".into(), incarnation)
+        .await
+        .unwrap();
+    assert_eq!(runtime.lock_epoch(&account_id), Some(u64::MAX));
+
+    runtime
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-1".into(),
+            Incarnation::from("replacement-incarnation"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(runtime.lock_epoch(&account_id), Some(0));
+}
+
+#[tokio::test]
 async fn restore_is_batch_atomic_and_replaces_the_visible_device_catalog() {
     let executor = Arc::new(SerializedInMemoryExecutor::default());
     let installer = Runtime::with_serialized_replica_executor(executor.clone());
@@ -778,6 +799,7 @@ impl ObservationSink for BlockingSink {
 
 struct ReentrantRuntimeCloseSink {
     runtime: std::sync::Weak<Runtime>,
+    handle: Mutex<Option<Arc<ObservationHandle>>>,
     revisions: Mutex<Vec<u64>>,
     entered: (Mutex<bool>, Condvar),
     release: (Mutex<bool>, Condvar),
@@ -806,6 +828,7 @@ impl ObservationSink for ReentrantRuntimeCloseSink {
         if revision != 1 {
             return;
         }
+        self.handle.lock().unwrap().take().unwrap().close();
         let (entered, changed) = &self.entered;
         *entered.lock().unwrap() = true;
         changed.notify_all();
@@ -820,15 +843,16 @@ impl ObservationSink for ReentrantRuntimeCloseSink {
 }
 
 #[test]
-fn callback_awaiting_a_concurrent_close_breaks_the_delivery_drain_cycle() {
+fn self_closed_callback_awaiting_concurrent_runtime_close_does_not_deadlock() {
     let (runtime, account_id, _) = installed_runtime();
     let sink = Arc::new(ReentrantRuntimeCloseSink {
         runtime: Arc::downgrade(&runtime),
+        handle: Mutex::new(None),
         revisions: Mutex::new(Vec::new()),
         entered: (Mutex::new(false), Condvar::new()),
         release: (Mutex::new(false), Condvar::new()),
     });
-    let _observation = runtime
+    let observation = runtime
         .observe(
             ObservationRequest::Items {
                 account_id: account_id.clone(),
@@ -836,6 +860,7 @@ fn callback_awaiting_a_concurrent_close_breaks_the_delivery_drain_cycle() {
             sink.clone(),
         )
         .unwrap();
+    *sink.handle.lock().unwrap() = Some(observation);
     let publisher = {
         let runtime = runtime.clone();
         thread::spawn(move || run_request(runtime, create_request(account_id)))
@@ -892,6 +917,113 @@ fn concurrent_publications_are_serialized_in_strict_revision_order() {
     first.join().unwrap();
 
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1, 2]);
+}
+
+#[test]
+fn queued_plaintext_from_an_old_lock_epoch_is_dropped_before_delivery() {
+    let (runtime, account_id, _) = installed_runtime();
+    let sink = Arc::new(BlockingSink::new());
+    let _handle = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let first = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    sink.wait_until_blocked();
+    let second = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    second.join().unwrap();
+
+    block_on_test(runtime.mark_account_locked(&account_id)).unwrap();
+    sink.release();
+    first.join().unwrap();
+    runtime.publish_all();
+    assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
+}
+
+#[test]
+fn queued_plaintext_from_an_old_incarnation_is_dropped_even_if_epoch_matches() {
+    let (runtime, account_id, _) = installed_runtime();
+    let sink = Arc::new(BlockingSink::new());
+    let _handle = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let first = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    sink.wait_until_blocked();
+    let second = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    second.join().unwrap();
+
+    block_on_test(runtime.install_or_replace_account(
+        account_id.clone(),
+        "user-1".into(),
+        Incarnation::from("replacement-incarnation"),
+    ))
+    .unwrap();
+    block_on_test(runtime.unlock_account(&account_id)).unwrap();
+    runtime.set_lock_epoch(&account_id, 0);
+    sink.release();
+    first.join().unwrap();
+    assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
+}
+
+#[test]
+fn lock_epoch_overflow_fails_closed_and_drops_queued_plaintext() {
+    let (runtime, account_id, _) = installed_runtime();
+    runtime.set_lock_epoch(&account_id, u64::MAX);
+    let sink = Arc::new(BlockingSink::new());
+    let _handle = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let first = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    sink.wait_until_blocked();
+    let second = {
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        thread::spawn(move || run_request(runtime, create_request(account_id)))
+    };
+    second.join().unwrap();
+
+    assert_eq!(
+        block_on_test(runtime.mark_account_locked(&account_id))
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
+    );
+    sink.release();
+    first.join().unwrap();
+    assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
 }
 
 #[test]
