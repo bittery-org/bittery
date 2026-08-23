@@ -2,7 +2,7 @@ use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 const KEY_PREFIX: &str = "bittery:runtime:platform-storage";
 const DOCUMENT_VERSION: u32 = 1;
@@ -455,7 +455,24 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn serialize_sensitive_json<T>(
+    value: &T,
+    failure_message: &'static str,
+) -> Result<String, RuntimeError>
+where
+    T: Serialize,
+{
+    let mut bytes = Zeroizing::new(Vec::new());
+    serde_json::to_writer(&mut *bytes, value)
+        .map_err(|_| platform_storage_invariant(failure_message))?;
+    String::from_utf8(std::mem::take(&mut *bytes)).map_err(|error| {
+        let mut bytes = error.into_bytes();
+        bytes.zeroize();
+        platform_storage_invariant(failure_message)
+    })
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -468,21 +485,27 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), RuntimeError> {
 )]
 enum PlatformStorageRequest {
     Get {
+        #[zeroize(skip)]
         area: PlatformStorageArea,
+        #[zeroize(skip)]
         key: String,
     },
     Set {
+        #[zeroize(skip)]
         area: PlatformStorageArea,
+        #[zeroize(skip)]
         key: String,
         value: String,
     },
     Delete {
+        #[zeroize(skip)]
         area: PlatformStorageArea,
+        #[zeroize(skip)]
         key: String,
     },
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -498,6 +521,7 @@ enum PlatformStorageResponse {
         #[serde(deserialize_with = "required_option::deserialize")]
         value: Option<String>,
     },
+    #[zeroize(skip)]
     Done,
 }
 
@@ -523,14 +547,20 @@ pub fn platform_storage_contract_schema() -> schemars::Schema {
 #[async_trait]
 #[doc(hidden)]
 pub trait SerializedPlatformStorageExecutor: Send + Sync {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError>;
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError>;
 }
 
 #[cfg(target_arch = "wasm32")]
 #[async_trait(?Send)]
 #[doc(hidden)]
 pub trait SerializedPlatformStorageExecutor {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError>;
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError>;
 }
 
 /// Rust-owned document policy over one serialized primitive host seam.
@@ -543,7 +573,10 @@ struct UnavailablePlatformStorageExecutor;
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SerializedPlatformStorageExecutor for UnavailablePlatformStorageExecutor {
-    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        _request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError> {
         Err(platform_storage_invariant(
             "this Runtime has no production platform storage executor",
         ))
@@ -784,34 +817,36 @@ impl PlatformStorage {
     where
         T: Serialize,
     {
-        let serialized = serde_json::to_string(document).map_err(|_| {
-            platform_storage_invariant("platform storage document could not be serialized")
-        })?;
-        self.set(target, serialized).await
+        let area = target.area();
+        let key = target.key()?;
+        let serialized = serialize_sensitive_json(
+            document,
+            "platform storage document could not be serialized",
+        )?;
+        self.expect_done(PlatformStorageRequest::Set {
+            area,
+            key,
+            value: serialized,
+        })
+        .await
     }
 
-    async fn get(&self, target: PlatformStorageValue) -> Result<Option<String>, RuntimeError> {
-        match self
+    async fn get(
+        &self,
+        target: PlatformStorageValue,
+    ) -> Result<Option<Zeroizing<String>>, RuntimeError> {
+        let mut response = self
             .invoke(PlatformStorageRequest::Get {
                 area: target.area(),
                 key: target.key()?,
             })
-            .await?
-        {
-            PlatformStorageResponse::Value { value } => Ok(value),
+            .await?;
+        match &mut response {
+            PlatformStorageResponse::Value { value } => Ok(value.take().map(Zeroizing::new)),
             PlatformStorageResponse::Done => Err(platform_storage_invariant(
                 "platform storage returned Done for Get",
             )),
         }
-    }
-
-    async fn set(&self, target: PlatformStorageValue, value: String) -> Result<(), RuntimeError> {
-        self.expect_done(PlatformStorageRequest::Set {
-            area: target.area(),
-            key: target.key()?,
-            value,
-        })
-        .await
     }
 
     async fn delete(&self, target: PlatformStorageValue) -> Result<(), RuntimeError> {
@@ -835,9 +870,10 @@ impl PlatformStorage {
         &self,
         request: PlatformStorageRequest,
     ) -> Result<PlatformStorageResponse, RuntimeError> {
-        let request_json = serde_json::to_string(&request).map_err(|_| {
-            platform_storage_invariant("platform storage request could not be serialized")
-        })?;
+        let request_json = Zeroizing::new(serialize_sensitive_json(
+            &request,
+            "platform storage request could not be serialized",
+        )?);
         let response_json = self.executor.invoke(request_json).await?;
         serde_json::from_str(&response_json).map_err(|_| {
             platform_storage_invariant("platform storage returned an invalid response")
@@ -886,9 +922,50 @@ mod tests {
         responses: Mutex<Vec<PlatformStorageResponse>>,
     }
 
+    #[derive(Clone, Copy)]
+    enum FailingWireBehavior {
+        ExecutorError,
+        MalformedResponse,
+        InvalidDocument,
+    }
+
+    struct FailingWireExecutor {
+        behavior: FailingWireBehavior,
+        saw_secret: Mutex<bool>,
+    }
+
+    #[async_trait]
+    impl SerializedPlatformStorageExecutor for FailingWireExecutor {
+        async fn invoke(
+            &self,
+            request_json: Zeroizing<String>,
+        ) -> Result<Zeroizing<String>, RuntimeError> {
+            *self.saw_secret.lock().expect("wire observation poisoned") =
+                request_json.contains("session-token");
+            match self.behavior {
+                FailingWireBehavior::ExecutorError => {
+                    Err(platform_storage_invariant("injected executor failure"))
+                }
+                FailingWireBehavior::MalformedResponse => Ok(Zeroizing::new(
+                    r#"{"type":"value","value":"session-token"#.into(),
+                )),
+                FailingWireBehavior::InvalidDocument => Ok(Zeroizing::new(
+                    serde_json::json!({
+                        "type": "value",
+                        "value": "{\"token\":\"session-token\"}",
+                    })
+                    .to_string(),
+                )),
+            }
+        }
+    }
+
     #[async_trait]
     impl SerializedPlatformStorageExecutor for RecordingExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            request_json: Zeroizing<String>,
+        ) -> Result<Zeroizing<String>, RuntimeError> {
             let request = serde_json::from_str(&request_json)
                 .map_err(|_| platform_storage_invariant("test request was invalid"))?;
             self.requests
@@ -901,6 +978,7 @@ mod tests {
                 .expect("responses lock poisoned")
                 .remove(0);
             serde_json::to_string(&response)
+                .map(Zeroizing::new)
                 .map_err(|_| platform_storage_invariant("test response could not serialize"))
         }
     }
@@ -988,6 +1066,8 @@ mod tests {
         assert_zeroize_on_drop::<DeviceKeyDocument>();
         assert_zeroize_on_drop::<QuickUnlockDocument>();
         assert_zeroize_on_drop::<CurrentSessionDocument>();
+        assert_zeroize_on_drop::<PlatformStorageRequest>();
+        assert_zeroize_on_drop::<PlatformStorageResponse>();
 
         let mut device_key = DeviceKeyDocument::new([7; 32]).clone();
         device_key.zeroize();
@@ -1010,6 +1090,61 @@ mod tests {
             "encrypted-private-key"
         );
         assert_eq!(current_session.session_id.as_deref(), Some("session-id"));
+
+        let mut request = PlatformStorageRequest::Set {
+            area: PlatformStorageArea::SessionSecret,
+            key: "session-key".into(),
+            value: "session-token".into(),
+        };
+        request.zeroize();
+        let PlatformStorageRequest::Set { key, value, .. } = &request else {
+            panic!("Set request changed variant while zeroizing");
+        };
+        assert_eq!(key, "session-key");
+        assert!(value.is_empty());
+
+        let mut response = PlatformStorageResponse::Value {
+            value: Some("session-token".into()),
+        };
+        response.zeroize();
+        let PlatformStorageResponse::Value { value } = &response else {
+            panic!("Value response changed variant while zeroizing");
+        };
+        assert!(value.is_none());
+    }
+
+    #[tokio::test]
+    async fn secret_wire_buffers_are_owned_by_zeroizing_types_on_every_error_path() {
+        for behavior in [
+            FailingWireBehavior::ExecutorError,
+            FailingWireBehavior::MalformedResponse,
+            FailingWireBehavior::InvalidDocument,
+        ] {
+            let executor = Arc::new(FailingWireExecutor {
+                behavior,
+                saw_secret: Mutex::new(false),
+            });
+            let storage = PlatformStorage::new(executor.clone());
+            let result = match executor.behavior {
+                FailingWireBehavior::ExecutorError => storage
+                    .store_current_session(&current_session_document())
+                    .await
+                    .map(|_| None),
+                FailingWireBehavior::MalformedResponse | FailingWireBehavior::InvalidDocument => {
+                    storage
+                        .load_current_session(&account("account"), &incarnation("generation"))
+                        .await
+                }
+            };
+
+            assert!(result.is_err());
+            if matches!(executor.behavior, FailingWireBehavior::ExecutorError) {
+                assert!(*executor
+                    .saw_secret
+                    .lock()
+                    .expect("wire observation poisoned"));
+            }
+        }
     }
 
     #[test]

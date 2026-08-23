@@ -1640,16 +1640,21 @@ mod startup_tests {
 
     #[async_trait]
     impl SerializedPlatformStorageExecutor for MemoryPlatformExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<zeroize::Zeroizing<String>, RuntimeError> {
             let request: Value = serde_json::from_str(&request_json).unwrap();
             let area = request["area"].as_str().unwrap().to_owned();
             let key = request["key"].as_str().unwrap().to_owned();
             match request["type"].as_str().unwrap() {
-                "get" => Ok(json!({
-                    "type": "value",
-                    "value": self.values.lock().unwrap().get(&(area, key)).cloned()
-                })
-                .to_string()),
+                "get" => Ok(zeroize::Zeroizing::new(
+                    json!({
+                        "type": "value",
+                        "value": self.values.lock().unwrap().get(&(area, key)).cloned()
+                    })
+                    .to_string(),
+                )),
                 "set" => {
                     if self.fail_next_set.swap(false, Ordering::SeqCst) {
                         return Err(startup_invariant("injected catalog write failure"));
@@ -1658,12 +1663,12 @@ mod startup_tests {
                         .lock()
                         .unwrap()
                         .insert((area, key), request["value"].as_str().unwrap().to_owned());
-                    Ok(json!({"type": "done"}).to_string())
+                    Ok(zeroize::Zeroizing::new(json!({"type": "done"}).to_string()))
                 }
                 "delete" => {
                     self.values.lock().unwrap().remove(&(area, key.clone()));
                     self.deletes.lock().unwrap().push(key);
-                    Ok(json!({"type": "done"}).to_string())
+                    Ok(zeroize::Zeroizing::new(json!({"type": "done"}).to_string()))
                 }
                 _ => unreachable!(),
             }
@@ -1672,7 +1677,10 @@ mod startup_tests {
 
     #[async_trait]
     impl SerializedPlatformStorageExecutor for PausingPlatformExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<zeroize::Zeroizing<String>, RuntimeError> {
             if serde_json::from_str::<Value>(&request_json).unwrap()["type"] == "get" {
                 *self.reached.0.lock().unwrap() = true;
                 self.reached.1.notify_all();

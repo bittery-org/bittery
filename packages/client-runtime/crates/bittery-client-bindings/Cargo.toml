@@ -23,3 +23,4 @@ getrandom_02 = { package = "getrandom", version = "=0.2.16", features = ["js"] }
 js-sys = "=0.3.103"
 wasm-bindgen.workspace = true
 wasm-bindgen-futures = "=0.4.76"
+zeroize.workspace = true

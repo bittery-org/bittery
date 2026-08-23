@@ -8,6 +8,7 @@ use std::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+use zeroize::Zeroizing;
 
 struct JsSerializedReplicaExecutor {
     invoke: js_sys::Function,
@@ -25,21 +26,28 @@ struct JsSerializedHttpExecutor {
 #[async_trait::async_trait(?Send)]
 impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
-        invoke_serialized(&self.invoke, request_json, replica_invoke_error).await
+        invoke_serialized(&self.invoke, &request_json, replica_invoke_error).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl core::SerializedPlatformStorageExecutor for JsSerializedPlatformStorageExecutor {
-    async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
-        invoke_serialized(&self.invoke, request_json, platform_storage_invoke_error).await
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, core::RuntimeError> {
+        // Rust retains zeroizing ownership across the await. Crossing wasm-bindgen necessarily
+        // creates JS-engine-managed string copies that Rust cannot inspect or wipe.
+        invoke_serialized(&self.invoke, &request_json, platform_storage_invoke_error)
+            .await
+            .map(Zeroizing::new)
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl core::SerializedHttpExecutor for JsSerializedHttpExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
-        invoke_serialized(&self.invoke, request_json, http_invoke_error).await
+        invoke_serialized(&self.invoke, &request_json, http_invoke_error).await
     }
 
     fn cancel(&self, dispatch_id: &str) {
@@ -52,7 +60,7 @@ impl core::SerializedHttpExecutor for JsSerializedHttpExecutor {
 
 async fn invoke_serialized(
     invoke: &js_sys::Function,
-    request_json: String,
+    request_json: &str,
     error: fn(&str) -> core::RuntimeError,
 ) -> Result<String, core::RuntimeError> {
     let promise = invoke
