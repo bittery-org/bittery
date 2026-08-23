@@ -2,6 +2,7 @@ use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const KEY_PREFIX: &str = "bittery:runtime:platform-storage";
 const DOCUMENT_VERSION: u32 = 1;
@@ -273,9 +274,10 @@ impl AccountMetadataDocument {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeviceKeyDocument {
+    #[zeroize(skip)]
     version: u32,
     pub(crate) key_bytes: [u8; 32],
 }
@@ -293,16 +295,23 @@ impl DeviceKeyDocument {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct QuickUnlockDocument {
+    #[zeroize(skip)]
     version: u32,
+    #[zeroize(skip)]
     pub(crate) account_id: AccountId,
+    #[zeroize(skip)]
     pub(crate) incarnation: Incarnation,
+    #[zeroize(skip)]
     pub(crate) encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
     pub(crate) secret_key: String,
+    #[zeroize(skip)]
     pub(crate) created_at_ms: u64,
+    #[zeroize(skip)]
     pub(crate) last_master_password_entry_ms: Option<u64>,
+    #[zeroize(skip)]
     pub(crate) biometric_enabled: bool,
 }
 
@@ -355,17 +364,25 @@ impl QuickUnlockDocument {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CurrentSessionDocument {
+    #[zeroize(skip)]
     version: u32,
+    #[zeroize(skip)]
     pub(crate) account_id: AccountId,
+    #[zeroize(skip)]
     pub(crate) incarnation: Incarnation,
     pub(crate) token: String,
+    #[zeroize(skip)]
     pub(crate) session_id: Option<String>,
+    #[zeroize(skip)]
     pub(crate) expires_at_ms: u64,
+    #[zeroize(skip)]
     pub(crate) server_expires_at_ms: Option<u64>,
+    #[zeroize(skip)]
     pub(crate) vault_keys: Vec<crate::server_contract::AuthVaultKeyResponse>,
+    #[zeroize(skip)]
     pub(crate) encrypted_private_key: String,
 }
 
@@ -925,6 +942,137 @@ mod tests {
         .expect("metadata must be valid")
     }
 
+    fn quick_unlock_document() -> QuickUnlockDocument {
+        QuickUnlockDocument::new(
+            account("account"),
+            incarnation("generation"),
+            bittery_crypto_core::EncryptedData {
+                ciphertext: "ciphertext".into(),
+                iv: "iv".into(),
+                algorithm: "AES-GCM-AAD-V1".into(),
+            },
+            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
+            10,
+            None,
+            false,
+        )
+        .expect("quick unlock must be valid")
+    }
+
+    fn current_session_document() -> CurrentSessionDocument {
+        CurrentSessionDocument::new(
+            account("account"),
+            incarnation("generation"),
+            "session-token".into(),
+            Some("session-id".into()),
+            1_000,
+            Some(2_000),
+            vec![crate::server_contract::AuthVaultKeyResponse {
+                encrypted_vault_key: "encrypted-vault-key".into(),
+                role: crate::server_contract::VaultRole::Owner,
+                vault_icon: Some("key".into()),
+                vault_id: "vault".into(),
+                vault_image_url: None,
+                vault_name: "Personal".into(),
+                vault_type: crate::server_contract::VaultType::Personal,
+            }],
+            "encrypted-private-key".into(),
+        )
+        .expect("canonical Current Session must be valid")
+    }
+
+    #[test]
+    fn sensitive_documents_zeroize_only_their_plaintext_secrets() {
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+
+        assert_zeroize_on_drop::<DeviceKeyDocument>();
+        assert_zeroize_on_drop::<QuickUnlockDocument>();
+        assert_zeroize_on_drop::<CurrentSessionDocument>();
+
+        let mut device_key = DeviceKeyDocument::new([7; 32]).clone();
+        device_key.zeroize();
+        assert_eq!(device_key.key_bytes, [0; 32]);
+
+        let mut quick_unlock = quick_unlock_document().clone();
+        quick_unlock.zeroize();
+        assert!(quick_unlock.secret_key.is_empty());
+        assert_eq!(
+            quick_unlock.encrypted_master_unlock_key.ciphertext,
+            "ciphertext"
+        );
+        assert_eq!(quick_unlock.account_id, account("account"));
+
+        let mut current_session = current_session_document().clone();
+        current_session.zeroize();
+        assert!(current_session.token.is_empty());
+        assert_eq!(
+            current_session.encrypted_private_key,
+            "encrypted-private-key"
+        );
+        assert_eq!(current_session.session_id.as_deref(), Some("session-id"));
+    }
+
+    #[test]
+    fn sensitive_document_json_shapes_are_unchanged_across_roundtrips() {
+        let device_key = serde_json::json!({
+            "version": 1,
+            "keyBytes": vec![7; 32],
+        });
+        let quick_unlock = serde_json::json!({
+            "version": 1,
+            "accountId": "account",
+            "incarnation": "generation",
+            "encryptedMasterUnlockKey": {
+                "ciphertext": "ciphertext",
+                "iv": "iv",
+                "algorithm": "AES-GCM-AAD-V1",
+            },
+            "secretKey": "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
+            "createdAtMs": 10,
+            "lastMasterPasswordEntryMs": null,
+            "biometricEnabled": false,
+        });
+        let current_session = serde_json::json!({
+            "version": 1,
+            "accountId": "account",
+            "incarnation": "generation",
+            "token": "session-token",
+            "sessionId": "session-id",
+            "expiresAtMs": 1_000,
+            "serverExpiresAtMs": 2_000,
+            "vaultKeys": [{
+                "encryptedVaultKey": "encrypted-vault-key",
+                "role": "owner",
+                "vaultIcon": "key",
+                "vaultId": "vault",
+                "vaultImageUrl": null,
+                "vaultName": "Personal",
+                "vaultType": "personal",
+            }],
+            "encryptedPrivateKey": "encrypted-private-key",
+        });
+
+        let decoded_device_key: DeviceKeyDocument =
+            serde_json::from_value(device_key.clone()).expect("Device key shape must decode");
+        let decoded_quick_unlock: QuickUnlockDocument =
+            serde_json::from_value(quick_unlock.clone()).expect("Quick-unlock shape must decode");
+        let decoded_current_session: CurrentSessionDocument =
+            serde_json::from_value(current_session.clone()).expect("Session shape must decode");
+
+        assert_eq!(
+            serde_json::to_value(&decoded_device_key).expect("Device key must encode"),
+            device_key
+        );
+        assert_eq!(
+            serde_json::to_value(&decoded_quick_unlock).expect("Quick-unlock must encode"),
+            quick_unlock
+        );
+        assert_eq!(
+            serde_json::to_value(&decoded_current_session).expect("Session must encode"),
+            current_session
+        );
+    }
+
     #[test]
     fn classification_is_complete_and_keeps_forbidden_authentication_inputs_unrepresentable() {
         let values = [
@@ -964,20 +1112,7 @@ mod tests {
             assert_eq!(value.area(), expected_area);
         }
 
-        let quick_unlock = QuickUnlockDocument::new(
-            account("account"),
-            incarnation("generation"),
-            bittery_crypto_core::EncryptedData {
-                ciphertext: "ciphertext".into(),
-                iv: "iv".into(),
-                algorithm: "AES-GCM-AAD-V1".into(),
-            },
-            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
-            10,
-            None,
-            false,
-        )
-        .expect("quick unlock must be valid");
+        let quick_unlock = quick_unlock_document();
         let fields = serde_json::to_value(quick_unlock).expect("document must serialize");
         assert!(fields.get("masterPassword").is_none());
         assert!(fields.get("rawMasterUnlockKey").is_none());
@@ -1048,25 +1183,7 @@ mod tests {
 
     #[test]
     fn current_session_uses_the_canonical_generated_vault_key_shape() {
-        let document = CurrentSessionDocument::new(
-            account("account"),
-            incarnation("generation"),
-            "session-token".into(),
-            Some("session-id".into()),
-            1_000,
-            Some(2_000),
-            vec![crate::server_contract::AuthVaultKeyResponse {
-                encrypted_vault_key: "encrypted-vault-key".into(),
-                role: crate::server_contract::VaultRole::Owner,
-                vault_icon: Some("key".into()),
-                vault_id: "vault".into(),
-                vault_image_url: None,
-                vault_name: "Personal".into(),
-                vault_type: crate::server_contract::VaultType::Personal,
-            }],
-            "encrypted-private-key".into(),
-        )
-        .expect("canonical Current Session must be valid");
+        let document = current_session_document();
 
         let encoded = serde_json::to_value(document).expect("Current Session must serialize");
         assert_eq!(encoded["vaultKeys"][0]["role"], "owner");
