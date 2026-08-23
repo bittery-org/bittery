@@ -120,6 +120,10 @@ export interface CryptoWorkerHandle extends SharedWorkerHandle {}
 /** How the worker is obtained. `wasm-worker-test-doubles.ts` passes an in-process one. */
 export interface WasmWorkerDeps {
 	createWorker: () => CryptoWorkerHandle;
+	handleHostRequest?: (
+		payload: unknown,
+		signal: AbortSignal,
+	) => Promise<unknown>;
 }
 
 const DEFAULT_DEPS: WasmWorkerDeps = {

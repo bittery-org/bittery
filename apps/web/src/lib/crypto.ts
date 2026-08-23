@@ -6,6 +6,7 @@
  * by one port is rejected by the other.
  */
 
+import { WebPlatformStorageHost } from "@bittery/client-runtime/web-platform-storage-host";
 import { createWorkerRuntime } from "@bittery/client-runtime/worker-runtime";
 import {
 	createWasmWorkerCryptoPort,
@@ -16,14 +17,19 @@ import {
 // This process-wide owner is the single channel multiplexer for production Crypto and the cold
 // Runtime transport. Product authentication/bootstrap remains outside this bounded batch.
 export function createWebWorkerComposition(deps?: WasmWorkerDeps) {
-	const workerOwner = createWasmWorkerOwner(
-		deps ?? {
-			createWorker: () =>
-				new Worker(new URL("./runtime.worker.ts", import.meta.url), {
-					type: "module",
-				}),
-		},
-	);
+	const platformStorage = new WebPlatformStorageHost();
+	const workerDeps: WasmWorkerDeps = deps ?? {
+		createWorker: () =>
+			new Worker(new URL("./runtime.worker.ts", import.meta.url), {
+				type: "module",
+			}),
+	};
+	const workerOwner = createWasmWorkerOwner({
+		...workerDeps,
+		handleHostRequest:
+			workerDeps.handleHostRequest ??
+			platformStorage.invoke.bind(platformStorage),
+	});
 	return {
 		workerOwner,
 		crypto: createWasmWorkerCryptoPort(workerOwner.channel("crypto")),

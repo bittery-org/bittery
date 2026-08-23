@@ -8,6 +8,7 @@ description = "Shared Bittery client Runtime and Replica policy"
 [features]
 default = []
 persistence-contract-schema = ["dep:schemars"]
+platform-storage-contract-schema = ["dep:schemars"]
 
 [dependencies]
 async-trait.workspace = true
@@ -22,3 +23,8 @@ tokio.workspace = true
 name = "generate-persistence-contract-schema"
 path = "src/bin/generate_persistence_contract_schema.rs"
 required-features = ["persistence-contract-schema"]
+
+[[bin]]
+name = "generate-platform-storage-contract-schema"
+path = "src/bin/generate_platform_storage_contract_schema.rs"
+required-features = ["platform-storage-contract-schema"]

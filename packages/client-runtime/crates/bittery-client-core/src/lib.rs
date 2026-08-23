@@ -3,6 +3,7 @@
 //! This crate deliberately knows no host framework or binding generator. Platform crates translate
 //! its closed protocol and execute primitive ports; they do not own Runtime behavior.
 
+mod platform_storage;
 mod protocol;
 mod replica;
 mod runtime;
@@ -14,6 +15,13 @@ pub mod server_contract {
     include!("generated/server.rs");
 }
 
+#[cfg(feature = "platform-storage-contract-schema")]
+#[doc(hidden)]
+pub use platform_storage::platform_storage_contract_schema;
+#[doc(hidden)]
+pub use platform_storage::{
+    PlatformStorage, PlatformStorageValue, SerializedPlatformStorageExecutor,
+};
 pub use protocol::{
     AccountAccessState, AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus,
     ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
