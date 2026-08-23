@@ -1,4 +1,5 @@
 import type {
+	PreparedLockEpochAdvance,
 	PreparedReplicaCommit,
 	PreparedReplicaInstall,
 	ReplicaHead,
@@ -30,7 +31,9 @@ export class IndexedDbReplicaExecutor {
 					? await load(database, request.accountId)
 					: request.type === "install"
 						? await install(database, request.prepared)
-						: await commit(database, request.prepared);
+						: request.type === "commit"
+							? await commit(database, request.prepared)
+							: await advanceLockEpoch(database, request.prepared);
 			if (!validateReplicaPersistenceResponse(response)) {
 				throw new Error(
 					"persistence response does not match the generated contract",
@@ -56,6 +59,8 @@ function parseRequest(requestJson: string): ReplicaPersistenceRequest {
 		);
 	}
 	if (value.type === "commit") assertPreparedSafety(value.prepared);
+	if (value.type === "advanceLockEpoch")
+		assertLockEpochAdvanceSafety(value.prepared);
 	return value;
 }
 
@@ -160,7 +165,8 @@ async function install(
 					previous !== null &&
 					previous.userId === prepared.expected.userId &&
 					previous.incarnation === prepared.expected.incarnation &&
-					previous.replicaRevision === prepared.expected.replicaRevision;
+					previous.replicaRevision === prepared.expected.replicaRevision &&
+					previous.lockEpoch === prepared.expected.lockEpoch;
 		if (!matches) {
 			await completed;
 			return { type: "installed", result: { type: "stale" } };
@@ -195,8 +201,10 @@ async function commit(
 			throw new Error("prepared Replica commit cannot change User identity");
 		}
 		if (
+			head.userId !== prepared.expected.userId ||
 			head.incarnation !== prepared.expected.incarnation ||
-			head.replicaRevision !== prepared.expected.replicaRevision
+			head.replicaRevision !== prepared.expected.replicaRevision ||
+			head.lockEpoch !== prepared.expected.lockEpoch
 		) {
 			await completed;
 			return {
@@ -204,7 +212,6 @@ async function commit(
 				result: { type: "stale", actualRevision: head.replicaRevision },
 			};
 		}
-
 		for (const write of prepared.writes) {
 			if (write.type === "put") {
 				transaction.objectStore(mapStore(write.row.store)).put({
@@ -234,6 +241,69 @@ async function commit(
 	}
 }
 
+async function advanceLockEpoch(
+	database: IDBDatabase,
+	prepared: PreparedLockEpochAdvance,
+): Promise<ReplicaPersistenceResponse> {
+	const transaction = database.transaction("heads", "readwrite");
+	const completed = transactionDone(transaction);
+	try {
+		const heads = transaction.objectStore("heads");
+		const value = await requestResult(heads.get(prepared.expected.accountId));
+		if (value === undefined) {
+			await completed;
+			return { type: "lockEpochAdvanced", result: { type: "missing" } };
+		}
+		const head = parseStoredHead(value, prepared.expected.accountId);
+		if (
+			head.userId !== prepared.expected.userId ||
+			head.incarnation !== prepared.expected.incarnation ||
+			head.replicaRevision !== prepared.expected.replicaRevision ||
+			head.lockEpoch !== prepared.expected.lockEpoch
+		) {
+			await completed;
+			return { type: "lockEpochAdvanced", result: { type: "stale" } };
+		}
+		if (prepared.nextHead.failure !== head.failure) {
+			throw new Error("prepared Account lock epoch cannot change failure");
+		}
+		heads.put(prepared.nextHead);
+		await completed;
+		return {
+			type: "lockEpochAdvanced",
+			result: { type: "applied", lockEpoch: prepared.nextHead.lockEpoch },
+		};
+	} catch (error) {
+		abort(transaction);
+		await completed.catch(() => undefined);
+		throw error;
+	}
+}
+
+function assertLockEpochAdvanceSafety(
+	prepared: PreparedLockEpochAdvance,
+): void {
+	const { expected, nextHead } = prepared;
+	assertIdentifier(expected.accountId, "expected Account");
+	assertIdentifier(expected.userId, "expected User");
+	assertIdentifier(expected.incarnation, "expected incarnation");
+	parseRevision(expected.replicaRevision, "expected revision");
+	const expectedEpoch = parseRevision(
+		expected.lockEpoch,
+		"expected lock epoch",
+	);
+	if (
+		nextHead.accountId !== expected.accountId ||
+		nextHead.userId !== expected.userId ||
+		nextHead.incarnation !== expected.incarnation ||
+		nextHead.replicaRevision !== expected.replicaRevision ||
+		expectedEpoch === MAX_U64 ||
+		nextHead.lockEpoch !== (expectedEpoch + 1n).toString()
+	) {
+		throw new Error("prepared Account lock epoch transition is invalid");
+	}
+}
+
 function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
 	const { expected, nextHead } = prepared;
 	assertIdentifier(expected.accountId, "expected Account");
@@ -242,9 +312,13 @@ function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
 		expected.replicaRevision,
 		"expected revision",
 	);
+	if (nextHead.userId !== expected.userId) {
+		throw new Error("prepared Replica commit cannot change User identity");
+	}
 	if (
 		nextHead.accountId !== expected.accountId ||
-		nextHead.incarnation !== expected.incarnation
+		nextHead.incarnation !== expected.incarnation ||
+		nextHead.lockEpoch !== expected.lockEpoch
 	) {
 		throw new Error(
 			"next head does not preserve the expected Account and incarnation",
@@ -286,6 +360,7 @@ function parseStoredHead(value: unknown, accountId: string): ReplicaHead {
 	assertIdentifier(candidate.head.userId, "stored head User");
 	assertIdentifier(candidate.head.incarnation, "stored head incarnation");
 	parseRevision(candidate.head.replicaRevision, "stored head revision");
+	parseRevision(candidate.head.lockEpoch, "stored head lock epoch");
 	return candidate.head;
 }
 

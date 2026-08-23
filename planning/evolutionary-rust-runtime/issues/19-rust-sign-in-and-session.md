@@ -29,6 +29,15 @@ credential lifetime.
 
 ## Comments
 
+### 2026-08-23 — durable lock epoch prerequisite
+
+The installed Account head now carries a required durable decimal-u64 lock epoch. Lock clears live
+plaintext and access before its exact persisted epoch advance completes; a storage error leaves the
+Account locked with the epoch pending, and unlock/plaintext work stays fail-closed until retry.
+Ordinary Replica commits compare and preserve the epoch. Re-login with a new incarnation starts at
+zero while same-incarnation replay preserves its current epoch and all accepted Operations and
+encrypted optimistic overlays.
+
 ### 2026-08-23 — Sign-in frontier resolved
 
 - `SignIn` carries an explicit `insecure_transport_confirmed` boolean. Rust refuses a remote plain

@@ -174,16 +174,20 @@ A successful visible plan increments the revision exactly once. A mismatched gua
 or `Missing` without writes. Rust rereads and recomputes. An in-process per-Account actor reduces
 contention but is not the durability authority.
 
-A separate lock epoch tags work that may produce plaintext. Lock increments the epoch and destroys
-the MUK, unwrapped Vault keys, and decrypted projections. Results built under an older epoch are
-dropped before publication.
+A separate durable lock epoch tags work that may produce plaintext. Lock first clears live secrets
+and decrypted projections and invalidates old deliveries, then advances the persisted Account head
+with an exact compare-and-swap that leaves the Replica revision and every Replica row unchanged.
+Normal guarded writes compare and preserve that epoch, so work prepared before Lock becomes stale.
+The Account stays locked and refuses new plaintext work while an epoch advance needs retry. A new
+incarnation starts at epoch zero; a replay of the same incarnation preserves its durable epoch.
 
 ### Logical records
 
 The first logical schema is Account-scoped and contains:
 
 - Account installation: local Account ID, incarnation, Server URL, Server User ID, schema version,
-  Replica revision, lock epoch, existing Account metadata and pinned KDF profile;
+  Replica revision, required decimal-u64 durable lock epoch, existing Account metadata and pinned
+  KDF profile;
 - existing Device-bound quick-unlock/session data and existing Session-bound credentials, routed by
   their established storage classifications rather than silently promoted to longer persistence;
 - Replica metadata: tagged state (`cold`, `bootstrapping`, `ready`, `refresh_required`), active

@@ -115,6 +115,42 @@ struct RemoveOnCommitExecutor {
     remove_on_commit: AtomicBool,
 }
 
+struct FailFirstLockEpochExecutor {
+    state: InMemoryReplica,
+    fail_next_advance: AtomicBool,
+}
+
+impl Default for FailFirstLockEpochExecutor {
+    fn default() -> Self {
+        Self {
+            state: InMemoryReplica::default(),
+            fail_next_advance: AtomicBool::new(true),
+        }
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for FailFirstLockEpochExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if matches!(request, ReplicaPersistenceRequest::AdvanceLockEpoch { .. })
+            && self.fail_next_advance.swap(false, Ordering::SeqCst)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "injected lock epoch persistence failure",
+            ));
+        }
+        let response = self.state.invoke(request).await?;
+        serde_json::to_string(&response).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "in-memory response could not be serialized",
+            )
+        })
+    }
+}
+
 impl RemoveOnCommitExecutor {
     fn seeded() -> Self {
         let state = InMemoryReplica::default();
@@ -355,12 +391,13 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
 #[tokio::test]
 async fn replacement_starts_a_fresh_lock_epoch_while_replay_preserves_it() {
     let (runtime, account_id, incarnation) = installed_runtime();
-    runtime.set_lock_epoch(&account_id, u64::MAX);
+    runtime.mark_account_locked(&account_id).await.unwrap();
+    assert_eq!(runtime.lock_epoch(&account_id), Some(1));
     runtime
         .install_or_replace_account(account_id.clone(), "user-1".into(), incarnation)
         .await
         .unwrap();
-    assert_eq!(runtime.lock_epoch(&account_id), Some(u64::MAX));
+    assert_eq!(runtime.lock_epoch(&account_id), Some(1));
 
     runtime
         .install_or_replace_account(
@@ -371,6 +408,40 @@ async fn replacement_starts_a_fresh_lock_epoch_while_replay_preserves_it() {
         .await
         .unwrap();
     assert_eq!(runtime.lock_epoch(&account_id), Some(0));
+}
+
+#[tokio::test]
+async fn failed_lock_epoch_persistence_stays_locked_until_a_successful_retry() {
+    let runtime =
+        Runtime::with_serialized_replica_executor(Arc::new(FailFirstLockEpochExecutor::default()));
+    let account_id = AccountId::from("account-1");
+    runtime
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-1".into(),
+            Incarnation::from("incarnation-1"),
+        )
+        .await
+        .unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
+
+    let error = runtime.mark_account_locked(&account_id).await.unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(
+        runtime.account_access_state(&account_id),
+        Some(AccountAccessState::Locked)
+    );
+    assert!(runtime.lock_epoch_is_pending(&account_id));
+    assert_eq!(runtime.lock_epoch(&account_id), Some(1));
+    assert_eq!(
+        runtime.unlock_account(&account_id).await.unwrap_err().code,
+        RuntimeErrorCode::InvariantViolation
+    );
+
+    runtime.mark_account_locked(&account_id).await.unwrap();
+    assert!(!runtime.lock_epoch_is_pending(&account_id));
+    assert_eq!(runtime.lock_epoch(&account_id), Some(1));
+    runtime.unlock_account(&account_id).await.unwrap();
 }
 
 #[tokio::test]
@@ -471,6 +542,31 @@ async fn runtime_status_projects_unlocked_and_locked_as_closed_states() {
         states,
         vec![AccountAccessState::Unlocked, AccountAccessState::Locked]
     );
+}
+
+#[tokio::test]
+async fn unlock_delivers_new_epoch_at_the_same_replica_revision() {
+    let (runtime, account_id, _) = installed_runtime();
+    let items = Arc::new(ProjectionSink::default());
+    let _observation = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            items.clone(),
+        )
+        .unwrap();
+    runtime.mark_account_locked(&account_id).await.unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
+    runtime.publish_all();
+    let revisions: Vec<_> = items
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(RuntimeProjection::revision)
+        .collect();
+    assert_eq!(revisions, vec![0, 0]);
 }
 
 fn run_request(runtime: Arc<Runtime>, request: RuntimeRequest) {
@@ -944,9 +1040,29 @@ fn queued_plaintext_from_an_old_lock_epoch_is_dropped_before_delivery() {
     };
     second.join().unwrap();
 
-    block_on_test(runtime.mark_account_locked(&account_id)).unwrap();
+    let (locked_sender, locked_receiver) = mpsc::channel();
+    let lock_runtime = runtime.clone();
+    let lock_account = account_id.clone();
+    let locker = thread::spawn(move || {
+        locked_sender
+            .send(block_on_test(
+                lock_runtime.mark_account_locked(&lock_account),
+            ))
+            .unwrap();
+    });
+    while !runtime.lock_epoch_is_pending(&account_id) {
+        thread::yield_now();
+    }
+    assert!(locked_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
     sink.release();
     first.join().unwrap();
+    locked_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    locker.join().unwrap();
     runtime.publish_all();
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
 }
@@ -976,16 +1092,32 @@ fn queued_plaintext_from_an_old_incarnation_is_dropped_even_if_epoch_matches() {
     };
     second.join().unwrap();
 
-    block_on_test(runtime.install_or_replace_account(
-        account_id.clone(),
-        "user-1".into(),
-        Incarnation::from("replacement-incarnation"),
-    ))
-    .unwrap();
-    block_on_test(runtime.unlock_account(&account_id)).unwrap();
-    runtime.set_lock_epoch(&account_id, 0);
+    let (replaced_sender, replaced_receiver) = mpsc::channel();
+    let replace_runtime = runtime.clone();
+    let replace_account = account_id.clone();
+    let replacer = thread::spawn(move || {
+        replaced_sender
+            .send(block_on_test(replace_runtime.install_or_replace_account(
+                replace_account,
+                "user-1".into(),
+                Incarnation::from("replacement-incarnation"),
+            )))
+            .unwrap();
+    });
+    while runtime.account_access_state(&account_id) != Some(AccountAccessState::SignedOut) {
+        thread::yield_now();
+    }
+    assert!(replaced_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
     sink.release();
     first.join().unwrap();
+    replaced_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    replacer.join().unwrap();
+    block_on_test(runtime.unlock_account(&account_id)).unwrap();
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
 }
 
@@ -1015,14 +1147,33 @@ fn lock_epoch_overflow_fails_closed_and_drops_queued_plaintext() {
     };
     second.join().unwrap();
 
+    let (locked_sender, locked_receiver) = mpsc::channel();
+    let lock_runtime = runtime.clone();
+    let lock_account = account_id.clone();
+    let locker = thread::spawn(move || {
+        locked_sender
+            .send(block_on_test(
+                lock_runtime.mark_account_locked(&lock_account),
+            ))
+            .unwrap();
+    });
+    while !runtime.lock_epoch_is_pending(&account_id) {
+        thread::yield_now();
+    }
+    assert!(locked_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
+    sink.release();
+    first.join().unwrap();
     assert_eq!(
-        block_on_test(runtime.mark_account_locked(&account_id))
+        locked_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
             .unwrap_err()
             .code,
         RuntimeErrorCode::InvariantViolation
     );
-    sink.release();
-    first.join().unwrap();
+    locker.join().unwrap();
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
 }
 

@@ -22,8 +22,8 @@ pub use persistence_contract::persistence_contract_schema;
 pub(crate) use persistence_contract::ReplicaPersistenceRequest;
 use persistence_contract::{
     apply_prepared_writes_to_rows, prepare_commit, prepare_install, reconstruct_snapshot,
-    replica_invariant, snapshot_rows, ExpectedReplicaInstall, PreparedCommitOutcome,
-    ReplicaInstallResult,
+    replica_invariant, snapshot_rows, ExpectedReplicaInstall, LockEpochAdvanceResult,
+    PreparedCommitOutcome, PreparedLockEpochAdvance, ReplicaInstallResult,
 };
 use persistence_contract::{ReplicaHead, ReplicaPersistenceResponse};
 #[cfg(test)]
@@ -230,6 +230,96 @@ impl Replica {
                     return Ok(snapshot);
                 }
                 ReplicaInstallResult::Stale => continue,
+            }
+        }
+    }
+
+    pub(crate) async fn advance_lock_epoch(
+        &self,
+        account_id: &AccountId,
+        user_id: &str,
+        incarnation: &Incarnation,
+        desired_epoch: u64,
+    ) -> Result<ReplicaSnapshot, RuntimeError> {
+        loop {
+            let current = self.load_uncached(account_id).await?.ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "Account disappeared while advancing its lock epoch",
+                )
+            })?;
+            if current.user_id != user_id || current.incarnation != *incarnation {
+                return Err(replica_invariant(
+                    "Account identity changed while advancing its lock epoch",
+                ));
+            }
+            if current.lock_epoch == desired_epoch {
+                return Ok(current);
+            }
+            if current.lock_epoch.checked_add(1) != Some(desired_epoch) {
+                return Err(replica_invariant(
+                    "durable Account lock epoch made unexpected progress",
+                ));
+            }
+            let next_head = ReplicaHead {
+                account_id: current.account_id.clone(),
+                user_id: current.user_id.clone(),
+                incarnation: current.incarnation.clone(),
+                replica_revision: current.revision,
+                lock_epoch: desired_epoch,
+                failure: current.failure,
+            };
+            let prepared = PreparedLockEpochAdvance {
+                expected: persistence_contract::ExpectedReplicaHead {
+                    account_id: current.account_id.clone(),
+                    user_id: current.user_id.clone(),
+                    incarnation: current.incarnation.clone(),
+                    replica_revision: current.revision,
+                    lock_epoch: current.lock_epoch,
+                },
+                next_head: next_head.clone(),
+            };
+            let expected_rows = current.clone();
+            let response = self
+                .persistence
+                .invoke(ReplicaPersistenceRequest::AdvanceLockEpoch { prepared })
+                .await?;
+            let ReplicaPersistenceResponse::LockEpochAdvanced { result } = response else {
+                return Err(replica_invariant(
+                    "Replica persistence returned a non-lock-epoch response",
+                ));
+            };
+            match result {
+                LockEpochAdvanceResult::Applied { lock_epoch } if lock_epoch == desired_epoch => {
+                    let snapshot = self.load_uncached(account_id).await?.ok_or_else(|| {
+                        replica_invariant("Replica lost an applied Account lock epoch")
+                    })?;
+                    if snapshot.account_id != next_head.account_id
+                        || snapshot.user_id != next_head.user_id
+                        || snapshot.incarnation != next_head.incarnation
+                        || snapshot.revision != next_head.replica_revision
+                        || snapshot.lock_epoch != next_head.lock_epoch
+                        || snapshot.failure != next_head.failure
+                        || !same_replica_rows(Some(&expected_rows), &snapshot)
+                    {
+                        return Err(replica_invariant(
+                            "Replica applied a different Account lock epoch head",
+                        ));
+                    }
+                    return Ok(snapshot);
+                }
+                LockEpochAdvanceResult::Applied { .. } => {
+                    return Err(replica_invariant(
+                        "Replica applied an unexpected Account lock epoch",
+                    ));
+                }
+                LockEpochAdvanceResult::Stale => continue,
+                LockEpochAdvanceResult::Missing => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AccountMissing,
+                        "Account disappeared while advancing its lock epoch",
+                    ));
+                }
             }
         }
     }
@@ -470,6 +560,7 @@ impl InMemoryReplica {
                 user_id,
                 incarnation,
                 revision: 0,
+                lock_epoch: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
                 failure: None,
@@ -531,6 +622,20 @@ impl InMemoryReplica {
         account.revision += 1;
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_lock_epoch(
+        &self,
+        account_id: &AccountId,
+        lock_epoch: u64,
+    ) -> Result<(), RuntimeError> {
+        let mut accounts = self.accounts.lock().expect("replica lock poisoned");
+        let account = accounts.get_mut(account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        account.lock_epoch = lock_epoch;
+        Ok(())
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -550,6 +655,7 @@ impl ReplicaPersistence for InMemoryReplica {
                             user_id: snapshot.user_id.clone(),
                             incarnation: snapshot.incarnation.clone(),
                             replica_revision: snapshot.revision,
+                            lock_epoch: snapshot.lock_epoch,
                             failure: snapshot.failure,
                         }),
                         snapshot_rows(snapshot)?,
@@ -574,6 +680,7 @@ impl ReplicaPersistence for InMemoryReplica {
                             user_id,
                             incarnation,
                             replica_revision,
+                            lock_epoch,
                         },
                         Some(current),
                     ) => {
@@ -581,6 +688,7 @@ impl ReplicaPersistence for InMemoryReplica {
                             && current.user_id == *user_id
                             && current.incarnation == *incarnation
                             && current.revision == *replica_revision
+                            && current.lock_epoch == *lock_epoch
                     }
                     _ => false,
                 };
@@ -594,6 +702,7 @@ impl ReplicaPersistence for InMemoryReplica {
                         current.user_id = prepared.next_head.user_id;
                         current.incarnation = prepared.next_head.incarnation;
                         current.revision = prepared.next_head.replica_revision;
+                        current.lock_epoch = prepared.next_head.lock_epoch;
                         current.failure = prepared.next_head.failure;
                     }
                     None => {
@@ -605,6 +714,7 @@ impl ReplicaPersistence for InMemoryReplica {
                                 user_id: head.user_id,
                                 incarnation: head.incarnation,
                                 revision: head.replica_revision,
+                                lock_epoch: head.lock_epoch,
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
                                 failure: head.failure,
@@ -624,7 +734,9 @@ impl ReplicaPersistence for InMemoryReplica {
                     });
                 };
                 if current.incarnation != prepared.expected.incarnation
+                    || current.user_id != prepared.expected.user_id
                     || current.revision != prepared.expected.replica_revision
+                    || current.lock_epoch != prepared.expected.lock_epoch
                 {
                     return Ok(ReplicaPersistenceResponse::Committed {
                         result: PlanResult::Stale {
@@ -640,6 +752,7 @@ impl ReplicaPersistence for InMemoryReplica {
                     || prepared.next_head.user_id != current.user_id
                     || prepared.next_head.incarnation != prepared.expected.incarnation
                     || prepared.next_head.replica_revision != expected_next_revision
+                    || prepared.next_head.lock_epoch != current.lock_epoch
                 {
                     return Err(replica_invariant(
                         "prepared Replica head transition is invalid",
@@ -659,6 +772,44 @@ impl ReplicaPersistence for InMemoryReplica {
                 Ok(ReplicaPersistenceResponse::Committed {
                     result: PlanResult::Applied {
                         replica_revision: expected_next_revision,
+                    },
+                })
+            }
+            ReplicaPersistenceRequest::AdvanceLockEpoch { prepared } => {
+                let mut accounts = self.accounts.lock().expect("replica lock poisoned");
+                let Some(current) = accounts.get_mut(&prepared.expected.account_id) else {
+                    return Ok(ReplicaPersistenceResponse::LockEpochAdvanced {
+                        result: LockEpochAdvanceResult::Missing,
+                    });
+                };
+                if current.user_id != prepared.expected.user_id
+                    || current.incarnation != prepared.expected.incarnation
+                    || current.revision != prepared.expected.replica_revision
+                    || current.lock_epoch != prepared.expected.lock_epoch
+                {
+                    return Ok(ReplicaPersistenceResponse::LockEpochAdvanced {
+                        result: LockEpochAdvanceResult::Stale,
+                    });
+                }
+                let expected_epoch = current
+                    .lock_epoch
+                    .checked_add(1)
+                    .ok_or_else(|| replica_invariant("Account lock epoch overflowed"))?;
+                if prepared.next_head.account_id != current.account_id
+                    || prepared.next_head.user_id != current.user_id
+                    || prepared.next_head.incarnation != current.incarnation
+                    || prepared.next_head.replica_revision != current.revision
+                    || prepared.next_head.lock_epoch != expected_epoch
+                    || prepared.next_head.failure != current.failure
+                {
+                    return Err(replica_invariant(
+                        "prepared Account lock epoch transition is invalid",
+                    ));
+                }
+                current.lock_epoch = expected_epoch;
+                Ok(ReplicaPersistenceResponse::LockEpochAdvanced {
+                    result: LockEpochAdvanceResult::Applied {
+                        lock_epoch: expected_epoch,
                     },
                 })
             }
@@ -689,6 +840,7 @@ mod persistence_contract_tests {
                             user_id: "hostile-user".into(),
                             incarnation: Incarnation::from("hostile-incarnation"),
                             replica_revision: 7,
+                            lock_epoch: 0,
                             failure: None,
                         }),
                         rows: vec![],
@@ -700,7 +852,8 @@ mod persistence_contract_tests {
                         result: ReplicaInstallResult::Applied,
                     })
                 }
-                ReplicaPersistenceRequest::Commit { .. } => unreachable!(),
+                ReplicaPersistenceRequest::Commit { .. }
+                | ReplicaPersistenceRequest::AdvanceLockEpoch { .. } => unreachable!(),
             }
         }
     }
@@ -709,6 +862,12 @@ mod persistence_contract_tests {
         state: InMemoryReplica,
         raced: AtomicBool,
         install_calls: AtomicUsize,
+    }
+
+    struct LockEpochRaceExecutor {
+        state: InMemoryReplica,
+        raced: AtomicBool,
+        advance_calls: AtomicUsize,
     }
 
     struct LyingAppliedExecutor {
@@ -737,17 +896,20 @@ mod persistence_contract_tests {
             match request {
                 ReplicaPersistenceRequest::Load { .. } => {
                     let next_head = self.next_head.lock().unwrap().clone();
+                    let applied = next_head.is_some();
                     let mut snapshot = self.current.clone();
                     let head = next_head.unwrap_or_else(|| ReplicaHead {
                         account_id: snapshot.account_id.clone(),
                         user_id: snapshot.user_id.clone(),
                         incarnation: snapshot.incarnation.clone(),
                         replica_revision: snapshot.revision,
+                        lock_epoch: snapshot.lock_epoch,
                         failure: snapshot.failure,
                     });
-                    if head.incarnation != snapshot.incarnation {
+                    if applied {
                         snapshot.incarnation = head.incarnation.clone();
                         snapshot.revision = head.replica_revision;
+                        snapshot.lock_epoch = head.lock_epoch;
                         match self.corruption {
                             RowCorruption::Delete => {
                                 snapshot.items.clear();
@@ -774,6 +936,13 @@ mod persistence_contract_tests {
                     *self.next_head.lock().unwrap() = Some(prepared.next_head);
                     Ok(ReplicaPersistenceResponse::Installed {
                         result: ReplicaInstallResult::Applied,
+                    })
+                }
+                ReplicaPersistenceRequest::AdvanceLockEpoch { prepared } => {
+                    let lock_epoch = prepared.next_head.lock_epoch;
+                    *self.next_head.lock().unwrap() = Some(prepared.next_head);
+                    Ok(ReplicaPersistenceResponse::LockEpochAdvanced {
+                        result: LockEpochAdvanceResult::Applied { lock_epoch },
                     })
                 }
                 ReplicaPersistenceRequest::Commit { .. } => unreachable!(),
@@ -821,6 +990,22 @@ mod persistence_contract_tests {
                             Incarnation::from("competing-incarnation"),
                         )
                         .unwrap();
+                }
+            }
+            self.state.invoke(request).await
+        }
+    }
+
+    #[async_trait]
+    impl ReplicaPersistence for LockEpochRaceExecutor {
+        async fn invoke(
+            &self,
+            request: ReplicaPersistenceRequest,
+        ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+            if matches!(request, ReplicaPersistenceRequest::AdvanceLockEpoch { .. }) {
+                self.advance_calls.fetch_add(1, Ordering::SeqCst);
+                if !self.raced.swap(true, Ordering::SeqCst) {
+                    let _ = self.state.invoke(request.clone()).await?;
                 }
             }
             self.state.invoke(request).await
@@ -955,6 +1140,7 @@ mod persistence_contract_tests {
                     user_id: "user-1".into(),
                     incarnation: Incarnation::from("old-incarnation"),
                     revision: 1,
+                    lock_epoch: 0,
                     items: vec![item("account-1", "item-1")],
                     operations: vec![operation("operation-1", "item-1")],
                     failure: None,
@@ -976,6 +1162,69 @@ mod persistence_contract_tests {
             );
             assert!(replica.snapshot(&AccountId::from("account-1")).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn lock_epoch_advance_rejects_applied_when_rows_change() {
+        let replica = Replica::new(Arc::new(LyingRowsExecutor {
+            current: ReplicaSnapshot {
+                account_id: AccountId::from("account-1"),
+                user_id: "user-1".into(),
+                incarnation: Incarnation::from("incarnation-1"),
+                revision: 1,
+                lock_epoch: 0,
+                items: vec![item("account-1", "item-1")],
+                operations: vec![operation("operation-1", "item-1")],
+                failure: None,
+            },
+            next_head: Mutex::new(None),
+            corruption: RowCorruption::Change,
+        }));
+        assert_eq!(
+            replica
+                .advance_lock_epoch(
+                    &AccountId::from("account-1"),
+                    "user-1",
+                    &Incarnation::from("incarnation-1"),
+                    1,
+                )
+                .await
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::InvariantViolation
+        );
+    }
+
+    #[tokio::test]
+    async fn lock_epoch_advance_rereads_stale_progress_and_accepts_the_desired_epoch() {
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        let persistence = Arc::new(LockEpochRaceExecutor {
+            state,
+            raced: AtomicBool::new(false),
+            advance_calls: AtomicUsize::new(0),
+        });
+        let replica = Replica::new(persistence.clone());
+
+        let snapshot = replica
+            .advance_lock_epoch(
+                &AccountId::from("account-1"),
+                "user-1",
+                &Incarnation::from("incarnation-1"),
+                1,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.lock_epoch, 1);
+        assert_eq!(snapshot.revision, 0);
+        assert_eq!(persistence.advance_calls.load(Ordering::SeqCst), 1);
     }
 
     async fn assert_replica_conformance(replica: &Replica) {
@@ -1103,6 +1352,7 @@ mod persistence_contract_tests {
                 user_id: "user-1".into(),
                 incarnation: Incarnation::from("incarnation-1"),
                 revision: 41,
+                lock_epoch: 0,
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
                 failure: None,
@@ -1127,14 +1377,17 @@ mod persistence_contract_tests {
                 "prepared": {
                     "expected": {
                         "accountId": "account-1",
+                        "userId": "user-1",
                         "incarnation": "incarnation-1",
-                        "replicaRevision": "41"
+                        "replicaRevision": "41",
+                        "lockEpoch": "0"
                     },
                     "nextHead": {
                         "accountId": "account-1",
                         "userId": "user-1",
                         "incarnation": "incarnation-1",
                         "replicaRevision": "42",
+                        "lockEpoch": "0",
                         "failure": null
                     },
                     "writes": [{
@@ -1208,6 +1461,7 @@ mod persistence_contract_tests {
             user_id: "user-1".into(),
             incarnation: Incarnation::from("incarnation-1"),
             revision: 4,
+            lock_epoch: 0,
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
             failure: None,
@@ -1251,6 +1505,7 @@ mod persistence_contract_tests {
             user_id: "user-1".into(),
             incarnation: Incarnation::from("incarnation-1"),
             replica_revision: 7,
+            lock_epoch: 0,
             failure: None,
         };
         let mismatched = StoredReplicaRow {
@@ -1271,6 +1526,7 @@ mod persistence_contract_tests {
                 user_id: String::new(),
                 incarnation: Incarnation::from("incarnation-1"),
                 replica_revision: 0,
+                lock_epoch: 0,
                 failure: None,
             }),
             vec![],

@@ -103,14 +103,17 @@ function prepared(
 	return {
 		expected: {
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: expectedRevision,
+			lockEpoch: "0",
 		},
 		nextHead: {
 			accountId: "account-a",
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: nextRevision,
+			lockEpoch: "0",
 			failure: null,
 		},
 		writes,
@@ -119,6 +122,29 @@ function prepared(
 
 function commit(value: PreparedReplicaCommit) {
 	return { type: "commit", prepared: value } as const;
+}
+
+function advanceLockEpoch(replicaRevision = "0", lockEpoch = "0") {
+	return {
+		type: "advanceLockEpoch",
+		prepared: {
+			expected: {
+				accountId: "account-a",
+				userId: "user-a",
+				incarnation: "incarnation-a",
+				replicaRevision,
+				lockEpoch,
+			},
+			nextHead: {
+				accountId: "account-a",
+				userId: "user-a",
+				incarnation: "incarnation-a",
+				replicaRevision,
+				lockEpoch: (BigInt(lockEpoch) + 1n).toString(),
+				failure: null,
+			},
+		},
+	} as const;
 }
 
 function install(
@@ -132,6 +158,7 @@ function install(
 				userId: string;
 				incarnation: string;
 				replicaRevision: string;
+				lockEpoch: string;
 		  } = { type: "missing", accountId: "account-a" },
 	replicaRevision = "0",
 ) {
@@ -144,6 +171,7 @@ function install(
 				userId,
 				incarnation,
 				replicaRevision,
+				lockEpoch: "0",
 				failure: null,
 			},
 		},
@@ -151,6 +179,24 @@ function install(
 }
 
 describe("IndexedDbReplicaExecutor", () => {
+	test("advances only the durable lock epoch and makes an old commit stale", async () => {
+		await invoke(install());
+		await invoke(commit(prepared([put("operations", "kept", "opaque")])));
+		expect(await invoke(advanceLockEpoch("1"))).toEqual({
+			type: "lockEpochAdvanced",
+			result: { type: "applied", lockEpoch: "1" },
+		});
+		const loaded = await invoke({ type: "load", accountId: "account-a" });
+		expect(loaded.head).toMatchObject({
+			replicaRevision: "1",
+			lockEpoch: "1",
+		});
+		expect(loaded.rows).toHaveLength(1);
+		expect(await invoke(commit(prepared([], "1", "2")))).toEqual({
+			type: "committed",
+			result: { type: "stale", actualRevision: "1" },
+		});
+	});
 	test("atomically replaces only the head and preserves previous rows", async () => {
 		expect(await invoke(install())).toEqual({
 			type: "installed",
@@ -173,6 +219,7 @@ describe("IndexedDbReplicaExecutor", () => {
 						userId: "user-a",
 						incarnation: "incarnation-a",
 						replicaRevision: "1",
+						lockEpoch: "0",
 					},
 					"2",
 				),
@@ -188,6 +235,7 @@ describe("IndexedDbReplicaExecutor", () => {
 				userId: "user-a",
 				incarnation: "incarnation-b",
 				replicaRevision: "2",
+				lockEpoch: "0",
 				failure: null,
 			},
 			rows: [
@@ -245,11 +293,40 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
+			lockEpoch: "0",
 			failure: null,
 		});
 		await expect(
 			invoke({ type: "load", accountId: "account-a" }),
 		).rejects.toThrow("stored head User must not be empty");
+	});
+
+	test("rejects malformed stored lock epochs", async () => {
+		await seedHead({
+			accountId: "account-a",
+			userId: "user-a",
+			incarnation: "incarnation-a",
+			replicaRevision: "0",
+			lockEpoch: "01",
+			failure: null,
+		});
+		await expect(
+			invoke({ type: "load", accountId: "account-a" }),
+		).rejects.toThrow("stored head does not match the generated contract");
+	});
+
+	test("rejects malformed lock epoch advance identities before opening storage", async () => {
+		for (const field of ["accountId", "userId", "incarnation"] as const) {
+			const valid = advanceLockEpoch();
+			const request = {
+				...valid,
+				prepared: {
+					...valid.prepared,
+					expected: { ...valid.prepared.expected, [field]: "" },
+				},
+			};
+			await expect(invoke(request)).rejects.toThrow("must not be empty");
+		}
 	});
 
 	test("rejects the former domain plan and unknown wire fields", async () => {
@@ -291,6 +368,7 @@ describe("IndexedDbReplicaExecutor", () => {
 				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision: "0",
+				lockEpoch: "0",
 				failure: "INVARIANT_VIOLATION",
 			},
 			rows: [],
@@ -312,6 +390,7 @@ describe("IndexedDbReplicaExecutor", () => {
 				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision,
+				lockEpoch: "0",
 				failure: null,
 			},
 			rows: [],
@@ -338,6 +417,18 @@ describe("IndexedDbReplicaExecutor", () => {
 				},
 			}),
 		).toBeFalse();
+		expect(
+			validateReplicaPersistenceRequest({
+				...advanceLockEpoch(),
+				prepared: {
+					...advanceLockEpoch().prepared,
+					expected: {
+						...advanceLockEpoch().prepared.expected,
+						replicaRevision: "01",
+					},
+				},
+			}),
+		).toBeFalse();
 	});
 
 	test("returns stale without applying prepared writes", async () => {
@@ -346,6 +437,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "4",
+			lockEpoch: "0",
 			failure: null,
 		});
 		expect(
@@ -365,6 +457,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
+			lockEpoch: "0",
 			failure: null,
 		});
 		const writes = [
@@ -382,6 +475,7 @@ describe("IndexedDbReplicaExecutor", () => {
 				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision: "1",
+				lockEpoch: "0",
 				failure: null,
 			},
 			rows: writes.map((write) => (write.type === "put" ? write.row : write)),
@@ -413,6 +507,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
+			lockEpoch: "0",
 			failure: null,
 		});
 		await expect(
@@ -436,6 +531,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
+			lockEpoch: "0",
 			failure: null,
 		});
 		const results = await Promise.all([
@@ -467,6 +563,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "9007199254740993",
+			lockEpoch: "0",
 			failure: null,
 		});
 		expect(

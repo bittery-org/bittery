@@ -59,6 +59,12 @@ pub(crate) struct ReplicaHead {
         schemars(schema_with = "decimal_u64::json_schema")
     )]
     pub replica_revision: u64,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "persistence-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub lock_epoch: u64,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub failure: Option<RuntimeErrorCode>,
 }
@@ -88,6 +94,12 @@ pub(crate) enum ExpectedReplicaInstall {
             schemars(schema_with = "decimal_u64::json_schema")
         )]
         replica_revision: u64,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "persistence-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        lock_epoch: u64,
     },
 }
 
@@ -115,12 +127,48 @@ pub(crate) struct ExpectedReplicaHead {
     pub account_id: AccountId,
     #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
     pub incarnation: Incarnation,
+    pub user_id: String,
     #[serde(with = "decimal_u64")]
     #[cfg_attr(
         feature = "persistence-contract-schema",
         schemars(schema_with = "decimal_u64::json_schema")
     )]
     pub replica_revision: u64,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "persistence-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub lock_epoch: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PreparedLockEpochAdvance {
+    pub expected: ExpectedReplicaHead,
+    pub next_head: ReplicaHead,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum LockEpochAdvanceResult {
+    Applied {
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "persistence-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        lock_epoch: u64,
+    },
+    Stale,
+    Missing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +217,9 @@ pub(crate) enum ReplicaPersistenceRequest {
     Commit {
         prepared: PreparedReplicaCommit,
     },
+    AdvanceLockEpoch {
+        prepared: PreparedLockEpochAdvance,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +245,9 @@ pub(crate) enum ReplicaPersistenceResponse {
     },
     Committed {
         result: PlanResult,
+    },
+    LockEpochAdvanced {
+        result: LockEpochAdvanceResult,
     },
 }
 
@@ -249,6 +303,7 @@ pub(super) fn prepare_install(
                     user_id: current.user_id.clone(),
                     incarnation: current.incarnation.clone(),
                     replica_revision: current.revision,
+                    lock_epoch: current.lock_epoch,
                 },
                 next_revision,
             )
@@ -261,6 +316,7 @@ pub(super) fn prepare_install(
             user_id,
             incarnation,
             replica_revision,
+            lock_epoch: 0,
             failure: None,
         },
     })
@@ -313,13 +369,16 @@ pub(super) fn prepare_commit(
             expected: ExpectedReplicaHead {
                 account_id: current.account_id,
                 incarnation: current.incarnation,
+                user_id: current.user_id,
                 replica_revision: current.revision,
+                lock_epoch: current.lock_epoch,
             },
             next_head: ReplicaHead {
                 account_id: next.account_id.clone(),
                 user_id: next.user_id.clone(),
                 incarnation: next.incarnation.clone(),
                 replica_revision: next.revision,
+                lock_epoch: next.lock_epoch,
                 failure: next.failure,
             },
             writes,
@@ -450,6 +509,7 @@ pub(super) fn reconstruct_snapshot(
             user_id: head.user_id,
             incarnation: head.incarnation,
             revision: head.replica_revision,
+            lock_epoch: head.lock_epoch,
             items,
             operations,
             failure: head.failure,

@@ -61,21 +61,102 @@ impl Drop for ActiveRuntimeDelivery {
     }
 }
 
-#[derive(Clone)]
-struct AccountEpoch {
-    account_id: AccountId,
+#[derive(Clone, PartialEq, Eq)]
+struct DeliveryGeneration {
     incarnation: crate::protocol::Incarnation,
     epoch: u64,
 }
 
+struct DeliveryToken {
+    state: Mutex<DeliveryTokenState>,
+    finished: Condvar,
+}
+
+struct DeliveryTokenState {
+    invalidated: bool,
+    active: HashMap<ThreadId, usize>,
+}
+
+impl DeliveryToken {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(DeliveryTokenState {
+                invalidated: false,
+                active: HashMap::new(),
+            }),
+            finished: Condvar::new(),
+        }
+    }
+
+    fn begin(self: &Arc<Self>) -> Option<DeliveryLease> {
+        let thread = std::thread::current().id();
+        let mut state = self.state.lock().expect("delivery token lock poisoned");
+        if state.invalidated {
+            return None;
+        }
+        *state.active.entry(thread).or_insert(0) += 1;
+        Some(DeliveryLease {
+            token: Arc::clone(self),
+            thread,
+        })
+    }
+
+    fn invalidate(&self) {
+        self.state
+            .lock()
+            .expect("delivery token lock poisoned")
+            .invalidated = true;
+    }
+
+    fn wait_for_other_threads(&self) {
+        let current = std::thread::current().id();
+        let mut state = self.state.lock().expect("delivery token lock poisoned");
+        while state
+            .active
+            .iter()
+            .any(|(thread, depth)| *thread != current && *depth > 0)
+        {
+            state = self
+                .finished
+                .wait(state)
+                .expect("delivery token lock poisoned while invalidating");
+        }
+    }
+}
+
+struct DeliveryLease {
+    token: Arc<DeliveryToken>,
+    thread: ThreadId,
+}
+
+impl Drop for DeliveryLease {
+    fn drop(&mut self) {
+        let mut state = self
+            .token
+            .state
+            .lock()
+            .expect("delivery token lock poisoned");
+        let depth = state
+            .active
+            .get_mut(&self.thread)
+            .expect("delivery lease depth must exist");
+        *depth -= 1;
+        if *depth == 0 {
+            state.active.remove(&self.thread);
+        }
+        self.token.finished.notify_all();
+    }
+}
+
 struct ProjectedDelivery {
     projection: RuntimeProjection,
-    account_epoch: Option<AccountEpoch>,
+    generation: Option<DeliveryGeneration>,
+    token: Option<Arc<DeliveryToken>>,
 }
 
 struct QueuedDelivery {
     projection: RuntimeProjection,
-    account_epoch: Option<AccountEpoch>,
+    token: Option<Arc<DeliveryToken>>,
 }
 
 struct Subscription {
@@ -83,7 +164,6 @@ struct Subscription {
     sink: Arc<dyn ObservationSink>,
     delivery: Mutex<DeliveryState>,
     delivery_finished: Condvar,
-    runtime: Weak<Runtime>,
     runtime_identity: usize,
 }
 
@@ -91,7 +171,7 @@ struct Subscription {
 struct DeliveryState {
     closed: bool,
     delivering_thread: Option<ThreadId>,
-    last_queued_revision: Option<u64>,
+    last_queued: Option<(Option<DeliveryGeneration>, u64)>,
     queue: VecDeque<QueuedDelivery>,
 }
 
@@ -127,7 +207,6 @@ impl Subscription {
     fn new(
         request: ObservationRequest,
         sink: Arc<dyn ObservationSink>,
-        runtime: Weak<Runtime>,
         runtime_identity: usize,
     ) -> Self {
         Self {
@@ -135,7 +214,6 @@ impl Subscription {
             sink,
             delivery: Mutex::new(DeliveryState::default()),
             delivery_finished: Condvar::new(),
-            runtime,
             runtime_identity,
         }
     }
@@ -148,17 +226,22 @@ impl Subscription {
                 .delivery
                 .lock()
                 .expect("observation delivery lock poisoned");
-            if delivery.closed
-                || delivery
-                    .last_queued_revision
-                    .is_some_and(|last| revision <= last)
+            if delivery.closed {
+                return;
+            }
+            if delivery
+                .last_queued
+                .as_ref()
+                .is_some_and(|(generation, last)| {
+                    generation == &projected.generation && revision <= *last
+                })
             {
                 return;
             }
-            delivery.last_queued_revision = Some(revision);
+            delivery.last_queued = Some((projected.generation.clone(), revision));
             delivery.queue.push_back(QueuedDelivery {
                 projection: projected.projection,
-                account_epoch: projected.account_epoch,
+                token: projected.token,
             });
             if delivery.delivering_thread.is_some() {
                 return;
@@ -187,30 +270,13 @@ impl Subscription {
                 };
                 next
             };
-            if let Some(account_epoch) = &next.account_epoch {
-                let Some(runtime) = self.runtime.upgrade() else {
-                    return;
-                };
-                if runtime
-                    .account_lock_epochs
-                    .lock()
-                    .expect("Account lock epoch lock poisoned")
-                    .get(&account_epoch.account_id)
-                    != Some(&account_epoch.epoch)
-                    || runtime
-                        .replica
-                        .snapshot(&account_epoch.account_id)
-                        .is_none_or(|snapshot| snapshot.incarnation != account_epoch.incarnation)
-                    || runtime
-                        .account_access
-                        .lock()
-                        .expect("Account access lock poisoned")
-                        .get(&account_epoch.account_id)
-                        != Some(&AccountAccessState::Unlocked)
-                {
-                    continue;
-                }
-            }
+            let _lease = match next.token {
+                Some(token) => match token.begin() {
+                    Some(lease) => Some(lease),
+                    None => continue,
+                },
+                None => None,
+            };
             let _active_delivery = ActiveRuntimeDelivery::enter(self.runtime_identity);
             self.sink.publish(next.projection);
         }
@@ -236,20 +302,6 @@ impl Subscription {
     }
 }
 
-fn advance_epoch(
-    epochs: &mut HashMap<AccountId, u64>,
-    account_id: &AccountId,
-) -> Result<(), RuntimeError> {
-    let epoch = epochs.entry(account_id.clone()).or_insert(0);
-    *epoch = epoch.checked_add(1).ok_or_else(|| {
-        RuntimeError::new(
-            RuntimeErrorCode::InvariantViolation,
-            "Account lock epoch overflowed",
-        )
-    })?;
-    Ok(())
-}
-
 pub struct Runtime {
     replica: Arc<Replica>,
     #[cfg(test)]
@@ -266,6 +318,8 @@ pub struct Runtime {
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
+    lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
+    delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -334,6 +388,8 @@ impl Runtime {
             unlocked_items: Mutex::new(HashMap::new()),
             account_access: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
+            lock_epoch_pending: Mutex::new(HashMap::new()),
+            delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
         })
     }
@@ -345,6 +401,13 @@ impl Runtime {
 
     #[cfg(test)]
     pub(crate) fn set_lock_epoch(&self, account_id: &AccountId, epoch: u64) {
+        let persistence = self
+            .test_persistence
+            .as_ref()
+            .expect("test lock epoch mutation requires in-memory persistence");
+        persistence.set_lock_epoch(account_id, epoch).unwrap();
+        self.replica
+            .cache(persistence.snapshot(account_id).unwrap());
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
@@ -356,6 +419,26 @@ impl Runtime {
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
+            .get(account_id)
+            .copied()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lock_epoch_is_pending(&self, account_id: &AccountId) -> bool {
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(account_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn account_access_state(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<AccountAccessState> {
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
             .get(account_id)
             .copied()
     }
@@ -411,16 +494,13 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
-        let previous_incarnation = self
-            .replica
-            .snapshot(&account_id)
-            .map(|snapshot| snapshot.incarnation);
         let snapshot = self
             .replica
             .install_or_replace(account_id.clone(), user_id, incarnation)
             .await?;
-        let next_incarnation = snapshot.incarnation.clone();
+        let next_lock_epoch = snapshot.lock_epoch;
         let _publication = self.publication.lock().expect("publication lock poisoned");
+        let invalidated_delivery = self.invalidate_delivery(&account_id);
         self.replica.cache(snapshot);
         self.unlocked_items
             .lock()
@@ -430,20 +510,21 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::SignedOut);
-        let mut epochs = self
-            .account_lock_epochs
+        self.account_lock_epochs
             .lock()
-            .expect("Account lock epoch lock poisoned");
-        if previous_incarnation.as_ref() == Some(&next_incarnation) {
-            epochs.entry(account_id.clone()).or_insert(0);
-        } else {
-            epochs.insert(account_id.clone(), 0);
-        }
-        drop(epochs);
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), next_lock_epoch);
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .remove(&account_id);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
         drop(_execution_guard);
         drop(_catalog_guard);
+        if let Some(token) = invalidated_delivery {
+            token.wait_for_other_threads();
+        }
         self.publish_all();
         Ok(())
     }
@@ -484,6 +565,10 @@ impl Runtime {
         self.ensure_open()?;
         let restored = self.replica.restore_known_accounts(&account_ids).await?;
         let _publication = self.publication.lock().expect("publication lock poisoned");
+        let invalidated_deliveries: Vec<_> = lock_ids
+            .iter()
+            .filter_map(|account_id| self.invalidate_delivery(account_id))
+            .collect();
         self.replica.replace_cache(&restored);
         {
             let mut access = self
@@ -499,19 +584,24 @@ impl Runtime {
             .lock()
             .expect("unlocked projection lock poisoned")
             .clear();
-        {
-            let mut epochs = self
-                .account_lock_epochs
-                .lock()
-                .expect("Account lock epoch lock poisoned");
-            for account_id in &lock_ids {
-                advance_epoch(&mut epochs, account_id)?;
-            }
-        }
+        *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned") = restored
+            .iter()
+            .map(|snapshot| (snapshot.account_id.clone(), snapshot.lock_epoch))
+            .collect();
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .clear();
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
         drop(execution_guards);
         drop(_catalog_guard);
+        for token in invalidated_deliveries {
+            token.wait_for_other_threads();
+        }
         self.publish_all();
         Ok(())
     }
@@ -521,6 +611,17 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
+        if self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(account_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch persistence is pending",
+            ));
+        }
         if self.replica.snapshot(account_id).is_none() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::AccountMissing,
@@ -548,15 +649,23 @@ impl Runtime {
     #[doc(hidden)]
     pub async fn mark_account_locked(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let execution_lock = self.account_execution_lock(account_id)?;
-        let _execution_guard = execution_lock.lock().await;
+        let execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
-        if self.replica.snapshot(account_id).is_none() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::AccountMissing,
-                "account is not installed",
-            ));
-        }
+        let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        let pending_epoch = self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .get(account_id)
+            .copied();
+        let desired_epoch = pending_epoch
+            .or_else(|| snapshot.lock_epoch.checked_add(1))
+            .unwrap_or(snapshot.lock_epoch);
+        let overflowed = pending_epoch.is_none() && snapshot.lock_epoch == u64::MAX;
         let _publication = self.publication.lock().expect("publication lock poisoned");
+        let invalidated_delivery = self.invalidate_delivery(account_id);
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
@@ -565,17 +674,47 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::Locked);
-        advance_epoch(
-            &mut self
-                .account_lock_epochs
-                .lock()
-                .expect("Account lock epoch lock poisoned"),
-            account_id,
-        )?;
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), desired_epoch);
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .insert(account_id.clone(), desired_epoch);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
-        drop(_execution_guard);
+        drop(execution_guard);
+        if let Some(token) = invalidated_delivery {
+            token.wait_for_other_threads();
+        }
         self.publish_all();
+        if overflowed {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch overflowed",
+            ));
+        }
+        let _execution_guard = execution_lock.lock().await;
+        let durable = self
+            .replica
+            .advance_lock_epoch(
+                account_id,
+                &snapshot.user_id,
+                &snapshot.incarnation,
+                desired_epoch,
+            )
+            .await?;
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.cache(durable);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), desired_epoch);
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .remove(account_id);
         Ok(())
     }
 
@@ -634,6 +773,17 @@ impl Runtime {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AuthenticationRequired,
                         "the selected Account is signed out or locked",
+                    ));
+                }
+                if self
+                    .lock_epoch_pending
+                    .lock()
+                    .expect("pending lock epoch lock poisoned")
+                    .contains_key(&account_id)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "Account lock epoch persistence is pending",
                     ));
                 }
                 let lock_epoch = *self
@@ -793,12 +943,7 @@ impl Runtime {
         let publication = self.publication.lock().expect("publication lock poisoned");
         self.ensure_open()?;
         let id = self.next_observer_id.fetch_add(1, Ordering::SeqCst);
-        let subscription = Arc::new(Subscription::new(
-            request,
-            sink,
-            Arc::downgrade(self),
-            self.identity(),
-        ));
+        let subscription = Arc::new(Subscription::new(request, sink, self.identity()));
         self.observers
             .lock()
             .expect("observer lock poisoned")
@@ -865,7 +1010,28 @@ impl Runtime {
             for (_, lock) in &execution_locks {
                 execution_guards.push(lock.lock().await);
             }
+            let pending = self
+                .lock_epoch_pending
+                .lock()
+                .expect("pending lock epoch lock poisoned")
+                .clone();
+            let durable_advances: Vec<_> = self
+                .replica
+                .snapshots()
+                .into_iter()
+                .filter_map(|snapshot| {
+                    let desired = pending
+                        .get(&snapshot.account_id)
+                        .copied()
+                        .or_else(|| snapshot.lock_epoch.checked_add(1))?;
+                    Some((snapshot, desired))
+                })
+                .collect();
             let _publication = self.publication.lock().expect("publication lock poisoned");
+            let invalidated_deliveries: Vec<_> = execution_locks
+                .iter()
+                .filter_map(|(account_id, _)| self.invalidate_delivery(account_id))
+                .collect();
             let subscriptions: Vec<_> = self
                 .observers
                 .lock()
@@ -881,20 +1047,21 @@ impl Runtime {
                 .lock()
                 .expect("Account access lock poisoned")
                 .clear();
-            {
-                let mut epochs = self
-                    .account_lock_epochs
-                    .lock()
-                    .expect("Account lock epoch lock poisoned");
-                for account_id in execution_locks.iter().map(|(account_id, _)| account_id) {
-                    if advance_epoch(&mut epochs, account_id).is_err() {
-                        epochs.remove(account_id);
-                    }
-                }
-            }
+            *self
+                .account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned") = durable_advances
+                .iter()
+                .map(|(snapshot, epoch)| (snapshot.account_id.clone(), *epoch))
+                .collect();
             drop(_publication);
+            drop(execution_guards);
+            drop(_catalog_guard);
             self.close_state_cleaned.store(true, Ordering::SeqCst);
             self.close_finished.notify_waiters();
+            for token in invalidated_deliveries {
+                token.wait_for_other_threads();
+            }
             for subscription in subscriptions {
                 subscription.close();
             }
@@ -902,6 +1069,17 @@ impl Runtime {
                 .lock()
                 .expect("observer lock poisoned")
                 .clear();
+            for (snapshot, desired_epoch) in durable_advances {
+                let _ = self
+                    .replica
+                    .advance_lock_epoch(
+                        &snapshot.account_id,
+                        &snapshot.user_id,
+                        &snapshot.incarnation,
+                        desired_epoch,
+                    )
+                    .await;
+            }
             self.close_complete.store(true, Ordering::SeqCst);
             self.close_finished.notify_waiters();
         }
@@ -928,6 +1106,19 @@ impl Runtime {
 
     fn identity(&self) -> usize {
         std::ptr::from_ref(self).addr()
+    }
+
+    fn invalidate_delivery(&self, account_id: &AccountId) -> Option<Arc<DeliveryToken>> {
+        let token = self
+            .delivery_tokens
+            .lock()
+            .expect("delivery token map poisoned")
+            .remove(account_id)
+            .map(|(_, token)| token);
+        if let Some(token) = &token {
+            token.invalidate();
+        }
+        token
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<ProjectedDelivery, RuntimeError> {
@@ -962,6 +1153,23 @@ impl Runtime {
                     .expect("Account lock epoch lock poisoned")
                     .get(account_id)
                     .unwrap_or(&0);
+                let generation = DeliveryGeneration {
+                    incarnation: snapshot.incarnation.clone(),
+                    epoch,
+                };
+                let token = {
+                    let mut tokens = self
+                        .delivery_tokens
+                        .lock()
+                        .expect("delivery token map poisoned");
+                    let entry = tokens
+                        .entry(account_id.clone())
+                        .or_insert_with(|| (generation.clone(), Arc::new(DeliveryToken::new())));
+                    if entry.0 != generation {
+                        *entry = (generation.clone(), Arc::new(DeliveryToken::new()));
+                    }
+                    Arc::clone(&entry.1)
+                };
                 Ok(ProjectedDelivery {
                     projection: RuntimeProjection::Items(ItemsProjection {
                         account_id: account_id.clone(),
@@ -974,11 +1182,8 @@ impl Runtime {
                             .cloned()
                             .unwrap_or_default(),
                     }),
-                    account_epoch: Some(AccountEpoch {
-                        account_id: account_id.clone(),
-                        incarnation: snapshot.incarnation,
-                        epoch,
-                    }),
+                    generation: Some(generation),
+                    token: Some(token),
                 })
             }
             ObservationRequest::RuntimeStatus { account_id } => {
@@ -1015,7 +1220,8 @@ impl Runtime {
                             .collect(),
                         closed: self.is_closed(),
                     }),
-                    account_epoch: None,
+                    generation: None,
+                    token: None,
                 })
             }
         }

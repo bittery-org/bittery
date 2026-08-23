@@ -160,6 +160,8 @@ pub(crate) struct ReplicaSnapshot {
     pub incarnation: Incarnation,
     #[serde(with = "decimal_u64")]
     pub revision: u64,
+    #[serde(with = "decimal_u64")]
+    pub lock_epoch: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
     pub failure: Option<RuntimeErrorCode>,
@@ -188,6 +190,7 @@ pub(super) struct AccountReplica {
     pub(super) user_id: String,
     pub(super) incarnation: Incarnation,
     pub(super) revision: u64,
+    pub(super) lock_epoch: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
@@ -200,6 +203,7 @@ impl AccountReplica {
             user_id: snapshot.user_id,
             incarnation: snapshot.incarnation,
             revision: snapshot.revision,
+            lock_epoch: snapshot.lock_epoch,
             items: snapshot
                 .items
                 .into_iter()
@@ -263,6 +267,7 @@ impl AccountReplica {
             user_id: self.user_id.clone(),
             incarnation: self.incarnation.clone(),
             revision: self.revision,
+            lock_epoch: self.lock_epoch,
             items,
             operations,
             failure: self.failure,
