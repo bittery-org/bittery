@@ -5,10 +5,13 @@ export type ReplicaPersistenceRequest = ({
 accountId: string
 type: "load"
 } | {
+head: ReplicaHead
+type: "install"
+} | {
 prepared: PreparedReplicaCommit
 type: "commit"
 })
-export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
+export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type PreparedReplicaWrite = ({
 row: StoredReplicaRow
 type: "put"
@@ -23,8 +26,17 @@ head: (ReplicaHead | null)
 rows: StoredReplicaRow[]
 type: "loaded"
 } | {
+result: ReplicaInstallResult
+type: "installed"
+} | {
 result: PlanResult
 type: "committed"
+})
+export type ReplicaInstallResult = ({
+type: "created"
+} | {
+previousIncarnation: string
+type: "replaced"
 })
 export type PlanResult = ({
 replicaRevision: string
@@ -40,6 +52,13 @@ export interface ReplicaPersistenceContract {
 request: ReplicaPersistenceRequest
 response: ReplicaPersistenceResponse
 }
+export interface ReplicaHead {
+accountId: string
+failure: (RuntimeErrorCode | null)
+incarnation: string
+replicaRevision: string
+userId: string
+}
 export interface PreparedReplicaCommit {
 expected: ExpectedReplicaHead
 nextHead: ReplicaHead
@@ -47,12 +66,6 @@ writes: PreparedReplicaWrite[]
 }
 export interface ExpectedReplicaHead {
 accountId: string
-incarnation: string
-replicaRevision: string
-}
-export interface ReplicaHead {
-accountId: string
-failure: (RuntimeErrorCode | null)
 incarnation: string
 replicaRevision: string
 }

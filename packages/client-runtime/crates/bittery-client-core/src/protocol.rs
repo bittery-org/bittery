@@ -286,7 +286,16 @@ pub struct RuntimeStatusProjection {
 pub struct AccountStatus {
     pub account_id: AccountId,
     pub replica_revision: u64,
+    pub access: AccountAccessState,
     pub failure: Option<RuntimeErrorCode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountAccessState {
+    SignedOut,
+    Locked,
+    Unlocked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +307,7 @@ pub enum RuntimeErrorCode {
     AccountMissing,
     AccountAlreadyInstalled,
     AccountFailed,
+    AuthenticationRequired,
     AuthenticationUnavailable,
     InvariantViolation,
 }

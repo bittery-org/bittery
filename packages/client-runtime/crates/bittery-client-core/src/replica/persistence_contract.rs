@@ -50,6 +50,7 @@ pub(crate) struct StoredReplicaRow {
 pub(crate) struct ReplicaHead {
     #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
     pub account_id: AccountId,
+    pub user_id: String,
     #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
     pub incarnation: Incarnation,
     #[serde(with = "decimal_u64")]
@@ -60,6 +61,22 @@ pub(crate) struct ReplicaHead {
     pub replica_revision: u64,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub failure: Option<RuntimeErrorCode>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ReplicaInstallResult {
+    Created,
+    Replaced {
+        #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
+        previous_incarnation: Incarnation,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +135,9 @@ pub(crate) enum ReplicaPersistenceRequest {
         #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
         account_id: AccountId,
     },
+    Install {
+        head: ReplicaHead,
+    },
     Commit {
         prepared: PreparedReplicaCommit,
     },
@@ -140,6 +160,9 @@ pub(crate) enum ReplicaPersistenceResponse {
         #[serde(deserialize_with = "required_option::deserialize")]
         head: Option<ReplicaHead>,
         rows: Vec<StoredReplicaRow>,
+    },
+    Installed {
+        result: ReplicaInstallResult,
     },
     Committed {
         result: PlanResult,
@@ -220,6 +243,7 @@ pub(super) fn prepare_commit(
             },
             next_head: ReplicaHead {
                 account_id: next.account_id.clone(),
+                user_id: next.user_id.clone(),
                 incarnation: next.incarnation.clone(),
                 replica_revision: next.revision,
                 failure: next.failure,
@@ -303,6 +327,9 @@ pub(super) fn reconstruct_snapshot(
             "Replica persistence returned another Account's head",
         ));
     }
+    if head.user_id.is_empty() {
+        return Err(replica_invariant("Replica head User identity is empty"));
+    }
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
@@ -346,6 +373,7 @@ pub(super) fn reconstruct_snapshot(
     Ok(Some(
         AccountReplica {
             account_id: head.account_id,
+            user_id: head.user_id,
             incarnation: head.incarnation,
             revision: head.replica_revision,
             items,

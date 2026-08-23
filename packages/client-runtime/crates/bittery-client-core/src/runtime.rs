@@ -6,12 +6,12 @@ use crate::{
         Replica, ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
         SerializedReplicaPersistence,
     },
-    AccountId, AccountStatus, ItemProjectionStatus, ItemsProjection, LoginItemProjection,
-    ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
-    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    AccountAccessState, AccountId, AccountStatus, ItemProjectionStatus, ItemsProjection,
+    LoginItemProjection, ObservationRequest, ObservationSink, RequestCancellation, RuntimeError,
+    RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex, Weak,
@@ -149,6 +149,7 @@ pub struct Runtime {
     device_revision: AtomicU64,
     closed: AtomicBool,
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
+    account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -210,6 +211,7 @@ impl Runtime {
             device_revision: AtomicU64::new(0),
             closed: AtomicBool::new(false),
             unlocked_items: Mutex::new(HashMap::new()),
+            account_access: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
         })
     }
@@ -241,8 +243,113 @@ impl Runtime {
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
-            .entry(account_id)
+            .entry(account_id.clone())
             .or_default();
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        self.publish_all();
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub async fn install_or_replace_account(
+        &self,
+        account_id: AccountId,
+        user_id: String,
+        incarnation: crate::protocol::Incarnation,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_open()?;
+        self.replica
+            .install_or_replace(account_id.clone(), user_id, incarnation)
+            .await?;
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .remove(&account_id);
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id, AccountAccessState::SignedOut);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        self.publish_all();
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub async fn restore_known_accounts(
+        &self,
+        account_ids: Vec<AccountId>,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_open()?;
+        let mut unique = HashSet::with_capacity(account_ids.len());
+        for account_id in &account_ids {
+            if !unique.insert(account_id.clone()) {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "known Account identity is duplicated",
+                ));
+            }
+        }
+        let restored = self.replica.restore_known_accounts(&account_ids).await?;
+        {
+            let mut access = self
+                .account_access
+                .lock()
+                .expect("Account access lock poisoned");
+            *access = restored
+                .iter()
+                .map(|snapshot| (snapshot.account_id.clone(), AccountAccessState::SignedOut))
+                .collect();
+        }
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .clear();
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        self.publish_all();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn unlock_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        if self.replica.snapshot(account_id).is_none() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountMissing,
+                "account is not installed",
+            ));
+        }
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .entry(account_id.clone())
+            .or_default();
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn mark_account_locked(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        self.ensure_open()?;
+        if self.replica.snapshot(account_id).is_none() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountMissing,
+                "account is not installed",
+            ));
+        }
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .remove(account_id);
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Locked);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all();
         Ok(())
@@ -290,6 +397,18 @@ impl Runtime {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AccountFailed,
                         "the selected Account module has failed",
+                    ));
+                }
+                if self
+                    .account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .get(&account_id)
+                    != Some(&AccountAccessState::Unlocked)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "the selected Account is signed out or locked",
                     ));
                 }
                 let operation_id = bittery_crypto_core::generate_uuid();
@@ -479,6 +598,14 @@ impl Runtime {
             for subscription in subscriptions {
                 subscription.close();
             }
+            self.unlocked_items
+                .lock()
+                .expect("unlocked projection lock poisoned")
+                .clear();
+            self.account_access
+                .lock()
+                .expect("Account access lock poisoned")
+                .clear();
         }
     }
 
@@ -501,6 +628,18 @@ impl Runtime {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
                 })?;
+                if self
+                    .account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .get(account_id)
+                    != Some(&AccountAccessState::Unlocked)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "the selected Account is signed out or locked",
+                    ));
+                }
                 Ok(RuntimeProjection::Items(ItemsProjection {
                     account_id: account_id.clone(),
                     replica_revision: snapshot.revision,
@@ -525,16 +664,20 @@ impl Runtime {
                     }
                     None => self.replica.snapshots(),
                 };
-                let revision = account_id
-                    .as_ref()
-                    .and_then(|id| self.replica.snapshot(id).map(|value| value.revision))
-                    .unwrap_or_else(|| self.device_revision.load(Ordering::SeqCst));
+                let revision = self.device_revision.load(Ordering::SeqCst);
                 Ok(RuntimeProjection::RuntimeStatus(RuntimeStatusProjection {
                     account_id: account_id.clone(),
                     revision,
                     accounts: snapshots
                         .into_iter()
                         .map(|value| AccountStatus {
+                            access: self
+                                .account_access
+                                .lock()
+                                .expect("Account access lock poisoned")
+                                .get(&value.account_id)
+                                .copied()
+                                .unwrap_or(AccountAccessState::SignedOut),
                             account_id: value.account_id,
                             replica_revision: value.revision,
                             failure: value.failure,

@@ -5,9 +5,9 @@ use crate::{
         ReplicaItemRecord, ReplicaPersistence, ReplicaPersistenceRequest,
         SerializedReplicaExecutor,
     },
-    AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle, ObservationRequest,
-    ObservationSink, RequestCancellation, Runtime, RuntimeError, RuntimeErrorCode,
-    RuntimeProjection, RuntimeRequest,
+    AccountAccessState, AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle,
+    ObservationRequest, ObservationSink, RequestCancellation, Runtime, RuntimeError,
+    RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
 };
 use async_trait::async_trait;
 use std::{
@@ -133,6 +133,34 @@ struct AdvanceBeforeLoadExecutor {
     load_calls: AtomicUsize,
 }
 
+#[derive(Default)]
+struct SerializedInMemoryExecutor {
+    state: InMemoryReplica,
+}
+
+#[derive(Default)]
+struct ProjectionSink(Mutex<Vec<RuntimeProjection>>);
+
+impl ObservationSink for ProjectionSink {
+    fn publish(&self, projection: RuntimeProjection) {
+        self.0.lock().unwrap().push(projection);
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for SerializedInMemoryExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        let response = self.state.invoke(request).await?;
+        serde_json::to_string(&response).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "in-memory response could not be serialized",
+            )
+        })
+    }
+}
+
 impl AdvanceBeforeLoadExecutor {
     fn seeded() -> Self {
         let state = InMemoryReplica::default();
@@ -224,6 +252,184 @@ fn optimistic_item(account_id: AccountId, item_id: &str) -> ReplicaItemRecord {
     }
 }
 
+#[tokio::test]
+async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked() {
+    let executor = Arc::new(SerializedInMemoryExecutor::default());
+    let account_id = AccountId::from("account-restore");
+    let first = Runtime::with_serialized_replica_executor(executor.clone());
+    first
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-restore".into(),
+            Incarnation::from("incarnation-old"),
+        )
+        .await
+        .unwrap();
+    first.unlock_account(&account_id).unwrap();
+    first
+        .request(
+            create_request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    first
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-restore".into(),
+            Incarnation::from("incarnation-new"),
+        )
+        .await
+        .unwrap();
+
+    let restored = Runtime::with_serialized_replica_executor(executor.clone());
+    restored
+        .restore_known_accounts(vec![account_id.clone()])
+        .await
+        .unwrap();
+    let snapshot = restored.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.user_id, "user-restore");
+    assert_eq!(snapshot.incarnation, Incarnation::from("incarnation-new"));
+    assert_eq!(snapshot.revision, 0);
+    assert!(snapshot.items.is_empty());
+    assert!(snapshot.operations.is_empty());
+    let status = ProjectionSink::default();
+    let status = Arc::new(status);
+    let _observation = restored
+        .observe(
+            ObservationRequest::RuntimeStatus {
+                account_id: Some(account_id.clone()),
+            },
+            status.clone(),
+        )
+        .unwrap();
+    let RuntimeProjection::RuntimeStatus(projected) = status.0.lock().unwrap()[0].clone() else {
+        panic!("expected Runtime status projection");
+    };
+    assert_eq!(projected.accounts[0].access, AccountAccessState::SignedOut);
+    let locked_items = restored.observe(
+        ObservationRequest::Items {
+            account_id: account_id.clone(),
+        },
+        Arc::new(ProjectionSink::default()),
+    );
+    assert!(matches!(
+        locked_items,
+        Err(RuntimeError {
+            code: RuntimeErrorCode::AuthenticationRequired,
+            ..
+        })
+    ));
+    assert_eq!(
+        restored
+            .request(create_request(account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+}
+
+#[tokio::test]
+async fn restore_is_batch_atomic_and_replaces_the_visible_device_catalog() {
+    let executor = Arc::new(SerializedInMemoryExecutor::default());
+    let installer = Runtime::with_serialized_replica_executor(executor.clone());
+    for suffix in ["a", "b"] {
+        installer
+            .install_or_replace_account(
+                AccountId::from(format!("account-{suffix}")),
+                format!("user-{suffix}"),
+                Incarnation::from(format!("incarnation-{suffix}")),
+            )
+            .await
+            .unwrap();
+    }
+
+    let restored = Runtime::with_serialized_replica_executor(executor.clone());
+    restored
+        .restore_known_accounts(vec![
+            AccountId::from("account-a"),
+            AccountId::from("account-b"),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(restored.replica().snapshots().len(), 2);
+    restored
+        .restore_known_accounts(vec![AccountId::from("account-a")])
+        .await
+        .unwrap();
+    assert_eq!(
+        restored
+            .replica()
+            .snapshots()
+            .into_iter()
+            .map(|snapshot| snapshot.account_id)
+            .collect::<Vec<_>>(),
+        vec![AccountId::from("account-a")]
+    );
+
+    let failed =
+        Runtime::with_serialized_replica_executor(Arc::new(SerializedInMemoryExecutor::default()));
+    let error = failed
+        .restore_known_accounts(vec![AccountId::from("missing"), AccountId::from("missing")])
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert!(failed.replica().snapshots().is_empty());
+    let failed_status = Arc::new(ProjectionSink::default());
+    let _failed_observation = failed
+        .observe(
+            ObservationRequest::RuntimeStatus { account_id: None },
+            failed_status.clone(),
+        )
+        .unwrap();
+    let RuntimeProjection::RuntimeStatus(projected) = failed_status.0.lock().unwrap()[0].clone()
+    else {
+        panic!("expected Runtime status projection");
+    };
+    assert!(projected.accounts.is_empty());
+
+    let missing_after_valid = Runtime::with_serialized_replica_executor(executor);
+    let error = missing_after_valid
+        .restore_known_accounts(vec![
+            AccountId::from("account-a"),
+            AccountId::from("missing"),
+        ])
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AccountMissing);
+    assert!(missing_after_valid.replica().snapshots().is_empty());
+}
+
+#[test]
+fn runtime_status_projects_unlocked_and_locked_as_closed_states() {
+    let (runtime, account_id, _) = installed_runtime();
+    let status = Arc::new(ProjectionSink::default());
+    let _observation = runtime
+        .observe(
+            ObservationRequest::RuntimeStatus {
+                account_id: Some(account_id.clone()),
+            },
+            status.clone(),
+        )
+        .unwrap();
+    runtime.mark_account_locked(&account_id).unwrap();
+    let projections = status.0.lock().unwrap();
+    let states: Vec<_> = projections
+        .iter()
+        .map(|projection| {
+            let RuntimeProjection::RuntimeStatus(status) = projection else {
+                panic!("expected Runtime status projection");
+            };
+            status.accounts[0].access
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec![AccountAccessState::Unlocked, AccountAccessState::Locked]
+    );
+}
+
 fn run_request(runtime: Arc<Runtime>, request: RuntimeRequest) {
     tokio::runtime::Builder::new_current_thread()
         .build()
@@ -282,6 +488,7 @@ async fn durable_stale_keeps_rereading_and_recomputing_while_revisions_advance()
     let runtime = Runtime::with_serialized_replica_executor(executor.clone());
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).unwrap();
 
     let response = runtime
         .request(
@@ -305,6 +512,7 @@ async fn durable_missing_clears_the_cache_and_returns_account_missing() {
     let runtime = Runtime::with_serialized_replica_executor(executor);
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).unwrap();
 
     let error = runtime
         .request(
@@ -324,6 +532,7 @@ async fn create_recomputes_when_revision_advances_before_the_guarded_commit_load
     let runtime = Runtime::with_serialized_replica_executor(executor);
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).unwrap();
 
     let response = runtime
         .request(

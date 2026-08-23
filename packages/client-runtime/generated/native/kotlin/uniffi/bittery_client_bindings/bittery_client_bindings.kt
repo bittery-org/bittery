@@ -3431,6 +3431,8 @@ data class AccountStatus (
     ,
     var `replicaRevision`: kotlin.ULong
     ,
+    var `access`: AccountAccessState
+    ,
     var `failure`: RuntimeErrorCode?
 
 ){
@@ -3450,6 +3452,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
         return AccountStatus(
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
+            FfiConverterTypeAccountAccessState.read(buf),
             FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
         )
     }
@@ -3457,12 +3460,14 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
     override fun allocationSize(value: AccountStatus) = (
             FfiConverterString.allocationSize(value.`accountId`) +
             FfiConverterULong.allocationSize(value.`replicaRevision`) +
+            FfiConverterTypeAccountAccessState.allocationSize(value.`access`) +
             FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`)
     )
 
     override fun write(value: AccountStatus, buf: ByteBuffer) {
             FfiConverterString.write(value.`accountId`, buf)
             FfiConverterULong.write(value.`replicaRevision`, buf)
+            FfiConverterTypeAccountAccessState.write(value.`access`, buf)
             FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
     }
 }
@@ -3567,6 +3572,41 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterBoolean.write(value.`closed`, buf)
     }
 }
+
+
+
+
+enum class AccountAccessState {
+
+    SIGNED_OUT,
+    LOCKED,
+    UNLOCKED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountAccessState: FfiConverterRustBuffer<AccountAccessState> {
+    override fun read(buf: ByteBuffer) = try {
+        AccountAccessState.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AccountAccessState) = 4UL
+
+    override fun write(value: AccountAccessState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 
@@ -3799,6 +3839,7 @@ enum class RuntimeErrorCode {
     ACCOUNT_MISSING,
     ACCOUNT_ALREADY_INSTALLED,
     ACCOUNT_FAILED,
+    AUTHENTICATION_REQUIRED,
     AUTHENTICATION_UNAVAILABLE,
     INVARIANT_VIOLATION;
 

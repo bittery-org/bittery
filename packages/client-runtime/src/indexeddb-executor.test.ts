@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
@@ -108,6 +108,7 @@ function prepared(
 		},
 		nextHead: {
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: nextRevision,
 			failure: null,
@@ -120,7 +121,80 @@ function commit(value: PreparedReplicaCommit) {
 	return { type: "commit", prepared: value } as const;
 }
 
+function install(incarnation = "incarnation-a", userId = "user-a") {
+	return {
+		type: "install",
+		head: {
+			accountId: "account-a",
+			userId,
+			incarnation,
+			replicaRevision: "0",
+			failure: null,
+		},
+	} as const;
+}
+
 describe("IndexedDbReplicaExecutor", () => {
+	test("atomically replaces an installed account and removes its previous rows", async () => {
+		expect(await invoke(install())).toEqual({
+			type: "installed",
+			result: { type: "created" },
+		});
+		expect(
+			await invoke(
+				commit(prepared([put("operations", "old-operation", "opaque")])),
+			),
+		).toMatchObject({ result: { type: "applied" } });
+
+		expect(await invoke(install("incarnation-b"))).toEqual({
+			type: "installed",
+			result: {
+				type: "replaced",
+				previousIncarnation: "incarnation-a",
+			},
+		});
+		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual({
+			type: "loaded",
+			head: {
+				accountId: "account-a",
+				userId: "user-a",
+				incarnation: "incarnation-b",
+				replicaRevision: "0",
+				failure: null,
+			},
+			rows: [],
+		});
+	});
+
+	test("refuses to replace an Account with another User or the same incarnation", async () => {
+		await invoke(install());
+		await expect(invoke(install("incarnation-b", "user-b"))).rejects.toThrow(
+			"cannot change User",
+		);
+		await expect(invoke(install("incarnation-a"))).rejects.toThrow(
+			"new incarnation",
+		);
+		expect(
+			await invoke({ type: "load", accountId: "account-a" }),
+		).toMatchObject({
+			head: { userId: "user-a", incarnation: "incarnation-a" },
+			rows: [],
+		});
+	});
+
+	test("refuses a prepared commit that changes the installed User", async () => {
+		await invoke(install());
+		const invalid = prepared([put("operations", "forbidden", "opaque")]);
+		invalid.nextHead.userId = "user-b";
+		await expect(invoke(commit(invalid))).rejects.toThrow("cannot change User");
+		expect(
+			await invoke({ type: "load", accountId: "account-a" }),
+		).toMatchObject({
+			head: { userId: "user-a", replicaRevision: "0" },
+			rows: [],
+		});
+	});
+
 	test("loads and commits a missing account without creating it", async () => {
 		expect(await invoke({ type: "load", accountId: "missing" })).toEqual({
 			type: "loaded",
@@ -131,6 +205,19 @@ describe("IndexedDbReplicaExecutor", () => {
 			type: "committed",
 			result: { type: "missing" },
 		});
+	});
+
+	test("rejects a stored head with an empty User identity", async () => {
+		await seedHead({
+			accountId: "account-a",
+			userId: "",
+			incarnation: "incarnation-a",
+			replicaRevision: "0",
+			failure: null,
+		});
+		await expect(
+			invoke({ type: "load", accountId: "account-a" }),
+		).rejects.toThrow("stored head User must not be empty");
 	});
 
 	test("rejects the former domain plan and unknown wire fields", async () => {
@@ -155,6 +242,7 @@ describe("IndexedDbReplicaExecutor", () => {
 				type: "loaded",
 				head: {
 					accountId: "account-a",
+					userId: "user-a",
 					incarnation: "incarnation-a",
 					replicaRevision: "0",
 				},
@@ -168,6 +256,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			type: "loaded",
 			head: {
 				accountId: "account-a",
+				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision: "0",
 				failure: "INVARIANT_VIOLATION",
@@ -188,6 +277,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			type: "loaded",
 			head: {
 				accountId: "account-a",
+				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision,
 				failure: null,
@@ -221,6 +311,7 @@ describe("IndexedDbReplicaExecutor", () => {
 	test("returns stale without applying prepared writes", async () => {
 		await seedHead({
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "4",
 			failure: null,
@@ -239,6 +330,7 @@ describe("IndexedDbReplicaExecutor", () => {
 	test("stores and loads opaque rows without parsing their payload", async () => {
 		await seedHead({
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
 			failure: null,
@@ -255,6 +347,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			type: "loaded",
 			head: {
 				accountId: "account-a",
+				userId: "user-a",
 				incarnation: "incarnation-a",
 				replicaRevision: "1",
 				failure: null,
@@ -285,6 +378,7 @@ describe("IndexedDbReplicaExecutor", () => {
 	test("rejects an unsafe primitive batch before writing any row", async () => {
 		await seedHead({
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
 			failure: null,
@@ -307,6 +401,7 @@ describe("IndexedDbReplicaExecutor", () => {
 	test("two executors race through CAS without mixing loser writes", async () => {
 		await seedHead({
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "0",
 			failure: null,
@@ -337,6 +432,7 @@ describe("IndexedDbReplicaExecutor", () => {
 	test("preserves uint64 precision and rejects a non-successor head", async () => {
 		await seedHead({
 			accountId: "account-a",
+			userId: "user-a",
 			incarnation: "incarnation-a",
 			replicaRevision: "9007199254740993",
 			failure: null,

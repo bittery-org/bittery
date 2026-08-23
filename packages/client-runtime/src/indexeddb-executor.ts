@@ -1,6 +1,7 @@
 import type {
 	PreparedReplicaCommit,
 	ReplicaHead,
+	ReplicaInstallResult,
 	ReplicaPersistenceRequest,
 	ReplicaPersistenceResponse,
 	ReplicaStore,
@@ -12,7 +13,7 @@ import {
 } from "../generated/persistence/validator.js";
 
 const DATABASE_NAME = "bittery_replica";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
 const STORE_NAMES = ["heads", "optimistic_items", "operations"] as const;
@@ -27,7 +28,9 @@ export class IndexedDbReplicaExecutor {
 			const response =
 				request.type === "load"
 					? await load(database, request.accountId)
-					: await commit(database, request.prepared);
+					: request.type === "install"
+						? await install(database, request.head)
+						: await commit(database, request.prepared);
 			if (!validateReplicaPersistenceResponse(response)) {
 				throw new Error(
 					"persistence response does not match the generated contract",
@@ -136,6 +139,56 @@ async function load(
 	}
 }
 
+async function install(
+	database: IDBDatabase,
+	head: ReplicaHead,
+): Promise<ReplicaPersistenceResponse> {
+	assertInstallSafety(head);
+	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const completed = transactionDone(transaction);
+	try {
+		const heads = transaction.objectStore("heads");
+		const previousValue = await requestResult(heads.get(head.accountId));
+		const result: ReplicaInstallResult =
+			previousValue === undefined
+				? { type: "created" }
+				: (() => {
+						const previous = parseStoredHead(previousValue, head.accountId);
+						if (previous.userId !== head.userId) {
+							throw new Error("installed Account identity cannot change User");
+						}
+						if (previous.incarnation === head.incarnation) {
+							throw new Error(
+								"replaced Account must receive a new incarnation",
+							);
+						}
+						return {
+							type: "replaced",
+							previousIncarnation: previous.incarnation,
+						};
+					})();
+		for (const storeName of ["optimistic_items", "operations"] as const) {
+			const request = transaction
+				.objectStore(storeName)
+				.index(ACCOUNT_INDEX)
+				.openKeyCursor(head.accountId);
+			request.onsuccess = () => {
+				const cursor = request.result;
+				if (cursor === null) return;
+				transaction.objectStore(storeName).delete(cursor.primaryKey);
+				cursor.continue();
+			};
+		}
+		heads.put(head);
+		await completed;
+		return { type: "installed", result };
+	} catch (error) {
+		abort(transaction);
+		await completed.catch(() => undefined);
+		throw error;
+	}
+}
+
 async function commit(
 	database: IDBDatabase,
 	prepared: PreparedReplicaCommit,
@@ -152,6 +205,9 @@ async function commit(
 			return { type: "committed", result: { type: "missing" } };
 		}
 		const head = parseStoredHead(headValue, prepared.expected.accountId);
+		if (prepared.nextHead.userId !== head.userId) {
+			throw new Error("prepared Replica commit cannot change User identity");
+		}
 		if (
 			head.incarnation !== prepared.expected.incarnation ||
 			head.replicaRevision !== prepared.expected.replicaRevision
@@ -224,6 +280,15 @@ function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
 	}
 }
 
+function assertInstallSafety(head: ReplicaHead): void {
+	assertIdentifier(head.accountId, "installed Account");
+	assertIdentifier(head.userId, "installed User");
+	assertIdentifier(head.incarnation, "installed incarnation");
+	if (head.replicaRevision !== "0" || head.failure !== null) {
+		throw new Error("installed Replica head must begin clean at revision zero");
+	}
+}
+
 function parseStoredHead(value: unknown, accountId: string): ReplicaHead {
 	const candidate: ReplicaPersistenceResponse = {
 		type: "loaded",
@@ -241,6 +306,7 @@ function parseStoredHead(value: unknown, accountId: string): ReplicaHead {
 		throw new Error("stored head Account scope does not match its key");
 	}
 	assertIdentifier(candidate.head.accountId, "stored head Account");
+	assertIdentifier(candidate.head.userId, "stored head User");
 	assertIdentifier(candidate.head.incarnation, "stored head incarnation");
 	parseRevision(candidate.head.replicaRevision, "stored head revision");
 	return candidate.head;

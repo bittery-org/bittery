@@ -15,10 +15,10 @@ pub mod server_contract {
 }
 
 pub use protocol::{
-    AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus, ItemsProjection,
-    LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink,
-    RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
-    RuntimeResponse, RuntimeStatusProjection,
+    AccountAccessState, AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus,
+    ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
+    ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection,
+    RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]

@@ -340,14 +340,23 @@ pub enum RuntimeErrorCode {
     AccountMissing,
     AccountAlreadyInstalled,
     AccountFailed,
+    AuthenticationRequired,
     AuthenticationUnavailable,
     InvariantViolation,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum AccountAccessState {
+    SignedOut,
+    Locked,
+    Unlocked,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct AccountStatus {
     pub account_id: String,
     pub replica_revision: u64,
+    pub access: AccountAccessState,
     pub failure: Option<RuntimeErrorCode>,
 }
 
@@ -667,12 +676,24 @@ impl From<core::AccountStatus> for AccountStatus {
         let core::AccountStatus {
             account_id,
             replica_revision,
+            access,
             failure,
         } = value;
         Self {
             account_id: account_id.into(),
             replica_revision,
+            access: access.into(),
             failure: failure.map(Into::into),
+        }
+    }
+}
+
+impl From<core::AccountAccessState> for AccountAccessState {
+    fn from(value: core::AccountAccessState) -> Self {
+        match value {
+            core::AccountAccessState::SignedOut => Self::SignedOut,
+            core::AccountAccessState::Locked => Self::Locked,
+            core::AccountAccessState::Unlocked => Self::Unlocked,
         }
     }
 }
@@ -685,6 +706,7 @@ impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
             core::RuntimeErrorCode::AccountMissing => Self::AccountMissing,
             core::RuntimeErrorCode::AccountAlreadyInstalled => Self::AccountAlreadyInstalled,
             core::RuntimeErrorCode::AccountFailed => Self::AccountFailed,
+            core::RuntimeErrorCode::AuthenticationRequired => Self::AuthenticationRequired,
             core::RuntimeErrorCode::AuthenticationUnavailable => Self::AuthenticationUnavailable,
             core::RuntimeErrorCode::InvariantViolation => Self::InvariantViolation,
         }

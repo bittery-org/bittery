@@ -1617,13 +1617,15 @@ public func FfiConverterTypeSecretString_lower(_ value: SecretString) -> UInt64 
 public struct AccountStatus: Equatable, Hashable {
     public var accountId: String
     public var replicaRevision: UInt64
+    public var access: AccountAccessState
     public var failure: RuntimeErrorCode?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(accountId: String, replicaRevision: UInt64, failure: RuntimeErrorCode?) {
+    public init(accountId: String, replicaRevision: UInt64, access: AccountAccessState, failure: RuntimeErrorCode?) {
         self.accountId = accountId
         self.replicaRevision = replicaRevision
+        self.access = access
         self.failure = failure
     }
 
@@ -1645,6 +1647,7 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
             try AccountStatus(
                 accountId: FfiConverterString.read(from: &buf),
                 replicaRevision: FfiConverterUInt64.read(from: &buf),
+                access: FfiConverterTypeAccountAccessState.read(from: &buf),
                 failure: FfiConverterOptionTypeRuntimeErrorCode.read(from: &buf)
         )
     }
@@ -1652,6 +1655,7 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
     public static func write(_ value: AccountStatus, into buf: inout [UInt8]) {
         FfiConverterString.write(value.accountId, into: &buf)
         FfiConverterUInt64.write(value.replicaRevision, into: &buf)
+        FfiConverterTypeAccountAccessState.write(value.access, into: &buf)
         FfiConverterOptionTypeRuntimeErrorCode.write(value.failure, into: &buf)
     }
 }
@@ -1790,6 +1794,80 @@ public func FfiConverterTypeRuntimeStatusProjection_lift(_ buf: RustBuffer) thro
 public func FfiConverterTypeRuntimeStatusProjection_lower(_ value: RuntimeStatusProjection) -> RustBuffer {
     return FfiConverterTypeRuntimeStatusProjection.lower(value)
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum AccountAccessState: Equatable, Hashable {
+
+    case signedOut
+    case locked
+    case unlocked
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension AccountAccessState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountAccessState: FfiConverterRustBuffer {
+    typealias SwiftType = AccountAccessState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountAccessState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .signedOut
+
+        case 2: return .locked
+
+        case 3: return .unlocked
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AccountAccessState, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .signedOut:
+            writeInt(&buf, Int32(1))
+
+
+        case .locked:
+            writeInt(&buf, Int32(2))
+
+
+        case .unlocked:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountAccessState_lift(_ buf: RustBuffer) throws -> AccountAccessState {
+    return try FfiConverterTypeAccountAccessState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountAccessState_lower(_ value: AccountAccessState) -> RustBuffer {
+    return FfiConverterTypeAccountAccessState.lower(value)
+}
+
 
 
 public enum BindingError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
@@ -2105,6 +2183,7 @@ public enum RuntimeErrorCode: Equatable, Hashable {
     case accountMissing
     case accountAlreadyInstalled
     case accountFailed
+    case authenticationRequired
     case authenticationUnavailable
     case invariantViolation
 
@@ -2138,9 +2217,11 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
 
         case 5: return .accountFailed
 
-        case 6: return .authenticationUnavailable
+        case 6: return .authenticationRequired
 
-        case 7: return .invariantViolation
+        case 7: return .authenticationUnavailable
+
+        case 8: return .invariantViolation
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2170,12 +2251,16 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
             writeInt(&buf, Int32(5))
 
 
-        case .authenticationUnavailable:
+        case .authenticationRequired:
             writeInt(&buf, Int32(6))
 
 
-        case .invariantViolation:
+        case .authenticationUnavailable:
             writeInt(&buf, Int32(7))
+
+
+        case .invariantViolation:
+            writeInt(&buf, Int32(8))
 
         }
     }

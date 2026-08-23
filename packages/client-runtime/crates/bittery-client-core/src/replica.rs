@@ -1,4 +1,3 @@
-#[cfg(test)]
 use crate::protocol::Incarnation;
 use crate::{AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
@@ -20,6 +19,7 @@ pub(crate) use domain::{
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use persistence_contract::persistence_contract_schema;
+pub(crate) use persistence_contract::ReplicaInstallResult;
 pub(crate) use persistence_contract::ReplicaPersistenceRequest;
 use persistence_contract::{
     apply_prepared_writes_to_rows, prepare_commit, reconstruct_snapshot, replica_invariant,
@@ -112,6 +112,23 @@ impl Replica {
         &self,
         account_id: &AccountId,
     ) -> Result<Option<ReplicaSnapshot>, RuntimeError> {
+        let snapshot = self.load_uncached(account_id).await?;
+        let mut snapshots = self.snapshots.lock().expect("Replica cache lock poisoned");
+        match &snapshot {
+            Some(value) => {
+                snapshots.insert(account_id.clone(), value.clone());
+            }
+            None => {
+                snapshots.remove(account_id);
+            }
+        }
+        Ok(snapshot)
+    }
+
+    async fn load_uncached(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<ReplicaSnapshot>, RuntimeError> {
         let response = self
             .persistence
             .invoke(ReplicaPersistenceRequest::Load {
@@ -124,17 +141,83 @@ impl Replica {
                 "Replica persistence returned a commit response for a load",
             ));
         };
-        let snapshot = reconstruct_snapshot(account_id, head, rows)?;
-        let mut snapshots = self.snapshots.lock().expect("Replica cache lock poisoned");
-        match &snapshot {
-            Some(value) => {
-                snapshots.insert(account_id.clone(), value.clone());
-            }
-            None => {
-                snapshots.remove(account_id);
-            }
+        reconstruct_snapshot(account_id, head, rows)
+    }
+
+    pub(crate) async fn restore_known_accounts(
+        &self,
+        account_ids: &[AccountId],
+    ) -> Result<Vec<ReplicaSnapshot>, RuntimeError> {
+        let mut restored = Vec::with_capacity(account_ids.len());
+        for account_id in account_ids {
+            let snapshot = self.load_uncached(account_id).await?.ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "known Account has no durable Replica installation",
+                )
+            })?;
+            restored.push(snapshot);
         }
-        Ok(snapshot)
+        let next = restored
+            .iter()
+            .cloned()
+            .map(|snapshot| (snapshot.account_id.clone(), snapshot))
+            .collect();
+        *self.snapshots.lock().expect("Replica cache lock poisoned") = next;
+        Ok(restored)
+    }
+
+    pub(crate) async fn install_or_replace(
+        &self,
+        account_id: AccountId,
+        user_id: String,
+        incarnation: Incarnation,
+    ) -> Result<ReplicaInstallResult, RuntimeError> {
+        if account_id.as_str().is_empty() || user_id.is_empty() || incarnation.as_str().is_empty() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Replica installation identities must not be empty",
+            ));
+        }
+        let expected_user_id = user_id.clone();
+        let expected_incarnation = incarnation.clone();
+        let head = ReplicaHead {
+            account_id: account_id.clone(),
+            user_id,
+            incarnation,
+            replica_revision: 0,
+            failure: None,
+        };
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::Install { head })
+            .await?;
+        let ReplicaPersistenceResponse::Installed { result } = response else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Replica persistence returned a non-install response for an install",
+            ));
+        };
+        let snapshot = self.load(&account_id).await?.ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Replica persistence lost an installed Account",
+            )
+        })?;
+        if snapshot.account_id != account_id
+            || snapshot.user_id != expected_user_id
+            || snapshot.incarnation != expected_incarnation
+            || snapshot.revision != 0
+            || snapshot.failure.is_some()
+            || !snapshot.items.is_empty()
+            || !snapshot.operations.is_empty()
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "installed Account did not restore as a clean Replica",
+            ));
+        }
+        Ok(result)
     }
 
     pub(crate) async fn execute(
@@ -284,7 +367,7 @@ impl InMemoryReplica {
     pub(crate) fn install(
         &self,
         account_id: AccountId,
-        _user_id: String,
+        user_id: String,
         incarnation: Incarnation,
     ) -> Result<(), RuntimeError> {
         let mut accounts = self.accounts.lock().expect("replica lock poisoned");
@@ -298,6 +381,7 @@ impl InMemoryReplica {
             account_id.clone(),
             AccountReplica {
                 account_id,
+                user_id,
                 incarnation,
                 revision: 0,
                 items: HashMap::new(),
@@ -377,6 +461,7 @@ impl ReplicaPersistence for InMemoryReplica {
                     Some(snapshot) => (
                         Some(ReplicaHead {
                             account_id: snapshot.account_id.clone(),
+                            user_id: snapshot.user_id.clone(),
                             incarnation: snapshot.incarnation.clone(),
                             replica_revision: snapshot.revision,
                             failure: snapshot.failure,
@@ -386,6 +471,45 @@ impl ReplicaPersistence for InMemoryReplica {
                     None => (None, vec![]),
                 };
                 Ok(ReplicaPersistenceResponse::Loaded { head, rows })
+            }
+            ReplicaPersistenceRequest::Install { head } => {
+                if head.replica_revision != 0 || head.failure.is_some() {
+                    return Err(replica_invariant(
+                        "installed Replica head must begin clean at revision zero",
+                    ));
+                }
+                let mut accounts = self.accounts.lock().expect("replica lock poisoned");
+                let result = match accounts.get(&head.account_id) {
+                    Some(previous) => {
+                        if previous.user_id != head.user_id {
+                            return Err(replica_invariant(
+                                "installed Account identity cannot change User",
+                            ));
+                        }
+                        if previous.incarnation == head.incarnation {
+                            return Err(replica_invariant(
+                                "replaced Account must receive a new incarnation",
+                            ));
+                        }
+                        ReplicaInstallResult::Replaced {
+                            previous_incarnation: previous.incarnation.clone(),
+                        }
+                    }
+                    None => ReplicaInstallResult::Created,
+                };
+                accounts.insert(
+                    head.account_id.clone(),
+                    AccountReplica {
+                        account_id: head.account_id,
+                        user_id: head.user_id,
+                        incarnation: head.incarnation,
+                        revision: 0,
+                        items: HashMap::new(),
+                        operations: HashMap::new(),
+                        failure: None,
+                    },
+                );
+                Ok(ReplicaPersistenceResponse::Installed { result })
             }
             ReplicaPersistenceRequest::Commit { prepared } => {
                 let mut accounts = self.accounts.lock().expect("replica lock poisoned");
@@ -408,6 +532,7 @@ impl ReplicaPersistence for InMemoryReplica {
                     .checked_add(1)
                     .ok_or_else(|| replica_invariant("Replica revision overflowed"))?;
                 if prepared.next_head.account_id != prepared.expected.account_id
+                    || prepared.next_head.user_id != current.user_id
                     || prepared.next_head.incarnation != prepared.expected.incarnation
                     || prepared.next_head.replica_revision != expected_next_revision
                 {
@@ -619,6 +744,7 @@ mod persistence_contract_tests {
         let prepared = prepare_commit(
             ReplicaSnapshot {
                 account_id: AccountId::from("account-1"),
+                user_id: "user-1".into(),
                 incarnation: Incarnation::from("incarnation-1"),
                 revision: 41,
                 items: vec![],
@@ -650,6 +776,7 @@ mod persistence_contract_tests {
                     },
                     "nextHead": {
                         "accountId": "account-1",
+                        "userId": "user-1",
                         "incarnation": "incarnation-1",
                         "replicaRevision": "42",
                         "failure": null
@@ -722,6 +849,7 @@ mod persistence_contract_tests {
     fn valid_domain_plan_becomes_an_opaque_primitive_commit() {
         let current = ReplicaSnapshot {
             account_id: AccountId::from("account-1"),
+            user_id: "user-1".into(),
             incarnation: Incarnation::from("incarnation-1"),
             revision: 4,
             items: vec![],
@@ -764,6 +892,7 @@ mod persistence_contract_tests {
         let account_id = AccountId::from("account-1");
         let head = ReplicaHead {
             account_id: account_id.clone(),
+            user_id: "user-1".into(),
             incarnation: Incarnation::from("incarnation-1"),
             replica_revision: 7,
             failure: None,
@@ -779,6 +908,18 @@ mod persistence_contract_tests {
 
         let error = reconstruct_snapshot(&account_id, Some(head), vec![mismatched]).unwrap_err();
         assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(reconstruct_snapshot(
+            &account_id,
+            Some(ReplicaHead {
+                account_id: account_id.clone(),
+                user_id: String::new(),
+                incarnation: Incarnation::from("incarnation-1"),
+                replica_revision: 0,
+                failure: None,
+            }),
+            vec![],
+        )
+        .is_err());
         assert!(reconstruct_snapshot(&account_id, None, vec![])
             .unwrap()
             .is_none());
@@ -809,6 +950,53 @@ mod persistence_contract_tests {
             .unwrap();
         let persistence: Arc<dyn ReplicaPersistence> = persistence;
         assert_replica_conformance(&Replica::new(persistence)).await;
+    }
+
+    #[tokio::test]
+    async fn installation_and_commit_cannot_change_the_account_user_identity() {
+        let persistence = Arc::new(InMemoryReplica::default());
+        let replica = Replica::new(persistence.clone());
+        let account_id = AccountId::from("account-1");
+        replica
+            .install_or_replace(
+                account_id.clone(),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .await
+            .unwrap();
+        assert!(replica
+            .install_or_replace(
+                account_id.clone(),
+                "user-2".into(),
+                Incarnation::from("incarnation-2"),
+            )
+            .await
+            .is_err());
+        let current = replica.load(&account_id).await.unwrap().unwrap();
+        assert_eq!(current.user_id, "user-1");
+        assert_eq!(current.incarnation, Incarnation::from("incarnation-1"));
+
+        let mut prepared = prepare_commit(
+            current,
+            GuardedCommitPlan::new(
+                account_id.clone(),
+                Incarnation::from("incarnation-1"),
+                0,
+                vec![],
+            ),
+        )
+        .unwrap()
+        .wire;
+        prepared.next_head.user_id = "user-2".into();
+        assert!(persistence
+            .invoke(ReplicaPersistenceRequest::Commit { prepared })
+            .await
+            .is_err());
+        assert_eq!(
+            replica.load(&account_id).await.unwrap().unwrap().user_id,
+            "user-1"
+        );
     }
 
     #[tokio::test]

@@ -156,6 +156,7 @@ pub(crate) enum RecomputedPlanResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReplicaSnapshot {
     pub account_id: AccountId,
+    pub user_id: String,
     pub incarnation: Incarnation,
     #[serde(with = "decimal_u64")]
     pub revision: u64,
@@ -184,6 +185,7 @@ pub(super) fn apply_plan(
 #[derive(Clone)]
 pub(super) struct AccountReplica {
     pub(super) account_id: AccountId,
+    pub(super) user_id: String,
     pub(super) incarnation: Incarnation,
     pub(super) revision: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
@@ -195,6 +197,7 @@ impl AccountReplica {
     pub(super) fn from_snapshot(snapshot: ReplicaSnapshot) -> Self {
         Self {
             account_id: snapshot.account_id,
+            user_id: snapshot.user_id,
             incarnation: snapshot.incarnation,
             revision: snapshot.revision,
             items: snapshot
@@ -257,6 +260,7 @@ impl AccountReplica {
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         ReplicaSnapshot {
             account_id: self.account_id.clone(),
+            user_id: self.user_id.clone(),
             incarnation: self.incarnation.clone(),
             revision: self.revision,
             items,
