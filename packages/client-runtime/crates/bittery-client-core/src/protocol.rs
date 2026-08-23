@@ -260,6 +260,9 @@ pub struct LoginItemProjection {
     pub custom_fields: Vec<LoginCustomField>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    pub favorite: bool,
+    pub created_at: String,
+    pub updated_at: String,
     pub status: ItemProjectionStatus,
 }
 
@@ -299,7 +302,15 @@ pub struct AccountStatus {
     pub account_id: AccountId,
     pub replica_revision: u64,
     pub access: AccountAccessState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<AccountWaitingReason>,
     pub failure: Option<RuntimeErrorCode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountWaitingReason {
+    ReauthenticationRequired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

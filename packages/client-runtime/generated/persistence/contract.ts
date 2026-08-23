@@ -34,7 +34,7 @@ key: ReplicaRowKey
 store: ReplicaStore
 type: "delete"
 })
-export type ReplicaStore = ("optimisticItems" | "operations")
+export type ReplicaStore = ("optimisticItems" | "operations" | "replicaMetadata" | "bootstrapGenerations" | "bootstrapPages" | "authorityVaults" | "authorityItems")
 export type ReplicaPersistenceResponse = ({
 head: (ReplicaHead | null)
 rows: StoredReplicaRow[]
@@ -79,22 +79,11 @@ response: ReplicaPersistenceResponse
 export interface PreparedReplicaInstall {
 expected: ExpectedReplicaInstall
 nextHead: ReplicaHead
+writes: PreparedReplicaWrite[]
 }
 export interface ReplicaHead {
 accountId: string
 failure: (RuntimeErrorCode | null)
-incarnation: string
-lockEpoch: string
-replicaRevision: string
-userId: string
-}
-export interface PreparedReplicaCommit {
-expected: ExpectedReplicaHead
-nextHead: ReplicaHead
-writes: PreparedReplicaWrite[]
-}
-export interface ExpectedReplicaHead {
-accountId: string
 incarnation: string
 lockEpoch: string
 replicaRevision: string
@@ -108,6 +97,18 @@ store: ReplicaStore
 export interface ReplicaRowKey {
 accountId: string
 recordId: string
+}
+export interface PreparedReplicaCommit {
+expected: ExpectedReplicaHead
+nextHead: ReplicaHead
+writes: PreparedReplicaWrite[]
+}
+export interface ExpectedReplicaHead {
+accountId: string
+incarnation: string
+lockEpoch: string
+replicaRevision: string
+userId: string
 }
 export interface PreparedLockEpochAdvance {
 expected: ExpectedReplicaHead

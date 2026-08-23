@@ -12,27 +12,28 @@ mod persistence_contract;
 #[cfg(test)]
 use domain::apply_plan;
 use domain::AccountReplica;
-#[cfg(test)]
-use domain::{
-    AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
-    AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthoritySnapshot,
-    BootstrapContinuation, BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor,
-    BootstrapPageIdentity, CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult,
-    PromoteBootstrapPlan, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
-    StageBootstrapPageResult, SyncCursor,
-};
+#[allow(
+    unused_imports,
+    reason = "closed Replica types are re-exported for Runtime"
+)]
 pub(crate) use domain::{
-    GuardedCommitPlan, OperationRecord, PlanMutation, PlanResult, RecomputedPlanResult,
-    ReplicaItemRecord, ReplicaSnapshot,
+    AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
+    AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
+    BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
+    BootstrapPageCursor, BootstrapPageIdentity, CleanupBootstrapGenerationPlan,
+    CleanupBootstrapGenerationResult, GuardedCommitPlan, MarkRefreshRequiredPlan, OperationRecord,
+    PlanMutation, PlanResult, PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord,
+    ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
+    StageBootstrapPageResult, SyncCursor,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use persistence_contract::persistence_contract_schema;
 pub(crate) use persistence_contract::ReplicaPersistenceRequest;
 use persistence_contract::{
-    apply_prepared_writes_to_rows, prepare_commit, prepare_install, reconstruct_snapshot,
-    replica_invariant, snapshot_rows, ExpectedReplicaInstall, LockEpochAdvanceResult,
-    PreparedCommitOutcome, PreparedLockEpochAdvance, ReplicaInstallResult,
+    apply_prepared_writes_to_rows, prepare_bootstrap_commit, prepare_commit, prepare_install,
+    reconstruct_snapshot, replica_invariant, snapshot_rows, ExpectedReplicaInstall,
+    LockEpochAdvanceResult, PreparedCommitOutcome, PreparedLockEpochAdvance, ReplicaInstallResult,
 };
 use persistence_contract::{ReplicaHead, ReplicaPersistenceResponse};
 #[cfg(test)]
@@ -277,6 +278,75 @@ mod bootstrap_authority_tests {
             SyncCursor::CapturedValue {
                 id: "event-2".into()
             }
+        );
+    }
+
+    #[test]
+    fn refresh_required_keeps_the_active_generation_readable() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "old");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "old",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedValue {
+                    id: "event-1".into(),
+                },
+                BootstrapContinuation::Final,
+                "old-item",
+            ))
+            .unwrap();
+        promote(&replica, &account_id, 1, "old");
+
+        assert_eq!(
+            replica
+                .mark_refresh_required(MarkRefreshRequiredPlan {
+                    guard: guard(&account_id, 2),
+                })
+                .unwrap(),
+            PlanResult::Applied {
+                replica_revision: 3
+            }
+        );
+        let refresh = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(refresh.state, ReplicaState::RefreshRequired);
+        assert_eq!(refresh.visible_items, vec![item("old-item", "vault-1")]);
+
+        begin(&replica, &account_id, 3, "new");
+        let staging = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(staging.state, ReplicaState::Bootstrapping);
+        assert_eq!(staging.visible_items, vec![item("old-item", "vault-1")]);
+        assert_eq!(
+            replica
+                .snapshot(&account_id)
+                .unwrap()
+                .bootstrap
+                .generations
+                .get(&generation("new"))
+                .unwrap()
+                .fallback_state,
+            ReplicaState::RefreshRequired
+        );
+
+        let cold = InMemoryReplica::default();
+        let cold_account = AccountId::from("account-cold");
+        cold.install(
+            cold_account.clone(),
+            "user-bootstrap".into(),
+            Incarnation::from("incarnation-bootstrap"),
+        )
+        .unwrap();
+        assert_eq!(
+            cold.mark_refresh_required(MarkRefreshRequiredPlan {
+                guard: guard(&cold_account, 0),
+            })
+            .unwrap_err()
+            .code,
+            RuntimeErrorCode::InvariantViolation
         );
     }
 
@@ -749,6 +819,66 @@ mod bootstrap_authority_tests {
         assert!(bootstrap.generation_ids.is_empty());
         assert!(bootstrap.visible_items.is_empty());
     }
+
+    #[tokio::test]
+    async fn a_stale_server_version_cannot_overwrite_newer_ciphertext() {
+        let persistence = Arc::new(InMemoryReplica::default());
+        let account_id = AccountId::from("account-bootstrap");
+        persistence
+            .install(
+                account_id.clone(),
+                "user-bootstrap".into(),
+                Incarnation::from("incarnation-bootstrap"),
+            )
+            .unwrap();
+        begin(&persistence, &account_id, 0, "generation-1");
+        persistence
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "generation-1",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedValue {
+                    id: "event-1".into(),
+                },
+                BootstrapContinuation::Final,
+                "item-1",
+            ))
+            .unwrap();
+        promote(&persistence, &account_id, 1, "generation-1");
+        let replica = Replica::new(persistence.clone());
+        replica.load(&account_id).await.unwrap();
+        let mut older = item("item-1", "vault-1");
+        older.version = 0;
+        older.encrypted_data = "stale-ciphertext".into();
+        let error = replica
+            .apply_authoritative_item(
+                &account_id,
+                SyncCursor::CapturedValue {
+                    id: "event-1".into(),
+                },
+                SyncCursor::CapturedValue {
+                    id: "event-2".into(),
+                },
+                older,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        let snapshot = persistence.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(
+            snapshot.active_cursor,
+            SyncCursor::CapturedValue {
+                id: "event-1".into()
+            }
+        );
+        assert_eq!(
+            snapshot.visible_items[0].encrypted_data,
+            "ciphertext-item-1"
+        );
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1191,6 +1321,157 @@ impl Replica {
         }
     }
 
+    pub(crate) async fn begin_bootstrap(
+        &self,
+        plan: BeginBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        self.persist_applied_bootstrap(&account_id, true, |account| account.begin_bootstrap(plan))
+            .await
+    }
+
+    pub(crate) async fn mark_refresh_required(
+        &self,
+        plan: MarkRefreshRequiredPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(PlanResult::Missing);
+        };
+        let mut account = AccountReplica::from_snapshot(current.clone());
+        let result = account.mark_refresh_required(plan)?;
+        if !matches!(result, PlanResult::Applied { replica_revision } if replica_revision != current.revision)
+        {
+            return Ok(result);
+        }
+        self.commit_bootstrap_snapshot(current, account.snapshot(), true)
+            .await
+    }
+
+    pub(crate) async fn stage_bootstrap_page(
+        &self,
+        plan: StageBootstrapPagePlan,
+    ) -> Result<StageBootstrapPageResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(StageBootstrapPageResult::Missing);
+        };
+        let mut account = AccountReplica::from_snapshot(current.clone());
+        let result = account.stage_bootstrap_page(plan)?;
+        if result != StageBootstrapPageResult::Applied {
+            return Ok(result);
+        }
+        self.commit_bootstrap_snapshot(current, account.snapshot(), false)
+            .await?;
+        Ok(result)
+    }
+
+    pub(crate) async fn promote_bootstrap(
+        &self,
+        plan: PromoteBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        self.persist_applied_bootstrap(&account_id, true, |account| account.promote_bootstrap(plan))
+            .await
+    }
+
+    pub(crate) async fn abandon_bootstrap(
+        &self,
+        plan: AbandonBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        self.persist_applied_bootstrap(&account_id, true, |account| account.abandon_bootstrap(plan))
+            .await
+    }
+
+    #[allow(
+        dead_code,
+        reason = "cleanup runs after a later generation is abandoned"
+    )]
+    pub(crate) async fn cleanup_bootstrap_generation(
+        &self,
+        plan: CleanupBootstrapGenerationPlan,
+    ) -> Result<CleanupBootstrapGenerationResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(CleanupBootstrapGenerationResult::Missing);
+        };
+        let mut account = AccountReplica::from_snapshot(current.clone());
+        let result = account.cleanup_bootstrap_generation(plan)?;
+        if result != CleanupBootstrapGenerationResult::Applied {
+            return Ok(result);
+        }
+        self.commit_bootstrap_snapshot(current, account.snapshot(), false)
+            .await?;
+        Ok(result)
+    }
+
+    pub(crate) async fn apply_authoritative_item(
+        &self,
+        account_id: &AccountId,
+        expected_cursor: SyncCursor,
+        next_cursor: SyncCursor,
+        item: AuthorityItemRecord,
+    ) -> Result<PlanResult, RuntimeError> {
+        self.persist_applied_bootstrap(account_id, true, |account| {
+            account.apply_authoritative_item(&expected_cursor, next_cursor, item)
+        })
+        .await
+    }
+
+    async fn persist_applied_bootstrap(
+        &self,
+        account_id: &AccountId,
+        increment_revision: bool,
+        apply: impl FnOnce(&mut AccountReplica) -> Result<PlanResult, RuntimeError>,
+    ) -> Result<PlanResult, RuntimeError> {
+        let Some(current) = self.load_uncached(account_id).await? else {
+            return Ok(PlanResult::Missing);
+        };
+        let mut account = AccountReplica::from_snapshot(current.clone());
+        let result = apply(&mut account)?;
+        if !matches!(result, PlanResult::Applied { .. }) {
+            return Ok(result);
+        }
+        self.commit_bootstrap_snapshot(current, account.snapshot(), increment_revision)
+            .await
+    }
+
+    async fn commit_bootstrap_snapshot(
+        &self,
+        current: ReplicaSnapshot,
+        next: ReplicaSnapshot,
+        increment_revision: bool,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = current.account_id.clone();
+        let prepared = prepare_bootstrap_commit(current, next.clone(), increment_revision)?;
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::Commit {
+                prepared: prepared.wire,
+            })
+            .await?;
+        let ReplicaPersistenceResponse::Committed { result } = response else {
+            return Err(replica_invariant(
+                "Replica persistence returned a non-commit response for Bootstrap",
+            ));
+        };
+        if let PlanResult::Applied { replica_revision } = result {
+            if replica_revision != next.revision {
+                return Err(replica_invariant(
+                    "Replica persistence committed an unexpected Bootstrap revision",
+                ));
+            }
+            self.snapshots
+                .lock()
+                .expect("Replica cache lock poisoned")
+                .insert(next.account_id.clone(), next);
+        } else {
+            self.load(&account_id).await?;
+        }
+        Ok(result)
+    }
+
     pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
         self.snapshots
             .lock()
@@ -1269,7 +1550,6 @@ pub(crate) struct InMemoryReplica {
 #[derive(Default)]
 struct InMemoryReplicaState {
     accounts: HashMap<AccountId, AccountReplica>,
-    bootstrap: HashMap<AccountId, domain::BootstrapAuthority>,
 }
 
 impl InMemoryReplica {
@@ -1287,9 +1567,6 @@ impl InMemoryReplica {
                 "account is already installed",
             ));
         }
-        state
-            .bootstrap
-            .insert(account_id.clone(), domain::BootstrapAuthority::default());
         state.accounts.insert(
             account_id.clone(),
             AccountReplica {
@@ -1301,6 +1578,7 @@ impl InMemoryReplica {
                 items: HashMap::new(),
                 operations: HashMap::new(),
                 failure: None,
+                bootstrap: domain::BootstrapAuthority::default(),
             },
         );
         Ok(())
@@ -1332,9 +1610,11 @@ impl InMemoryReplica {
 
     #[cfg(test)]
     pub(crate) fn remove(&self, account_id: &AccountId) {
-        let mut state = self.state.lock().expect("replica lock poisoned");
-        state.accounts.remove(account_id);
-        state.bootstrap.remove(account_id);
+        self.state
+            .lock()
+            .expect("replica lock poisoned")
+            .accounts
+            .remove(account_id);
     }
 
     pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
@@ -1354,9 +1634,9 @@ impl InMemoryReplica {
         self.state
             .lock()
             .expect("replica lock poisoned")
-            .bootstrap
+            .accounts
             .get(account_id)
-            .map(domain::BootstrapAuthority::snapshot)
+            .map(|account| account.bootstrap.snapshot())
     }
 
     #[cfg(test)]
@@ -1365,14 +1645,22 @@ impl InMemoryReplica {
         plan: BeginBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
-        let account_id = plan.guard.account_id.clone();
-        let Some(mut account) = state.accounts.remove(&account_id) else {
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
             return Ok(PlanResult::Missing);
         };
-        let result =
-            account.begin_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
-        state.accounts.insert(account_id, account);
-        result
+        account.begin_bootstrap(plan)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_refresh_required(
+        &self,
+        plan: MarkRefreshRequiredPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
+            return Ok(PlanResult::Missing);
+        };
+        account.mark_refresh_required(plan)
     }
 
     #[cfg(test)]
@@ -1381,14 +1669,10 @@ impl InMemoryReplica {
         plan: StageBootstrapPagePlan,
     ) -> Result<StageBootstrapPageResult, RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
-        let account_id = plan.guard.account_id.clone();
-        let Some(mut account) = state.accounts.remove(&account_id) else {
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
             return Ok(StageBootstrapPageResult::Missing);
         };
-        let result = account
-            .stage_bootstrap_page(state.bootstrap.entry(account_id.clone()).or_default(), plan);
-        state.accounts.insert(account_id, account);
-        result
+        account.stage_bootstrap_page(plan)
     }
 
     #[cfg(test)]
@@ -1397,14 +1681,10 @@ impl InMemoryReplica {
         plan: PromoteBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
-        let account_id = plan.guard.account_id.clone();
-        let Some(mut account) = state.accounts.remove(&account_id) else {
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
             return Ok(PlanResult::Missing);
         };
-        let result =
-            account.promote_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
-        state.accounts.insert(account_id, account);
-        result
+        account.promote_bootstrap(plan)
     }
 
     #[cfg(test)]
@@ -1413,14 +1693,10 @@ impl InMemoryReplica {
         plan: AbandonBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
-        let account_id = plan.guard.account_id.clone();
-        let Some(mut account) = state.accounts.remove(&account_id) else {
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
             return Ok(PlanResult::Missing);
         };
-        let result =
-            account.abandon_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
-        state.accounts.insert(account_id, account);
-        result
+        account.abandon_bootstrap(plan)
     }
 
     #[cfg(test)]
@@ -1429,16 +1705,10 @@ impl InMemoryReplica {
         plan: CleanupBootstrapGenerationPlan,
     ) -> Result<CleanupBootstrapGenerationResult, RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
-        let account_id = plan.guard.account_id.clone();
-        let Some(mut account) = state.accounts.remove(&account_id) else {
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
             return Ok(CleanupBootstrapGenerationResult::Missing);
         };
-        let result = account.cleanup_bootstrap_generation(
-            state.bootstrap.entry(account_id.clone()).or_default(),
-            plan,
-        );
-        state.accounts.insert(account_id, account);
-        result
+        account.cleanup_bootstrap_generation(plan)
     }
 
     #[cfg(test)]
@@ -1551,13 +1821,32 @@ impl ReplicaPersistence for InMemoryReplica {
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
                                 failure: head.failure,
+                                bootstrap: domain::BootstrapAuthority::default(),
                             },
                         );
                     }
                 }
-                state
-                    .bootstrap
-                    .insert(account_id, domain::BootstrapAuthority::default());
+                if let Some(current) = state.accounts.get_mut(&account_id) {
+                    current.bootstrap = domain::BootstrapAuthority::default();
+                    let rows = apply_prepared_writes_to_rows(
+                        snapshot_rows(current.snapshot())?,
+                        &prepared.writes,
+                    );
+                    let restored = reconstruct_snapshot(
+                        &account_id,
+                        Some(ReplicaHead {
+                            account_id: current.account_id.clone(),
+                            user_id: current.user_id.clone(),
+                            incarnation: current.incarnation.clone(),
+                            replica_revision: current.revision,
+                            lock_epoch: current.lock_epoch,
+                            failure: current.failure,
+                        }),
+                        rows,
+                    )?
+                    .ok_or_else(|| replica_invariant("prepared Replica install lost its head"))?;
+                    *current = AccountReplica::from_snapshot(restored);
+                }
                 Ok(ReplicaPersistenceResponse::Installed {
                     result: ReplicaInstallResult::Applied,
                 })
@@ -1580,6 +1869,7 @@ impl ReplicaPersistence for InMemoryReplica {
                         },
                     });
                 }
+                let expected_same_revision = current.revision;
                 let expected_next_revision = current
                     .revision
                     .checked_add(1)
@@ -1587,7 +1877,8 @@ impl ReplicaPersistence for InMemoryReplica {
                 if prepared.next_head.account_id != prepared.expected.account_id
                     || prepared.next_head.user_id != current.user_id
                     || prepared.next_head.incarnation != prepared.expected.incarnation
-                    || prepared.next_head.replica_revision != expected_next_revision
+                    || (prepared.next_head.replica_revision != expected_same_revision
+                        && prepared.next_head.replica_revision != expected_next_revision)
                     || prepared.next_head.lock_epoch != current.lock_epoch
                 {
                     return Err(replica_invariant(
@@ -1598,6 +1889,7 @@ impl ReplicaPersistence for InMemoryReplica {
                     snapshot_rows(current.snapshot())?,
                     &prepared.writes,
                 );
+                let replica_revision = prepared.next_head.replica_revision;
                 let next = reconstruct_snapshot(
                     &prepared.expected.account_id,
                     Some(prepared.next_head),
@@ -1607,9 +1899,7 @@ impl ReplicaPersistence for InMemoryReplica {
                 let next = AccountReplica::from_snapshot(next);
                 state.accounts.insert(next.account_id.clone(), next);
                 Ok(ReplicaPersistenceResponse::Committed {
-                    result: PlanResult::Applied {
-                        replica_revision: expected_next_revision,
-                    },
+                    result: PlanResult::Applied { replica_revision },
                 })
             }
             ReplicaPersistenceRequest::AdvanceLockEpoch { prepared } => {
@@ -1987,6 +2277,7 @@ mod persistence_contract_tests {
                     items: vec![item("account-1", "item-1")],
                     operations: vec![operation("operation-1", "item-1")],
                     failure: None,
+                    bootstrap: BootstrapAuthority::default(),
                 },
                 next_head: Mutex::new(None),
                 corruption,
@@ -2019,6 +2310,7 @@ mod persistence_contract_tests {
                 items: vec![item("account-1", "item-1")],
                 operations: vec![operation("operation-1", "item-1")],
                 failure: None,
+                bootstrap: BootstrapAuthority::default(),
             },
             next_head: Mutex::new(None),
             corruption: RowCorruption::Change,
@@ -2239,6 +2531,7 @@ mod persistence_contract_tests {
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
                 failure: None,
+                bootstrap: BootstrapAuthority::default(),
             },
             GuardedCommitPlan::new(
                 AccountId::from("account-1"),
@@ -2349,6 +2642,7 @@ mod persistence_contract_tests {
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
             failure: None,
+            bootstrap: BootstrapAuthority::default(),
         };
         let prepared = prepare_commit(
             current,

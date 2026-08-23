@@ -1,6 +1,8 @@
 use super::domain::{
-    apply_plan, decimal_u64, AccountReplica, GuardedCommitPlan, OperationRecord, PlanMutation,
-    PlanResult, ReplicaItemRecord, ReplicaSnapshot,
+    apply_plan, decimal_u64, AccountReplica, AuthorityItemRecord, AuthorityVaultRecord,
+    BootstrapAuthority, BootstrapGenerationId, BootstrapGenerationRecord, BootstrapPageReceipt,
+    GuardedCommitPlan, OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord,
+    ReplicaSnapshot, ReplicaState, SyncCursor,
 };
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,11 @@ mod required_option {
 pub(crate) enum ReplicaStore {
     OptimisticItems,
     Operations,
+    ReplicaMetadata,
+    BootstrapGenerations,
+    BootstrapPages,
+    AuthorityVaults,
+    AuthorityItems,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +116,8 @@ pub(crate) enum ExpectedReplicaInstall {
 pub(crate) struct PreparedReplicaInstall {
     pub expected: ExpectedReplicaInstall,
     pub next_head: ReplicaHead,
+    #[serde(default)]
+    pub writes: Vec<PreparedReplicaWrite>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,6 +318,10 @@ pub(super) fn prepare_install(
             )
         }
     };
+    let writes = match current {
+        Some(current) => bootstrap_clear_writes(&current.account_id, &current.bootstrap)?,
+        None => Vec::new(),
+    };
     Ok(PreparedReplicaInstall {
         expected,
         next_head: ReplicaHead {
@@ -319,6 +332,7 @@ pub(super) fn prepare_install(
             lock_epoch: 0,
             failure: None,
         },
+        writes,
     })
 }
 
@@ -408,7 +422,9 @@ fn stored_row<T: Serialize>(
 pub(super) fn snapshot_rows(
     snapshot: ReplicaSnapshot,
 ) -> Result<Vec<StoredReplicaRow>, RuntimeError> {
-    let mut rows = Vec::with_capacity(snapshot.items.len() + snapshot.operations.len());
+    let mut rows = Vec::with_capacity(
+        snapshot.items.len() + snapshot.operations.len() + snapshot.bootstrap.row_count(),
+    );
     for item in snapshot.items {
         rows.push(stored_row(
             ReplicaStore::OptimisticItems,
@@ -425,6 +441,7 @@ pub(super) fn snapshot_rows(
             &operation,
         )?);
     }
+    rows.extend(bootstrap_rows(&snapshot.account_id, &snapshot.bootstrap)?);
     Ok(rows)
 }
 
@@ -467,6 +484,8 @@ pub(super) fn reconstruct_snapshot(
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
+    let mut bootstrap = BootstrapAuthority::default();
+    let mut saw_metadata = false;
     for row in rows {
         if row.key.account_id != head.account_id {
             return Err(replica_invariant(
@@ -501,8 +520,120 @@ pub(super) fn reconstruct_snapshot(
                     return Err(replica_invariant("Replica operation row key is duplicated"));
                 }
             }
+            ReplicaStore::ReplicaMetadata => {
+                if row.key.record_id != BOOTSTRAP_METADATA_ID {
+                    return Err(replica_invariant(
+                        "Replica metadata row key is not the Bootstrap head",
+                    ));
+                }
+                let metadata: BootstrapMetadataRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica Bootstrap metadata is invalid"))?;
+                if saw_metadata {
+                    return Err(replica_invariant(
+                        "Replica Bootstrap metadata is duplicated",
+                    ));
+                }
+                saw_metadata = true;
+                bootstrap.state = metadata.state;
+                bootstrap.active_generation = metadata.active_generation;
+                bootstrap.active_cursor = metadata.active_cursor;
+                bootstrap.staging_generation = metadata.staging_generation;
+            }
+            ReplicaStore::BootstrapGenerations => {
+                let generation: BootstrapGenerationRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| {
+                        replica_invariant("Replica Bootstrap generation payload is invalid")
+                    })?;
+                if generation.generation_id.0 != row.key.record_id {
+                    return Err(replica_invariant(
+                        "Replica Bootstrap generation key does not match its payload",
+                    ));
+                }
+                if bootstrap
+                    .generations
+                    .insert(generation.generation_id.clone(), generation)
+                    .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica Bootstrap generation key is duplicated",
+                    ));
+                }
+            }
+            ReplicaStore::BootstrapPages => {
+                let receipt: BootstrapPageReceipt = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica Bootstrap page payload is invalid"))?;
+                if composite_record_id(
+                    &receipt.generation_id.0,
+                    &receipt.page_identity.0.to_string(),
+                ) != row.key.record_id
+                {
+                    return Err(replica_invariant(
+                        "Replica Bootstrap page key does not match its payload",
+                    ));
+                }
+                if bootstrap
+                    .pages
+                    .insert(
+                        (receipt.generation_id.clone(), receipt.page_identity),
+                        receipt,
+                    )
+                    .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica Bootstrap page key is duplicated",
+                    ));
+                }
+            }
+            ReplicaStore::AuthorityVaults => {
+                let (generation_id, vault_id) = split_composite_record_id(&row.key.record_id)?;
+                let vault: AuthorityVaultRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica Vault payload is invalid"))?;
+                if vault.id != vault_id {
+                    return Err(replica_invariant(
+                        "Replica Vault key does not match its payload",
+                    ));
+                }
+                if bootstrap
+                    .vaults
+                    .insert(
+                        (BootstrapGenerationId(generation_id), vault.id.clone()),
+                        vault,
+                    )
+                    .is_some()
+                {
+                    return Err(replica_invariant("Replica Vault key is duplicated"));
+                }
+            }
+            ReplicaStore::AuthorityItems => {
+                let (generation_id, item_id) = split_composite_record_id(&row.key.record_id)?;
+                let item: AuthorityItemRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica Item payload is invalid"))?;
+                if item.id != item_id {
+                    return Err(replica_invariant(
+                        "Replica Item key does not match its payload",
+                    ));
+                }
+                if bootstrap
+                    .items
+                    .insert(
+                        (BootstrapGenerationId(generation_id), item.id.clone()),
+                        item,
+                    )
+                    .is_some()
+                {
+                    return Err(replica_invariant("Replica Item key is duplicated"));
+                }
+            }
         }
     }
+    if !saw_metadata && bootstrap != BootstrapAuthority::default() {
+        return Err(replica_invariant(
+            "Replica Bootstrap rows exist without metadata",
+        ));
+    }
+    bootstrap
+        .validate()
+        .map_err(|_| replica_invariant("Replica Bootstrap authority is inconsistent"))?;
 
     Ok(Some(
         AccountReplica {
@@ -514,6 +645,7 @@ pub(super) fn reconstruct_snapshot(
             items,
             operations,
             failure: head.failure,
+            bootstrap,
         }
         .snapshot(),
     ))
@@ -521,4 +653,181 @@ pub(super) fn reconstruct_snapshot(
 
 pub(super) fn replica_invariant(message: impl Into<String>) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+const BOOTSTRAP_METADATA_ID: &str = "bootstrap";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapMetadataRecord {
+    state: ReplicaState,
+    #[serde(deserialize_with = "required_option::deserialize")]
+    active_generation: Option<BootstrapGenerationId>,
+    active_cursor: SyncCursor,
+    #[serde(deserialize_with = "required_option::deserialize")]
+    staging_generation: Option<BootstrapGenerationId>,
+}
+
+fn composite_record_id(left: &str, right: &str) -> String {
+    format!("{left}/{right}")
+}
+
+fn split_composite_record_id(value: &str) -> Result<(String, String), RuntimeError> {
+    let Some((left, right)) = value.split_once('/') else {
+        return Err(replica_invariant("Replica composite row key is invalid"));
+    };
+    if left.is_empty() || right.is_empty() {
+        return Err(replica_invariant("Replica composite row key is invalid"));
+    }
+    Ok((left.to_owned(), right.to_owned()))
+}
+
+fn bootstrap_rows(
+    account_id: &crate::AccountId,
+    bootstrap: &BootstrapAuthority,
+) -> Result<Vec<StoredReplicaRow>, RuntimeError> {
+    if bootstrap == &BootstrapAuthority::default() {
+        return Ok(Vec::new());
+    }
+    let mut rows = Vec::with_capacity(bootstrap.row_count());
+    rows.push(stored_row(
+        ReplicaStore::ReplicaMetadata,
+        account_id,
+        BOOTSTRAP_METADATA_ID,
+        &BootstrapMetadataRecord {
+            state: bootstrap.state,
+            active_generation: bootstrap.active_generation.clone(),
+            active_cursor: bootstrap.active_cursor.clone(),
+            staging_generation: bootstrap.staging_generation.clone(),
+        },
+    )?);
+    for (generation_id, generation) in &bootstrap.generations {
+        rows.push(stored_row(
+            ReplicaStore::BootstrapGenerations,
+            account_id,
+            &generation_id.0,
+            generation,
+        )?);
+    }
+    for ((generation_id, page_identity), receipt) in &bootstrap.pages {
+        rows.push(stored_row(
+            ReplicaStore::BootstrapPages,
+            account_id,
+            &composite_record_id(&generation_id.0, &page_identity.0.to_string()),
+            receipt,
+        )?);
+    }
+    for ((generation_id, vault_id), vault) in &bootstrap.vaults {
+        rows.push(stored_row(
+            ReplicaStore::AuthorityVaults,
+            account_id,
+            &composite_record_id(&generation_id.0, vault_id),
+            vault,
+        )?);
+    }
+    for ((generation_id, item_id), item) in &bootstrap.items {
+        rows.push(stored_row(
+            ReplicaStore::AuthorityItems,
+            account_id,
+            &composite_record_id(&generation_id.0, item_id),
+            item,
+        )?);
+    }
+    Ok(rows)
+}
+
+fn bootstrap_clear_writes(
+    account_id: &crate::AccountId,
+    bootstrap: &BootstrapAuthority,
+) -> Result<Vec<PreparedReplicaWrite>, RuntimeError> {
+    Ok(bootstrap_rows(account_id, bootstrap)?
+        .into_iter()
+        .map(|row| PreparedReplicaWrite::Delete {
+            store: row.store,
+            key: row.key,
+        })
+        .collect())
+}
+
+pub(super) fn bootstrap_write_diff(
+    account_id: &crate::AccountId,
+    current: &BootstrapAuthority,
+    next: &BootstrapAuthority,
+) -> Result<Vec<PreparedReplicaWrite>, RuntimeError> {
+    let current_rows = bootstrap_rows(account_id, current)?;
+    let next_rows = bootstrap_rows(account_id, next)?;
+    let mut writes = Vec::new();
+    for row in &next_rows {
+        let unchanged = current_rows.iter().any(|current_row| current_row == row);
+        if !unchanged {
+            writes.push(PreparedReplicaWrite::Put { row: row.clone() });
+        }
+    }
+    for row in current_rows {
+        if next_rows
+            .iter()
+            .all(|next_row| next_row.store != row.store || next_row.key != row.key)
+        {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: row.store,
+                key: row.key,
+            });
+        }
+    }
+    Ok(writes)
+}
+
+#[allow(dead_code, reason = "orchestration prepares Bootstrap commits next")]
+pub(super) fn prepare_bootstrap_commit(
+    current: ReplicaSnapshot,
+    next: ReplicaSnapshot,
+    increment_revision: bool,
+) -> Result<PreparedCommitOutcome, RuntimeError> {
+    if current.account_id != next.account_id
+        || current.user_id != next.user_id
+        || current.incarnation != next.incarnation
+        || current.lock_epoch != next.lock_epoch
+        || current.items != next.items
+        || current.operations != next.operations
+        || current.failure != next.failure
+    {
+        return Err(replica_invariant(
+            "Bootstrap commit cannot change non-authority Replica rows",
+        ));
+    }
+    let expected_revision = if increment_revision {
+        current
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| replica_invariant("Replica revision overflow"))?
+    } else {
+        current.revision
+    };
+    if next.revision != expected_revision {
+        return Err(replica_invariant(
+            "Bootstrap commit revision does not match the prepared transition",
+        ));
+    }
+    let writes = bootstrap_write_diff(&current.account_id, &current.bootstrap, &next.bootstrap)?;
+    Ok(PreparedCommitOutcome {
+        wire: PreparedReplicaCommit {
+            expected: ExpectedReplicaHead {
+                account_id: current.account_id,
+                incarnation: current.incarnation,
+                user_id: current.user_id,
+                replica_revision: current.revision,
+                lock_epoch: current.lock_epoch,
+            },
+            next_head: ReplicaHead {
+                account_id: next.account_id.clone(),
+                user_id: next.user_id.clone(),
+                incarnation: next.incarnation.clone(),
+                replica_revision: next.revision,
+                lock_epoch: next.lock_epoch,
+                failure: next.failure,
+            },
+            writes,
+        },
+        next_snapshot: next,
+    })
 }

@@ -17,6 +17,7 @@ base64.workspace = true
 bittery-crypto-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10.9"
 schemars = { version = "=1.2.2", optional = true }
 subtle.workspace = true
 thiserror.workspace = true

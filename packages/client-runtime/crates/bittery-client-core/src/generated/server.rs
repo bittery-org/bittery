@@ -297,6 +297,35 @@ pub enum ItemCategory {
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct ItemResponseDto {
+    pub category: ItemCategory,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "deletedAt")]
+    pub deleted_at: Option<String>,
+    #[serde(rename = "encryptedByUserId")]
+    pub encrypted_by_user_id: String,
+    #[serde(rename = "encryptedData")]
+    pub encrypted_data: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    pub encryption_algorithm: String,
+    #[serde(rename = "encryptionIv")]
+    pub encryption_iv: String,
+    #[serde(rename = "encryptionVersion")]
+    pub encryption_version: i32,
+    pub favorite: bool,
+    pub id: String,
+    #[serde(rename = "lastModifiedBy")]
+    pub last_modified_by: String,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+    #[serde(rename = "vaultId")]
+    pub vault_id: String,
+    pub version: i32,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct KdfParamsResponse {
     pub algorithm: String,
     pub iterations: i32,

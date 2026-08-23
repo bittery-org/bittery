@@ -148,6 +148,45 @@ describe("Runtime worker service", () => {
 		]);
 	});
 
+	test("passes authentication identity into withConfiguredExecutors", async () => {
+		const runtime = new RuntimeDouble();
+		const configured: string[] = [];
+		const configuredService = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			authClient: {
+				clientId: "bittery-web",
+				platform: "web",
+				version: "0.5.2",
+			},
+			loadWasm: async () =>
+				({
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredExecutors(
+							_replica,
+							_platform,
+							_http,
+							_cancel,
+							clientId,
+							platform,
+							version,
+						) {
+							configured.push(clientId, platform, version);
+							return runtime;
+						},
+					},
+				}) as unknown as RuntimeWasm,
+		});
+		await configuredService.request(
+			{ type: "request", requestId: "auth", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		expect(configured).toEqual(["bittery-web", "web", "0.5.2"]);
+	});
+
 	test("awaits open before request and closes safely while startup is pending", async () => {
 		let finishOpen!: () => void;
 		const opened = new Promise<void>((resolve) => {

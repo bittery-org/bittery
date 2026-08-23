@@ -20,6 +20,7 @@ const outputPath = path.join(
 export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
 	"CreateItemBody",
+	"ItemResponseDto",
 	"CreateItemOperationOutcome",
 	"FinishLoginRequest",
 	"FinishLoginResponse",
@@ -363,8 +364,8 @@ function renderSchema(name, schema) {
 			"map/object additionalProperties are not supported",
 		);
 	const required = new Set(schema.required ?? []);
-	const fields = orderedProperties(name, schema.properties ?? {})
-		.map(([field, fieldSchema]) => {
+	const fields = orderedProperties(name, schema.properties ?? {}).map(
+		([field, fieldSchema]) => {
 			const base = rustType(fieldSchema, name, field);
 			const type =
 				required.has(field) || base.startsWith("Option<")
@@ -376,7 +377,8 @@ function renderSchema(name, schema) {
 					? []
 					: [`    #[serde(rename = ${JSON.stringify(field)})]`];
 			return [...rename, `    pub ${rustField}: ${type},`].join("\n");
-		});
+		},
+	);
 	return [
 		"#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]",
 		"#[serde(deny_unknown_fields)]",

@@ -3433,6 +3433,8 @@ data class AccountStatus (
     ,
     var `access`: AccountAccessState
     ,
+    var `waitingReason`: AccountWaitingReason?
+    ,
     var `failure`: RuntimeErrorCode?
 
 ){
@@ -3453,6 +3455,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterTypeAccountAccessState.read(buf),
+            FfiConverterOptionalTypeAccountWaitingReason.read(buf),
             FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
         )
     }
@@ -3461,6 +3464,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.allocationSize(value.`accountId`) +
             FfiConverterULong.allocationSize(value.`replicaRevision`) +
             FfiConverterTypeAccountAccessState.allocationSize(value.`access`) +
+            FfiConverterOptionalTypeAccountWaitingReason.allocationSize(value.`waitingReason`) +
             FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`)
     )
 
@@ -3468,6 +3472,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.write(value.`accountId`, buf)
             FfiConverterULong.write(value.`replicaRevision`, buf)
             FfiConverterTypeAccountAccessState.write(value.`access`, buf)
+            FfiConverterOptionalTypeAccountWaitingReason.write(value.`waitingReason`, buf)
             FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
     }
 }
@@ -3602,6 +3607,39 @@ public object FfiConverterTypeAccountAccessState: FfiConverterRustBuffer<Account
     override fun allocationSize(value: AccountAccessState) = 4UL
 
     override fun write(value: AccountAccessState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class AccountWaitingReason {
+
+    REAUTHENTICATION_REQUIRED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountWaitingReason: FfiConverterRustBuffer<AccountWaitingReason> {
+    override fun read(buf: ByteBuffer) = try {
+        AccountWaitingReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AccountWaitingReason) = 4UL
+
+    override fun write(value: AccountWaitingReason, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -4264,6 +4302,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeAccountWaitingReason: FfiConverterRustBuffer<AccountWaitingReason?> {
+    override fun read(buf: ByteBuffer): AccountWaitingReason? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeAccountWaitingReason.read(buf)
+    }
+
+    override fun allocationSize(value: AccountWaitingReason?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeAccountWaitingReason.allocationSize(value)
+        }
+    }
+
+    override fun write(value: AccountWaitingReason?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeAccountWaitingReason.write(value, buf)
         }
     }
 }

@@ -14,10 +14,19 @@ import {
 } from "../generated/persistence/validator.js";
 
 const DATABASE_NAME = "bittery_replica";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
-const STORE_NAMES = ["heads", "optimistic_items", "operations"] as const;
+const STORE_NAMES = [
+	"heads",
+	"optimistic_items",
+	"operations",
+	"replica_metadata",
+	"bootstrap_generations",
+	"bootstrap_pages",
+	"authority_vaults",
+	"authority_items",
+] as const;
 
 type DatabaseStore = (typeof STORE_NAMES)[number];
 
@@ -85,7 +94,7 @@ async function openDatabase(): Promise<IDBDatabase> {
 
 function createSchema(database: IDBDatabase): void {
 	database.createObjectStore("heads", { keyPath: "accountId" });
-	for (const storeName of ["optimistic_items", "operations"]) {
+	for (const storeName of STORE_NAMES.filter((name) => name !== "heads")) {
 		const store = database.createObjectStore(storeName, {
 			keyPath: ["accountId", "recordId"],
 		});
@@ -110,32 +119,34 @@ async function load(
 	const transaction = database.transaction(STORE_NAMES, "readonly");
 	const completed = transactionDone(transaction);
 	try {
-		const [headValue, itemValues, operationValues] = await Promise.all([
+		const [headValue, ...storeValues] = await Promise.all([
 			requestResult(transaction.objectStore("heads").get(accountId)),
-			requestResult(
-				transaction
-					.objectStore("optimistic_items")
-					.index(ACCOUNT_INDEX)
-					.getAll(accountId),
-			),
-			requestResult(
-				transaction
-					.objectStore("operations")
-					.index(ACCOUNT_INDEX)
-					.getAll(accountId),
+			...STORE_NAMES.filter((name) => name !== "heads").map((storeName) =>
+				requestResult(
+					transaction
+						.objectStore(storeName)
+						.index(ACCOUNT_INDEX)
+						.getAll(accountId),
+				),
 			),
 		]);
 		await completed;
 		const head =
 			headValue === undefined ? null : parseStoredHead(headValue, accountId);
-		const rows = [
-			...itemValues.map((value) =>
-				parseStoredRow(value, "optimisticItems", accountId),
-			),
-			...operationValues.map((value) =>
-				parseStoredRow(value, "operations", accountId),
-			),
+		const stores: ReplicaStore[] = [
+			"optimisticItems",
+			"operations",
+			"replicaMetadata",
+			"bootstrapGenerations",
+			"bootstrapPages",
+			"authorityVaults",
+			"authorityItems",
 		];
+		const rows = stores.flatMap((store, index) =>
+			(storeValues[index] as unknown[]).map((value) =>
+				parseStoredRow(value, store, accountId),
+			),
+		);
 		return { type: "loaded", head, rows };
 	} catch (error) {
 		abort(transaction);
@@ -148,7 +159,7 @@ async function install(
 	database: IDBDatabase,
 	prepared: PreparedReplicaInstall,
 ): Promise<ReplicaPersistenceResponse> {
-	const transaction = database.transaction("heads", "readwrite");
+	const transaction = database.transaction(STORE_NAMES, "readwrite");
 	const completed = transactionDone(transaction);
 	try {
 		const heads = transaction.objectStore("heads");
@@ -170,6 +181,19 @@ async function install(
 		if (!matches) {
 			await completed;
 			return { type: "installed", result: { type: "stale" } };
+		}
+		for (const write of prepared.writes ?? []) {
+			if (write.type === "put") {
+				transaction.objectStore(mapStore(write.row.store)).put({
+					accountId: write.row.key.accountId,
+					recordId: write.row.key.recordId,
+					payloadJson: write.row.payloadJson,
+				});
+			} else {
+				transaction
+					.objectStore(mapStore(write.store))
+					.delete([write.key.accountId, write.key.recordId]);
+			}
 		}
 		heads.put(prepared.nextHead);
 		await completed;
@@ -326,8 +350,11 @@ function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
 	}
 	if (expectedRevision === MAX_U64)
 		throw new Error("Replica revision overflow");
-	if (nextHead.replicaRevision !== (expectedRevision + 1n).toString()) {
-		throw new Error("next head revision must be the exact successor");
+	if (
+		nextHead.replicaRevision !== expectedRevision.toString() &&
+		nextHead.replicaRevision !== (expectedRevision + 1n).toString()
+	) {
+		throw new Error("next head revision must stay or be the exact successor");
 	}
 	for (const write of prepared.writes) {
 		const key = write.type === "put" ? write.row.key : write.key;
@@ -395,7 +422,22 @@ function parseStoredRow(
 }
 
 function mapStore(store: ReplicaStore): DatabaseStore {
-	return store === "optimisticItems" ? "optimistic_items" : "operations";
+	switch (store) {
+		case "optimisticItems":
+			return "optimistic_items";
+		case "operations":
+			return "operations";
+		case "replicaMetadata":
+			return "replica_metadata";
+		case "bootstrapGenerations":
+			return "bootstrap_generations";
+		case "bootstrapPages":
+			return "bootstrap_pages";
+		case "authorityVaults":
+			return "authority_vaults";
+		case "authorityItems":
+			return "authority_items";
+	}
 }
 
 function assertIdentifier(value: string, context: string): void {

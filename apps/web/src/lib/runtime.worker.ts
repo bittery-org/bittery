@@ -25,5 +25,10 @@ serveWorkerChannels(scope, {
 		},
 		httpExecutor,
 		loadWasm: loadCombinedWebWasm,
+		authClient: {
+			clientId: "bittery-web",
+			platform: "web",
+			version: "0.5.2",
+		},
 	}),
 });

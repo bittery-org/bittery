@@ -12,6 +12,33 @@ use url::{Host, Url};
 
 const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+
+pub(crate) enum AuthenticatedOutcome<T> {
+    Ok(T),
+    ReauthenticationRequired,
+    Transient,
+}
+
+impl<T> AuthenticatedOutcome<T> {
+    pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> AuthenticatedOutcome<U> {
+        match self {
+            Self::Ok(value) => AuthenticatedOutcome::Ok(map(value)),
+            Self::ReauthenticationRequired => AuthenticatedOutcome::ReauthenticationRequired,
+            Self::Transient => AuthenticatedOutcome::Transient,
+        }
+    }
+}
+
+pub(crate) struct RawJsonPage<T> {
+    pub raw_body: Vec<u8>,
+    pub value: T,
+}
+
+struct RawHttpResponse {
+    status: u16,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+}
 // Authentication is all-or-nothing. These maintainer-approved aggregate bounds cover the initial
 // Finish-login page and every cursor page so a hostile Server cannot grow unique cursors forever.
 const MAX_AUTH_VAULT_KEYS: usize = 21_000;
@@ -178,6 +205,200 @@ impl<'transport> AuthHttpClient<'transport> {
             cancellation,
         )
         .await
+    }
+
+    pub(crate) async fn refresh_session(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::RefreshSessionResponse>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        let url = self.endpoint(&["api", "v1", "sessions", "current", "refresh"])?;
+        let raw = self
+            .execute_raw(
+                HttpMethod::Post,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                SMALL_AUTH_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let value = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Session refresh returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(value))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn bootstrap_page(
+        &self,
+        token: &str,
+        request_cursor: Option<&str>,
+        pinned_sync_cursor: Option<&str>,
+        sync_cursor_captured: bool,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<RawJsonPage<crate::server_contract::BootstrapItemsResponse>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "sync", "bootstrap"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "500");
+            if let Some(cursor) = request_cursor {
+                query.append_pair("cursor", cursor);
+            }
+            if sync_cursor_captured {
+                query.append_pair("syncCursorCaptured", "true");
+                if let Some(sync_cursor) = pinned_sync_cursor {
+                    query.append_pair("syncCursor", sync_cursor);
+                }
+            }
+        }
+        self.get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await
+    }
+
+    pub(crate) async fn sync_changes(
+        &self,
+        token: &str,
+        since_id: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::SyncChangesResponse>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "sync", "changes"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "100");
+            if let Some(since_id) = since_id {
+                query.append_pair("sinceId", since_id);
+            }
+        }
+        Ok(self
+            .get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await?
+            .map(|page| page.value))
+    }
+
+    pub(crate) async fn fetch_item(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::ItemResponseDto>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        Ok(self
+            .get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await?
+            .map(|page| page.value))
+    }
+
+    pub(crate) async fn sse_wakeup(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Vec<u8>>, RuntimeError> {
+        validate_bearer(token)?;
+        let url = self.endpoint(&["api", "v1", "sync", "events"])?;
+        let mut headers = self.headers(Some(token))?;
+        headers.push(HttpHeader {
+            name: "Accept".to_owned(),
+            value: "text/event-stream".to_owned(),
+        });
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                headers,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => Ok(AuthenticatedOutcome::Ok(raw.body)),
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    async fn get_authenticated_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_response_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                max_response_bytes,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let value = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Sync Server returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(RawJsonPage {
+                    raw_body: raw.body,
+                    value,
+                }))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    async fn execute_raw(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        headers: Vec<HttpHeader>,
+        body: Vec<u8>,
+        max_response_bytes: u32,
+        cancellation: RequestCancellation,
+    ) -> Result<RawHttpResponse, RuntimeError> {
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(method, url.into(), headers, body, max_response_bytes),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status,
+                headers,
+                body,
+            } => Ok(RawHttpResponse {
+                status,
+                headers,
+                body,
+            }),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "request was cancelled",
+            )),
+            HttpResponse::NetworkFailure | HttpResponse::ResponseTooLarge => {
+                Err(authentication_failure("Server request failed"))
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -512,6 +733,15 @@ fn validate_config(config: &AuthClientConfig) -> Result<(), RuntimeError> {
         }
     }
     Ok(())
+}
+
+fn validate_identifier(value: &str, label: &str) -> Result<(), RuntimeError> {
+    if value.is_empty() {
+        Err(invariant("Sync identifier is empty"))
+    } else {
+        let _ = label;
+        Ok(())
+    }
 }
 
 fn validate_bearer(token: &str) -> Result<(), RuntimeError> {

@@ -1,9 +1,4 @@
-import { usePlatformCrypto, useSessionState } from "@bittery/core/hooks";
-import {
-	performSRPLogin,
-	storeLoginSessionOwned,
-} from "@bittery/core/services/auth-service";
-import { unlockAccountWithPassword } from "@bittery/core/services/unlock";
+import { useSessionState } from "@bittery/core/hooks";
 import {
 	createApiClientForServer,
 	getDefaultServerUrl,
@@ -21,8 +16,13 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { lifecycleDeps } from "@/lib/lifecycle";
-import { forgetActiveSession, itemCache, storage } from "@/lib/storage";
+import { runtime } from "@/lib/crypto";
+import {
+	getRuntimeAccountId,
+	quickUnlockWithRuntime,
+	signInWithRuntime,
+} from "@/lib/runtime-auth";
+import { forgetActiveSession, storage } from "@/lib/storage";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -180,7 +180,6 @@ function SignInFormContent({
 	const { manager } = useAccountRuntime();
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const crypto = usePlatformCrypto();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
@@ -211,19 +210,17 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			if (isQuickUnlock) {
-				const accountId = quickUnlockAccountId;
+				const accountId = getRuntimeAccountId() ?? quickUnlockAccountId;
 				if (!accountId) {
 					throw new Error(m.toast_auth_unlock_error_failed());
 				}
-				const outcome = await unlockAccountWithPassword(
-					{ accountId, password: input.password },
-					{ crypto, ...lifecycleDeps },
-				);
-				if (outcome.unlocked.length === 0) {
-					throw new Error(m.toast_auth_unlock_error_failed());
-				}
+				const signedIn = await quickUnlockWithRuntime(runtime, {
+					accountId,
+					masterPassword: input.password,
+				});
+				await storage.storeAuthToken("runtime-session");
 				await manager.refresh();
-				return outcome;
+				return signedIn;
 			}
 			const normalizedEmail = input.email.trim().toLowerCase();
 			if (
@@ -232,32 +229,16 @@ function SignInFormContent({
 			) {
 				throw new Error(m.auth_insecure_http_confirmation_required());
 			}
-			const result = await performSRPLogin(
-				{
-					...input,
-					email: normalizedEmail,
-					serverUrl,
-					insecureTransportConfirmed,
-				},
-				{ crypto, apiClient: ceremonyApiClient, storage },
-			);
-			await storeLoginSessionOwned(
-				result,
-				input.secretKey,
-				storage,
-				itemCache,
-				crypto,
-				normalizedEmail,
-				{
-					serverUrl,
-					insecureTransportConfirmed,
-					onSessionStored: () => manager.refresh(),
-				},
-			);
-			// `storeLoginSession` sets the master unlock key before it moves the
-			// active-account pointer, so the unlock notification alone would publish the
-			// pre-login id. Re-read it once the pointer is final.
-			return result;
+			const signedIn = await signInWithRuntime(runtime, {
+				serverUrl,
+				email: normalizedEmail,
+				masterPassword: input.password,
+				secretKey: input.secretKey,
+				insecureTransportConfirmed,
+			});
+			await storage.storeAuthToken("runtime-session");
+			await manager.refresh();
+			return signedIn;
 		},
 		onSuccess: () => {
 			toast.success(m.toast_auth_signin_success());

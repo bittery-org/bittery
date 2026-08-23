@@ -1618,14 +1618,16 @@ public struct AccountStatus: Equatable, Hashable {
     public var accountId: String
     public var replicaRevision: UInt64
     public var access: AccountAccessState
+    public var waitingReason: AccountWaitingReason?
     public var failure: RuntimeErrorCode?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(accountId: String, replicaRevision: UInt64, access: AccountAccessState, failure: RuntimeErrorCode?) {
+    public init(accountId: String, replicaRevision: UInt64, access: AccountAccessState, waitingReason: AccountWaitingReason?, failure: RuntimeErrorCode?) {
         self.accountId = accountId
         self.replicaRevision = replicaRevision
         self.access = access
+        self.waitingReason = waitingReason
         self.failure = failure
     }
 
@@ -1648,6 +1650,7 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
                 accountId: FfiConverterString.read(from: &buf),
                 replicaRevision: FfiConverterUInt64.read(from: &buf),
                 access: FfiConverterTypeAccountAccessState.read(from: &buf),
+                waitingReason: FfiConverterOptionTypeAccountWaitingReason.read(from: &buf),
                 failure: FfiConverterOptionTypeRuntimeErrorCode.read(from: &buf)
         )
     }
@@ -1656,6 +1659,7 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
         FfiConverterString.write(value.accountId, into: &buf)
         FfiConverterUInt64.write(value.replicaRevision, into: &buf)
         FfiConverterTypeAccountAccessState.write(value.access, into: &buf)
+        FfiConverterOptionTypeAccountWaitingReason.write(value.waitingReason, into: &buf)
         FfiConverterOptionTypeRuntimeErrorCode.write(value.failure, into: &buf)
     }
 }
@@ -1866,6 +1870,66 @@ public func FfiConverterTypeAccountAccessState_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeAccountAccessState_lower(_ value: AccountAccessState) -> RustBuffer {
     return FfiConverterTypeAccountAccessState.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum AccountWaitingReason: Equatable, Hashable {
+
+    case reauthenticationRequired
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension AccountWaitingReason: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountWaitingReason: FfiConverterRustBuffer {
+    typealias SwiftType = AccountWaitingReason
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountWaitingReason {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .reauthenticationRequired
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AccountWaitingReason, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .reauthenticationRequired:
+            writeInt(&buf, Int32(1))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountWaitingReason_lift(_ buf: RustBuffer) throws -> AccountWaitingReason {
+    return try FfiConverterTypeAccountWaitingReason.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountWaitingReason_lower(_ value: AccountWaitingReason) -> RustBuffer {
+    return FfiConverterTypeAccountWaitingReason.lower(value)
 }
 
 
@@ -2540,6 +2604,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeAccountWaitingReason: FfiConverterRustBuffer {
+    typealias SwiftType = AccountWaitingReason?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAccountWaitingReason.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAccountWaitingReason.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

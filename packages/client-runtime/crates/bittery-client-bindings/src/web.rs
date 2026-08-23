@@ -166,6 +166,46 @@ impl WebClientRuntime {
         ))
     }
 
+    #[wasm_bindgen(js_name = withConfiguredExecutors)]
+    pub fn with_configured_executors(
+        replica_invoke: js_sys::Function,
+        platform_storage_invoke: js_sys::Function,
+        http_invoke: js_sys::Function,
+        http_cancel: js_sys::Function,
+        client_id: String,
+        platform: String,
+        version: String,
+    ) -> Result<Self, JsValue> {
+        let platform = match platform.as_str() {
+            "web" => core::ClientPlatform::Web,
+            "desktop" => core::ClientPlatform::Desktop,
+            "mobile" => core::ClientPlatform::Mobile,
+            "extension" => core::ClientPlatform::Extension,
+            _ => {
+                return Err(JsValue::from_str(
+                    "authentication client platform is invalid",
+                ));
+            }
+        };
+        let config = core::AuthClientConfig::new(client_id, platform, version)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        Ok(Self::from_inner(
+            core::Runtime::with_configured_serialized_executors(
+                Arc::new(JsSerializedReplicaExecutor {
+                    invoke: replica_invoke,
+                }),
+                Arc::new(JsSerializedPlatformStorageExecutor {
+                    invoke: platform_storage_invoke,
+                }),
+                Arc::new(JsSerializedHttpExecutor {
+                    invoke: http_invoke,
+                    cancel: http_cancel,
+                }),
+                config,
+            ),
+        ))
+    }
+
     fn from_inner(inner: Arc<core::Runtime>) -> Self {
         Self {
             inner,

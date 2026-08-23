@@ -254,6 +254,9 @@ pub struct LoginItemProjection {
     note: Option<String>,
     custom_fields: Vec<Arc<LoginCustomField>>,
     tags: Vec<String>,
+    favorite: bool,
+    created_at: String,
+    updated_at: String,
     status: ItemProjectionStatus,
 }
 
@@ -320,6 +323,18 @@ impl LoginItemProjection {
         self.tags.clone()
     }
 
+    pub fn favorite(&self) -> bool {
+        self.favorite
+    }
+
+    pub fn created_at(&self) -> String {
+        self.created_at.clone()
+    }
+
+    pub fn updated_at(&self) -> String {
+        self.updated_at.clone()
+    }
+
     pub fn status(&self) -> ItemProjectionStatus {
         self.status
     }
@@ -362,11 +377,17 @@ pub enum AccountAccessState {
     Unlocked,
 }
 
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum AccountWaitingReason {
+    ReauthenticationRequired,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct AccountStatus {
     pub account_id: String,
     pub replica_revision: u64,
     pub access: AccountAccessState,
+    pub waiting_reason: Option<AccountWaitingReason>,
     pub failure: Option<RuntimeErrorCode>,
 }
 
@@ -612,6 +633,9 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
             note,
             custom_fields,
             tags,
+            favorite,
+            created_at,
+            updated_at,
             status,
         } = value;
         Self {
@@ -630,6 +654,9 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
                 .map(|field| Arc::new(LoginCustomField::from(field)))
                 .collect(),
             tags,
+            favorite,
+            created_at,
+            updated_at,
             status: status.into(),
         }
     }
@@ -696,12 +723,14 @@ impl From<core::AccountStatus> for AccountStatus {
             account_id,
             replica_revision,
             access,
+            waiting_reason,
             failure,
         } = value;
         Self {
             account_id: account_id.into(),
             replica_revision,
             access: access.into(),
+            waiting_reason: waiting_reason.map(Into::into),
             failure: failure.map(Into::into),
         }
     }
@@ -713,6 +742,14 @@ impl From<core::AccountAccessState> for AccountAccessState {
             core::AccountAccessState::SignedOut => Self::SignedOut,
             core::AccountAccessState::Locked => Self::Locked,
             core::AccountAccessState::Unlocked => Self::Unlocked,
+        }
+    }
+}
+
+impl From<core::AccountWaitingReason> for AccountWaitingReason {
+    fn from(value: core::AccountWaitingReason) -> Self {
+        match value {
+            core::AccountWaitingReason::ReauthenticationRequired => Self::ReauthenticationRequired,
         }
     }
 }
@@ -800,6 +837,9 @@ mod tests {
                     note: Some("UNIQUE_PROJECTION_NOTE".into()),
                     custom_fields: vec![],
                     tags: vec![],
+                    favorite: true,
+                    created_at: "2026-08-23T00:00:00Z".into(),
+                    updated_at: "2026-08-23T00:00:00Z".into(),
                     status: ItemProjectionStatus::Pending,
                 })],
             },

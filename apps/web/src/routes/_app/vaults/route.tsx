@@ -6,7 +6,6 @@ import {
 	useCreateVault,
 	useDeleteVault,
 	useItemCounts,
-	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
 import {
@@ -29,6 +28,7 @@ import {
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -43,7 +43,7 @@ function VaultsLayout() {
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
 	const { vaultKeys } = useAllVaultKeys();
-	const { items, isLoading: isLoadingItems } = useItems();
+	const { items, isLoading: isLoadingItems } = useRuntimeItems();
 	const availableTags = useAvailableTags(items);
 	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
 	const createVault = useCreateVault();

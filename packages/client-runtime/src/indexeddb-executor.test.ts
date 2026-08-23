@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
@@ -55,12 +55,19 @@ async function seedHead(head: ReplicaHead): Promise<void> {
 
 async function rawDatabaseContents(): Promise<unknown[]> {
 	const database = await openRawDatabase();
-	const transaction = database.transaction(
-		["heads", "optimistic_items", "operations"],
-		"readonly",
-	);
-	const requests = ["heads", "optimistic_items", "operations"].map(
-		(storeName) => transaction.objectStore(storeName).getAll(),
+	const storeNames = [
+		"heads",
+		"optimistic_items",
+		"operations",
+		"replica_metadata",
+		"bootstrap_generations",
+		"bootstrap_pages",
+		"authority_vaults",
+		"authority_items",
+	];
+	const transaction = database.transaction(storeNames, "readonly");
+	const requests = storeNames.map((storeName) =>
+		transaction.objectStore(storeName).getAll(),
 	);
 	const values = await Promise.all(requests.map(requestResult));
 	await transactionDone(transaction);
@@ -174,6 +181,7 @@ function install(
 				lockEpoch: "0",
 				failure: null,
 			},
+			writes: [],
 		},
 	} as const;
 }
@@ -574,5 +582,115 @@ describe("IndexedDbReplicaExecutor", () => {
 		await expect(
 			invoke(commit(prepared([], "9007199254740994", "9007199254740996"))),
 		).rejects.toThrow("successor");
+	});
+
+	test("stages Bootstrap authority without publishing plaintext or mixing generations", async () => {
+		await invoke(install());
+		const metadata = JSON.stringify({
+			state: "bootstrapping",
+			activeGeneration: null,
+			activeCursor: { type: "cold" },
+			stagingGeneration: "generation-1",
+		});
+		const generation = JSON.stringify({
+			generationId: "generation-1",
+			fallbackState: "cold",
+			pinnedWatermark: { type: "capturedEmpty" },
+			nextPageIdentity: "1",
+			nextPageCursor: { type: "initial" },
+			finalPageStaged: true,
+		});
+		const item = JSON.stringify({
+			id: "item-1",
+			vaultId: "vault-1",
+			category: "login",
+			favorite: false,
+			encryptedData: "ciphertext-not-plaintext",
+			encryptionIv: "iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+			version: 1,
+			encryptionVersion: 1,
+			encryptedByUserId: "user-a",
+			lastModifiedBy: "user-a",
+			createdAt: "2026-08-23T00:00:00Z",
+			updatedAt: "2026-08-23T00:00:00Z",
+			deletedAt: null,
+			attachments: [],
+		});
+		expect(
+			await invoke(
+				commit(
+					prepared([
+						put("replicaMetadata", "bootstrap", metadata),
+						put("bootstrapGenerations", "generation-1", generation),
+						put("authorityItems", "generation-1/item-1", item),
+					]),
+				),
+			),
+		).toMatchObject({ result: { type: "applied" } });
+		const staged = await invoke({ type: "load", accountId: "account-a" });
+		expect(staged.rows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					store: "replicaMetadata",
+					key: { accountId: "account-a", recordId: "bootstrap" },
+				}),
+				expect.objectContaining({
+					store: "authorityItems",
+					key: { accountId: "account-a", recordId: "generation-1/item-1" },
+				}),
+			]),
+		);
+		expect(JSON.stringify(staged)).not.toContain("master-password");
+		expect(JSON.stringify(staged)).not.toContain("plaintext-login");
+
+		const promoteMetadata = JSON.stringify({
+			state: "ready",
+			activeGeneration: "generation-1",
+			activeCursor: { type: "capturedEmpty" },
+			stagingGeneration: null,
+		});
+		expect(
+			await invoke(
+				commit(
+					prepared(
+						[put("replicaMetadata", "bootstrap", promoteMetadata)],
+						"1",
+						"2",
+					),
+				),
+			),
+		).toMatchObject({ result: { replicaRevision: "2" } });
+		const promoted = await invoke({ type: "load", accountId: "account-a" });
+		expect(promoted.head.replicaRevision).toBe("2");
+		expect(
+			promoted.rows.some(
+				(row: { store: string; payloadJson: string }) =>
+					row.store === "replicaMetadata" &&
+					row.payloadJson.includes('"state":"ready"'),
+			),
+		).toBe(true);
+	});
+
+	test("same-revision Bootstrap page writes stay atomic and isolated from the Cursor", async () => {
+		await invoke(install());
+		await invoke(
+			commit(
+				prepared([
+					put("replicaMetadata", "bootstrap", '{"state":"bootstrapping"}'),
+				]),
+			),
+		);
+		const sameRevision = prepared(
+			[put("authorityItems", "generation-1/item-1", '{"id":"item-1"}')],
+			"1",
+			"1",
+		);
+		expect(await invoke(commit(sameRevision))).toMatchObject({
+			result: { type: "applied", replicaRevision: "1" },
+		});
+		const loaded = await invoke({ type: "load", accountId: "account-a" });
+		expect(loaded.head.replicaRevision).toBe("1");
+		expect(loaded.rows).toHaveLength(2);
 	});
 });

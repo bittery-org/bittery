@@ -5,7 +5,6 @@ import {
 	useDeleteItem,
 	useUpdateItem,
 	useVaultInfo,
-	useVaultItems,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
@@ -45,12 +44,13 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -78,8 +78,11 @@ function VaultDetailPage() {
 	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
-	const { items: decryptedItems, isLoading: isLoadingItems } =
-		useVaultItems(vaultId);
+	const { items: allItems, isLoading: isLoadingItems } = useRuntimeItems();
+	const decryptedItems = useMemo(
+		() => allItems.filter((item) => item.vaultId === vaultId),
+		[allItems, vaultId],
+	);
 	const selectedItemId =
 		selectedItemIdFromSearch &&
 		decryptedItems.some((item) => item.id === selectedItemIdFromSearch)

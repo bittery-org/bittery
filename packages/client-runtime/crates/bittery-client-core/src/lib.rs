@@ -43,10 +43,10 @@ pub use platform_storage::platform_storage_contract_schema;
 #[doc(hidden)]
 pub use platform_storage::SerializedPlatformStorageExecutor;
 pub use protocol::{
-    AccountAccessState, AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus,
-    ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
-    ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeProjection,
-    RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, CustomFieldKind,
+    ItemProjectionStatus, ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection,
+    ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
+    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]

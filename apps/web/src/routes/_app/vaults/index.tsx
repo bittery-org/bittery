@@ -3,7 +3,6 @@ import {
 	useAvailableTags,
 	useCreateItem,
 	useDeleteItem,
-	useItems,
 	useUpdateItem,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
@@ -34,6 +33,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/")({
@@ -51,7 +51,7 @@ function AllItemsPage() {
 	const { m } = useI18n();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 
-	const { items, isLoading } = useItems();
+	const { items, isLoading } = useRuntimeItems();
 	const { vaultKeys } = useAllVaultKeys();
 	const availableTags = useAvailableTags(items);
 	const createItem = useCreateItem();

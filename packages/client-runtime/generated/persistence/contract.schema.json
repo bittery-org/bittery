@@ -249,12 +249,20 @@
         },
         "nextHead": {
           "$ref": "#/$defs/ReplicaHead"
+        },
+        "writes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreparedReplicaWrite"
+          }
         }
       },
       "additionalProperties": false,
       "required": [
         "expected",
-        "nextHead"
+        "nextHead",
+        "writes"
       ]
     },
     "PreparedReplicaWrite": {
@@ -548,7 +556,12 @@
       "type": "string",
       "enum": [
         "optimisticItems",
-        "operations"
+        "operations",
+        "replicaMetadata",
+        "bootstrapGenerations",
+        "bootstrapPages",
+        "authorityVaults",
+        "authorityItems"
       ]
     },
     "RuntimeErrorCode": {

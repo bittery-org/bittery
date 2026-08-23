@@ -123,7 +123,8 @@ pub(crate) struct ReplicaItemRecord {
     pub optimistic: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(
     dead_code,
     reason = "the closed Replica state schema is implemented in slices"
@@ -136,7 +137,13 @@ pub(crate) enum ReplicaState {
     RefreshRequired,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -150,7 +157,13 @@ pub(crate) enum SyncCursor {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -163,7 +176,13 @@ pub(crate) enum BootstrapPageCursor {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -173,19 +192,21 @@ pub(crate) enum BootstrapContinuation {
     More { next_cursor: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
 )]
 pub(crate) struct BootstrapGenerationId(pub(crate) String);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
 )]
-pub(crate) struct BootstrapPageIdentity(pub(crate) u64);
+pub(crate) struct BootstrapPageIdentity(#[serde(with = "decimal_u64")] pub(crate) u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
@@ -194,7 +215,53 @@ pub(crate) struct BootstrapPageIdentity(pub(crate) u64);
 )]
 pub(crate) struct Sha256Fingerprint(pub(crate) [u8; 32]);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl Sha256Fingerprint {
+    pub(crate) fn of_bytes(bytes: &[u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        Self(Sha256::digest(bytes).into())
+    }
+
+    fn to_hex(self) -> String {
+        self.0.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn from_hex(value: &str) -> Result<Self, String> {
+        if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("expected a 32-byte hex SHA-256 fingerprint".into());
+        }
+        let mut bytes = [0u8; 32];
+        for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+            bytes[index] = u8::from_str_radix(
+                std::str::from_utf8(chunk).expect("hex digits are valid UTF-8"),
+                16,
+            )
+            .map_err(|_| "expected a 32-byte hex SHA-256 fingerprint".to_owned())?;
+        }
+        Ok(Self(bytes))
+    }
+}
+
+impl Serialize for Sha256Fingerprint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_hex())
+    }
+}
+
+impl<'de> Deserialize<'de> for Sha256Fingerprint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::from_hex(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(
     dead_code,
     reason = "the authority schema mirrors every current Server value"
@@ -204,7 +271,8 @@ pub(crate) enum AuthorityVaultType {
     Team,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(
     dead_code,
     reason = "the authority schema mirrors every current Server value"
@@ -216,7 +284,8 @@ pub(crate) enum AuthorityVaultRole {
     ReadOnly,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(
     dead_code,
     reason = "the authority schema mirrors every current Server value"
@@ -229,7 +298,8 @@ pub(crate) enum AuthorityItemCategory {
     Totp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -244,7 +314,8 @@ pub(crate) struct AuthorityVaultRecord {
     pub role: AuthorityVaultRole,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -268,7 +339,8 @@ pub(crate) struct AuthorityAttachmentRecord {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -312,6 +384,15 @@ pub(crate) struct BootstrapGuard {
 pub(crate) struct BeginBootstrapPlan {
     pub guard: BootstrapGuard,
     pub generation_id: BootstrapGenerationId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct MarkRefreshRequiredPlan {
+    pub guard: BootstrapGuard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -386,7 +467,8 @@ pub(crate) enum CleanupBootstrapGenerationResult {
     Missing,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -400,7 +482,8 @@ pub(crate) struct BootstrapGenerationRecord {
     pub final_page_staged: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
@@ -433,20 +516,20 @@ pub(crate) struct BootstrapAuthoritySnapshot {
     pub staged_item_count: usize,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
 )]
-pub(super) struct BootstrapAuthority {
-    state: ReplicaState,
-    active_generation: Option<BootstrapGenerationId>,
-    active_cursor: SyncCursor,
-    staging_generation: Option<BootstrapGenerationId>,
-    generations: HashMap<BootstrapGenerationId, BootstrapGenerationRecord>,
-    pages: HashMap<(BootstrapGenerationId, BootstrapPageIdentity), BootstrapPageReceipt>,
-    vaults: HashMap<(BootstrapGenerationId, String), AuthorityVaultRecord>,
-    items: HashMap<(BootstrapGenerationId, String), AuthorityItemRecord>,
+pub(crate) struct BootstrapAuthority {
+    pub(crate) state: ReplicaState,
+    pub(crate) active_generation: Option<BootstrapGenerationId>,
+    pub(crate) active_cursor: SyncCursor,
+    pub(crate) staging_generation: Option<BootstrapGenerationId>,
+    pub(crate) generations: HashMap<BootstrapGenerationId, BootstrapGenerationRecord>,
+    pub(crate) pages: HashMap<(BootstrapGenerationId, BootstrapPageIdentity), BootstrapPageReceipt>,
+    pub(crate) vaults: HashMap<(BootstrapGenerationId, String), AuthorityVaultRecord>,
+    pub(crate) items: HashMap<(BootstrapGenerationId, String), AuthorityItemRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,6 +579,8 @@ pub(crate) struct ReplicaSnapshot {
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
     pub failure: Option<RuntimeErrorCode>,
+    #[serde(skip)]
+    pub bootstrap: BootstrapAuthority,
 }
 
 pub(super) fn apply_plan(
@@ -525,6 +610,7 @@ pub(super) struct AccountReplica {
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
+    pub(super) bootstrap: BootstrapAuthority,
 }
 
 impl AccountReplica {
@@ -546,35 +632,38 @@ impl AccountReplica {
                 .map(|operation| (operation.operation_id.clone(), operation))
                 .collect(),
             failure: snapshot.failure,
+            bootstrap: snapshot.bootstrap,
         }
     }
 
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
     pub(super) fn begin_bootstrap(
         &mut self,
-        bootstrap: &mut BootstrapAuthority,
         plan: BeginBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         if let Some(result) = self.guard_result(&plan.guard) {
             return Ok(result);
         }
-        bootstrap.validate()?;
+        self.bootstrap.validate()?;
         validate_identifier(&plan.generation_id.0, "Bootstrap generation")?;
-        if bootstrap.staging_generation.is_some() {
+        if self.bootstrap.staging_generation.is_some() {
             return Err(replica_invariant(
                 "a Bootstrap generation is already staging",
             ));
         }
-        if bootstrap.generations.contains_key(&plan.generation_id)
-            || bootstrap
+        if self.bootstrap.generations.contains_key(&plan.generation_id)
+            || self
+                .bootstrap
                 .pages
                 .keys()
                 .any(|(generation_id, _)| generation_id == &plan.generation_id)
-            || bootstrap
+            || self
+                .bootstrap
                 .vaults
                 .keys()
                 .any(|(generation_id, _)| generation_id == &plan.generation_id)
-            || bootstrap
+            || self
+                .bootstrap
                 .items
                 .keys()
                 .any(|(generation_id, _)| generation_id == &plan.generation_id)
@@ -583,12 +672,12 @@ impl AccountReplica {
                 "Bootstrap generation identity was reused",
             ));
         }
-        let fallback_state = bootstrap.state;
+        let fallback_state = self.bootstrap.state;
         if fallback_state == ReplicaState::Bootstrapping {
             return Err(replica_invariant("Bootstrap fallback state is invalid"));
         }
         let next_revision = increment_revision(self.revision)?;
-        let mut next = bootstrap.clone();
+        let mut next = self.bootstrap.clone();
         next.generations.insert(
             plan.generation_id.clone(),
             BootstrapGenerationRecord {
@@ -603,7 +692,39 @@ impl AccountReplica {
         next.state = ReplicaState::Bootstrapping;
         next.staging_generation = Some(plan.generation_id);
         next.validate()?;
-        *bootstrap = next;
+        self.bootstrap = next;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    pub(super) fn mark_refresh_required(
+        &mut self,
+        plan: MarkRefreshRequiredPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(&plan.guard) {
+            return Ok(result);
+        }
+        self.bootstrap.validate()?;
+        match self.bootstrap.state {
+            ReplicaState::RefreshRequired => {
+                return Ok(PlanResult::Applied {
+                    replica_revision: self.revision,
+                });
+            }
+            ReplicaState::Ready => {}
+            ReplicaState::Cold | ReplicaState::Bootstrapping => {
+                return Err(replica_invariant(
+                    "refresh is only valid from a ready Replica",
+                ));
+            }
+        }
+        let next_revision = increment_revision(self.revision)?;
+        let mut next = self.bootstrap.clone();
+        next.state = ReplicaState::RefreshRequired;
+        next.validate()?;
+        self.bootstrap = next;
         self.revision = next_revision;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
@@ -613,22 +734,21 @@ impl AccountReplica {
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
     pub(super) fn stage_bootstrap_page(
         &mut self,
-        bootstrap: &mut BootstrapAuthority,
         plan: StageBootstrapPagePlan,
     ) -> Result<StageBootstrapPageResult, RuntimeError> {
         if let Some(result) = self.stage_guard_result(&plan.guard) {
             return Ok(result);
         }
-        bootstrap.validate()?;
-        if bootstrap.state != ReplicaState::Bootstrapping
-            || bootstrap.staging_generation.as_ref() != Some(&plan.generation_id)
+        self.bootstrap.validate()?;
+        if self.bootstrap.state != ReplicaState::Bootstrapping
+            || self.bootstrap.staging_generation.as_ref() != Some(&plan.generation_id)
         {
             return Ok(StageBootstrapPageResult::Stale {
                 actual_revision: self.revision,
             });
         }
         let receipt_key = (plan.generation_id.clone(), plan.page_identity);
-        if let Some(receipt) = bootstrap.pages.get(&receipt_key) {
+        if let Some(receipt) = self.bootstrap.pages.get(&receipt_key) {
             return Ok(
                 if receipt.request_cursor == plan.request_cursor
                     && receipt.raw_response_fingerprint == plan.raw_response_fingerprint
@@ -639,7 +759,8 @@ impl AccountReplica {
                 },
             );
         }
-        let generation = bootstrap
+        let generation = self
+            .bootstrap
             .generations
             .get(&plan.generation_id)
             .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?;
@@ -662,7 +783,8 @@ impl AccountReplica {
         validate_continuation(&plan.continuation)?;
         validate_authority_page(&plan.vaults, &plan.items)?;
         for item in &plan.items {
-            if bootstrap
+            if self
+                .bootstrap
                 .items
                 .contains_key(&(plan.generation_id.clone(), item.id.clone()))
             {
@@ -677,7 +799,7 @@ impl AccountReplica {
             .0
             .checked_add(1)
             .ok_or_else(|| replica_invariant("Bootstrap page identity overflowed"))?;
-        let mut next = bootstrap.clone();
+        let mut next = self.bootstrap.clone();
         for vault in &plan.vaults {
             next.vaults.insert(
                 (plan.generation_id.clone(), vault.id.clone()),
@@ -714,26 +836,26 @@ impl AccountReplica {
             }
         }
         next.validate()?;
-        *bootstrap = next;
+        self.bootstrap = next;
         Ok(StageBootstrapPageResult::Applied)
     }
 
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
     pub(super) fn promote_bootstrap(
         &mut self,
-        bootstrap: &mut BootstrapAuthority,
         plan: PromoteBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         if let Some(result) = self.guard_result(&plan.guard) {
             return Ok(result);
         }
-        bootstrap.validate()?;
-        if bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
+        self.bootstrap.validate()?;
+        if self.bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
             return Ok(PlanResult::Stale {
                 actual_revision: self.revision,
             });
         }
-        let generation = bootstrap
+        let generation = self
+            .bootstrap
             .generations
             .get(&plan.generation_id)
             .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?;
@@ -745,13 +867,13 @@ impl AccountReplica {
         validate_captured_cursor(&generation.pinned_watermark)?;
         let pinned_watermark = generation.pinned_watermark.clone();
         let next_revision = increment_revision(self.revision)?;
-        let mut next = bootstrap.clone();
+        let mut next = self.bootstrap.clone();
         next.active_generation = Some(plan.generation_id);
         next.active_cursor = pinned_watermark;
         next.staging_generation = None;
         next.state = ReplicaState::Ready;
         next.validate()?;
-        *bootstrap = next;
+        self.bootstrap = next;
         self.revision = next_revision;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
@@ -761,29 +883,29 @@ impl AccountReplica {
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
     pub(super) fn abandon_bootstrap(
         &mut self,
-        bootstrap: &mut BootstrapAuthority,
         plan: AbandonBootstrapPlan,
     ) -> Result<PlanResult, RuntimeError> {
         if let Some(result) = self.guard_result(&plan.guard) {
             return Ok(result);
         }
-        bootstrap.validate()?;
-        if bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
+        self.bootstrap.validate()?;
+        if self.bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
             return Ok(PlanResult::Stale {
                 actual_revision: self.revision,
             });
         }
-        let fallback_state = bootstrap
+        let fallback_state = self
+            .bootstrap
             .generations
             .get(&plan.generation_id)
             .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?
             .fallback_state;
         let next_revision = increment_revision(self.revision)?;
-        let mut next = bootstrap.clone();
+        let mut next = self.bootstrap.clone();
         next.staging_generation = None;
         next.state = fallback_state;
         next.validate()?;
-        *bootstrap = next;
+        self.bootstrap = next;
         self.revision = next_revision;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
@@ -793,7 +915,6 @@ impl AccountReplica {
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
     pub(super) fn cleanup_bootstrap_generation(
         &mut self,
-        bootstrap: &mut BootstrapAuthority,
         plan: CleanupBootstrapGenerationPlan,
     ) -> Result<CleanupBootstrapGenerationResult, RuntimeError> {
         if self.account_id != plan.guard.account_id {
@@ -804,13 +925,13 @@ impl AccountReplica {
                 actual_revision: self.revision,
             });
         }
-        bootstrap.validate()?;
-        if bootstrap.active_generation.as_ref() == Some(&plan.generation_id)
-            || bootstrap.staging_generation.as_ref() == Some(&plan.generation_id)
+        self.bootstrap.validate()?;
+        if self.bootstrap.active_generation.as_ref() == Some(&plan.generation_id)
+            || self.bootstrap.staging_generation.as_ref() == Some(&plan.generation_id)
         {
             return Ok(CleanupBootstrapGenerationResult::Protected);
         }
-        let mut next = bootstrap.clone();
+        let mut next = self.bootstrap.clone();
         next.generations.remove(&plan.generation_id);
         next.pages
             .retain(|(generation_id, _), _| generation_id != &plan.generation_id);
@@ -819,8 +940,55 @@ impl AccountReplica {
         next.items
             .retain(|(generation_id, _), _| generation_id != &plan.generation_id);
         next.validate()?;
-        *bootstrap = next;
+        self.bootstrap = next;
         Ok(CleanupBootstrapGenerationResult::Applied)
+    }
+
+    pub(super) fn apply_authoritative_item(
+        &mut self,
+        expected_cursor: &SyncCursor,
+        next_cursor: SyncCursor,
+        item: AuthorityItemRecord,
+    ) -> Result<PlanResult, RuntimeError> {
+        if self.bootstrap.state != ReplicaState::Ready
+            || self.bootstrap.active_cursor != *expected_cursor
+        {
+            return Ok(PlanResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        let generation_id =
+            self.bootstrap.active_generation.clone().ok_or_else(|| {
+                replica_invariant("ready Replica has no active Bootstrap generation")
+            })?;
+        validate_captured_cursor(&next_cursor)?;
+        validate_authority_page(&[], std::slice::from_ref(&item))?;
+        if let Some(existing) = self
+            .bootstrap
+            .items
+            .get(&(generation_id.clone(), item.id.clone()))
+        {
+            if existing.version > item.version {
+                return Err(replica_invariant(
+                    "a stale Server version cannot overwrite newer ciphertext",
+                ));
+            }
+        }
+        let next_revision = increment_revision(self.revision)?;
+        self.bootstrap
+            .items
+            .insert((generation_id, item.id.clone()), item);
+        self.bootstrap.active_cursor = next_cursor;
+        if let Some(active) = &self.bootstrap.active_generation {
+            if let Some(generation) = self.bootstrap.generations.get_mut(active) {
+                generation.pinned_watermark = self.bootstrap.active_cursor.clone();
+            }
+        }
+        self.bootstrap.validate()?;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
     }
 
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
@@ -911,13 +1079,19 @@ impl AccountReplica {
             items,
             operations,
             failure: self.failure,
+            bootstrap: self.bootstrap.clone(),
         }
     }
 }
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
 impl BootstrapAuthority {
-    fn validate(&self) -> Result<(), RuntimeError> {
+    pub(super) fn row_count(&self) -> usize {
+        let metadata = usize::from(self != &Self::default());
+        metadata + self.generations.len() + self.pages.len() + self.vaults.len() + self.items.len()
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
         let active_is_cold = self.active_cursor == SyncCursor::Cold;
         if self.active_generation.is_none() != active_is_cold {
             return Err(replica_invariant(
@@ -1040,7 +1214,7 @@ impl BootstrapAuthority {
         Ok(())
     }
 
-    pub(super) fn snapshot(&self) -> BootstrapAuthoritySnapshot {
+    pub(crate) fn snapshot(&self) -> BootstrapAuthoritySnapshot {
         let mut visible_vaults = Vec::new();
         let mut visible_items = Vec::new();
         if let Some(active) = &self.active_generation {

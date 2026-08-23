@@ -3,7 +3,6 @@ import {
 	useAvailableTags,
 	useCreateItem,
 	useDeleteItem,
-	useItems,
 	useUpdateItem,
 } from "@bittery/core/hooks";
 import type {
@@ -34,6 +33,7 @@ import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/tag/$tagName")({
@@ -55,7 +55,7 @@ function TagPage() {
 	const tagName = decodeURIComponent(encodedTagName);
 	const tagColor = getTagColorFromName(tagName);
 
-	const { items: allItems, isLoading } = useItems();
+	const { items: allItems, isLoading } = useRuntimeItems();
 	const { vaultKeys } = useAllVaultKeys();
 
 	const taggedItems = useMemo(

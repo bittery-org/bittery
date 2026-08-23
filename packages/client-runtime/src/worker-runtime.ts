@@ -24,6 +24,12 @@ interface WebClientRuntimeLike {
 	unobserve(observationId: string): void;
 }
 
+export interface RuntimeAuthClientConfig {
+	clientId: string;
+	platform: string;
+	version: string;
+}
+
 export interface RuntimeWasm {
 	WebClientRuntime: {
 		withExecutors(
@@ -31,6 +37,15 @@ export interface RuntimeWasm {
 			platformStorageInvoke: (requestJson: string) => Promise<string>,
 			httpInvoke: (requestJson: string) => Promise<string>,
 			httpCancel: (dispatchId: string) => void,
+		): WebClientRuntimeLike;
+		withConfiguredExecutors?(
+			replicaInvoke: (requestJson: string) => Promise<string>,
+			platformStorageInvoke: (requestJson: string) => Promise<string>,
+			httpInvoke: (requestJson: string) => Promise<string>,
+			httpCancel: (dispatchId: string) => void,
+			clientId: string,
+			platform: string,
+			version: string,
 		): WebClientRuntimeLike;
 	};
 }
@@ -49,6 +64,7 @@ export interface RuntimeWorkerServiceDeps {
 	platformStorageExecutor: PlatformStorageExecutor;
 	httpExecutor: HttpExecutor;
 	loadWasm(): Promise<RuntimeWasm>;
+	authClient?: RuntimeAuthClientConfig;
 }
 
 type RuntimeCommand =
@@ -123,12 +139,29 @@ export function createRuntimeWorkerService(
 		if (closing) return Promise.reject(closed());
 		if (runtimeTask !== undefined) return runtimeTask;
 		const started = deps.loadWasm().then(async ({ WebClientRuntime }) => {
-			const created = WebClientRuntime.withExecutors(
-				deps.executor.invoke.bind(deps.executor),
-				deps.platformStorageExecutor.invoke.bind(deps.platformStorageExecutor),
-				deps.httpExecutor.invoke.bind(deps.httpExecutor),
-				deps.httpExecutor.cancel.bind(deps.httpExecutor),
+			const replicaInvoke = deps.executor.invoke.bind(deps.executor);
+			const platformInvoke = deps.platformStorageExecutor.invoke.bind(
+				deps.platformStorageExecutor,
 			);
+			const httpInvoke = deps.httpExecutor.invoke.bind(deps.httpExecutor);
+			const httpCancel = deps.httpExecutor.cancel.bind(deps.httpExecutor);
+			const created =
+				deps.authClient && WebClientRuntime.withConfiguredExecutors
+					? WebClientRuntime.withConfiguredExecutors(
+							replicaInvoke,
+							platformInvoke,
+							httpInvoke,
+							httpCancel,
+							deps.authClient.clientId,
+							deps.authClient.platform,
+							deps.authClient.version,
+						)
+					: WebClientRuntime.withExecutors(
+							replicaInvoke,
+							platformInvoke,
+							httpInvoke,
+							httpCancel,
+						);
 			try {
 				await created.open();
 				return created;

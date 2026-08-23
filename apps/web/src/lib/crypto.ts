@@ -43,7 +43,7 @@ export function createWebWorkerComposition(deps?: WasmWorkerDeps) {
 const composition = createWebWorkerComposition();
 export const webWorkerOwner = composition.workerOwner;
 export const crypto = composition.crypto;
-/** Cold Runtime transport; product bootstrap remains deliberately unwired. */
+/** Shared Worker Runtime. Web Items observation consumes `observe(Items)`. */
 export const runtime = composition.runtime;
 
 // Spawning the worker and instantiating WASM costs the first sign-in about as much as the
