@@ -9,6 +9,9 @@ mod platform_storage;
 // Ticket 19 lands the primitive host seam before authentication starts constructing requests.
 #[allow(dead_code)]
 mod http_transport;
+// Ticket 19 keeps Server authentication policy behind one typed Rust-owned HTTP seam.
+#[allow(dead_code)]
+mod auth_http;
 mod protocol;
 mod replica;
 mod runtime;
