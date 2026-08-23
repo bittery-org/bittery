@@ -111,6 +111,8 @@ pub(crate) async fn authenticate(
             cancellation.clone(),
         )
         .await?;
+    // Take ownership immediately so every proof, follow-up, and cancellation failure zeroizes it.
+    let token = Zeroizing::new(finish.token);
     ensure_not_cancelled(&cancellation)?;
 
     srp.verify_session(
@@ -122,18 +124,16 @@ pub(crate) async fn authenticate(
     ensure_not_cancelled(&cancellation)?;
 
     let vault_keys = http
-        .drain_vault_keys(&finish.token, finish.vault_keys, cancellation.clone())
+        .drain_vault_keys(&token, finish.vault_keys, cancellation.clone())
         .await?;
-    let travel_mode = http
-        .get_travel_mode(&finish.token, cancellation.clone())
-        .await?;
+    let travel_mode = http.get_travel_mode(&token, cancellation.clone()).await?;
     ensure_not_cancelled(&cancellation)?;
 
     Ok(VerifiedAuthentication {
         normalized_server_url: http.normalized_server_url(),
         kdf_profile,
         master_unlock_key: Zeroizing::new(derived.master_unlock_key),
-        token: Zeroizing::new(finish.token),
+        token,
         session_id: finish.session_id,
         expires_at: finish.expires_at,
         user: finish.user,
@@ -418,7 +418,9 @@ mod tests {
             .unwrap();
 
         fn requires_zeroizing_muk(_: &Zeroizing<[u8; 32]>) {}
+        fn requires_zeroizing_token(_: &Zeroizing<String>) {}
         requires_zeroizing_muk(&verified.master_unlock_key);
+        requires_zeroizing_token(&verified.token);
         let independently_derived =
             derive_keys(PASSWORD, SECRET_KEY, EMAIL, &current_kdf_profile()).unwrap();
         assert_eq!(
