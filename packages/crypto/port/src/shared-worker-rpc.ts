@@ -2,6 +2,7 @@ import {
 	copyWorkerValue,
 	isWorkerReply,
 	type WorkerChannelName,
+	type WorkerReply,
 	type WorkerRequest,
 	WorkerRpcError,
 } from "./worker-wire";
@@ -30,6 +31,10 @@ export interface SharedWorkerOwner {
 
 export interface SharedWorkerOwnerDeps {
 	createWorker: () => SharedWorkerHandle;
+	handleHostRequest?: (
+		payload: unknown,
+		signal: AbortSignal,
+	) => Promise<unknown>;
 }
 
 interface PendingRequest {
@@ -63,9 +68,104 @@ export function createSharedWorkerOwner(
 	let nextControlId = 0;
 	const pending = new Map<string, PendingRequest>();
 	const listeners = new Map<WorkerChannelName, Set<(value: unknown) => void>>();
+	const activeHostRequests = new Map<number, AbortController>();
 
 	function key(channel: WorkerChannelName, id: number): string {
 		return `${channel}\u0000${id}`;
+	}
+
+	function abortHostRequests(): void {
+		for (const controller of activeHostRequests.values()) controller.abort();
+		activeHostRequests.clear();
+	}
+
+	function failWorker(error: WorkerRpcError): void {
+		if (failure !== null) return;
+		failure = error;
+		for (const request of pending.values()) {
+			request.detachAbort();
+			request.reject(error);
+		}
+		pending.clear();
+		abortHostRequests();
+		closeRequest?.reject(error);
+		closeRequest = null;
+		const failedWorker = worker;
+		worker = null;
+		if (failedWorker !== null) {
+			failedWorker.onmessage = null;
+			failedWorker.onerror = null;
+			failedWorker.terminate();
+		}
+	}
+
+	function postHostResponse(
+		target: SharedWorkerHandle,
+		reply: WorkerRequest,
+	): void {
+		try {
+			target.postMessage(reply);
+		} catch (error) {
+			failWorker(backendFailure(error, "Could not post the host response."));
+		}
+	}
+
+	function answerHostRequest(
+		target: SharedWorkerHandle,
+		request: Extract<WorkerReply, { type: "host-request" }>,
+	): void {
+		if (closePromise !== null || closed || failure !== null) {
+			postHostResponse(target, {
+				type: "host-response",
+				id: request.id,
+				ok: false,
+				code: "closed",
+				message: "The shared worker is closing.",
+			});
+			return;
+		}
+		const handler = deps.handleHostRequest;
+		if (handler === undefined) {
+			postHostResponse(target, {
+				type: "host-response",
+				id: request.id,
+				ok: false,
+				code: "closed",
+				message: "No host request handler is attached.",
+			});
+			return;
+		}
+		const controller = new AbortController();
+		activeHostRequests.set(request.id, controller);
+		void Promise.resolve()
+			.then(() => handler(copyWorkerValue(request.payload), controller.signal))
+			.then((value) => {
+				if (activeHostRequests.get(request.id) !== controller) return;
+				const wireValue = copyWorkerValue(value);
+				activeHostRequests.delete(request.id);
+				postHostResponse(target, {
+					type: "host-response",
+					id: request.id,
+					ok: true,
+					value: wireValue,
+				});
+			})
+			.catch((error: unknown) => {
+				if (activeHostRequests.get(request.id) !== controller) return;
+				activeHostRequests.delete(request.id);
+				const record = error as { code?: unknown; message?: unknown };
+				postHostResponse(target, {
+					type: "host-response",
+					id: request.id,
+					ok: false,
+					code:
+						typeof record.code === "string" ? record.code : "backend-failure",
+					message:
+						typeof record.message === "string"
+							? record.message
+							: "The host request failed.",
+				});
+			});
 	}
 
 	function ensureWorker(): SharedWorkerHandle {
@@ -75,6 +175,11 @@ export function createSharedWorkerOwner(
 			worker.onmessage = (event) => {
 				if (!isWorkerReply(event.data)) return;
 				const reply = event.data;
+				if (reply.type === "host-request") {
+					const target = worker;
+					if (target !== null) answerHostRequest(target, reply);
+					return;
+				}
 				if (reply.type === "notification") {
 					for (const listener of listeners.get(reply.channel) ?? []) {
 						listener(reply.value);
@@ -106,24 +211,12 @@ export function createSharedWorkerOwner(
 				else request.reject(new WorkerRpcError(reply.code, reply.message));
 			};
 			worker.onerror = (event) => {
-				failure = new WorkerRpcError(
-					"backend-failure",
-					event.message || "The shared worker failed.",
+				failWorker(
+					new WorkerRpcError(
+						"backend-failure",
+						event.message || "The shared worker failed.",
+					),
 				);
-				for (const request of pending.values()) {
-					request.detachAbort();
-					request.reject(failure);
-				}
-				pending.clear();
-				closeRequest?.reject(failure);
-				closeRequest = null;
-				const failedWorker = worker;
-				worker = null;
-				if (failedWorker !== null) {
-					failedWorker.onmessage = null;
-					failedWorker.onerror = null;
-					failedWorker.terminate();
-				}
 			};
 		}
 		return worker;
@@ -233,6 +326,7 @@ export function createSharedWorkerOwner(
 				);
 			}
 			pending.clear();
+			abortHostRequests();
 			const target = worker;
 			const id = nextControlId++;
 			closePromise = new Promise<void>((resolve, reject) => {

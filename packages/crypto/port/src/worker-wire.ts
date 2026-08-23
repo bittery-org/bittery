@@ -10,9 +10,23 @@ export type WorkerRequest =
 			payload: unknown;
 	  }
 	| { type: "cancel"; channel: WorkerChannelName; id: number }
-	| { type: "close"; id: number };
+	| { type: "close"; id: number }
+	| {
+			type: "host-response";
+			id: number;
+			ok: true;
+			value: unknown;
+	  }
+	| {
+			type: "host-response";
+			id: number;
+			ok: false;
+			code: string;
+			message: string;
+	  };
 
 export type WorkerReply =
+	| { type: "host-request"; id: number; payload: unknown }
 	| {
 			type: "notification";
 			channel: WorkerChannelName;
@@ -63,6 +77,14 @@ export function isWorkerChannelName(
 export function isWorkerRequest(value: unknown): value is WorkerRequest {
 	if (!isRecord(value) || !isRequestId(value.id)) return false;
 	if (value.type === "close") return true;
+	if (value.type === "host-response") {
+		return (
+			(value.ok === true && Object.hasOwn(value, "value")) ||
+			(value.ok === false &&
+				typeof value.code === "string" &&
+				typeof value.message === "string")
+		);
+	}
 	if (!isWorkerChannelName(value.channel)) return false;
 	if (value.type === "cancel") return true;
 	return value.type === "request" && Object.hasOwn(value, "payload");
@@ -70,6 +92,9 @@ export function isWorkerRequest(value: unknown): value is WorkerRequest {
 
 export function isWorkerReply(value: unknown): value is WorkerReply {
 	if (!isRecord(value)) return false;
+	if (value.type === "host-request") {
+		return isRequestId(value.id) && Object.hasOwn(value, "payload");
+	}
 	if (value.type === "notification") {
 		return isWorkerChannelName(value.channel) && Object.hasOwn(value, "value");
 	}

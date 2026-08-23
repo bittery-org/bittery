@@ -11,6 +11,11 @@ export {
 	loadCryptoWebBackend,
 } from "./uniffi-bindings";
 export {
+	createWorkerHostRpc,
+	type WorkerHostRpc,
+	type WorkerHostRpcScope,
+} from "./worker-host-rpc";
+export {
 	serveWorkerChannels,
 	type WorkerChannelService,
 	type WorkerRouterScope,

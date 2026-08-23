@@ -4,6 +4,7 @@ import {
 	createSharedWorkerOwner,
 	type SharedWorkerHandle,
 } from "./shared-worker-rpc";
+import { createWorkerHostRpc, type WorkerHostRpc } from "./worker-host-rpc";
 import {
 	serveWorkerChannels,
 	type WorkerChannelService,
@@ -24,12 +25,19 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 	terminateCalls = 0;
 	nextPostFailure: Error | null = null;
 	readonly requests: Array<{ channel: string; id: number }> = [];
-	private listener: ((event: { data: unknown }) => void) | null = null;
+	readonly host: WorkerHostRpc;
+	private readonly listeners = new Set<(event: { data: unknown }) => void>();
 
-	constructor(services: Readonly<Record<string, WorkerChannelService>>) {
+	constructor(
+		services:
+			| Readonly<Record<string, WorkerChannelService>>
+			| ((
+					host: WorkerHostRpc,
+			  ) => Readonly<Record<string, WorkerChannelService>>),
+	) {
 		const scope: WorkerRouterScope = {
 			addEventListener: (_type, listener) => {
-				this.listener = listener;
+				this.listeners.add(listener);
 			},
 			postMessage: (message) => {
 				const copy = structuredClone(message);
@@ -38,7 +46,11 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 				);
 			},
 		};
-		serveWorkerChannels(scope, services);
+		this.host = createWorkerHostRpc(scope);
+		serveWorkerChannels(
+			scope,
+			typeof services === "function" ? services(this.host) : services,
+		);
 	}
 
 	postMessage(message: unknown): void {
@@ -56,7 +68,9 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 			const request = copy as { channel: string; id: number };
 			this.requests.push({ channel: request.channel, id: request.id });
 		}
-		queueMicrotask(() => this.listener?.({ data: copy }));
+		queueMicrotask(() => {
+			for (const listener of this.listeners) listener({ data: copy });
+		});
 	}
 
 	terminate(): void {
@@ -72,7 +86,7 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 	}
 
 	emitToWorker(message: unknown): void {
-		this.listener?.({ data: message });
+		for (const listener of this.listeners) listener({ data: message });
 	}
 }
 
@@ -376,5 +390,181 @@ describe("shared worker RPC", () => {
 
 		expect([...result.bytes]).toEqual([4, 5, 6]);
 		expect(workerReply.byteLength).toBe(3);
+	});
+
+	test("worker host requests use an independent id space and correlate reverse-order replies", async () => {
+		const first = deferred<unknown>();
+		const second = deferred<unknown>();
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					const answers = await Promise.all([
+						host.request({ hostCall: "first" }),
+						host.request({ hostCall: "second" }),
+					]);
+					return answers;
+				},
+			},
+		}));
+		const seen: unknown[] = [];
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (payload) => {
+				seen.push(payload);
+				return (payload as { hostCall: string }).hostCall === "first"
+					? first.promise
+					: second.promise;
+			},
+		});
+
+		const result = owner
+			.channel("runtime")
+			.request<unknown[]>({ productCall: true });
+		await Promise.resolve();
+		await Promise.resolve();
+		second.resolve("second-answer");
+		first.resolve("first-answer");
+
+		expect(await result).toEqual(["first-answer", "second-answer"]);
+		expect(seen).toEqual([{ hostCall: "first" }, { hostCall: "second" }]);
+		expect(worker.requests).toEqual([{ channel: "runtime", id: 0 }]);
+	});
+
+	test("a missing host handler fails closed without affecting later product requests", async () => {
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async (payload) =>
+					(payload as { useHost?: boolean }).useHost
+						? host.request("needed")
+						: "healthy",
+			},
+		}));
+		const owner = createSharedWorkerOwner({ createWorker: () => worker });
+
+		await expect(
+			owner.channel("runtime").request({ useHost: true }),
+		).rejects.toMatchObject({ code: "closed" });
+		expect(await owner.channel("runtime").request<string>({})).toBe("healthy");
+	});
+
+	test("host requests and responses enforce the same clone-safe vocabulary", async () => {
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async (payload) =>
+					host.request((payload as { value: unknown }).value),
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (payload) =>
+				payload === "bad-response" ? () => undefined : payload,
+		});
+
+		await expect(
+			owner.channel("runtime").request({ value: () => undefined }),
+		).rejects.toMatchObject({ code: "invalid-input" });
+		await expect(
+			owner.channel("runtime").request({ value: "bad-response" }),
+		).rejects.toMatchObject({ code: "invalid-input" });
+		expect(
+			await owner
+				.channel("runtime")
+				.request<Uint8Array>({ value: new Uint8Array([3, 4]) }),
+		).toEqual(new Uint8Array([3, 4]));
+	});
+
+	test("unknown and late host responses are ignored", async () => {
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => host.request("known"),
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => "answer",
+		});
+
+		worker.emitToWorker({
+			type: "host-response",
+			id: 99,
+			ok: true,
+			value: "late",
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("answer");
+		worker.emitToWorker({
+			type: "host-response",
+			id: 0,
+			ok: true,
+			value: "later",
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("answer");
+	});
+
+	test("close aborts main-thread host work and rejects the worker-side wait", async () => {
+		const hostStarted = deferred<void>();
+		const hostAborted = deferred<void>();
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: { request: async () => host.request("slow") },
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (_payload, signal) => {
+				hostStarted.resolve();
+				await new Promise<void>((resolve) =>
+					signal.addEventListener(
+						"abort",
+						() => {
+							hostAborted.resolve();
+							resolve();
+						},
+						{ once: true },
+					),
+				);
+				return "too-late";
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+
+		const close = owner.close();
+
+		await expect(request).rejects.toMatchObject({ code: "closed" });
+		await hostAborted.promise;
+		await close;
+	});
+
+	test("a worker crash aborts pending main-thread host work", async () => {
+		const hostStarted = deferred<void>();
+		const hostAborted = deferred<void>();
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: { request: async () => host.request("slow") },
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (_payload, signal) => {
+				hostStarted.resolve();
+				await new Promise<void>((resolve) =>
+					signal.addEventListener(
+						"abort",
+						() => {
+							hostAborted.resolve();
+							resolve();
+						},
+						{ once: true },
+					),
+				);
+				return "too-late";
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+
+		worker.fail("crashed during host work");
+
+		await expect(request).rejects.toMatchObject({
+			code: "backend-failure",
+			message: "crashed during host work",
+		});
+		await hostAborted.promise;
 	});
 });
