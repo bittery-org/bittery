@@ -1,10 +1,15 @@
 #[cfg(test)]
 use crate::replica::PlanResult;
 use crate::{
+    authentication::VerifiedAuthentication,
+    authentication_installation::{
+        prepare_authenticated_installation, AuthenticationInstallationEvidence, Clock,
+        InstallationEntropy, SystemClock, SystemInstallationEntropy,
+    },
     http_transport::{HttpTransport, SerializedHttpExecutor},
     platform_storage::{
-        DeviceCatalogAccount, DeviceCatalogDocument, PlatformStorage,
-        SerializedPlatformStorageExecutor,
+        DeviceCatalogAccount, DeviceCatalogDocument, DeviceKeyDocument,
+        PendingAccountInstallIntent, PlatformStorage, SerializedPlatformStorageExecutor,
     },
     replica::{
         GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, RecomputedPlanResult,
@@ -24,6 +29,7 @@ use std::{
     },
     thread::ThreadId,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 thread_local! {
     static ACTIVE_RUNTIME_DELIVERIES: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
@@ -70,6 +76,34 @@ impl Drop for ActiveRuntimeDelivery {
 struct DeliveryGeneration {
     incarnation: crate::protocol::Incarnation,
     epoch: u64,
+}
+
+struct LiveMasterUnlockKey(Zeroizing<[u8; 32]>);
+
+impl LiveMasterUnlockKey {
+    fn new(value: Zeroizing<[u8; 32]>) -> Self {
+        Self(value)
+    }
+}
+
+impl Drop for LiveMasterUnlockKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+        #[cfg(test)]
+        if self.0.iter().all(|byte| *byte == 0) {
+            LIVE_MASTER_UNLOCK_KEY_DROPS_AFTER_ZEROIZE.with(|drops| drops.set(drops.get() + 1));
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static LIVE_MASTER_UNLOCK_KEY_DROPS_AFTER_ZEROIZE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn take_zeroized_live_master_unlock_key_drops() -> usize {
+    LIVE_MASTER_UNLOCK_KEY_DROPS_AFTER_ZEROIZE.with(|drops| drops.replace(0))
 }
 
 struct DeliveryToken {
@@ -324,6 +358,8 @@ pub struct Runtime {
     catalog_transition: tokio::sync::Mutex<()>,
     publication: Mutex<()>,
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
+    live_master_unlock_keys:
+        Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
@@ -431,6 +467,7 @@ impl Runtime {
             catalog_transition: tokio::sync::Mutex::new(()),
             publication: Mutex::new(()),
             unlocked_items: Mutex::new(HashMap::new()),
+            live_master_unlock_keys: Mutex::new(HashMap::new()),
             account_access: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
             lock_epoch_pending: Mutex::new(HashMap::new()),
@@ -524,6 +561,10 @@ impl Runtime {
     }
 
     fn publish_restored_accounts(&self, restored: &[crate::replica::ReplicaSnapshot]) {
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .clear();
         self.replica.replace_cache(restored);
         *self
             .account_access
@@ -582,6 +623,18 @@ impl Runtime {
             .expect("Account access lock poisoned")
             .get(account_id)
             .copied()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_live_master_unlock_key(
+        &self,
+        account_id: &AccountId,
+        incarnation: &crate::protocol::Incarnation,
+    ) -> bool {
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .contains_key(&(account_id.clone(), incarnation.clone()))
     }
 
     #[cfg(test)]
@@ -647,6 +700,7 @@ impl Runtime {
             .lock()
             .expect("unlocked projection lock poisoned")
             .remove(&account_id);
+        self.clear_live_master_unlock_keys_for_account(&account_id);
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
@@ -668,6 +722,486 @@ impl Runtime {
         }
         self.publish_all();
         Ok(())
+    }
+
+    /// Installs one fully authenticated Account generation without exposing authentication policy
+    /// to bindings. The public Sign-in request is wired to this only after the complete slice lands.
+    #[allow(
+        dead_code,
+        reason = "private coordinator lands before the public Sign-in routing slice"
+    )]
+    pub(crate) async fn install_verified_authentication(
+        &self,
+        verified: VerifiedAuthentication,
+        evidence: AuthenticationInstallationEvidence,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.install_verified_authentication_with(
+            verified,
+            evidence,
+            &SystemClock,
+            &SystemInstallationEntropy,
+        )
+        .await
+    }
+
+    async fn install_verified_authentication_with(
+        &self,
+        verified: VerifiedAuthentication,
+        evidence: AuthenticationInstallationEvidence,
+        clock: &dyn Clock,
+        entropy: &dyn InstallationEntropy,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let catalog_guard = self.catalog_transition.lock().await;
+        self.ensure_open()?;
+        let original_catalog = self.platform_storage.load_device_catalog().await?;
+        let catalog = original_catalog
+            .clone()
+            .unwrap_or(DeviceCatalogDocument::new(Vec::new())?);
+        if catalog
+            .accounts
+            .iter()
+            .any(|account| account.pending_install.is_some())
+        {
+            return Err(startup_invariant(
+                "Device catalog must reconcile pending installation before Sign-in",
+            ));
+        }
+
+        let mut matching_accounts = Vec::new();
+        let mut active_metadata = HashMap::new();
+        for account in &catalog.accounts {
+            let active = account.active_incarnation.as_ref().ok_or_else(|| {
+                startup_invariant("active catalog Account has no active incarnation")
+            })?;
+            let metadata = self
+                .platform_storage
+                .load_account_metadata(&account.account_id, active)
+                .await?
+                .ok_or_else(|| {
+                    startup_invariant("active catalog Account has no generation metadata")
+                })?;
+            if metadata.normalized_server_url == verified.normalized_server_url
+                && metadata.user_id == verified.user.id
+            {
+                matching_accounts.push(account.account_id.clone());
+            }
+            active_metadata.insert(account.account_id.clone(), metadata);
+        }
+        if matching_accounts.len() > 1 {
+            return Err(startup_invariant(
+                "Device catalog contains duplicate Server Account identity",
+            ));
+        }
+
+        let matched_account_id = matching_accounts.pop();
+        let is_replacement = matched_account_id.is_some();
+        let account_id =
+            matched_account_id.unwrap_or_else(|| AccountId::from(entropy.generate_uuid()));
+        if account_id.as_str().is_empty()
+            || (!is_replacement
+                && catalog
+                    .accounts
+                    .iter()
+                    .any(|account| account.account_id == account_id))
+        {
+            return Err(startup_invariant(
+                "generated Account identity collides with the Device catalog",
+            ));
+        }
+        let previous_metadata = active_metadata.get(&account_id);
+        let existing_catalog_account = catalog
+            .accounts
+            .iter()
+            .find(|account| account.account_id == account_id);
+        let expected_active_incarnation =
+            existing_catalog_account.and_then(|account| account.active_incarnation.clone());
+        let incarnation = crate::protocol::Incarnation::from(entropy.generate_uuid());
+        if incarnation.as_str().is_empty()
+            || catalog.accounts.iter().any(|account| {
+                account.active_incarnation.as_ref() == Some(&incarnation)
+                    || account
+                        .pending_install
+                        .as_ref()
+                        .is_some_and(|pending| pending.incarnation == incarnation)
+            })
+        {
+            return Err(startup_invariant(
+                "generated Account incarnation collides with the Device catalog",
+            ));
+        }
+
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
+        let previous_snapshot = self.replica.snapshot(&account_id);
+        match (&expected_active_incarnation, &previous_snapshot) {
+            (Some(expected), Some(snapshot))
+                if snapshot.incarnation == *expected && snapshot.user_id == verified.user.id => {}
+            (None, None) => {}
+            _ => {
+                return Err(startup_invariant(
+                    "Device catalog and Runtime Replica disagree before Account installation",
+                ));
+            }
+        }
+
+        let device_key = match self.platform_storage.load_device_key().await? {
+            Some(document) => document,
+            None => {
+                let document = DeviceKeyDocument::new(entropy.generate_device_key());
+                self.ensure_not_closed()?;
+                self.platform_storage.store_device_key(&document).await?;
+                document
+            }
+        };
+        let prepared = prepare_authenticated_installation(
+            verified,
+            evidence,
+            account_id.clone(),
+            incarnation.clone(),
+            previous_metadata,
+            &device_key.key_bytes,
+            clock,
+        )?;
+
+        let staged_catalog = stage_catalog_install(
+            &catalog,
+            account_id.clone(),
+            incarnation.clone(),
+            expected_active_incarnation.clone(),
+        )?;
+        self.ensure_not_closed()?;
+        if let Err(error) = self
+            .platform_storage
+            .store_device_catalog(&staged_catalog)
+            .await
+        {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self.ensure_not_closed() {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self
+            .platform_storage
+            .store_account_metadata(&prepared.metadata)
+            .await
+        {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self.ensure_not_closed() {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self
+            .platform_storage
+            .store_quick_unlock(&prepared.quick_unlock)
+            .await
+        {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self.ensure_not_closed() {
+            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
+                .await;
+            return Err(error);
+        }
+
+        let installed_snapshot = match self
+            .replica
+            .install_or_replace(
+                account_id.clone(),
+                prepared.metadata.user_id.clone(),
+                incarnation.clone(),
+            )
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => match self.replica.load_uncached(&account_id).await {
+                Ok(durable)
+                    if durable_installation_is_unchanged(
+                        durable.as_ref(),
+                        previous_snapshot.as_ref(),
+                    ) =>
+                {
+                    self.rollback_pre_replica_install(
+                        original_catalog.as_ref(),
+                        &account_id,
+                        &incarnation,
+                    )
+                    .await;
+                    return Err(error);
+                }
+                Ok(Some(snapshot))
+                    if snapshot.incarnation == incarnation
+                        && snapshot.user_id == prepared.metadata.user_id =>
+                {
+                    let invalidated =
+                        self.fence_authenticated_installation(Some(snapshot), &account_id);
+                    drop(execution_guard);
+                    drop(catalog_guard);
+                    finish_generation_fence(invalidated);
+                    self.publish_all_unless_closed();
+                    return Err(error);
+                }
+                Ok(Some(third_head)) => {
+                    let invalidated =
+                        self.fence_authenticated_installation(Some(third_head), &account_id);
+                    drop(execution_guard);
+                    drop(catalog_guard);
+                    finish_generation_fence(invalidated);
+                    self.publish_all_unless_closed();
+                    return Err(startup_invariant(
+                        "Replica changed to an unexpected generation during installation",
+                    ));
+                }
+                Ok(None) | Err(_) => {
+                    let invalidated = self.fence_authenticated_installation(None, &account_id);
+                    drop(execution_guard);
+                    drop(catalog_guard);
+                    finish_generation_fence(invalidated);
+                    self.publish_all_unless_closed();
+                    return Err(startup_invariant(
+                        "Replica installation outcome could not be established",
+                    ));
+                }
+            },
+        };
+
+        if let Err(error) = self.ensure_not_closed() {
+            let invalidated =
+                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+            drop(execution_guard);
+            drop(catalog_guard);
+            finish_generation_fence(invalidated);
+            self.publish_all_unless_closed();
+            return Err(error);
+        }
+
+        let promoted_catalog =
+            match promote_catalog_install(&staged_catalog, &account_id, &incarnation) {
+                Ok(catalog) => catalog,
+                Err(error) => {
+                    let invalidated = self
+                        .fence_authenticated_installation(Some(installed_snapshot), &account_id);
+                    drop(execution_guard);
+                    drop(catalog_guard);
+                    finish_generation_fence(invalidated);
+                    self.publish_all_unless_closed();
+                    return Err(error);
+                }
+            };
+        if let Err(error) = self
+            .platform_storage
+            .store_device_catalog(&promoted_catalog)
+            .await
+        {
+            let invalidated =
+                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+            drop(execution_guard);
+            drop(catalog_guard);
+            finish_generation_fence(invalidated);
+            self.publish_all_unless_closed();
+            return Err(error);
+        }
+        if let Err(error) = self.ensure_not_closed() {
+            let invalidated =
+                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+            drop(execution_guard);
+            drop(catalog_guard);
+            finish_generation_fence(invalidated);
+            self.publish_all_unless_closed();
+            return Err(error);
+        }
+        if let Err(error) = self
+            .platform_storage
+            .store_current_session(&prepared.current_session)
+            .await
+        {
+            let invalidated =
+                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+            drop(execution_guard);
+            drop(catalog_guard);
+            finish_generation_fence(invalidated);
+            self.publish_all_unless_closed();
+            return Err(error);
+        }
+
+        let publication = self.publish_authenticated_installation(
+            installed_snapshot.clone(),
+            account_id.clone(),
+            incarnation.clone(),
+            prepared.master_unlock_key,
+        );
+        let invalidated = match publication {
+            Ok(invalidated) if !self.is_closed() => invalidated,
+            Ok(first_invalidated) => {
+                let invalidated =
+                    self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+                drop(execution_guard);
+                drop(catalog_guard);
+                finish_generation_fence(first_invalidated);
+                finish_generation_fence(invalidated);
+                self.publish_all_unless_closed();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::RuntimeClosed,
+                    "Runtime was closed during Account installation",
+                ));
+            }
+            Err(error) => {
+                let invalidated =
+                    self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
+                drop(execution_guard);
+                drop(catalog_guard);
+                finish_generation_fence(invalidated);
+                self.publish_all_unless_closed();
+                return Err(error);
+            }
+        };
+        drop(execution_guard);
+        drop(catalog_guard);
+        finish_generation_fence(invalidated);
+        self.publish_all_unless_closed();
+
+        if let Some(old_incarnation) = expected_active_incarnation {
+            let _ = self
+                .platform_storage
+                .remove_account_metadata(&account_id, &old_incarnation)
+                .await;
+            let _ = self
+                .platform_storage
+                .remove_quick_unlock(&account_id, &old_incarnation)
+                .await;
+            let _ = self
+                .platform_storage
+                .remove_current_session(&account_id, &old_incarnation)
+                .await;
+        }
+
+        Ok(RuntimeResponse::SignedIn {
+            account_id,
+            user_id: prepared.metadata.user_id,
+        })
+    }
+
+    async fn rollback_pre_replica_install(
+        &self,
+        original_catalog: Option<&DeviceCatalogDocument>,
+        account_id: &AccountId,
+        incarnation: &crate::protocol::Incarnation,
+    ) {
+        match original_catalog {
+            Some(catalog) => {
+                let _ = self.platform_storage.store_device_catalog(catalog).await;
+            }
+            None => {
+                let _ = self.platform_storage.remove_device_catalog().await;
+            }
+        }
+        let _ = self
+            .platform_storage
+            .remove_account_metadata(account_id, incarnation)
+            .await;
+        let _ = self
+            .platform_storage
+            .remove_quick_unlock(account_id, incarnation)
+            .await;
+        let _ = self
+            .platform_storage
+            .remove_current_session(account_id, incarnation)
+            .await;
+    }
+
+    fn fence_authenticated_installation(
+        &self,
+        snapshot: Option<crate::replica::ReplicaSnapshot>,
+        account_id: &AccountId,
+    ) -> Option<Arc<DeliveryToken>> {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        let invalidated = self.invalidate_delivery(account_id);
+        let lock_epoch = snapshot.as_ref().map(|snapshot| snapshot.lock_epoch);
+        if let Some(snapshot) = snapshot {
+            self.replica.cache(snapshot);
+        } else {
+            self.replica.remove_cached(account_id);
+        }
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .remove(account_id);
+        self.clear_live_master_unlock_keys_for_account(account_id);
+        let mut account_access = self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned");
+        let mut lock_epochs = self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned");
+        if let Some(lock_epoch) = lock_epoch {
+            account_access.insert(account_id.clone(), AccountAccessState::SignedOut);
+            lock_epochs.insert(account_id.clone(), lock_epoch);
+        } else {
+            account_access.remove(account_id);
+            lock_epochs.remove(account_id);
+        }
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .remove(account_id);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        invalidated
+    }
+
+    fn publish_authenticated_installation(
+        &self,
+        snapshot: crate::replica::ReplicaSnapshot,
+        account_id: AccountId,
+        incarnation: crate::protocol::Incarnation,
+        master_unlock_key: Zeroizing<[u8; 32]>,
+    ) -> Result<Option<Arc<DeliveryToken>>, RuntimeError> {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        if self.is_closed() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::RuntimeClosed,
+                "Runtime was closed during Account installation",
+            ));
+        }
+        let invalidated = self.invalidate_delivery(&account_id);
+        self.replica.cache(snapshot);
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .insert(account_id.clone(), Vec::new());
+        self.clear_live_master_unlock_keys_for_account(&account_id);
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .insert(
+                (account_id.clone(), incarnation),
+                LiveMasterUnlockKey::new(master_unlock_key),
+            );
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), 0);
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .remove(&account_id);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        Ok(invalidated)
     }
 
     #[doc(hidden)]
@@ -724,6 +1258,10 @@ impl Runtime {
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
+            .clear();
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
             .clear();
         *self
             .account_lock_epochs
@@ -816,6 +1354,7 @@ impl Runtime {
             .lock()
             .expect("unlocked projection lock poisoned")
             .remove(account_id);
+        self.clear_live_master_unlock_keys_for_account(account_id);
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
@@ -1006,6 +1545,7 @@ impl Runtime {
                             .lock()
                             .expect("unlocked projection lock poisoned")
                             .remove(&account_id);
+                        self.clear_live_master_unlock_keys_for_account(&account_id);
                         self.account_access
                             .lock()
                             .expect("Account access lock poisoned")
@@ -1034,6 +1574,7 @@ impl Runtime {
                             .lock()
                             .expect("unlocked projection lock poisoned")
                             .remove(&account_id);
+                        self.clear_live_master_unlock_keys_for_account(&account_id);
                         self.device_revision.fetch_add(1, Ordering::SeqCst);
                         drop(_publication);
                         drop(_execution_guard);
@@ -1173,6 +1714,12 @@ impl Runtime {
         }
     }
 
+    fn publish_all_unless_closed(&self) {
+        if !self.is_closed() {
+            self.publish_all();
+        }
+    }
+
     pub async fn close(&self) {
         if self.closed.swap(true, Ordering::SeqCst) {
             let reentrant_delivery = ActiveRuntimeDelivery::is_active(self.identity());
@@ -1234,6 +1781,10 @@ impl Runtime {
             self.unlocked_items
                 .lock()
                 .expect("unlocked projection lock poisoned")
+                .clear();
+            self.live_master_unlock_keys
+                .lock()
+                .expect("live master unlock key lock poisoned")
                 .clear();
             self.account_access
                 .lock()
@@ -1311,6 +1862,13 @@ impl Runtime {
             token.invalidate();
         }
         token
+    }
+
+    fn clear_live_master_unlock_keys_for_account(&self, account_id: &AccountId) {
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .retain(|(installed_account_id, _), _| installed_account_id != account_id);
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<ProjectedDelivery, RuntimeError> {
@@ -1481,6 +2039,75 @@ fn reconcile_catalog_account(
         _ => Err(startup_invariant(
             "pending Account installation cannot be reconciled with the durable Replica head",
         )),
+    }
+}
+
+fn stage_catalog_install(
+    catalog: &DeviceCatalogDocument,
+    account_id: AccountId,
+    incarnation: crate::protocol::Incarnation,
+    expected_active_incarnation: Option<crate::protocol::Incarnation>,
+) -> Result<DeviceCatalogDocument, RuntimeError> {
+    let mut accounts = catalog.accounts.clone();
+    let pending = PendingAccountInstallIntent {
+        incarnation,
+        expected_active_incarnation: expected_active_incarnation.clone(),
+    };
+    match accounts
+        .iter_mut()
+        .find(|account| account.account_id == account_id)
+    {
+        Some(account) => {
+            if account.active_incarnation != expected_active_incarnation {
+                return Err(startup_invariant(
+                    "catalog Account changed while staging installation",
+                ));
+            }
+            account.pending_install = Some(pending);
+        }
+        None => accounts.push(DeviceCatalogAccount {
+            account_id,
+            active_incarnation: None,
+            pending_install: Some(pending),
+        }),
+    }
+    DeviceCatalogDocument::new(accounts)
+}
+
+fn promote_catalog_install(
+    staged: &DeviceCatalogDocument,
+    account_id: &AccountId,
+    incarnation: &crate::protocol::Incarnation,
+) -> Result<DeviceCatalogDocument, RuntimeError> {
+    let mut accounts = staged.accounts.clone();
+    let account = accounts
+        .iter_mut()
+        .find(|account| &account.account_id == account_id)
+        .ok_or_else(|| startup_invariant("staged catalog Account disappeared"))?;
+    if account
+        .pending_install
+        .as_ref()
+        .is_none_or(|pending| &pending.incarnation != incarnation)
+    {
+        return Err(startup_invariant(
+            "staged catalog Account has another pending incarnation",
+        ));
+    }
+    account.active_incarnation = Some(incarnation.clone());
+    account.pending_install = None;
+    DeviceCatalogDocument::new(accounts)
+}
+
+fn durable_installation_is_unchanged(
+    durable: Option<&crate::replica::ReplicaSnapshot>,
+    previous: Option<&crate::replica::ReplicaSnapshot>,
+) -> bool {
+    durable == previous
+}
+
+fn finish_generation_fence(token: Option<Arc<DeliveryToken>>) {
+    if let Some(token) = token {
+        token.wait_for_other_threads();
     }
 }
 
@@ -1991,5 +2618,659 @@ mod startup_tests {
         assert_eq!(error.code, RuntimeErrorCode::RuntimeClosed);
         closing.join().unwrap();
         assert!(runtime.replica.snapshots().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod authenticated_installation_tests {
+    use super::*;
+    use crate::{
+        authentication_installation::{
+            AuthenticationInstallationEvidence, FixedClock, InstallationEntropy,
+        },
+        platform_storage::SerializedPlatformStorageExecutor,
+        protocol::Incarnation,
+        replica::{
+            InMemoryReplica, ReplicaPersistence, ReplicaPersistenceRequest,
+            SerializedReplicaExecutor,
+        },
+        server_contract::{
+            AuthVaultKeyResponse, LoginUserResponse, TravelModeResponse, VaultRole, VaultType,
+        },
+    };
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+    use std::collections::VecDeque;
+
+    const SECRET_KEY: &str = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+    const NOW_MS: u64 = 1_700_000_000_000;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PersistenceStep {
+        DeviceKey,
+        PendingCatalog,
+        Metadata,
+        QuickUnlock,
+        Replica,
+        PromotedCatalog,
+        CurrentSession,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ReplicaFault {
+        BeforeApply,
+        ApplyThenError,
+        ApplyThenUnreadable,
+        ThirdHead,
+    }
+
+    struct Pause {
+        step: PersistenceStep,
+        reached: AtomicBool,
+        released: AtomicBool,
+        reached_notify: tokio::sync::Notify,
+        release_notify: tokio::sync::Notify,
+    }
+
+    impl Pause {
+        fn new(step: PersistenceStep) -> Arc<Self> {
+            Arc::new(Self {
+                step,
+                reached: AtomicBool::new(false),
+                released: AtomicBool::new(false),
+                reached_notify: tokio::sync::Notify::new(),
+                release_notify: tokio::sync::Notify::new(),
+            })
+        }
+
+        async fn wait_until_reached(&self) {
+            while !self.reached.load(Ordering::SeqCst) {
+                self.reached_notify.notified().await;
+            }
+        }
+
+        fn release(&self) {
+            self.released.store(true, Ordering::SeqCst);
+            self.release_notify.notify_waiters();
+        }
+    }
+
+    #[derive(Default)]
+    struct InstallationPlatform {
+        values: Mutex<HashMap<(String, String), String>>,
+        events: Arc<Mutex<Vec<PersistenceStep>>>,
+        fault: Mutex<Option<PersistenceStep>>,
+        pause: Mutex<Option<Arc<Pause>>>,
+    }
+
+    impl InstallationPlatform {
+        fn fail_at(&self, step: PersistenceStep) {
+            *self.fault.lock().unwrap() = Some(step);
+        }
+
+        fn pause_at(&self, pause: Arc<Pause>) {
+            *self.pause.lock().unwrap() = Some(pause);
+        }
+
+        fn clear_events(&self) {
+            self.events.lock().unwrap().clear();
+        }
+
+        fn events(&self) -> Vec<PersistenceStep> {
+            self.events.lock().unwrap().clone()
+        }
+
+        fn catalog(&self) -> Option<DeviceCatalogDocument> {
+            self.values
+                .lock()
+                .unwrap()
+                .get(&(
+                    "devicePlain".into(),
+                    "bittery:runtime:platform-storage:device-catalog".into(),
+                ))
+                .map(|value| serde_json::from_str(value).unwrap())
+        }
+
+        fn put_document<T: serde::Serialize>(&self, area: &str, key: String, value: &T) {
+            self.values
+                .lock()
+                .unwrap()
+                .insert((area.into(), key), serde_json::to_string(value).unwrap());
+        }
+    }
+
+    fn classify_set(key: &str, serialized: &str) -> PersistenceStep {
+        if key.ends_with("device-key") {
+            PersistenceStep::DeviceKey
+        } else if key.ends_with("device-catalog") {
+            let value: Value = serde_json::from_str(serialized).unwrap();
+            if value["accounts"].as_array().is_some_and(|accounts| {
+                accounts
+                    .iter()
+                    .any(|account| !account["pendingInstall"].is_null())
+            }) {
+                PersistenceStep::PendingCatalog
+            } else {
+                PersistenceStep::PromotedCatalog
+            }
+        } else if key.ends_with("metadata") {
+            PersistenceStep::Metadata
+        } else if key.ends_with("quick-unlock") {
+            PersistenceStep::QuickUnlock
+        } else if key.ends_with("current-session") {
+            PersistenceStep::CurrentSession
+        } else {
+            panic!("unknown installation test key: {key}")
+        }
+    }
+
+    #[async_trait]
+    impl SerializedPlatformStorageExecutor for InstallationPlatform {
+        async fn invoke(
+            &self,
+            request_json: Zeroizing<String>,
+        ) -> Result<Zeroizing<String>, RuntimeError> {
+            let request: Value = serde_json::from_str(&request_json).unwrap();
+            let area = request["area"].as_str().unwrap().to_owned();
+            let key = request["key"].as_str().unwrap().to_owned();
+            match request["type"].as_str().unwrap() {
+                "get" => Ok(Zeroizing::new(
+                    json!({
+                        "type": "value",
+                        "value": self.values.lock().unwrap().get(&(area, key)).cloned()
+                    })
+                    .to_string(),
+                )),
+                "set" => {
+                    let serialized = request["value"].as_str().unwrap().to_owned();
+                    let step = classify_set(&key, &serialized);
+                    self.events.lock().unwrap().push(step);
+                    let should_fail = {
+                        let mut fault = self.fault.lock().unwrap();
+                        if *fault == Some(step) {
+                            fault.take();
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if should_fail {
+                        return Err(startup_invariant("injected platform write failure"));
+                    }
+                    self.values.lock().unwrap().insert((area, key), serialized);
+                    let pause = self.pause.lock().unwrap().clone();
+                    if let Some(pause) = pause.filter(|pause| pause.step == step) {
+                        pause.reached.store(true, Ordering::SeqCst);
+                        pause.reached_notify.notify_waiters();
+                        while !pause.released.load(Ordering::SeqCst) {
+                            pause.release_notify.notified().await;
+                        }
+                    }
+                    Ok(Zeroizing::new(json!({"type": "done"}).to_string()))
+                }
+                "delete" => {
+                    self.values.lock().unwrap().remove(&(area, key));
+                    Ok(Zeroizing::new(json!({"type": "done"}).to_string()))
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    struct InstallationReplica {
+        state: InMemoryReplica,
+        events: Arc<Mutex<Vec<PersistenceStep>>>,
+        fault: Mutex<Option<ReplicaFault>>,
+        fail_next_load: AtomicBool,
+    }
+
+    impl InstallationReplica {
+        fn new(events: Arc<Mutex<Vec<PersistenceStep>>>) -> Self {
+            Self {
+                state: InMemoryReplica::default(),
+                events,
+                fault: Mutex::new(None),
+                fail_next_load: AtomicBool::new(false),
+            }
+        }
+
+        fn fail_with(&self, fault: ReplicaFault) {
+            *self.fault.lock().unwrap() = Some(fault);
+        }
+    }
+
+    #[async_trait]
+    impl SerializedReplicaExecutor for InstallationReplica {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            let mut request: ReplicaPersistenceRequest =
+                serde_json::from_str(&request_json).unwrap();
+            if matches!(request, ReplicaPersistenceRequest::Load { .. })
+                && self.fail_next_load.swap(false, Ordering::SeqCst)
+            {
+                return Err(startup_invariant("injected Replica reread failure"));
+            }
+            if let ReplicaPersistenceRequest::Install { prepared } = &mut request {
+                self.events.lock().unwrap().push(PersistenceStep::Replica);
+                let fault = self.fault.lock().unwrap().take();
+                match fault {
+                    Some(ReplicaFault::BeforeApply) => {
+                        return Err(startup_invariant("injected Replica failure"));
+                    }
+                    Some(ReplicaFault::ApplyThenError) => {
+                        self.state.invoke(request).await?;
+                        return Err(startup_invariant("lost Replica apply response"));
+                    }
+                    Some(ReplicaFault::ApplyThenUnreadable) => {
+                        self.state.invoke(request).await?;
+                        self.fail_next_load.store(true, Ordering::SeqCst);
+                        return Err(startup_invariant("lost Replica apply response"));
+                    }
+                    Some(ReplicaFault::ThirdHead) => {
+                        prepared.next_head.incarnation = Incarnation::from("third-generation");
+                    }
+                    None => {}
+                }
+            }
+            serde_json::to_string(&self.state.invoke(request).await?)
+                .map_err(|_| startup_invariant("test Replica response could not serialize"))
+        }
+    }
+
+    struct FixedEntropy {
+        ids: Mutex<VecDeque<String>>,
+    }
+
+    impl FixedEntropy {
+        fn new(ids: &[&str]) -> Self {
+            Self {
+                ids: Mutex::new(ids.iter().map(|value| (*value).to_owned()).collect()),
+            }
+        }
+    }
+
+    impl InstallationEntropy for FixedEntropy {
+        fn generate_uuid(&self) -> String {
+            self.ids
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("test UUID script exhausted")
+        }
+
+        fn generate_device_key(&self) -> [u8; 32] {
+            [0x5A; 32]
+        }
+    }
+
+    struct UnusedHttp;
+
+    #[derive(Default)]
+    struct Sink(Mutex<Vec<RuntimeProjection>>);
+
+    impl ObservationSink for Sink {
+        fn publish(&self, projection: RuntimeProjection) {
+            self.0.lock().unwrap().push(projection);
+        }
+    }
+
+    #[async_trait]
+    impl SerializedHttpExecutor for UnusedHttp {
+        async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+            panic!("installation coordinator tests do not use HTTP")
+        }
+
+        fn cancel(&self, _dispatch_id: &str) {}
+    }
+
+    fn vault_key(id: &str) -> AuthVaultKeyResponse {
+        AuthVaultKeyResponse {
+            encrypted_vault_key: format!("wrapped-{id}"),
+            role: VaultRole::Owner,
+            vault_icon: None,
+            vault_id: id.into(),
+            vault_image_url: None,
+            vault_name: id.into(),
+            vault_type: VaultType::Personal,
+        }
+    }
+
+    fn verified(user_id: &str) -> VerifiedAuthentication {
+        VerifiedAuthentication {
+            normalized_server_url: "https://vault.example.com".into(),
+            kdf_profile: bittery_crypto_core::current_kdf_profile(),
+            master_unlock_key: Zeroizing::new([0xA5; 32]),
+            token: Zeroizing::new("session-token".into()),
+            session_id: "session-id".into(),
+            expires_at: "2030-01-01T00:00:00Z".into(),
+            user: LoginUserResponse {
+                email: format!("{user_id}@example.com"),
+                encrypted_private_key: "encrypted-private-key".into(),
+                id: user_id.into(),
+                name: "User".into(),
+                public_key: "public-key".into(),
+                secret_key_hint: "A3-A••••".into(),
+                team_avatar_url: None,
+                team_name: None,
+            },
+            vault_keys: vec![vault_key("visible"), vault_key("hidden")],
+            travel_mode: TravelModeResponse {
+                enabled: true,
+                enabled_at: Some("2029-01-01T00:00:00Z".into()),
+                hidden_vault_ids: vec!["hidden".into()],
+                updated_at: "2029-01-02T00:00:00Z".into(),
+            },
+        }
+    }
+
+    fn evidence() -> AuthenticationInstallationEvidence {
+        AuthenticationInstallationEvidence::new(SECRET_KEY.into(), false)
+    }
+
+    async fn harness() -> (
+        Arc<Runtime>,
+        Arc<InstallationReplica>,
+        Arc<InstallationPlatform>,
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let replica = Arc::new(InstallationReplica::new(events.clone()));
+        let platform = Arc::new(InstallationPlatform {
+            events,
+            ..InstallationPlatform::default()
+        });
+        let runtime = Runtime::with_serialized_executors(
+            replica.clone(),
+            platform.clone(),
+            Arc::new(UnusedHttp),
+        );
+        runtime.open().await.unwrap();
+        platform.clear_events();
+        (runtime, replica, platform)
+    }
+
+    async fn install(
+        runtime: &Runtime,
+        user_id: &str,
+        entropy: &FixedEntropy,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        runtime
+            .install_verified_authentication_with(
+                verified(user_id),
+                evidence(),
+                &FixedClock(NOW_MS),
+                entropy,
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn first_install_obeys_the_exact_durable_order_before_publication() {
+        let (runtime, _replica, platform) = harness().await;
+        let response = install(
+            &runtime,
+            "user-1",
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            platform.events(),
+            vec![
+                PersistenceStep::DeviceKey,
+                PersistenceStep::PendingCatalog,
+                PersistenceStep::Metadata,
+                PersistenceStep::QuickUnlock,
+                PersistenceStep::Replica,
+                PersistenceStep::PromotedCatalog,
+                PersistenceStep::CurrentSession,
+            ]
+        );
+        assert_eq!(
+            response,
+            RuntimeResponse::SignedIn {
+                account_id: AccountId::from("account-1"),
+                user_id: "user-1".into(),
+            }
+        );
+        assert_eq!(
+            runtime.account_access_state(&AccountId::from("account-1")),
+            Some(AccountAccessState::Unlocked)
+        );
+        assert!(runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        let session = runtime
+            .platform_storage
+            .load_current_session(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.vault_keys.len(), 1);
+        assert_eq!(session.vault_keys[0].vault_id, "visible");
+    }
+
+    #[tokio::test]
+    async fn replacement_keeps_the_account_id_and_duplicate_identity_rejects_before_writes() {
+        let (runtime, replica, platform) = harness().await;
+        install(
+            &runtime,
+            "user-1",
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap();
+        platform.clear_events();
+        let response = install(&runtime, "user-1", &FixedEntropy::new(&["generation-2"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            RuntimeResponse::SignedIn {
+                account_id: AccountId::from("account-1"),
+                user_id: "user-1".into(),
+            }
+        );
+        assert!(!runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        assert!(runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-2")
+        ));
+
+        replica
+            .state
+            .install(
+                AccountId::from("duplicate"),
+                "user-1".into(),
+                Incarnation::from("duplicate-generation"),
+            )
+            .unwrap();
+        let mut duplicate_metadata = runtime
+            .platform_storage
+            .load_account_metadata(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-2"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        duplicate_metadata.account_id = AccountId::from("duplicate");
+        duplicate_metadata.incarnation = Incarnation::from("duplicate-generation");
+        platform.put_document(
+            "devicePlain",
+            generation_storage_key("duplicate", "duplicate-generation", "metadata"),
+            &duplicate_metadata,
+        );
+        let mut catalog = platform.catalog().unwrap();
+        catalog.accounts.push(DeviceCatalogAccount {
+            account_id: AccountId::from("duplicate"),
+            active_incarnation: Some(Incarnation::from("duplicate-generation")),
+            pending_install: None,
+        });
+        platform.put_document(
+            "devicePlain",
+            "bittery:runtime:platform-storage:device-catalog".into(),
+            &DeviceCatalogDocument::new(catalog.accounts).unwrap(),
+        );
+        platform.clear_events();
+
+        let error = install(&runtime, "user-1", &FixedEntropy::new(&["unused"]))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(platform.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn persistence_failures_rollback_before_replica_and_fence_after_replica() {
+        for step in [
+            PersistenceStep::DeviceKey,
+            PersistenceStep::PendingCatalog,
+            PersistenceStep::Metadata,
+            PersistenceStep::QuickUnlock,
+        ] {
+            let (runtime, _replica, platform) = harness().await;
+            platform.fail_at(step);
+            assert!(install(
+                &runtime,
+                "user-1",
+                &FixedEntropy::new(&["account-1", "generation-1"]),
+            )
+            .await
+            .is_err());
+            assert!(runtime.replica.snapshots().is_empty());
+            assert!(runtime
+                .account_access_state(&AccountId::from("account-1"))
+                .is_none());
+            assert!(!runtime.has_live_master_unlock_key(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1")
+            ));
+        }
+
+        for fault in [
+            ReplicaFault::BeforeApply,
+            ReplicaFault::ApplyThenError,
+            ReplicaFault::ApplyThenUnreadable,
+            ReplicaFault::ThirdHead,
+        ] {
+            let (runtime, replica, _platform) = harness().await;
+            replica.fail_with(fault);
+            assert!(install(
+                &runtime,
+                "user-1",
+                &FixedEntropy::new(&["account-1", "generation-1"]),
+            )
+            .await
+            .is_err());
+            assert!(!runtime.has_live_master_unlock_key(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1")
+            ));
+            if matches!(fault, ReplicaFault::BeforeApply) {
+                assert!(runtime.replica.snapshots().is_empty());
+            } else {
+                assert_ne!(
+                    runtime.account_access_state(&AccountId::from("account-1")),
+                    Some(AccountAccessState::Unlocked)
+                );
+            }
+        }
+
+        for step in [
+            PersistenceStep::PromotedCatalog,
+            PersistenceStep::CurrentSession,
+        ] {
+            let (runtime, _replica, platform) = harness().await;
+            platform.fail_at(step);
+            assert!(install(
+                &runtime,
+                "user-1",
+                &FixedEntropy::new(&["account-1", "generation-1"]),
+            )
+            .await
+            .is_err());
+            assert_eq!(
+                runtime.account_access_state(&AccountId::from("account-1")),
+                Some(AccountAccessState::SignedOut)
+            );
+            assert!(!runtime.has_live_master_unlock_key(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1")
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn lock_close_and_close_racing_final_publication_retire_live_keys_without_callbacks() {
+        let (runtime, _replica, platform) = harness().await;
+        install(
+            &runtime,
+            "user-1",
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap();
+        let _ = take_zeroized_live_master_unlock_key_drops();
+        runtime
+            .mark_account_locked(&AccountId::from("account-1"))
+            .await
+            .unwrap();
+        assert_eq!(take_zeroized_live_master_unlock_key_drops(), 1);
+        assert!(!runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        install(&runtime, "user-1", &FixedEntropy::new(&["generation-2"]))
+            .await
+            .unwrap();
+        let _ = take_zeroized_live_master_unlock_key_drops();
+
+        let sink = Arc::new(Sink::default());
+        let _handle = runtime
+            .observe(
+                ObservationRequest::RuntimeStatus { account_id: None },
+                sink.clone(),
+            )
+            .unwrap();
+        let before_close = sink.0.lock().unwrap().len();
+        let pause = Pause::new(PersistenceStep::CurrentSession);
+        platform.pause_at(pause.clone());
+        let installing = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                install(&runtime, "user-1", &FixedEntropy::new(&["generation-3"])).await
+            })
+        };
+        pause.wait_until_reached().await;
+        let closing = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.close().await })
+        };
+        while !runtime.is_closed() {
+            tokio::task::yield_now().await;
+        }
+        pause.release();
+
+        let error = installing.await.unwrap().unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::RuntimeClosed);
+        closing.await.unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), before_close);
+        assert!(runtime.live_master_unlock_keys.lock().unwrap().is_empty());
+        assert!(take_zeroized_live_master_unlock_key_drops() >= 1);
+    }
+
+    fn generation_storage_key(account: &str, incarnation: &str, document: &str) -> String {
+        format!(
+            "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
+            account.len(),
+            incarnation.len()
+        )
     }
 }
