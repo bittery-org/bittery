@@ -21,7 +21,11 @@ import {
 	createStoredAccountApiClient,
 	createStoredAccountUnlockApiClient,
 } from "./api-client";
-import { performSRPUnlock, storeUnlockSessionOwned } from "./auth-service";
+import {
+	type IAuthClient,
+	performSRPUnlock,
+	storeUnlockSessionOwned,
+} from "./auth-service";
 import { selectActiveAccountAfterUnlock } from "./select-active-account";
 import {
 	getTravelModeEnforcer,
@@ -74,6 +78,11 @@ export interface UnlockDeps {
 /** Only the SRP (password) path derives keys, so only it takes a `CryptoPort`. */
 export interface PasswordUnlockDeps extends UnlockDeps {
 	crypto: CryptoPort;
+	/** Internal seam for deterministic ceremony tests; production resolves stored Account URLs. */
+	accountAuthClientFactory?: (
+		storage: AccountStore,
+		accountId: string,
+	) => Promise<IAuthClient>;
 }
 
 export interface UnlockOptions {
@@ -158,7 +167,13 @@ function unknownAccountOutcome(accountId: string): UnlockOutcome {
 async function acquireWithPassword(
 	targets: AccountMetadata[],
 	password: string,
-	{ storage, itemCache, crypto, credentialMirror }: PasswordUnlockDeps,
+	{
+		storage,
+		itemCache,
+		crypto,
+		credentialMirror,
+		accountAuthClientFactory,
+	}: PasswordUnlockDeps,
 ): Promise<AcquireResult> {
 	const candidates: UnlockCandidate[] = [];
 	const failed: UnlockFailure[] = [];
@@ -174,16 +189,19 @@ async function acquireWithPassword(
 			// Non-refreshing, and unauthenticated when the lock already dropped the token:
 			// an unlock runs before a session exists, so there is nothing to refresh
 			// against and nothing to authenticate with yet.
-			const apiClient = await createStoredAccountUnlockApiClient(
-				storage,
-				accountId,
-			);
+			const apiClient = await (
+				accountAuthClientFactory ?? createStoredAccountUnlockApiClient
+			)(storage, accountId);
 
 			const serverUrl =
 				(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
 			const result = await performSRPUnlock(
 				{ accountId, password },
-				{ crypto, apiClient, storage },
+				{
+					crypto,
+					storage,
+					accountAuthClientFactory: async () => apiClient,
+				},
 			);
 			// No `travelModeApiClient`: the client above may hold a dead token or none at
 			// all, and travel mode is verified before the new one is committed to storage.
@@ -201,7 +219,7 @@ async function acquireWithPassword(
 				},
 			);
 
-			candidates.push({ account, apiClient, verified: true });
+			candidates.push({ account, apiClient: null, verified: true });
 		} catch (error) {
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.

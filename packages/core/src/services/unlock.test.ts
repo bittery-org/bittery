@@ -13,9 +13,10 @@ import {
 	mukRefFor,
 } from "../testing/account-store-harness";
 import { NO_CREDENTIAL_MIRROR } from "./account-lifecycle";
-import { storeUnlockSession } from "./auth-service";
+import { type IAuthClient, storeUnlockSession } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
 import {
+	type PasswordUnlockDeps,
 	unlockAccountWithBiometric,
 	unlockAccountWithPassword,
 	unlockAllWithBiometric,
@@ -32,6 +33,59 @@ const KDF_PROFILE: KdfProfile = {
 	algorithm: "pbkdf2-sha256",
 	iterations: 600_000,
 };
+const VALID_SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+
+async function testAccountAuthClientFactory(
+	_storage: AccountStore,
+	accountId: string,
+): Promise<IAuthClient> {
+	return {
+		auth: {
+			checkEmail: mock(async () => ({ data: { exists: true } })),
+			startLogin: mock(async () => ({
+				data: {
+					attemptId: `attempt-${accountId}`,
+					salt: "srp-salt",
+					serverPublicKey: "server-public",
+					kdfParams: KDF_PROFILE,
+				},
+			})),
+			finishLogin: mock(async () => ({
+				data: {
+					token: `fresh-token-${accountId}`,
+					sessionId: `fresh-session-${accountId}`,
+					serverProof: "server-proof",
+					user: {
+						id: `user-${accountId}`,
+						email:
+							ACCOUNTS.find(([id]) => id === accountId)?.[1] ?? "x@test.com",
+						name: accountId,
+						secretKeyHint: "A3-A••••",
+						publicKey: "public-key",
+						encryptedPrivateKey: "encrypted-private-key",
+						teamName: "Solo",
+						teamAvatarUrl: null,
+					},
+					expiresAt: new Date(Date.now() + 60_000).toISOString(),
+					vaultKeys: { items: [], hasMore: false },
+				},
+			})),
+			drainVaultKeys: mock(async (_token, initialPage) => ({
+				data: initialPage.items,
+			})),
+		},
+	};
+}
+
+function passwordDeps(storage: AccountStore): PasswordUnlockDeps {
+	return {
+		storage,
+		itemCache,
+		crypto,
+		credentialMirror,
+		accountAuthClientFactory: testAccountAuthClientFactory,
+	};
+}
 
 /**
  * Unroutable on purpose: every API client built below is real, so the travel
@@ -76,6 +130,7 @@ async function createStorage(
 	} = options;
 
 	const { store, port } = await createTestAccountStore({ crypto: cryptoPort });
+	cryptoPort.verifyServerSession = async () => {};
 	if (biometric) {
 		port.biometricState.hasHardware = true;
 		port.biometricState.isEnrolled = true;
@@ -92,7 +147,7 @@ async function createStorage(
 			await store.storeAuthToken(`token-${accountId}`, accountId);
 		}
 		if (withSecretKey.includes(accountId)) {
-			await store.storeSecretKey(`secret-${accountId}`, accountId);
+			await store.storeSecretKey(VALID_SECRET_KEY, accountId);
 		}
 		if (withKdfProfile.includes(accountId)) {
 			await store.storePinnedKdfProfile(KDF_PROFILE, accountId);
@@ -133,7 +188,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -154,7 +209,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -169,28 +224,16 @@ describe("unlock all accounts", () => {
 		expect(await storage.getActiveAccount()).toEqual("acc-2");
 	});
 
-	/**
-	 * A lock drops `jwt_token` and keeps `session_data`, so "no stored token" is the
-	 * ordinary state of a locked account rather than a reason to refuse. This unlock
-	 * has to reach the server and re-run SRP; against `OFFLINE_SERVER_URL` that fails,
-	 * and the failure being `credential_rejected` is the proof it was attempted at all.
-	 */
-	it("re-runs SRP for an account whose lock already dropped the auth token", async () => {
+	it("re-runs SRP for every account regardless of an old auth token", async () => {
 		const { storage } = await createStorage({ withAuthToken: ["acc-2"] });
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
-		expect(outcome.unlocked).toEqual(["acc-2"]);
-		expect(outcome.failed).toEqual([
-			{
-				accountId: "acc-1",
-				email: "a@test.com",
-				reason: "credential_rejected",
-			},
-		]);
+		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
+		expect(outcome.failed).toEqual([]);
 	});
 
 	it("reports credential_rejected when the unlock itself fails", async () => {
@@ -198,7 +241,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -216,7 +259,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 			{ setActive: false },
 		);
 
@@ -231,7 +274,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw", accountIds: ["acc-2"] },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -244,7 +287,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -309,7 +352,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -333,7 +376,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -349,7 +392,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.activeAccountId).toBe("acc-1");
@@ -404,7 +447,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		// A cleanup that throws must neither escape the batch nor cost the
@@ -458,7 +501,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-2", password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -471,7 +514,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-2", password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 			{ setActive: false },
 		);
 
@@ -561,7 +604,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-404", password: "pw" },
-			{ storage, itemCache, crypto, credentialMirror },
+			passwordDeps(storage),
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -596,7 +639,6 @@ describe("stored account refresh", () => {
 
 		await storeUnlockSession(
 			{
-				mode: "local",
 				token: "token-acc-2",
 				user: {
 					id: "acc-2",
@@ -607,6 +649,11 @@ describe("stored account refresh", () => {
 				},
 				vaultKeys: [],
 				masterUnlockKey: await mukRefFor(cryptoPort, "acc-2"),
+				kdfParams: {
+					schemaVersion: 1,
+					algorithm: "pbkdf2-sha256",
+					iterations: 600_000,
+				},
 			},
 			storage,
 			itemCache,

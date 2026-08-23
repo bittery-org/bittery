@@ -438,7 +438,7 @@ describe("account-routed authentication", () => {
 			[account("acct", "user", "https://acct.example")],
 			crypto,
 		);
-		await storage.storeSecretKey("secret", "acct");
+		await storage.storeSecretKey(SECRET_KEY, "acct");
 		await storage.storePinnedKdfProfile(kdfParams, "acct");
 		const apiClient = createAuthClient([]);
 
@@ -457,7 +457,11 @@ describe("account-routed authentication", () => {
 		);
 		await performSRPUnlock(
 			{ accountId: "acct", password: "password" },
-			{ crypto, storage, apiClient },
+			{
+				crypto,
+				storage,
+				accountAuthClientFactory: async () => apiClient,
+			},
 		);
 
 		expect(srpChallengeFields).toEqual([
@@ -465,6 +469,40 @@ describe("account-routed authentication", () => {
 			["salt", "serverPublicKey"],
 			["salt", "serverPublicKey"],
 		]);
+	});
+
+	it("routes Quick Unlock through the requested Account's stored Server", async () => {
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[
+				account("account-a", "user-a", "https://a.example"),
+				account("account-b", "user-b", "https://b.example"),
+			],
+			crypto,
+		);
+		await storage.setActiveAccount("account-a");
+		await storage.storeServerUrl("https://a.example", "account-a");
+		await storage.storeServerUrl("https://b.example", "account-b");
+		await storage.storeSecretKey(SECRET_KEY, "account-b");
+		await storage.storePinnedKdfProfile(kdfParams, "account-b");
+		const resolved: Array<[string, string | null]> = [];
+
+		await performSRPUnlock(
+			{ accountId: "account-b", password: "password" },
+			{
+				crypto,
+				storage,
+				accountAuthClientFactory: async (accountStorage, accountId) => {
+					resolved.push([
+						accountId,
+						await accountStorage.getServerUrl(accountId),
+					]);
+					return createAuthClient([]);
+				},
+			},
+		);
+
+		expect(resolved).toEqual([["account-b", "https://b.example"]]);
 	});
 
 	it("rejects ambiguous full-login account matches before derivation", async () => {
@@ -499,13 +537,13 @@ describe("KDF agility on unlock", () => {
 		iterations: 600_000,
 	};
 
-	it("derives unlock keys with the account's pinned KDF profile", async () => {
+	it("runs full online SRP even when the old local Session is still valid", async () => {
 		const { crypto, derivations } = createRecordingCryptoPort();
 		const { storage } = await makeStore(
 			[account("acct", "user", "https://acct.example")],
 			crypto,
 		);
-		await storage.storeSecretKey("secret", "acct");
+		await storage.storeSecretKey(SECRET_KEY, "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 		await storage.storeAuthToken("token", "acct");
 		await storage.storeVaultKeys([], "acct");
@@ -516,27 +554,36 @@ describe("KDF agility on unlock", () => {
 			"user",
 		);
 
+		const startedEmails: string[] = [];
+		const authClient = createAuthClient(startedEmails, "fresh-token");
+		const finishLogin = spyOn(authClient.auth, "finishLogin");
+		const drainVaultKeys = spyOn(authClient.auth, "drainVaultKeys");
+		const verifyServerSession = spyOn(crypto, "verifyServerSession");
 		const result = await performSRPUnlock(
 			{ accountId: "acct", password: "password" },
 			{
 				crypto,
 				storage,
-				apiClient: createAuthClient([]),
+				accountAuthClientFactory: async () => authClient,
 			},
 		);
 
-		expect(result.mode).toBe("local");
+		expect(result.token).toBe("fresh-token");
+		expect(startedEmails).toEqual(["same@example.com"]);
+		expect(finishLogin).toHaveBeenCalledTimes(1);
+		expect(verifyServerSession).toHaveBeenCalledTimes(1);
+		expect(drainVaultKeys).toHaveBeenCalledTimes(1);
 		expect(derivations).toHaveLength(1);
 		expect(derivations[0]?.profile.iterations).toBe(600_000);
 	});
 
-	it("requires full sign-in when the offline-unlock pin is missing", async () => {
+	it("requires full sign-in when the Quick Unlock KDF pin is missing", async () => {
 		const { crypto, derivations } = createRecordingCryptoPort();
 		const { storage } = await makeStore(
 			[account("acct", "user", "https://acct.example")],
 			crypto,
 		);
-		await storage.storeSecretKey("secret", "acct");
+		await storage.storeSecretKey(SECRET_KEY, "acct");
 
 		expect(
 			performSRPUnlock(
@@ -544,7 +591,7 @@ describe("KDF agility on unlock", () => {
 				{
 					crypto,
 					storage,
-					apiClient: createAuthClient([]),
+					accountAuthClientFactory: async () => createAuthClient([]),
 				},
 			),
 		).rejects.toThrow("sign in again");
@@ -557,7 +604,7 @@ describe("KDF agility on unlock", () => {
 			[account("acct", "user", "http://server.example")],
 			crypto,
 		);
-		await storage.storeSecretKey("secret", "acct");
+		await storage.storeSecretKey(SECRET_KEY, "acct");
 		await storage.storeServerUrl("http://server.example", "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 		const drainedOrigins: unknown[] = [];
@@ -579,16 +626,15 @@ describe("KDF agility on unlock", () => {
 			},
 		);
 
-		const result = await performSRPUnlock(
+		await performSRPUnlock(
 			{ accountId: "acct", password: "password" },
 			{
 				crypto,
 				storage,
-				apiClient: authClient,
+				accountAuthClientFactory: async () => authClient,
 			},
 		);
 
-		expect(result.mode).toBe("reauth");
 		expect(drainedOrigins).toEqual([
 			{
 				kind: "persistedAccount",
@@ -604,7 +650,7 @@ describe("KDF agility on unlock", () => {
 			[account("acct", "user", "https://acct.example")],
 			crypto,
 		);
-		await storage.storeSecretKey("secret", "acct");
+		await storage.storeSecretKey(SECRET_KEY, "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 
 		const authClient = createAuthClient([]);
@@ -850,11 +896,11 @@ describe("storeLoginSession travel mode verification", () => {
 describe("storeUnlockSession active account", () => {
 	async function unlockResult(): Promise<UnlockResult> {
 		return {
-			mode: "local",
 			token: "unlock-token",
 			user: { id: "user-b", email: "same@example.com" },
 			vaultKeys: [],
 			masterUnlockKey: await mukRef(),
+			kdfParams,
 		};
 	}
 
@@ -916,11 +962,11 @@ describe("storeUnlockSession active account", () => {
 		);
 		const { cache: itemCache } = await createTestItemCache();
 		const result: UnlockResult = {
-			mode: "local",
 			token: "unlock-token",
 			user: { id: "user-b", email: "same@example.com" },
 			vaultKeys: [],
 			masterUnlockKey: await crypto.importKey(MUK),
+			kdfParams,
 		};
 		const kvSet = port.kvSet.bind(port);
 		port.kvSet = async (key, value, scope) => {
@@ -955,11 +1001,11 @@ describe("storeUnlockSession active account", () => {
 		);
 		const { cache: itemCache } = await createTestItemCache();
 		const result: UnlockResult = {
-			mode: "local",
 			token: "unlock-token",
 			user: { id: "user-b", email: "same@example.com" },
 			vaultKeys: [],
 			masterUnlockKey: await crypto.importKey(MUK),
+			kdfParams,
 		};
 		const log = spyOn(console, "error").mockImplementation(() => {});
 

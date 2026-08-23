@@ -263,7 +263,7 @@ async function lockAll(
 	);
 }
 
-/** Sign-out and forced invalidation are the same sequence under two names. */
+/** Explicit Sign-out permanently removes the Account from this device. */
 async function endSession(
 	accountId: string,
 	deps: LifecycleDeps,
@@ -441,29 +441,6 @@ export async function signOutAccount(
 ): Promise<LifecycleOutcome> {
 	const failures: LifecycleStepFailure[] = [];
 	const pre = await readPreState(deps.storage, failures);
-	await endSession(accountId, deps, failures);
-	return buildOutcome(
-		deps.storage,
-		pre,
-		affectedOf(pre.accounts, accountId),
-		failures,
-	);
-}
-
-/**
- * The server rejected this account's credentials. Same sequence as
- * `signOutAccount` under the name of its trigger, plus target resolution.
- */
-export async function invalidateAccountSession(
-	target: InvalidationTarget,
-	deps: LifecycleDeps,
-): Promise<LifecycleOutcome> {
-	const failures: LifecycleStepFailure[] = [];
-	const pre = await readPreState(deps.storage, failures);
-	const accountId = await resolveTarget(target, pre, deps.storage, failures);
-	if (!accountId) {
-		return buildOutcome(deps.storage, pre, [], failures);
-	}
 	await endSession(accountId, deps, failures);
 	return buildOutcome(
 		deps.storage,

@@ -7,6 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
+import { requireCompleteSessionLock } from "@/lib/session-reauth";
 import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -133,7 +134,14 @@ export function useWebSync(
 		async (payload: { sessionId: string }) => {
 			// The old Server Session is gone, so lock its Account and reauthenticate online.
 			// Device-bound Quick Unlock inputs remain; this is not explicit Sign out.
-			await accountSync.invalidateSession(payload);
+			try {
+				requireCompleteSessionLock(
+					await accountSync.invalidateSession(payload),
+				);
+			} catch (error) {
+				toast.error(m.toast_auth_session_lock_failed());
+				throw error;
+			}
 			lifecycle.clear();
 			queryClient.clear();
 
@@ -144,7 +152,7 @@ export function useWebSync(
 				window.location.href = "/login";
 			}
 		},
-		[accountSync, lifecycle, queryClient],
+		[accountSync, lifecycle, queryClient, m.toast_auth_session_lock_failed],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.error(m.sync_command_terminal_error(), {

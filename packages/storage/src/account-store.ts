@@ -1328,7 +1328,11 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				store.getStoredSecretKey(resolved),
 				store.getPinnedKdfProfile(resolved),
 			]);
-			return secretKey !== null && pinnedKdfProfile !== null;
+			return (
+				secretKey !== null &&
+				pinnedKdfProfile !== null &&
+				(await cryptoPort.validateSecretKey(secretKey))
+			);
 		},
 
 		/**

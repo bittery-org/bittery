@@ -35,7 +35,7 @@ function outcome(affected: AccountMetadata[]): LifecycleOutcome {
 
 const invalidationTargets: InvalidationTarget[] = [];
 let lockAllCalls = 0;
-/** Accounts `invalidateAccountSession` claims to have found, keyed by nothing — set per test. */
+/** Accounts `lockInvalidSession` claims to have found, keyed by nothing — set per test. */
 let invalidateResult: (target: InvalidationTarget) => AccountMetadata[] =
 	() => [ACCOUNT];
 
@@ -123,7 +123,7 @@ mock.module("@bittery/core/services/account-lifecycle", () => ({
 		lockAllCalls++;
 		return outcome([]);
 	},
-	invalidateAccountSession: async (target: InvalidationTarget) => {
+	lockInvalidSession: async (target: InvalidationTarget) => {
 		invalidationTargets.push(target);
 		return outcome(invalidateResult(target));
 	},

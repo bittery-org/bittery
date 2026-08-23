@@ -5,7 +5,7 @@
  * Uses shared auth utilities from @bittery/core for SRP login/unlock logic.
  */
 
-import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
+import { signOutAccount } from "@bittery/core/services/account-lifecycle";
 import {
 	performSRPLogin,
 	performSRPUnlock,
@@ -17,7 +17,6 @@ import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { createApiClientForServer } from "@bittery/shared/api-client-factory";
 import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
-import { apiClient } from "./api-client";
 import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { requireDesktopUnlock } from "./desktop-unlock";
@@ -128,7 +127,7 @@ export async function handleQuickUnlock(
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
 		{ accountId: activeAccount, password },
-		{ apiClient, crypto, storage },
+		{ crypto, storage },
 	);
 
 	// Store session data using shared utility
@@ -138,10 +137,7 @@ export async function handleQuickUnlock(
 		itemCache,
 		crypto,
 		activeAccount,
-		{
-			travelModeApiClient: apiClient,
-			setActive: true,
-		},
+		{ setActive: true },
 	);
 	await reconcileClientRuntime(runtime);
 
@@ -307,7 +303,7 @@ export async function handleLogout(
 ): Promise<Acknowledgement> {
 	const accountId = await storage.getActiveAccount();
 	const outcome = accountId
-		? await invalidateAccountSession({ accountId }, lifecycleDeps)
+		? await signOutAccount(accountId, lifecycleDeps)
 		: null;
 	// `source: "logout"` never refuses: signing out must lock even next to a desktop app.
 	await vaultSession.dispatch({

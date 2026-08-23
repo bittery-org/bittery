@@ -11,9 +11,10 @@
  */
 
 import {
-	invalidateAccountSession,
-	lockAccount,
+	type LifecycleOutcome,
+	lockInvalidSession,
 	removeAccount,
+	signOutAccount,
 } from "@bittery/core/services/account-lifecycle";
 import {
 	type AccountStore,
@@ -113,7 +114,10 @@ export async function forgetActiveSession(
 	refresh?: RefreshAccountRuntime,
 ): Promise<void> {
 	await initializeStorage();
-	await invalidateAccountSession("active", lifecycleDeps);
+	const accountId = await storage.getActiveAccount();
+	if (accountId) {
+		await signOutAccount(accountId, lifecycleDeps);
+	}
 	await refresh?.();
 }
 
@@ -123,13 +127,11 @@ export async function forgetActiveSession(
  */
 export async function lockActiveSession(
 	refresh?: RefreshAccountRuntime,
-): Promise<void> {
+): Promise<LifecycleOutcome> {
 	await initializeStorage();
-	const accountId = await storage.getActiveAccount();
-	if (accountId) {
-		await lockAccount(accountId, lifecycleDeps);
-	}
+	const outcome = await lockInvalidSession("active", lifecycleDeps);
 	await refresh?.();
+	return outcome;
 }
 
 /** Wipe everything stored for the active account, including its encrypted item cache. */

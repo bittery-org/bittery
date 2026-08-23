@@ -20,7 +20,6 @@ import {
 import {
 	type CredentialMirror,
 	deleteAccountEverywhere,
-	invalidateAccountSession,
 	type LifecycleDeps,
 	lockAccount,
 	lockAllAccounts,
@@ -357,28 +356,7 @@ describe("lockAllAccounts", () => {
 	});
 });
 
-describe("signOutAccount / invalidateAccountSession", () => {
-	it("produce byte-identical state from the same fixture", async () => {
-		const realNow = Date.now;
-		// Frozen so two fixtures built moments apart cannot differ by a `lastActiveAt` ms.
-		Date.now = () => 1_700_000_000_000;
-		try {
-			const signedOut = await createFixture();
-			const invalidated = await createFixture();
-
-			const signOutOutcome = await signOutAccount("acc-1", signedOut.deps);
-			const invalidateOutcome = await invalidateAccountSession(
-				{ accountId: "acc-1" },
-				invalidated.deps,
-			);
-
-			expect(fullState(signedOut)).toEqual(fullState(invalidated));
-			expect(signOutOutcome).toEqual(invalidateOutcome);
-		} finally {
-			Date.now = realNow;
-		}
-	});
-
+describe("signOutAccount", () => {
 	it("deletes the session and all three cache segments", async () => {
 		const fixture = await createFixture();
 
@@ -464,10 +442,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 			throw FAILURE;
 		};
 
-		const outcome = await invalidateAccountSession(
-			{ accountId: "acc-1" },
-			fixture.deps,
-		);
+		const outcome = await signOutAccount("acc-1", fixture.deps);
 
 		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-2"));
 		expect(outcome.failures).toEqual([
@@ -487,10 +462,10 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		]);
 	});
 
-	it("resolves the target by account id", async () => {
+	it("locks a target resolved by account id", async () => {
 		const fixture = await createFixture();
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ accountId: "acc-2" },
 			fixture.deps,
 		);
@@ -498,19 +473,23 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(outcome.affected.map((account) => account.accountId)).toEqual([
 			"acc-2",
 		]);
-		expect(await fixture.storage.getStoredSessionData("acc-2")).toBeNull();
+		expect(await fixture.storage.getAuthToken("acc-2")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-2")).not.toBeNull();
 		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
-		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-1"));
+		expect(fixture.cachePort.collections()).toEqual([
+			...segmentsOf("acc-1"),
+			...segmentsOf("acc-2"),
+		]);
 	});
 
-	it("resolves the target by sessionId", async () => {
+	it("locks a target resolved by sessionId", async () => {
 		const fixture = await createFixture();
 		await fixture.storage.updateStoredSessionMetadata("acc-2", {
 			sessionId: "session-acc-2",
 			expiresAt: Date.now() + 60_000,
 		});
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ sessionId: "session-acc-2" },
 			fixture.deps,
 		);
@@ -518,7 +497,8 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(outcome.affected.map((account) => account.accountId)).toEqual([
 			"acc-2",
 		]);
-		expect(await fixture.storage.getStoredSessionData("acc-2")).toBeNull();
+		expect(await fixture.storage.getAuthToken("acc-2")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-2")).not.toBeNull();
 		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
 	});
 
@@ -526,7 +506,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		const fixture = await createFixture();
 		const before = fullState(fixture);
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ accountId: "nobody" },
 			fixture.deps,
 		);
@@ -799,12 +779,12 @@ describe("quick-unlock material", () => {
 		expect(fixture.mirror.forgotten).toEqual([["acc-2"]]);
 	});
 
-	it("goes when the server invalidates the session", async () => {
+	it("survives when the Server rejects the old Session", async () => {
 		const fixture = await createFixture();
 
-		await invalidateAccountSession({ accountId: "acc-1" }, fixture.deps);
+		await lockInvalidSession({ accountId: "acc-1" }, fixture.deps);
 
-		expect(fixture.mirror.forgotten).toEqual([["acc-1"]]);
+		expect(fixture.mirror.forgotten).toEqual([]);
 	});
 
 	it("goes when the account is taken off the device", async () => {

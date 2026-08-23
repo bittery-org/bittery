@@ -8,10 +8,10 @@
 
 import {
 	type InvalidationTarget,
-	invalidateAccountSession,
 	type LifecycleDeps,
 	type LifecycleOutcome,
 	lockAllAccounts,
+	lockInvalidSession,
 } from "@bittery/core/services/account-lifecycle";
 import { lifecycleDeps } from "../../lifecycle";
 import type {
@@ -65,7 +65,7 @@ export function createLifecycleAdapter(
 ): VaultLifecyclePort {
 	const deps = options.deps ?? lifecycleDeps;
 	const lockAll = options.lockAll ?? lockAllAccounts;
-	const invalidate = options.invalidate ?? invalidateAccountSession;
+	const invalidate = options.invalidate ?? lockInvalidSession;
 
 	return {
 		async lockAll(): Promise<void> {
@@ -92,7 +92,7 @@ export function createLifecycleAdapter(
 				outcome = await invalidate({ accountId }, deps);
 			}
 
-			reportFailures("invalidateAccountSession", outcome);
+			reportFailures("lockInvalidSession", outcome);
 			return project(outcome);
 		},
 	};

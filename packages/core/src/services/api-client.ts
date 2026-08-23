@@ -93,21 +93,17 @@ export async function createStaticStoredAccountApiClient(
 }
 
 /**
- * Builds the client a password unlock talks to: the stored auth token when one exists, an
- * unauthenticated client for the account's server when it does not.
+ * Builds the unauthenticated client a password-only Quick Unlock ceremony talks to.
  *
- * A missing token is the *normal* state here, not a failure. `AccountStore.clearSession`
- * drops `jwt_token` on every lock and deliberately keeps `session_data`, so quick unlock
- * nearly always runs without a token — it re-runs SRP against `startLogin`/`finishLogin`,
- * neither of which is authenticated, and mints a fresh one. Refusing to build a client
- * without a token would make locking an account indistinguishable from signing out of it.
+ * The previous token is deliberately ignored even when still valid: Quick Unlock always runs
+ * `startLogin`/`finishLogin` against this Account's stored Server URL and HTTP consent, then
+ * installs the newly issued Session.
  */
 export async function createStoredAccountUnlockApiClient(
 	storage: AccountStore,
 	accountId: string,
 ): Promise<DefaultApiClient> {
-	const [authToken, account, serverUrl] = await Promise.all([
-		storage.getAuthToken(accountId),
+	const [account, serverUrl] = await Promise.all([
 		storage.getAccountMetadata(accountId),
 		storage.getServerUrl(accountId),
 	]);
@@ -116,16 +112,7 @@ export async function createStoredAccountUnlockApiClient(
 		insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
 	};
 
-	if (!authToken) {
-		return createApiClientForServer(resolvedServerUrl, undefined, metadata);
-	}
-	return createAccountApiClient(
-		authToken,
-		resolvedServerUrl,
-		undefined,
-		undefined,
-		metadata,
-	);
+	return createApiClientForServer(resolvedServerUrl, undefined, metadata);
 }
 
 export { createAccountApiClient, createApiClientForServer };

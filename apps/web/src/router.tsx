@@ -10,6 +10,7 @@ import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
+import { requireCompleteSessionLock } from "./lib/session-reauth";
 import { initializeStorage, lockActiveSession, storage } from "./lib/storage";
 import "./index.css";
 
@@ -41,12 +42,14 @@ function handleUnauthorizedError() {
 	// A rejected Server Session requires online reauthentication, not a local Sign-out.
 	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
 	lockActiveSession()
+		.then(requireCompleteSessionLock)
 		.then(() => {
 			toast.error(m.toast_auth_session_expired());
 			window.location.href = "/login";
 		})
 		// Without this reset one rejection pins the latch and every later 401 is dropped.
 		.catch(() => {
+			toast.error(m.toast_auth_session_lock_failed());
 			isHandlingAuthError = false;
 		});
 }

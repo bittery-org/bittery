@@ -1,5 +1,5 @@
 import { isUnauthorizedApiError } from "@bittery/api-contract";
-import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
+import { lockInvalidSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
@@ -33,21 +33,14 @@ function handleUnauthorizedError() {
 
 	isHandlingAuthError = true;
 
-	void invalidateAccountSession("active", lifecycleDeps)
+	void lockInvalidSession("active", lifecycleDeps)
 		.then((outcome) => {
 			queryClient.clear();
 			toast.error(m.toast_auth_session_expired());
 
 			// A 401 with no active account still has to leave the screen that produced
 			// it: staying put swallows the error and strands the user on a dead view.
-			const prefillEmail = outcome.wasActive
-				? outcome.affected[0]?.email
-				: undefined;
-			if (prefillEmail) {
-				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
-			} else {
-				window.location.href = "/";
-			}
+			window.location.href = outcome.wasActive ? "/unlock" : "/";
 		})
 		.catch(() => {
 			isHandlingAuthError = false;

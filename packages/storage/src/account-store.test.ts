@@ -107,6 +107,7 @@ const KDF_PROFILE = {
 	algorithm: "pbkdf2-sha256" as const,
 	iterations: 600_000,
 };
+const VALID_SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
 
 /** Advance the wall clock far enough that a zero-length period has provably elapsed. */
 const tick = (): Promise<void> =>
@@ -1404,7 +1405,7 @@ describe("AccountStore — accounts and settings", () => {
 
 		expect(await store.canQuickUnlock()).toBe(false);
 
-		await store.storeSecretKey("secret-a");
+		await store.storeSecretKey(VALID_SECRET_KEY);
 		expect(await store.canQuickUnlock()).toBe(false);
 
 		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
@@ -1419,7 +1420,7 @@ describe("AccountStore — accounts and settings", () => {
 		});
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
-		await store.storeSecretKey("secret-a");
+		await store.storeSecretKey(VALID_SECRET_KEY);
 		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
@@ -1435,7 +1436,7 @@ describe("AccountStore — accounts and settings", () => {
 		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
-		await store.storeSecretKey("secret-a");
+		await store.storeSecretKey(VALID_SECRET_KEY);
 		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await store.storeSessionData(muk, "a", "a@example.com", "user-a", -1);
 
@@ -1445,8 +1446,17 @@ describe("AccountStore — accounts and settings", () => {
 	it("does not offer quick unlock with corrupt pinned KDF material", async () => {
 		const { port, store } = await makeStore();
 		await seedAccount(store, "a", { active: true });
-		await store.storeSecretKey("secret-a");
+		await store.storeSecretKey(VALID_SECRET_KEY);
 		await port.kvSet(accountKey("a", "pinned_kdf_params"), "{oops", "device");
+
+		expect(await store.canQuickUnlock()).toBe(false);
+	});
+
+	it("does not offer quick unlock with a corrupt stored Secret Key", async () => {
+		const { store } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		await store.storeSecretKey("not-a-secret-key");
+		await store.storePinnedKdfProfile(KDF_PROFILE, "a");
 
 		expect(await store.canQuickUnlock()).toBe(false);
 	});
@@ -1455,7 +1465,7 @@ describe("AccountStore — accounts and settings", () => {
 		const harness = await makeStore({ sessionSurvivesRestart: true });
 		await seedAccount(harness.store, "a", { active: true });
 		await harness.store.storeAuthToken("jwt-value");
-		await harness.store.storeSecretKey("secret-a");
+		await harness.store.storeSecretKey(VALID_SECRET_KEY);
 		await harness.store.storePinnedKdfProfile(KDF_PROFILE, "a");
 		await harness.store.storeVaultKeys([]);
 		await harness.store.storeEncryptedPrivateKey("pk");

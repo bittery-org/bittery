@@ -32,7 +32,10 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import { createStoredAccountApiClient } from "./api-client";
+import {
+	createStoredAccountApiClient,
+	createStoredAccountUnlockApiClient,
+} from "./api-client";
 import {
 	getTravelModeEnforcer,
 	TravelModeVerificationError,
@@ -158,7 +161,6 @@ export interface LoginResult {
  * Result from successful unlock
  */
 export interface UnlockResult {
-	mode: "local" | "reauth";
 	token: string;
 	sessionId?: string;
 	expiresAt?: string | Date;
@@ -166,7 +168,7 @@ export interface UnlockResult {
 	vaultKeys: VaultKeyData[];
 	/** Ownership transfers to the store on `storeUnlockSessionOwned`, as with {@link LoginResult}. */
 	masterUnlockKey: KeyRef;
-	kdfParams?: KdfProfile;
+	kdfParams: KdfProfile;
 }
 
 /**
@@ -177,7 +179,7 @@ export interface SessionState {
 	accountId: string | null;
 	/** Whether the session is valid (not expired) */
 	isValid: boolean;
-	/** Whether quick unlock is available (has stored secret key + valid session) */
+	/** Whether Device-bound inputs can start password-only online reauthentication. */
 	canQuickUnlock: boolean;
 	/** Whether biometric unlock is available */
 	canBiometricUnlock: boolean;
@@ -227,8 +229,8 @@ export interface CheckEmailResult {
 
 /**
  * The user as a *ceremony result* carries them, which is not what any one endpoint sends.
- * A fresh login fills it from `FinishLoginResponse["user"]`, a local unlock from stored
- * account metadata, and signup from `SignupResponse["user"]` — so `name`, `teamName` and
+ * Sign-in and Quick Unlock fill it from `FinishLoginResponse["user"]`, while signup uses
+ * `SignupResponse["user"]` — so `name`, `teamName` and
  * `teamAvatarUrl` are optional because a source may not report them, not because a user may
  * lack a team. Every user has one; a stored account that predates the badge simply has none
  * recorded yet, which is why the unlock path merges rather than overwrites.
@@ -278,24 +280,18 @@ export interface SRPLoginDeps {
  */
 export interface SRPUnlockDeps {
 	crypto: CryptoPort;
-	apiClient: IAuthClient;
 	storage: AccountStore;
+	/** Internal test/adapter seam; production resolves the persisted Account's own Server. */
+	accountAuthClientFactory?: (
+		storage: AccountStore,
+		accountId: string,
+	) => Promise<IAuthClient>;
 }
 
 export interface SrpLoginProofDeps {
 	crypto: CryptoPort;
 	apiClient: StartLoginApiClient;
 	storage: AccountStore;
-}
-
-async function resolveAccountAuthClient(
-	accountId: string,
-	deps: SRPUnlockDeps,
-): Promise<IAuthClient> {
-	return (
-		(await createStoredAccountApiClient(deps.storage, accountId)) ??
-		deps.apiClient
-	);
 }
 
 async function resolveStartLoginApiClient(
@@ -305,6 +301,16 @@ async function resolveStartLoginApiClient(
 	return (
 		(await createStoredAccountApiClient(deps.storage, accountId)) ??
 		deps.apiClient
+	);
+}
+
+async function resolveAccountAuthClient(
+	accountId: string,
+	deps: SRPUnlockDeps,
+): Promise<IAuthClient> {
+	return (deps.accountAuthClientFactory ?? createStoredAccountUnlockApiClient)(
+		deps.storage,
+		accountId,
 	);
 }
 
@@ -727,27 +733,31 @@ export async function performSRPUnlock(
 	const apiClient = await resolveAccountAuthClient(accountId, deps);
 
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
-	if (!storedSecretKey) {
+	if (!storedSecretKey || !(await crypto.validateSecretKey(storedSecretKey))) {
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
-
-	// Unlock derives the account keys before it knows whether it can short-circuit
-	// on a locally valid session (offline) or must re-auth against the server, so
-	// it can't negotiate a profile from startLogin the way full login does. Derive
-	// with the profile pinned after login. A missing pin fails closed and requires
-	// a full sign-in; an implicit current-profile fallback could corrupt access to
-	// an account created with a different valid work factor.
 	const pinnedKdfProfile = await storage.getPinnedKdfProfile(accountId);
 	if (!pinnedKdfProfile) {
 		throw new Error(m.auth_error_kdf_profile_missing());
 	}
 	validateKdfProfileOrThrow(pinnedKdfProfile);
 
+	const clientEphemeral = await crypto.generateClientEphemeral();
+	const { data: startResult } = await apiClient.auth.startLogin({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+	const validatedProfile = await validateKdfProfileForAccount(
+		accountId,
+		startResult.kdfParams,
+		storage,
+	);
+
 	const { srpPassword, masterUnlockKey } = await vaultCrypto.deriveAccountKeys({
 		accountPassword: password,
 		secretKey: storedSecretKey,
 		email,
-		profile: pinnedKdfProfile,
+		profile: validatedProfile,
 		accountId,
 	});
 
@@ -758,56 +768,6 @@ export async function performSRPUnlock(
 			accountId,
 			masterUnlockKey,
 		});
-
-		const [
-			storedSessionData,
-			storedToken,
-			storedVaultKeys,
-			storedPrivateKey,
-			accountMetadata,
-		] = await Promise.all([
-			storage.getStoredSessionData(accountId),
-			storage.getAuthToken(accountId),
-			storage.getVaultKeys(accountId),
-			storage.getEncryptedPrivateKey(accountId),
-			storage.getAccountMetadata(accountId),
-		]);
-
-		if (
-			storedSessionData &&
-			storedToken &&
-			(await storage.isSessionValid(accountId))
-		) {
-			return {
-				mode: "local",
-				token: storedToken,
-				sessionId: storedSessionData.sessionId,
-				expiresAt: new Date(storedSessionData.expiresAt),
-				user: {
-					id: storedSessionData.userId,
-					email,
-					name: accountMetadata?.name,
-					teamName: accountMetadata?.teamName,
-					teamAvatarUrl: accountMetadata?.teamAvatarUrl,
-					encryptedPrivateKey: storedPrivateKey ?? undefined,
-				},
-				vaultKeys: storedVaultKeys ?? [],
-				masterUnlockKey,
-			};
-		}
-
-		const clientEphemeral = await crypto.generateClientEphemeral();
-
-		const { data: startResult } = await apiClient.auth.startLogin({
-			email,
-			clientPublicKey: clientEphemeral.publicKey,
-		});
-
-		const validatedProfile = await validateKdfProfileForAccount(
-			accountId,
-			startResult.kdfParams,
-			storage,
-		);
 
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
@@ -842,7 +802,6 @@ export async function performSRPUnlock(
 		);
 
 		return {
-			mode: "reauth",
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
@@ -885,39 +844,31 @@ export async function storeUnlockSession(
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
 
-	if (result.mode === "reauth") {
-		await storage.storeAuthToken(result.token, accountId);
-		await storage.storeServerUrl(serverUrl, accountId);
-		if (result.kdfParams) {
-			await persistPinnedKdfProfileIfNeeded(
-				accountId,
-				result.kdfParams,
-				storage,
-			);
-		}
-		const vaultKeys = await travelMode.stripVaultKeysIfActive(
-			accountId,
-			result.vaultKeys,
-		);
-		await storage.storeVaultKeys(vaultKeys, accountId);
+	await storage.storeAuthToken(result.token, accountId);
+	await storage.storeServerUrl(serverUrl, accountId);
+	await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
+	const vaultKeys = await travelMode.stripVaultKeysIfActive(
+		accountId,
+		result.vaultKeys,
+	);
+	await storage.storeVaultKeys(vaultKeys, accountId);
 
-		if (result.user.encryptedPrivateKey) {
-			await storage.storeEncryptedPrivateKey(
-				result.user.encryptedPrivateKey,
-				accountId,
-			);
-		}
-
-		// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
-		await storage.storeSessionData(
-			result.masterUnlockKey,
+	if (result.user.encryptedPrivateKey) {
+		await storage.storeEncryptedPrivateKey(
+			result.user.encryptedPrivateKey,
 			accountId,
-			resolvedEmail,
-			result.user.id,
-			result.expiresAt,
-			result.sessionId,
 		);
 	}
+
+	// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
+	await storage.storeSessionData(
+		result.masterUnlockKey,
+		accountId,
+		resolvedEmail,
+		result.user.id,
+		result.expiresAt,
+		result.sessionId,
+	);
 
 	if (options?.setActive ?? true) {
 		const currentActive = await storage.getActiveAccount();
@@ -933,7 +884,7 @@ export async function storeUnlockSession(
 	if (storedAccount) {
 		await storage.addAccount({
 			...storedAccount,
-			// Keys the account de-dupe, and a `local` unlock only knows the session's copy.
+			// Keys the account de-dupe; keep the stored identity if the response omits it.
 			userId: storedAccount.userId || result.user.id,
 			name: result.user.name || storedAccount.name,
 			// Absent means "not reported" as often as "no team": the metadata sync corrects

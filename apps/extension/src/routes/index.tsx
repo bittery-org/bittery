@@ -27,7 +27,7 @@ export const Route = createRoute({
 			throw redirect({ to: "/vault" });
 		}
 
-		// Check if quick unlock is available (has stored session)
+		// Check whether Device-bound Secret Key and KDF inputs can reauthenticate online.
 		const quickUnlockResponse = await sendMessage({ type: "CAN_QUICK_UNLOCK" });
 
 		if (quickUnlockResponse.success && quickUnlockResponse.canQuickUnlock) {
