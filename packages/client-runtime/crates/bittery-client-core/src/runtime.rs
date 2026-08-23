@@ -3,6 +3,8 @@ mod install;
 mod lock;
 mod open;
 
+use lock::AccessRetirement;
+
 #[cfg(test)]
 use crate::replica::PlanResult;
 use crate::{
@@ -805,6 +807,17 @@ impl Runtime {
                 self.commit_quick_unlock(snapshot, prepared, execution_guard)
                     .await
             }
+            // Retiring access is the one request a caller cannot take back. Cancellation is
+            // never consulted, and the accepted Operations this Account already owes stay
+            // durable: signing out is not a cancellation of committed Server work.
+            RuntimeRequest::Lock { account_id } => self
+                .retire_account_access(&account_id, AccessRetirement::Lock)
+                .await
+                .map(|access| RuntimeResponse::AccessChanged { account_id, access }),
+            RuntimeRequest::SignOut { account_id } => self
+                .retire_account_access(&account_id, AccessRetirement::SignOut)
+                .await
+                .map(|access| RuntimeResponse::AccessChanged { account_id, access }),
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,

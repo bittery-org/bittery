@@ -4103,6 +4103,24 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class Lock(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SignOut(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
     data class CreateLoginItem(
         val `accountId`: kotlin.String,
         val `vaultId`: kotlin.String,
@@ -4135,6 +4153,20 @@ sealed class RuntimeRequest: Disposable  {
     Disposable.destroy(
         this.`accountId`,
         this.`masterPassword`
+    )
+
+            }
+            is RuntimeRequest.Lock -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.SignOut -> {
+
+    Disposable.destroy(
+        this.`accountId`
     )
 
             }
@@ -4175,7 +4207,13 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 )
-            3 -> RuntimeRequest.CreateLoginItem(
+            3 -> RuntimeRequest.Lock(
+                FfiConverterString.read(buf),
+                )
+            4 -> RuntimeRequest.SignOut(
+                FfiConverterString.read(buf),
+                )
+            5 -> RuntimeRequest.CreateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
@@ -4202,6 +4240,20 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
+            )
+        }
+        is RuntimeRequest.Lock -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.SignOut -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
             )
         }
         is RuntimeRequest.CreateLoginItem -> {
@@ -4232,8 +4284,18 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
                 Unit
             }
-            is RuntimeRequest.CreateLoginItem -> {
+            is RuntimeRequest.Lock -> {
                 buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.SignOut -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.CreateLoginItem -> {
+                buf.putInt(5)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
@@ -4252,6 +4314,16 @@ sealed class RuntimeResponse {
     data class SignedIn(
         val `accountId`: kotlin.String,
         val `userId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class AccessChanged(
+        val `accountId`: kotlin.String,
+        val `access`: uniffi.bittery_client_bindings.AccountAccessState) : RuntimeResponse()
 
     {
 
@@ -4290,7 +4362,11 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            2 -> RuntimeResponse.Accepted(
+            2 -> RuntimeResponse.AccessChanged(
+                FfiConverterString.read(buf),
+                FfiConverterTypeAccountAccessState.read(buf),
+                )
+            3 -> RuntimeResponse.Accepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
@@ -4306,6 +4382,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterString.allocationSize(value.`userId`)
+            )
+        }
+        is RuntimeResponse.AccessChanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeAccountAccessState.allocationSize(value.`access`)
             )
         }
         is RuntimeResponse.Accepted -> {
@@ -4327,8 +4411,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.write(value.`userId`, buf)
                 Unit
             }
-            is RuntimeResponse.Accepted -> {
+            is RuntimeResponse.AccessChanged -> {
                 buf.putInt(2)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeAccountAccessState.write(value.`access`, buf)
+                Unit
+            }
+            is RuntimeResponse.Accepted -> {
+                buf.putInt(3)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)

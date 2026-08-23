@@ -177,6 +177,12 @@ pub enum RuntimeRequest {
         account_id: String,
         master_password: Arc<SecretString>,
     },
+    Lock {
+        account_id: String,
+    },
+    SignOut {
+        account_id: String,
+    },
     CreateLoginItem {
         account_id: String,
         vault_id: String,
@@ -200,6 +206,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("credentials", &"[redacted]")
                 .finish(),
+            Self::Lock { account_id } => formatter
+                .debug_struct("Lock")
+                .field("account_id", account_id)
+                .finish(),
+            Self::SignOut { account_id } => formatter
+                .debug_struct("SignOut")
+                .field("account_id", account_id)
+                .finish(),
             Self::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -219,6 +233,10 @@ pub enum RuntimeResponse {
     SignedIn {
         account_id: String,
         user_id: String,
+    },
+    AccessChanged {
+        account_id: String,
+        access: AccountAccessState,
     },
     Accepted {
         operation_id: String,
@@ -527,6 +545,12 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id: account_id.into(),
                 master_password: master_password.value.clone(),
             },
+            RuntimeRequest::Lock { account_id } => Self::Lock {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::SignOut { account_id } => Self::SignOut {
+                account_id: account_id.into(),
+            },
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -573,6 +597,10 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::SignedIn {
                 account_id: account_id.into(),
                 user_id,
+            },
+            core::RuntimeResponse::AccessChanged { account_id, access } => Self::AccessChanged {
+                account_id: account_id.into(),
+                access: access.into(),
             },
             core::RuntimeResponse::Accepted {
                 operation_id,
@@ -780,6 +808,8 @@ impl From<core::RuntimeError> for BindingError {
 
 // Compiled on the host only for its own tests: the Web binding is the one caller, and
 // `cargo test` on a native target is the only place this decision can be checked.
+#[cfg(any(target_arch = "wasm32", test))]
+mod observation_buffer;
 #[cfg(any(target_arch = "wasm32", test))]
 mod observation_slots;
 #[cfg(target_arch = "wasm32")]

@@ -2458,6 +2458,10 @@ public enum RuntimeRequest {
     )
     case quickUnlock(accountId: String, masterPassword: SecretString
     )
+    case lock(accountId: String
+    )
+    case signOut(accountId: String
+    )
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
 
@@ -2487,7 +2491,13 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         case 2: return .quickUnlock(accountId: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf)
         )
 
-        case 3: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 3: return .lock(accountId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 4: return .signOut(accountId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 5: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2513,8 +2523,18 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterTypeSecretString.write(masterPassword, into: &buf)
 
 
-        case let .createLoginItem(accountId,vaultId,draft):
+        case let .lock(accountId):
             writeInt(&buf, Int32(3))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case let .signOut(accountId):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case let .createLoginItem(accountId,vaultId,draft):
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
@@ -2546,6 +2566,8 @@ public enum RuntimeResponse: Equatable, Hashable {
 
     case signedIn(accountId: String, userId: String
     )
+    case accessChanged(accountId: String, access: AccountAccessState
+    )
     case accepted(operationId: String, itemId: String, replicaRevision: UInt64
     )
 
@@ -2572,7 +2594,10 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 1: return .signedIn(accountId: try FfiConverterString.read(from: &buf), userId: try FfiConverterString.read(from: &buf)
         )
 
-        case 2: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 2: return .accessChanged(accountId: try FfiConverterString.read(from: &buf), access: try FfiConverterTypeAccountAccessState.read(from: &buf)
+        )
+
+        case 3: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2589,8 +2614,14 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterString.write(userId, into: &buf)
 
 
-        case let .accepted(operationId,itemId,replicaRevision):
+        case let .accessChanged(accountId,access):
             writeInt(&buf, Int32(2))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterTypeAccountAccessState.write(access, into: &buf)
+
+
+        case let .accepted(operationId,itemId,replicaRevision):
+            writeInt(&buf, Int32(3))
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)

@@ -482,6 +482,40 @@
           ]
         },
         {
+          "description": "Retires this Account's live keys and plaintext delivery while the Device keeps the\nmaterial one master password reopens.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "lock"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "description": "Ends local ownership: the same retirement as `Lock`, and the Device forgets the\nQuick Unlock material and Session, so this Account needs a full Sign-in again.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "signOut"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "accountId": {
@@ -527,6 +561,27 @@
             "type",
             "accountId",
             "userId"
+          ]
+        },
+        {
+          "description": "The Account access state this Device holds after a `Lock` or `SignOut`. An Account this\nDevice does not have answers `SignedOut`, because that is what it is.",
+          "type": "object",
+          "properties": {
+            "access": {
+              "$ref": "#/$defs/AccountAccessState"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "accessChanged"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "access"
           ]
         },
         {

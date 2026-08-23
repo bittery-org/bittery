@@ -68,6 +68,24 @@ pub enum RuntimeRequest {
         account_id: AccountId,
         master_password: String,
     },
+    /// Retires this Account's live keys and plaintext delivery while the Device keeps the
+    /// material one master password reopens.
+    Lock {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
+    /// Ends local ownership: the same retirement as `Lock`, and the Device forgets the
+    /// Quick Unlock material and Session, so this Account needs a full Sign-in again.
+    SignOut {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
     CreateLoginItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -95,6 +113,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("credentials", &"[redacted]")
                 .finish(),
+            Self::Lock { account_id } => formatter
+                .debug_struct("Lock")
+                .field("account_id", account_id)
+                .finish(),
+            Self::SignOut { account_id } => formatter
+                .debug_struct("SignOut")
+                .field("account_id", account_id)
+                .finish(),
             Self::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -114,6 +140,7 @@ impl RuntimeRequest {
         match self {
             Self::SignIn { .. } => None,
             Self::QuickUnlock { account_id, .. } => Some(account_id),
+            Self::Lock { account_id } | Self::SignOut { account_id } => Some(account_id),
             Self::CreateLoginItem { account_id, .. } => Some(account_id),
         }
     }
@@ -211,6 +238,16 @@ pub enum RuntimeResponse {
         )]
         account_id: AccountId,
         user_id: String,
+    },
+    /// The Account access state this Device holds after a `Lock` or `SignOut`. An Account this
+    /// Device does not have answers `SignedOut`, because that is what it is.
+    AccessChanged {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        access: AccountAccessState,
     },
     Accepted {
         operation_id: String,

@@ -28,11 +28,16 @@ accountId: string
 type: "signedIn"
 userId: string
 } | {
+access: AccountAccessState
+accountId: string
+type: "accessChanged"
+} | {
 itemId: string
 operationId: string
 replicaRevision: string
 type: "accepted"
 })
+export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
 export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type RuntimeProjection = ({
 type: "items"
@@ -43,7 +48,6 @@ value: RuntimeStatusProjection
 })
 export type CustomFieldKind = ("text" | "password" | "email" | "url")
 export type ItemProjectionStatus = ("pending" | "authoritative" | "failed")
-export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
 export type AccountWaitingReason = "reauthenticationRequired"
 export type RuntimeRequest = ({
 email: string
@@ -56,6 +60,12 @@ type: "signIn"
 accountId: string
 masterPassword: string
 type: "quickUnlock"
+} | {
+accountId: string
+type: "lock"
+} | {
+accountId: string
+type: "signOut"
 } | {
 accountId: string
 draft: LoginItemDraft

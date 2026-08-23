@@ -76,3 +76,32 @@ Runtime-level test. A restart with a previously signed-in Account renders a lock
 Unlock restores the same Account. A projection published by a Sync catch-up with no request in flight
 reaches an open observation. Two browsers report distinct client ids. `pnpm check:ci` and
 `pnpm check:ci:rust` pass.
+
+## Comments
+
+- `SignOut` and `Lock` are both `retire_account_access` in `runtime/lock.rs`. Both destroy the live
+  master unlock key, drop the decrypted Items, revoke the plaintext delivery lease, advance the lock
+  epoch, and publish before the request answers. They differ only in what the Device keeps
+  afterwards. `Lock` keeps the Quick Unlock material and Session, so one master password reopens the
+  Account through the same full online ceremony. `SignOut` deletes that material and the Session for
+  the active incarnation, so the Account needs email, master password, and Secret Key again. The
+  Spec states that rule directly: quick-unlock material has no time-based expiry, and explicit
+  Sign-out, Account removal, or Wipe deletes it.
+- Account metadata, the durable Replica, and every accepted Operation survive a Sign-out. Sign-out
+  is not a cancellation: per ticket 10 an accepted Operation stays durable until the Server returns
+  its retained semantic outcome, and no local action may claim to reverse a committed Server effect.
+  Removing an Account from the Device remains a separate lifecycle action.
+- Sign-out is local. This slice has no Server session-revocation route, so the issued Session token
+  stays valid on the Server until it expires. The Runtime does not pretend otherwise.
+- Both answer `RuntimeResponse::AccessChanged { account_id, access }` with the access state the
+  Device now holds. An unknown, uninstalled, or already retired Account answers `SignedOut` instead
+  of failing, so a host teardown path never has to handle an error it cannot act on, and a repeated
+  request is harmless.
+- Open boundary for the Web slice: `open` still restores an installed Account as `SignedOut` even
+  when its Quick Unlock material is intact, so `SignedOut` alone does not tell the host whether to
+  offer Quick Unlock or a full Sign-in. The lock-screen bullet of this ticket still needs that
+  distinction.
+- Background publications now reach the Web host. The buffered sink stores the projection and wakes
+  one drain task that the wasm-bindgen executor polls from a microtask, which is the only point
+  where the Runtime holds no lock, no publication ordering, and no plaintext delivery lease. Drain
+  policy lives in the host-testable `observation_buffer` module; `web.rs` only supplies the JS call.

@@ -176,6 +176,15 @@ impl InstallationPlatform {
             .map(|value| serde_json::from_str(value).unwrap())
     }
 
+    fn has_document(&self, account: &str, incarnation: &str, document: &str) -> bool {
+        let expected = generation_storage_key(account, incarnation, document);
+        self.values
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(_, key)| key == &expected)
+    }
+
     fn put_document<T: serde::Serialize>(&self, area: &str, key: String, value: &T) {
         self.values
             .lock()
@@ -2848,4 +2857,277 @@ fn generation_storage_key(account: &str, incarnation: &str, document: &str) -> S
             account.len(),
             incarnation.len()
         )
+}
+
+fn signed_in_account(runtime: &Runtime) -> (AccountId, Incarnation) {
+    let snapshot = runtime.replica.snapshots().into_iter().next().unwrap();
+    (snapshot.account_id, snapshot.incarnation)
+}
+
+fn last_status_access(sink: &Sink, account_id: &AccountId) -> Option<AccountAccessState> {
+    sink.0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|projection| match projection {
+            RuntimeProjection::RuntimeStatus(status) => Some(status.clone()),
+            RuntimeProjection::Items(_) => None,
+        })?
+        .accounts
+        .into_iter()
+        .find(|status| &status.account_id == account_id)
+        .map(|status| status.access)
+}
+
+async fn signed_in_runtime_with_one_sealed_item() -> (
+    Arc<Runtime>,
+    Arc<InstallationPlatform>,
+    AccountId,
+    Incarnation,
+) {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (_wrapped, item) = sealed_login_item("item-1", "Bank", "secret-password");
+    *http.bootstrap_pages.lock().unwrap() = vec![json!({
+        "hasMore": false,
+        "items": [item],
+        "nextCursor": null,
+        "syncCursor": { "id": "evt-1" }
+    })];
+    let (runtime, _replica, platform) = routing_harness(http).await;
+    runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let (account_id, incarnation) = signed_in_account(&runtime);
+    (runtime, platform, account_id, incarnation)
+}
+
+#[tokio::test]
+async fn sign_out_destroys_live_keys_decrypted_items_and_quick_unlock_material() {
+    let (runtime, platform, account_id, incarnation) =
+        signed_in_runtime_with_one_sealed_item().await;
+    let RuntimeResponse::Accepted { operation_id, .. } = runtime
+        .request(
+            create_request(account_id.as_str()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected Accepted");
+    };
+    let status_sink = Arc::new(Sink::default());
+    let _status = runtime
+        .observe(
+            ObservationRequest::RuntimeStatus { account_id: None },
+            status_sink.clone(),
+        )
+        .unwrap();
+    let items_sink = Arc::new(Sink::default());
+    let _items = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            items_sink.clone(),
+        )
+        .unwrap();
+    assert!(runtime.has_live_master_unlock_key(&account_id, &incarnation));
+    assert!(runtime
+        .unlocked_items
+        .lock()
+        .unwrap()
+        .get(&account_id)
+        .is_some_and(|items| items
+            .iter()
+            .any(|item| item.password.as_deref() == Some("secret-password"))));
+    let published_items_before_sign_out = items_sink.0.lock().unwrap().len();
+    assert!(published_items_before_sign_out > 0);
+    let _ = take_zeroized_live_master_unlock_key_drops();
+
+    let response = runtime
+        .request(
+            RuntimeRequest::SignOut {
+                account_id: account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response,
+        RuntimeResponse::AccessChanged {
+            account_id: account_id.clone(),
+            access: AccountAccessState::SignedOut,
+        }
+    );
+    assert!(runtime.live_master_unlock_keys.lock().unwrap().is_empty());
+    assert!(take_zeroized_live_master_unlock_key_drops() >= 1);
+    assert!(!runtime.has_live_master_unlock_key(&account_id, &incarnation));
+    assert!(runtime
+        .unlocked_items
+        .lock()
+        .unwrap()
+        .get(&account_id)
+        .is_none());
+    assert_eq!(
+        runtime.account_access_state(&account_id),
+        Some(AccountAccessState::SignedOut)
+    );
+    let Err(error) = runtime.projection(&ObservationRequest::Items {
+        account_id: account_id.clone(),
+    }) else {
+        panic!("a signed-out Account must not project decrypted Items");
+    };
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    assert_eq!(
+        last_status_access(&status_sink, &account_id),
+        Some(AccountAccessState::SignedOut)
+    );
+    assert_eq!(
+        items_sink.0.lock().unwrap().len(),
+        published_items_before_sign_out,
+        "sign-out published another Items projection to an observation it just retired"
+    );
+    assert!(runtime
+        .replica
+        .snapshot(&account_id)
+        .unwrap()
+        .operations
+        .iter()
+        .any(|operation| operation.operation_id == operation_id));
+    assert!(!platform.has_document(account_id.as_str(), incarnation.as_str(), "quick-unlock"));
+    assert!(!platform.has_document(account_id.as_str(), incarnation.as_str(), "current-session"));
+    assert!(platform.has_document(account_id.as_str(), incarnation.as_str(), "metadata"));
+    assert_eq!(platform.catalog().unwrap().accounts.len(), 1);
+}
+
+#[tokio::test]
+async fn lock_keeps_quick_unlock_material_that_sign_out_deletes() {
+    let (runtime, platform, account_id, incarnation) =
+        signed_in_runtime_with_one_sealed_item().await;
+
+    let locked = runtime
+        .request(
+            RuntimeRequest::Lock {
+                account_id: account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        locked,
+        RuntimeResponse::AccessChanged {
+            account_id: account_id.clone(),
+            access: AccountAccessState::Locked,
+        }
+    );
+    assert_eq!(
+        runtime.account_access_state(&account_id),
+        Some(AccountAccessState::Locked)
+    );
+    assert!(!runtime.has_live_master_unlock_key(&account_id, &incarnation));
+    assert!(platform.has_document(account_id.as_str(), incarnation.as_str(), "quick-unlock"));
+    runtime
+        .request(
+            quick_unlock_request(account_id.as_str()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime.account_access_state(&account_id),
+        Some(AccountAccessState::Unlocked)
+    );
+
+    runtime
+        .request(
+            RuntimeRequest::SignOut {
+                account_id: account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    let error = runtime
+        .request(
+            quick_unlock_request(account_id.as_str()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    assert_eq!(
+        runtime.account_access_state(&account_id),
+        Some(AccountAccessState::SignedOut)
+    );
+}
+
+#[tokio::test]
+async fn repeated_and_unknown_sign_out_and_lock_answer_without_failing() {
+    let (runtime, _platform, account_id, _incarnation) =
+        signed_in_runtime_with_one_sealed_item().await;
+    let unknown = AccountId::from("account-that-was-never-installed");
+
+    for _ in 0..2 {
+        assert_eq!(
+            runtime
+                .request(
+                    RuntimeRequest::SignOut {
+                        account_id: account_id.clone()
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            RuntimeResponse::AccessChanged {
+                account_id: account_id.clone(),
+                access: AccountAccessState::SignedOut,
+            }
+        );
+    }
+    for request in [
+        RuntimeRequest::SignOut {
+            account_id: unknown.clone(),
+        },
+        RuntimeRequest::Lock {
+            account_id: unknown.clone(),
+        },
+    ] {
+        assert_eq!(
+            runtime.request(request, RequestCancellation::new()).await,
+            Ok(RuntimeResponse::AccessChanged {
+                account_id: unknown.clone(),
+                access: AccountAccessState::SignedOut,
+            })
+        );
+    }
+    assert_eq!(
+        runtime
+            .request(
+                RuntimeRequest::Lock {
+                    account_id: account_id.clone()
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AccessChanged {
+            account_id: account_id.clone(),
+            access: AccountAccessState::Locked,
+        }
+    );
+    assert!(runtime.replica.snapshot(&unknown).is_none());
 }

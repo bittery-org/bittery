@@ -1,14 +1,13 @@
-use crate::observation_slots::ObservationSlots;
+use crate::{observation_buffer::BufferedSink, observation_slots::ObservationSlots};
 use bittery_client_core as core;
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    rc::{Rc, Weak},
+    sync::{Arc, Mutex},
 };
+use tokio::sync::Notify;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 use zeroize::Zeroizing;
 
 struct JsSerializedReplicaExecutor {
@@ -102,32 +101,59 @@ fn http_invoke_error(_reason: &str) -> core::RuntimeError {
 pub struct WebClientRuntime {
     inner: Arc<core::Runtime>,
     cancellations: Mutex<HashMap<String, core::RequestCancellation>>,
-    observations: ObservationSlots<WebObservation>,
-}
-
-#[derive(Default)]
-struct BufferedSink(Mutex<Vec<core::RuntimeProjection>>);
-
-impl core::ObservationSink for BufferedSink {
-    fn publish(&self, projection: core::RuntimeProjection) {
-        self.0
-            .lock()
-            .expect("Web observation buffer lock poisoned")
-            .push(projection);
-    }
+    // The drain task holds a weak reference to this table and nothing else, so it can never keep
+    // a freed Runtime alive: it stops the first time it wakes and finds the table gone.
+    observations: Rc<ObservationSlots<WebObservation>>,
+    wake: Arc<Notify>,
 }
 
 struct WebObservation {
     handle: Arc<core::ObservationHandle>,
     sink: Arc<BufferedSink>,
     callback: js_sys::Function,
-    closed: AtomicBool,
 }
 
 impl WebObservation {
     fn close(&self) {
-        if !self.closed.swap(true, Ordering::SeqCst) {
+        if !self.sink.is_closed() {
+            self.sink.close();
             self.handle.close();
+        }
+    }
+
+    fn deliver(&self) -> Result<(), JsValue> {
+        self.sink.drain(|projection| {
+            let json = serde_json::to_string(&projection)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            self.callback
+                .call1(&JsValue::UNDEFINED, &JsValue::from_str(&json))?;
+            Ok(())
+        })
+    }
+}
+
+/// Delivers what the Runtime publishes when no host call is in flight.
+///
+/// The wasm-bindgen executor polls this task from a microtask, which is the one place where the
+/// Runtime holds no borrow, no publication ordering, and no plaintext delivery lease. Publishing
+/// only wakes the task; it never calls the host itself.
+async fn drain_published_observations(
+    observations: Weak<ObservationSlots<WebObservation>>,
+    wake: Arc<Notify>,
+) {
+    loop {
+        wake.notified().await;
+        let Some(observations) = observations.upgrade() else {
+            return;
+        };
+        for id in observations.ids() {
+            let Some(observation) = observations.get(&id) else {
+                continue;
+            };
+            // Nobody is waiting on this drain, so a host callback that throws can only be
+            // reported to the host that threw. The projection it refused is dropped; the next
+            // publication wakes this task again.
+            let _ = observation.deliver();
         }
     }
 }
@@ -208,10 +234,17 @@ impl WebClientRuntime {
     }
 
     fn from_inner(inner: Arc<core::Runtime>) -> Self {
+        let observations = Rc::new(ObservationSlots::new());
+        let wake = Arc::new(Notify::new());
+        spawn_local(drain_published_observations(
+            Rc::downgrade(&observations),
+            Arc::clone(&wake),
+        ));
         Self {
             inner,
             cancellations: Mutex::new(HashMap::new()),
-            observations: ObservationSlots::new(),
+            observations,
+            wake,
         }
     }
 
@@ -253,7 +286,7 @@ impl WebClientRuntime {
     ) -> Result<(), JsValue> {
         let request: core::ObservationRequest = serde_json::from_str(&request_json)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let sink = Arc::new(BufferedSink::default());
+        let sink = Arc::new(BufferedSink::new(Arc::clone(&self.wake)));
         let handle = self
             .inner
             .observe(request, sink.clone())
@@ -262,7 +295,6 @@ impl WebClientRuntime {
             handle,
             sink,
             callback,
-            closed: AtomicBool::new(false),
         });
         // A repeated id is a host defect. Closing the previous handle instead would strand
         // its consumer and hand its `unobserve` to whoever claimed the id last.
@@ -310,6 +342,14 @@ impl WebClientRuntime {
     }
 }
 
+// Freeing the Runtime from JavaScript leaves the drain task parked on a wake that nothing will
+// send. One last wake lets it observe the dropped table and finish.
+impl Drop for WebClientRuntime {
+    fn drop(&mut self) {
+        self.wake.notify_one();
+    }
+}
+
 impl WebClientRuntime {
     fn flush_observations(&self) -> Result<(), JsValue> {
         for id in self.observations.ids() {
@@ -319,26 +359,9 @@ impl WebClientRuntime {
     }
 
     fn flush_observation(&self, observation_id: &str) -> Result<(), JsValue> {
-        let Some(observation) = self.observations.get(observation_id) else {
-            return Ok(());
-        };
-        let projections: Vec<_> = observation
-            .sink
-            .0
-            .lock()
-            .expect("Web observation buffer lock poisoned")
-            .drain(..)
-            .collect();
-        for projection in projections {
-            if observation.closed.load(Ordering::SeqCst) {
-                break;
-            }
-            let json = serde_json::to_string(&projection)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            observation
-                .callback
-                .call1(&JsValue::UNDEFINED, &JsValue::from_str(&json))?;
+        match self.observations.get(observation_id) {
+            Some(observation) => observation.deliver(),
+            None => Ok(()),
         }
-        Ok(())
     }
 }
