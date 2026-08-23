@@ -221,6 +221,12 @@ watermark, Replica state, and revision. Readers observe either the previous comp
 new complete generation. Cursor expiry begins another staging generation while the old projection
 remains readable; cleanup removes only a proved unreachable generation.
 
+For Web restart acceptance, the recreated Runtime first restores only encrypted authority and the
+Account remains signed out. The test performs one online Full sign-in or password Quick Unlock, then
+disconnects the transport and proves subsequent Items reads from the local Replica. This does not add
+an offline password shortcut or a Web-specific local-authenticator credential; password Quick Unlock
+remains the complete online SRP ceremony defined below.
+
 ### Offline create
 
 Rust creates the final Item ID before encryption. That ID is used in AAD, optimistic projection, route

@@ -25,3 +25,16 @@ Items after an offline Worker/browser restart and unlock.
 Cold versus captured-empty, page crash/resume, watermark race, old-or-new promotion, expired Cursor,
 failed authority fetch, failed commit, stale version, lock during decrypt, and offline restart cases
 pass with no staged or plaintext leakage.
+
+## Comments
+
+### 2026-08-23 — Web offline acceptance starts after an online unlock
+
+- A recreated Web Worker or browser session restores encrypted Replica authority with the Account
+  signed out. The acceptance flow then performs one online Full Sign-in or password Quick Unlock,
+  disconnects the transport, and proves that subsequent reads come entirely from the encrypted local
+  Replica.
+- Password Quick Unlock remains a complete online SRP ceremony. Issue 20 does not add an offline
+  password shortcut, a WebAuthn/platform-authenticator port, or another persistable login credential.
+- The separately accepted biometric exception remains available only to hosts that provide its local
+  operating-system capability and still does not mint or refresh a Server Session.
