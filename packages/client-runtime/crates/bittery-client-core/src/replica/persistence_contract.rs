@@ -71,12 +71,40 @@ pub(crate) struct ReplicaHead {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(crate) enum ReplicaInstallResult {
-    Created,
-    Replaced {
+pub(crate) enum ExpectedReplicaInstall {
+    Missing {
         #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
-        previous_incarnation: Incarnation,
+        account_id: AccountId,
     },
+    Present {
+        #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
+        account_id: AccountId,
+        user_id: String,
+        #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
+        incarnation: Incarnation,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "persistence-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        replica_revision: u64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PreparedReplicaInstall {
+    pub expected: ExpectedReplicaInstall,
+    pub next_head: ReplicaHead,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum ReplicaInstallResult {
+    Applied,
+    Stale,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,7 +164,7 @@ pub(crate) enum ReplicaPersistenceRequest {
         account_id: AccountId,
     },
     Install {
-        head: ReplicaHead,
+        prepared: PreparedReplicaInstall,
     },
     Commit {
         prepared: PreparedReplicaCommit,
@@ -190,6 +218,52 @@ pub fn persistence_contract_schema() -> schemars::Schema {
 pub(super) struct PreparedCommitOutcome {
     pub(super) wire: PreparedReplicaCommit,
     pub(super) next_snapshot: ReplicaSnapshot,
+}
+
+pub(super) fn prepare_install(
+    current: Option<&ReplicaSnapshot>,
+    account_id: AccountId,
+    user_id: String,
+    incarnation: Incarnation,
+) -> Result<PreparedReplicaInstall, RuntimeError> {
+    let (expected, replica_revision) = match current {
+        None => (
+            ExpectedReplicaInstall::Missing {
+                account_id: account_id.clone(),
+            },
+            0,
+        ),
+        Some(current) => {
+            if current.account_id != account_id || current.user_id != user_id {
+                return Err(replica_invariant(
+                    "installed Account identity cannot change User",
+                ));
+            }
+            let next_revision = current
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| replica_invariant("Replica revision overflow"))?;
+            (
+                ExpectedReplicaInstall::Present {
+                    account_id: current.account_id.clone(),
+                    user_id: current.user_id.clone(),
+                    incarnation: current.incarnation.clone(),
+                    replica_revision: current.revision,
+                },
+                next_revision,
+            )
+        }
+    };
+    Ok(PreparedReplicaInstall {
+        expected,
+        next_head: ReplicaHead {
+            account_id,
+            user_id,
+            incarnation,
+            replica_revision,
+            failure: None,
+        },
+    })
 }
 
 pub(super) fn prepare_commit(

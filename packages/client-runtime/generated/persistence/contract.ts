@@ -5,11 +5,21 @@ export type ReplicaPersistenceRequest = ({
 accountId: string
 type: "load"
 } | {
-head: ReplicaHead
+prepared: PreparedReplicaInstall
 type: "install"
 } | {
 prepared: PreparedReplicaCommit
 type: "commit"
+})
+export type ExpectedReplicaInstall = ({
+accountId: string
+type: "missing"
+} | {
+accountId: string
+incarnation: string
+replicaRevision: string
+type: "present"
+userId: string
 })
 export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type PreparedReplicaWrite = ({
@@ -33,10 +43,9 @@ result: PlanResult
 type: "committed"
 })
 export type ReplicaInstallResult = ({
-type: "created"
+type: "applied"
 } | {
-previousIncarnation: string
-type: "replaced"
+type: "stale"
 })
 export type PlanResult = ({
 replicaRevision: string
@@ -51,6 +60,10 @@ type: "missing"
 export interface ReplicaPersistenceContract {
 request: ReplicaPersistenceRequest
 response: ReplicaPersistenceResponse
+}
+export interface PreparedReplicaInstall {
+expected: ExpectedReplicaInstall
+nextHead: ReplicaHead
 }
 export interface ReplicaHead {
 accountId: string

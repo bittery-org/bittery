@@ -121,24 +121,40 @@ function commit(value: PreparedReplicaCommit) {
 	return { type: "commit", prepared: value } as const;
 }
 
-function install(incarnation = "incarnation-a", userId = "user-a") {
+function install(
+	incarnation = "incarnation-a",
+	userId = "user-a",
+	expected:
+		| { type: "missing"; accountId: string }
+		| {
+				type: "present";
+				accountId: string;
+				userId: string;
+				incarnation: string;
+				replicaRevision: string;
+		  } = { type: "missing", accountId: "account-a" },
+	replicaRevision = "0",
+) {
 	return {
 		type: "install",
-		head: {
-			accountId: "account-a",
-			userId,
-			incarnation,
-			replicaRevision: "0",
-			failure: null,
+		prepared: {
+			expected,
+			nextHead: {
+				accountId: "account-a",
+				userId,
+				incarnation,
+				replicaRevision,
+				failure: null,
+			},
 		},
 	} as const;
 }
 
 describe("IndexedDbReplicaExecutor", () => {
-	test("atomically replaces an installed account and removes its previous rows", async () => {
+	test("atomically replaces only the head and preserves previous rows", async () => {
 		expect(await invoke(install())).toEqual({
 			type: "installed",
-			result: { type: "created" },
+			result: { type: "applied" },
 		});
 		expect(
 			await invoke(
@@ -146,12 +162,24 @@ describe("IndexedDbReplicaExecutor", () => {
 			),
 		).toMatchObject({ result: { type: "applied" } });
 
-		expect(await invoke(install("incarnation-b"))).toEqual({
+		expect(
+			await invoke(
+				install(
+					"incarnation-b",
+					"user-a",
+					{
+						type: "present",
+						accountId: "account-a",
+						userId: "user-a",
+						incarnation: "incarnation-a",
+						replicaRevision: "1",
+					},
+					"2",
+				),
+			),
+		).toEqual({
 			type: "installed",
-			result: {
-				type: "replaced",
-				previousIncarnation: "incarnation-a",
-			},
+			result: { type: "applied" },
 		});
 		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual({
 			type: "loaded",
@@ -159,21 +187,25 @@ describe("IndexedDbReplicaExecutor", () => {
 				accountId: "account-a",
 				userId: "user-a",
 				incarnation: "incarnation-b",
-				replicaRevision: "0",
+				replicaRevision: "2",
 				failure: null,
 			},
-			rows: [],
+			rows: [
+				{
+					store: "operations",
+					key: { accountId: "account-a", recordId: "old-operation" },
+					payloadJson: "opaque",
+				},
+			],
 		});
 	});
 
-	test("refuses to replace an Account with another User or the same incarnation", async () => {
+	test("returns stale when the exact expected head no longer matches", async () => {
 		await invoke(install());
-		await expect(invoke(install("incarnation-b", "user-b"))).rejects.toThrow(
-			"cannot change User",
-		);
-		await expect(invoke(install("incarnation-a"))).rejects.toThrow(
-			"new incarnation",
-		);
+		expect(await invoke(install("incarnation-b"))).toEqual({
+			type: "installed",
+			result: { type: "stale" },
+		});
 		expect(
 			await invoke({ type: "load", accountId: "account-a" }),
 		).toMatchObject({

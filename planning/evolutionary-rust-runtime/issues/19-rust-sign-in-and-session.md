@@ -36,8 +36,9 @@ credential lifetime.
   neither the transport adapter nor Active account infers consent.
 - After the Server proof identifies the User, Rust resolves an existing installation by normalized
   Server URL and Server User ID. A repeated full Sign-in keeps its stable local Account ID, atomically
-  replaces the Account installation with a new random incarnation, and leaves no observable deleted
-  or partially replaced state. A first Sign-in creates both a new stable Account ID and incarnation.
+  replaces the Account installation head with a new random incarnation, and preserves every accepted
+  Operation and encrypted optimistic overlay. Explicit Device Account removal is the only flow that
+  deletes those durable rows. A first Sign-in creates both a new stable Account ID and incarnation.
 - Rust verifies and applies Travel Mode with the freshly issued Session token after loading all
   required Account material and before committing any usable local Session. Failure leaves no
   published or unlocked local Session; an orphaned Server Session remains safe and recoverable.

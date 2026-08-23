@@ -248,7 +248,9 @@ this plan is not local completion.
 A retained semantic rejection stops retry and marks the encrypted optimistic Item failed without
 silently destroying the user's ciphertext. Editing or clearing failed optimistic Items is outside the
 first slice. Account removal deletes all local records and invalidates late plans by incarnation; it
-does not cancel or reverse a Server effect.
+does not cancel or reverse a Server effect. A repeated full Sign-in replaces only the installed
+Account head and preserves accepted Operations and their encrypted optimistic overlays. Explicit
+Device Account removal is the only flow that deletes those durable local records.
 
 Applying a remote change fetches its authoritative entity outside storage, then atomically applies the
 encrypted entity/tombstone and advances from the exact expected Cursor. Fetch or commit failure leaves

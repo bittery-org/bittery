@@ -7,7 +7,7 @@ use crate::{
     },
     AccountAccessState, AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle,
     ObservationRequest, ObservationSink, RequestCancellation, Runtime, RuntimeError,
-    RuntimeErrorCode, RuntimeProjection, RuntimeRequest,
+    RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
 };
 use async_trait::async_trait;
 use std::{
@@ -265,7 +265,7 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
         )
         .await
         .unwrap();
-    first.unlock_account(&account_id).unwrap();
+    first.unlock_account(&account_id).await.unwrap();
     first
         .request(
             create_request(account_id.clone()),
@@ -290,9 +290,9 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
     let snapshot = restored.replica().snapshot(&account_id).unwrap();
     assert_eq!(snapshot.user_id, "user-restore");
     assert_eq!(snapshot.incarnation, Incarnation::from("incarnation-new"));
-    assert_eq!(snapshot.revision, 0);
-    assert!(snapshot.items.is_empty());
-    assert!(snapshot.operations.is_empty());
+    assert_eq!(snapshot.revision, 2);
+    assert_eq!(snapshot.items.len(), 1);
+    assert_eq!(snapshot.operations.len(), 1);
     let status = ProjectionSink::default();
     let status = Arc::new(status);
     let _observation = restored
@@ -401,8 +401,8 @@ async fn restore_is_batch_atomic_and_replaces_the_visible_device_catalog() {
     assert!(missing_after_valid.replica().snapshots().is_empty());
 }
 
-#[test]
-fn runtime_status_projects_unlocked_and_locked_as_closed_states() {
+#[tokio::test]
+async fn runtime_status_projects_unlocked_and_locked_as_closed_states() {
     let (runtime, account_id, _) = installed_runtime();
     let status = Arc::new(ProjectionSink::default());
     let _observation = runtime
@@ -413,7 +413,7 @@ fn runtime_status_projects_unlocked_and_locked_as_closed_states() {
             status.clone(),
         )
         .unwrap();
-    runtime.mark_account_locked(&account_id).unwrap();
+    runtime.mark_account_locked(&account_id).await.unwrap();
     let projections = status.0.lock().unwrap();
     let states: Vec<_> = projections
         .iter()
@@ -488,7 +488,7 @@ async fn durable_stale_keeps_rereading_and_recomputing_while_revisions_advance()
     let runtime = Runtime::with_serialized_replica_executor(executor.clone());
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
-    runtime.unlock_account(&account_id).unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
 
     let response = runtime
         .request(
@@ -512,7 +512,7 @@ async fn durable_missing_clears_the_cache_and_returns_account_missing() {
     let runtime = Runtime::with_serialized_replica_executor(executor);
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
-    runtime.unlock_account(&account_id).unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
 
     let error = runtime
         .request(
@@ -532,7 +532,7 @@ async fn create_recomputes_when_revision_advances_before_the_guarded_commit_load
     let runtime = Runtime::with_serialized_replica_executor(executor);
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
-    runtime.unlock_account(&account_id).unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
 
     let response = runtime
         .request(
@@ -573,6 +573,118 @@ async fn cancellation_after_acceptance_stops_waiting_but_preserves_operation() {
             .len(),
         1
     );
+}
+
+#[test]
+fn account_lock_waits_for_an_inflight_acceptance_before_clearing_access() {
+    let (runtime, account_id, _) = installed_runtime();
+    let (entered_sender, entered_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
+    let request_runtime = runtime.clone();
+    let request_account = account_id.clone();
+    let request_thread = thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(request_runtime.request_with_acceptance_hook(
+                create_request(request_account),
+                RequestCancellation::new(),
+                move || {
+                    entered_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                },
+            ))
+    });
+    entered_receiver.recv().unwrap();
+
+    let (locked_sender, locked_receiver) = mpsc::channel();
+    let lock_runtime = runtime.clone();
+    let lock_account = account_id.clone();
+    let lock_thread = thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(lock_runtime.mark_account_locked(&lock_account));
+        locked_sender.send(result).unwrap();
+    });
+    assert!(locked_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
+    release_sender.send(()).unwrap();
+    assert!(matches!(
+        request_thread.join().unwrap().unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+    locked_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    lock_thread.join().unwrap();
+
+    assert_eq!(
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(runtime.request(create_request(account_id), RequestCancellation::new(),))
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+}
+
+#[test]
+fn close_waits_for_an_inflight_acceptance_before_clearing_runtime_state() {
+    let (runtime, account_id, _) = installed_runtime();
+    let (entered_sender, entered_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
+    let request_runtime = runtime.clone();
+    let request_thread = thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(request_runtime.request_with_acceptance_hook(
+                create_request(account_id),
+                RequestCancellation::new(),
+                move || {
+                    entered_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                },
+            ))
+    });
+    entered_receiver.recv().unwrap();
+
+    let (closed_sender, closed_receiver) = mpsc::channel();
+    let close_runtime = runtime.clone();
+    let close_thread = thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(close_runtime.close());
+        closed_sender.send(()).unwrap();
+    });
+    assert!(closed_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
+    release_sender.send(()).unwrap();
+    assert!(matches!(
+        request_thread.join().unwrap().unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+    closed_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    close_thread.join().unwrap();
+    assert!(runtime.is_closed());
+    assert!(matches!(
+        runtime.observe(
+            ObservationRequest::RuntimeStatus { account_id: None },
+            Arc::new(ProjectionSink::default()),
+        ),
+        Err(RuntimeError {
+            code: RuntimeErrorCode::RuntimeClosed,
+            ..
+        })
+    ));
 }
 
 struct BlockingSink {
@@ -642,14 +754,24 @@ fn concurrent_publications_are_serialized_in_strict_revision_order() {
         thread::spawn(move || run_request(runtime, request))
     };
     sink.wait_until_blocked();
+    let (second_done_sender, second_done_receiver) = mpsc::channel();
     let second = {
         let runtime = runtime.clone();
         let request = create_request(account_id);
-        thread::spawn(move || run_request(runtime, request))
+        thread::spawn(move || {
+            run_request(runtime, request);
+            second_done_sender.send(()).unwrap();
+        })
     };
-    second.join().unwrap();
+    assert!(second_done_receiver
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
     sink.release();
     first.join().unwrap();
+    second_done_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    second.join().unwrap();
 
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1, 2]);
 }

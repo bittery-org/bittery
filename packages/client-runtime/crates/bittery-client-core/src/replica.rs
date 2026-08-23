@@ -19,11 +19,11 @@ pub(crate) use domain::{
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use persistence_contract::persistence_contract_schema;
-pub(crate) use persistence_contract::ReplicaInstallResult;
 pub(crate) use persistence_contract::ReplicaPersistenceRequest;
 use persistence_contract::{
-    apply_prepared_writes_to_rows, prepare_commit, reconstruct_snapshot, replica_invariant,
-    snapshot_rows, PreparedCommitOutcome,
+    apply_prepared_writes_to_rows, prepare_commit, prepare_install, reconstruct_snapshot,
+    replica_invariant, snapshot_rows, ExpectedReplicaInstall, PreparedCommitOutcome,
+    ReplicaInstallResult,
 };
 use persistence_contract::{ReplicaHead, ReplicaPersistenceResponse};
 #[cfg(test)]
@@ -172,52 +172,69 @@ impl Replica {
         account_id: AccountId,
         user_id: String,
         incarnation: Incarnation,
-    ) -> Result<ReplicaInstallResult, RuntimeError> {
+    ) -> Result<(), RuntimeError> {
         if account_id.as_str().is_empty() || user_id.is_empty() || incarnation.as_str().is_empty() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "Replica installation identities must not be empty",
             ));
         }
-        let expected_user_id = user_id.clone();
-        let expected_incarnation = incarnation.clone();
-        let head = ReplicaHead {
-            account_id: account_id.clone(),
-            user_id,
-            incarnation,
-            replica_revision: 0,
-            failure: None,
-        };
-        let response = self
-            .persistence
-            .invoke(ReplicaPersistenceRequest::Install { head })
-            .await?;
-        let ReplicaPersistenceResponse::Installed { result } = response else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Replica persistence returned a non-install response for an install",
-            ));
-        };
-        let snapshot = self.load(&account_id).await?.ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Replica persistence lost an installed Account",
-            )
-        })?;
-        if snapshot.account_id != account_id
-            || snapshot.user_id != expected_user_id
-            || snapshot.incarnation != expected_incarnation
-            || snapshot.revision != 0
-            || snapshot.failure.is_some()
-            || !snapshot.items.is_empty()
-            || !snapshot.operations.is_empty()
-        {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "installed Account did not restore as a clean Replica",
-            ));
+        loop {
+            let current = self.load_uncached(&account_id).await?;
+            if let Some(current) = &current {
+                if current.user_id != user_id {
+                    return Err(replica_invariant(
+                        "installed Account identity cannot change User",
+                    ));
+                }
+                if current.incarnation == incarnation {
+                    if current.failure.is_some() {
+                        return Err(replica_invariant(
+                            "replayed Replica installation did not restore a clean head",
+                        ));
+                    }
+                    self.cache(current.clone());
+                    return Ok(());
+                }
+            }
+            let prepared = prepare_install(
+                current.as_ref(),
+                account_id.clone(),
+                user_id.clone(),
+                incarnation.clone(),
+            )?;
+            let response = self
+                .persistence
+                .invoke(ReplicaPersistenceRequest::Install {
+                    prepared: prepared.clone(),
+                })
+                .await?;
+            let ReplicaPersistenceResponse::Installed { result } = response else {
+                return Err(replica_invariant(
+                    "Replica persistence returned a non-install response for an install",
+                ));
+            };
+            match result {
+                ReplicaInstallResult::Applied => {
+                    let snapshot = self.load_uncached(&account_id).await?.ok_or_else(|| {
+                        replica_invariant("Replica persistence lost an applied installation")
+                    })?;
+                    if snapshot.account_id != prepared.next_head.account_id
+                        || snapshot.user_id != prepared.next_head.user_id
+                        || snapshot.incarnation != prepared.next_head.incarnation
+                        || snapshot.revision != prepared.next_head.replica_revision
+                        || snapshot.failure != prepared.next_head.failure
+                    {
+                        return Err(replica_invariant(
+                            "Replica persistence applied a different installation head",
+                        ));
+                    }
+                    self.cache(snapshot);
+                    return Ok(());
+                }
+                ReplicaInstallResult::Stale => continue,
+            }
         }
-        Ok(result)
     }
 
     pub(crate) async fn execute(
@@ -348,7 +365,6 @@ impl Replica {
         values
     }
 
-    #[cfg(test)]
     pub(crate) fn cache(&self, snapshot: ReplicaSnapshot) {
         self.snapshots
             .lock()
@@ -472,44 +488,63 @@ impl ReplicaPersistence for InMemoryReplica {
                 };
                 Ok(ReplicaPersistenceResponse::Loaded { head, rows })
             }
-            ReplicaPersistenceRequest::Install { head } => {
-                if head.replica_revision != 0 || head.failure.is_some() {
-                    return Err(replica_invariant(
-                        "installed Replica head must begin clean at revision zero",
-                    ));
-                }
+            ReplicaPersistenceRequest::Install { prepared } => {
                 let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-                let result = match accounts.get(&head.account_id) {
-                    Some(previous) => {
-                        if previous.user_id != head.user_id {
-                            return Err(replica_invariant(
-                                "installed Account identity cannot change User",
-                            ));
-                        }
-                        if previous.incarnation == head.incarnation {
-                            return Err(replica_invariant(
-                                "replaced Account must receive a new incarnation",
-                            ));
-                        }
-                        ReplicaInstallResult::Replaced {
-                            previous_incarnation: previous.incarnation.clone(),
-                        }
+                let account_id = prepared.next_head.account_id.clone();
+                let matches = match (&prepared.expected, accounts.get(&account_id)) {
+                    (
+                        ExpectedReplicaInstall::Missing {
+                            account_id: expected,
+                        },
+                        None,
+                    ) => expected == &account_id,
+                    (
+                        ExpectedReplicaInstall::Present {
+                            account_id: expected_account,
+                            user_id,
+                            incarnation,
+                            replica_revision,
+                        },
+                        Some(current),
+                    ) => {
+                        expected_account == &account_id
+                            && current.user_id == *user_id
+                            && current.incarnation == *incarnation
+                            && current.revision == *replica_revision
                     }
-                    None => ReplicaInstallResult::Created,
+                    _ => false,
                 };
-                accounts.insert(
-                    head.account_id.clone(),
-                    AccountReplica {
-                        account_id: head.account_id,
-                        user_id: head.user_id,
-                        incarnation: head.incarnation,
-                        revision: 0,
-                        items: HashMap::new(),
-                        operations: HashMap::new(),
-                        failure: None,
-                    },
-                );
-                Ok(ReplicaPersistenceResponse::Installed { result })
+                if !matches {
+                    return Ok(ReplicaPersistenceResponse::Installed {
+                        result: ReplicaInstallResult::Stale,
+                    });
+                }
+                match accounts.get_mut(&account_id) {
+                    Some(current) => {
+                        current.user_id = prepared.next_head.user_id;
+                        current.incarnation = prepared.next_head.incarnation;
+                        current.revision = prepared.next_head.replica_revision;
+                        current.failure = prepared.next_head.failure;
+                    }
+                    None => {
+                        let head = prepared.next_head;
+                        accounts.insert(
+                            account_id,
+                            AccountReplica {
+                                account_id: head.account_id,
+                                user_id: head.user_id,
+                                incarnation: head.incarnation,
+                                revision: head.replica_revision,
+                                items: HashMap::new(),
+                                operations: HashMap::new(),
+                                failure: head.failure,
+                            },
+                        );
+                    }
+                }
+                Ok(ReplicaPersistenceResponse::Installed {
+                    result: ReplicaInstallResult::Applied,
+                })
             }
             ReplicaPersistenceRequest::Commit { prepared } => {
                 let mut accounts = self.accounts.lock().expect("replica lock poisoned");
@@ -564,7 +599,97 @@ impl ReplicaPersistence for InMemoryReplica {
 #[cfg(test)]
 mod persistence_contract_tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    struct HostileCrossUserExecutor {
+        install_called: AtomicBool,
+    }
+
+    #[async_trait]
+    impl ReplicaPersistence for HostileCrossUserExecutor {
+        async fn invoke(
+            &self,
+            request: ReplicaPersistenceRequest,
+        ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+            match request {
+                ReplicaPersistenceRequest::Load { account_id } => {
+                    Ok(ReplicaPersistenceResponse::Loaded {
+                        head: Some(ReplicaHead {
+                            account_id,
+                            user_id: "hostile-user".into(),
+                            incarnation: Incarnation::from("hostile-incarnation"),
+                            replica_revision: 7,
+                            failure: None,
+                        }),
+                        rows: vec![],
+                    })
+                }
+                ReplicaPersistenceRequest::Install { .. } => {
+                    self.install_called.store(true, Ordering::SeqCst);
+                    Ok(ReplicaPersistenceResponse::Installed {
+                        result: ReplicaInstallResult::Applied,
+                    })
+                }
+                ReplicaPersistenceRequest::Commit { .. } => unreachable!(),
+            }
+        }
+    }
+
+    struct InstallRaceExecutor {
+        state: InMemoryReplica,
+        raced: AtomicBool,
+        install_calls: AtomicUsize,
+    }
+
+    struct LyingAppliedExecutor {
+        state: InMemoryReplica,
+    }
+
+    #[async_trait]
+    impl ReplicaPersistence for LyingAppliedExecutor {
+        async fn invoke(
+            &self,
+            request: ReplicaPersistenceRequest,
+        ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+            match request {
+                ReplicaPersistenceRequest::Install { prepared } => {
+                    self.state
+                        .install(
+                            prepared.next_head.account_id,
+                            "hostile-user".into(),
+                            Incarnation::from("hostile-incarnation"),
+                        )
+                        .unwrap();
+                    Ok(ReplicaPersistenceResponse::Installed {
+                        result: ReplicaInstallResult::Applied,
+                    })
+                }
+                other => self.state.invoke(other).await,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ReplicaPersistence for InstallRaceExecutor {
+        async fn invoke(
+            &self,
+            request: ReplicaPersistenceRequest,
+        ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+            if let ReplicaPersistenceRequest::Install { prepared } = &request {
+                self.install_calls.fetch_add(1, Ordering::SeqCst);
+                if !self.raced.swap(true, Ordering::SeqCst) {
+                    self.state
+                        .install(
+                            prepared.next_head.account_id.clone(),
+                            prepared.next_head.user_id.clone(),
+                            Incarnation::from("competing-incarnation"),
+                        )
+                        .unwrap();
+                }
+            }
+            self.state.invoke(request).await
+        }
+    }
 
     struct SerializedFakeExecutor {
         state: InMemoryReplica,
@@ -620,6 +745,66 @@ mod persistence_contract_tests {
             item_id: item_id.into(),
             request_bytes: b"sealed-request".to_vec(),
         }
+    }
+
+    #[tokio::test]
+    async fn rust_rejects_cross_user_install_before_a_hostile_executor_can_apply_it() {
+        let persistence = Arc::new(HostileCrossUserExecutor {
+            install_called: AtomicBool::new(false),
+        });
+        let replica = Replica::new(persistence.clone());
+        let error = replica
+            .install_or_replace(
+                AccountId::from("account-1"),
+                "desired-user".into(),
+                Incarnation::from("desired-incarnation"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(!persistence.install_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn install_rereads_and_retries_after_a_stale_compare_and_swap() {
+        let persistence = Arc::new(InstallRaceExecutor {
+            state: InMemoryReplica::default(),
+            raced: AtomicBool::new(false),
+            install_calls: AtomicUsize::new(0),
+        });
+        let replica = Replica::new(persistence.clone());
+        replica
+            .install_or_replace(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("desired-incarnation"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(persistence.install_calls.load(Ordering::SeqCst), 2);
+        let snapshot = replica.snapshot(&AccountId::from("account-1")).unwrap();
+        assert_eq!(
+            snapshot.incarnation,
+            Incarnation::from("desired-incarnation")
+        );
+        assert_eq!(snapshot.revision, 1);
+    }
+
+    #[tokio::test]
+    async fn rust_rejects_an_applied_response_when_authoritative_head_differs() {
+        let replica = Replica::new(Arc::new(LyingAppliedExecutor {
+            state: InMemoryReplica::default(),
+        }));
+        let error = replica
+            .install_or_replace(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("desired-incarnation"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(replica.snapshot(&AccountId::from("account-1")).is_none());
     }
 
     async fn assert_replica_conformance(replica: &Replica) {

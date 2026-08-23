@@ -261,6 +261,8 @@ impl Runtime {
         user_id: String,
         incarnation: crate::protocol::Incarnation,
     ) -> Result<(), RuntimeError> {
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
         self.replica
             .install_or_replace(account_id.clone(), user_id, incarnation)
@@ -293,6 +295,24 @@ impl Runtime {
                 ));
             }
         }
+        let mut lock_ids: HashSet<_> = self
+            .replica
+            .snapshots()
+            .into_iter()
+            .map(|snapshot| snapshot.account_id)
+            .collect();
+        lock_ids.extend(account_ids.iter().cloned());
+        let mut lock_ids: Vec<_> = lock_ids.into_iter().collect();
+        lock_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let execution_locks: Vec<_> = lock_ids
+            .iter()
+            .map(|account_id| self.account_execution_lock(account_id))
+            .collect::<Result<_, _>>()?;
+        let mut execution_guards = Vec::with_capacity(execution_locks.len());
+        for lock in &execution_locks {
+            execution_guards.push(lock.lock().await);
+        }
+        self.ensure_open()?;
         let restored = self.replica.restore_known_accounts(&account_ids).await?;
         {
             let mut access = self
@@ -314,7 +334,10 @@ impl Runtime {
     }
 
     #[cfg(test)]
-    pub(crate) fn unlock_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+    pub(crate) async fn unlock_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        let execution_lock = self.account_execution_lock(account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
         if self.replica.snapshot(account_id).is_none() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::AccountMissing,
@@ -334,7 +357,9 @@ impl Runtime {
     }
 
     #[doc(hidden)]
-    pub fn mark_account_locked(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+    pub async fn mark_account_locked(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        let execution_lock = self.account_execution_lock(account_id)?;
+        let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
         if self.replica.snapshot(account_id).is_none() {
             return Err(RuntimeError::new(
@@ -388,8 +413,9 @@ impl Runtime {
                 vault_id,
                 draft,
             } => {
-                let execution_lock = self.account_execution_lock(&account_id);
-                let execution_guard = execution_lock.lock().await;
+                let execution_lock = self.account_execution_lock(&account_id)?;
+                let _execution_guard = execution_lock.lock().await;
+                self.ensure_open()?;
                 let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
                 })?;
@@ -462,7 +488,6 @@ impl Runtime {
                             .expect("unlocked projection lock poisoned")
                             .remove(&account_id);
                         self.device_revision.fetch_add(1, Ordering::SeqCst);
-                        drop(execution_guard);
                         self.publish_all();
                         return Err(RuntimeError::new(
                             RuntimeErrorCode::AccountMissing,
@@ -477,7 +502,6 @@ impl Runtime {
                     .or_default()
                     .push(projection);
                 self.device_revision.fetch_add(1, Ordering::SeqCst);
-                drop(execution_guard);
                 self.publish_all();
                 accepted();
                 if cancellation.is_cancelled() {
@@ -588,6 +612,18 @@ impl Runtime {
 
     pub async fn close(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
+            let mut execution_locks: Vec<_> = self
+                .account_execution_locks
+                .lock()
+                .expect("Account execution lock map poisoned")
+                .iter()
+                .map(|(account_id, lock)| (account_id.clone(), Arc::clone(lock)))
+                .collect();
+            execution_locks.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+            let mut execution_guards = Vec::with_capacity(execution_locks.len());
+            for (_, lock) in &execution_locks {
+                execution_guards.push(lock.lock().await);
+            }
             let subscriptions: Vec<_> = self
                 .observers
                 .lock()
@@ -613,13 +649,19 @@ impl Runtime {
         self.closed.load(Ordering::SeqCst)
     }
 
-    fn account_execution_lock(&self, account_id: &AccountId) -> Arc<tokio::sync::Mutex<()>> {
-        self.account_execution_locks
+    fn account_execution_lock(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, RuntimeError> {
+        let mut locks = self
+            .account_execution_locks
             .lock()
-            .expect("Account execution lock map poisoned")
+            .expect("Account execution lock map poisoned");
+        self.ensure_open()?;
+        Ok(locks
             .entry(account_id.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
+            .clone())
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<RuntimeProjection, RuntimeError> {

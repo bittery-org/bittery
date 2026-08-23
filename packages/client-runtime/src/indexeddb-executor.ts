@@ -1,7 +1,7 @@
 import type {
 	PreparedReplicaCommit,
+	PreparedReplicaInstall,
 	ReplicaHead,
-	ReplicaInstallResult,
 	ReplicaPersistenceRequest,
 	ReplicaPersistenceResponse,
 	ReplicaStore,
@@ -29,7 +29,7 @@ export class IndexedDbReplicaExecutor {
 				request.type === "load"
 					? await load(database, request.accountId)
 					: request.type === "install"
-						? await install(database, request.head)
+						? await install(database, request.prepared)
 						: await commit(database, request.prepared);
 			if (!validateReplicaPersistenceResponse(response)) {
 				throw new Error(
@@ -141,47 +141,33 @@ async function load(
 
 async function install(
 	database: IDBDatabase,
-	head: ReplicaHead,
+	prepared: PreparedReplicaInstall,
 ): Promise<ReplicaPersistenceResponse> {
-	assertInstallSafety(head);
-	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const transaction = database.transaction("heads", "readwrite");
 	const completed = transactionDone(transaction);
 	try {
 		const heads = transaction.objectStore("heads");
-		const previousValue = await requestResult(heads.get(head.accountId));
-		const result: ReplicaInstallResult =
+		const accountId = prepared.nextHead.accountId;
+		const previousValue = await requestResult(heads.get(accountId));
+		const previous =
 			previousValue === undefined
-				? { type: "created" }
-				: (() => {
-						const previous = parseStoredHead(previousValue, head.accountId);
-						if (previous.userId !== head.userId) {
-							throw new Error("installed Account identity cannot change User");
-						}
-						if (previous.incarnation === head.incarnation) {
-							throw new Error(
-								"replaced Account must receive a new incarnation",
-							);
-						}
-						return {
-							type: "replaced",
-							previousIncarnation: previous.incarnation,
-						};
-					})();
-		for (const storeName of ["optimistic_items", "operations"] as const) {
-			const request = transaction
-				.objectStore(storeName)
-				.index(ACCOUNT_INDEX)
-				.openKeyCursor(head.accountId);
-			request.onsuccess = () => {
-				const cursor = request.result;
-				if (cursor === null) return;
-				transaction.objectStore(storeName).delete(cursor.primaryKey);
-				cursor.continue();
-			};
+				? null
+				: parseStoredHead(previousValue, accountId);
+		const matches =
+			prepared.expected.type === "missing"
+				? prepared.expected.accountId === accountId && previous === null
+				: prepared.expected.accountId === accountId &&
+					previous !== null &&
+					previous.userId === prepared.expected.userId &&
+					previous.incarnation === prepared.expected.incarnation &&
+					previous.replicaRevision === prepared.expected.replicaRevision;
+		if (!matches) {
+			await completed;
+			return { type: "installed", result: { type: "stale" } };
 		}
-		heads.put(head);
+		heads.put(prepared.nextHead);
 		await completed;
-		return { type: "installed", result };
+		return { type: "installed", result: { type: "applied" } };
 	} catch (error) {
 		abort(transaction);
 		await completed.catch(() => undefined);
@@ -277,15 +263,6 @@ function assertPreparedSafety(prepared: PreparedReplicaCommit): void {
 			);
 		}
 		assertIdentifier(key.recordId, "prepared row key");
-	}
-}
-
-function assertInstallSafety(head: ReplicaHead): void {
-	assertIdentifier(head.accountId, "installed Account");
-	assertIdentifier(head.userId, "installed User");
-	assertIdentifier(head.incarnation, "installed incarnation");
-	if (head.replicaRevision !== "0" || head.failure !== null) {
-		throw new Error("installed Replica head must begin clean at revision zero");
 	}
 }
 
