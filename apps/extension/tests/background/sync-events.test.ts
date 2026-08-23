@@ -362,7 +362,7 @@ describe("account-scoped sync cursors", () => {
 });
 
 describe("session_revoked over SSE", () => {
-	test("locks the vault, invalidates the named session and suppresses the reconnect", async () => {
+	test("locks the vault, invalidates the connection account and suppresses the reconnect", async () => {
 		unlockVault();
 		stubStream([
 			revocationFrame({ session_id: "s1", reason: "device_revoked" }),
@@ -374,7 +374,7 @@ describe("session_revoked over SSE", () => {
 		expect(vaultSession.getSnapshot().unlocked).toBe(false);
 		expect(vaultSession.getSnapshot().lockReason).toBe("session_revoked");
 		expect(lockAllCalls).toBe(1);
-		expect(invalidationTargets).toEqual([{ sessionId: "s1" }]);
+		expect(invalidationTargets).toEqual([{ accountId: ACCOUNT.accountId }]);
 
 		// The stream ends right after the revocation; reconnecting would loop the dead JWT.
 		expect(alarmCreates).not.toContain(SYNC_ALARM_NAME);
@@ -399,20 +399,15 @@ describe("session_revoked over SSE", () => {
 		expect(invalidationTargets).toEqual([{ accountId: ACCOUNT.accountId }]);
 	});
 
-	test("a session id that matches nothing retries by account id instead of reporting success", async () => {
+	test("a connection account id outranks an unresolved session id", async () => {
 		unlockVault();
-		// `StoredSessionData.sessionId` is optional, so an unresolved id yields an
-		// empty, failure-free outcome — indistinguishable from a successful kill.
 		invalidateResult = (target) =>
 			typeof target === "object" && "accountId" in target ? [ACCOUNT] : [];
 		stubStream([revocationFrame({ session_id: "unknown" })]);
 
 		await connect();
 
-		expect(invalidationTargets).toEqual([
-			{ sessionId: "unknown" },
-			{ accountId: ACCOUNT.accountId },
-		]);
+		expect(invalidationTargets).toEqual([{ accountId: ACCOUNT.accountId }]);
 	});
 
 	test("accepts the camelCase sessionId spelling", async () => {

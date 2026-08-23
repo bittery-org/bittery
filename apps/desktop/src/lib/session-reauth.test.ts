@@ -1,10 +1,13 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import type { AccountMetadata } from "@bittery/storage/types";
 import { reauthenticateDesktopSession } from "./session-reauth";
 
 function outcome(failures: LifecycleOutcome["failures"]): LifecycleOutcome {
 	return {
-		affected: [],
+		affected: [
+			{ accountId: "account-a", email: "a@example.com" } as AccountMetadata,
+		],
 		activeAccountId: "account-a",
 		activeAccount: null,
 		wasActive: true,
@@ -53,5 +56,19 @@ describe("reauthenticateDesktopSession", () => {
 		).rejects.toThrow("did not complete safely");
 		expect(clearQueries).not.toHaveBeenCalled();
 		expect(navigateToUnlock).not.toHaveBeenCalled();
+	});
+
+	it("rejects an unresolved Account before applying host effects", async () => {
+		const clearQueries = mock(() => {});
+		const unresolved = { ...outcome([]), affected: [] };
+
+		await expect(
+			reauthenticateDesktopSession(async () => unresolved, {
+				clearQueries,
+				notify: () => {},
+				navigateToUnlock: () => {},
+			}),
+		).rejects.toThrow("did not complete safely");
+		expect(clearQueries).not.toHaveBeenCalled();
 	});
 });

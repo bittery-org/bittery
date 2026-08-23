@@ -451,31 +451,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		};
 	}
 
-	test("retries by account id when the sessionId resolves nothing", async () => {
-		const targets: unknown[] = [];
-		const adapter = createLifecycleAdapter({
-			deps: {} as never,
-			invalidate: async (target) => {
-				targets.push(target);
-				// An unresolved sessionId is reported exactly like a clean success.
-				return "sessionId" in (target as object)
-					? outcome([])
-					: outcome([ACCOUNT]);
-			},
-			resolveFallbackAccountId: () => "acc-1",
-		});
-
-		const result = await adapter.invalidateSession({ sessionId: "s1" });
-
-		expect(targets).toEqual([{ sessionId: "s1" }, { accountId: "acc-1" }]);
-		expect(result).toEqual({
-			accountId: "acc-1",
-			email: "user@example.com",
-			wasActive: true,
-		});
-	});
-
-	test("does not retry when the sessionId resolved an account", async () => {
+	test("uses the known connection account instead of scanning by session id", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
 			deps: {} as never,
@@ -484,6 +460,50 @@ describe("lifecycle adapter — session invalidation", () => {
 				return outcome([ACCOUNT]);
 			},
 			resolveFallbackAccountId: () => "acc-1",
+		});
+
+		const result = await adapter.invalidateSession({ sessionId: "s1" });
+
+		expect(targets).toEqual([{ accountId: "acc-1" }]);
+		expect(result).toEqual({
+			accountId: "acc-1",
+			email: "user@example.com",
+			wasActive: true,
+		});
+	});
+
+	test("cannot lock another server account that shares the revoked session id", async () => {
+		const targets: unknown[] = [];
+		const otherAccount = {
+			...ACCOUNT,
+			accountId: "acc-other-server",
+			email: "other@example.com",
+		};
+		const adapter = createLifecycleAdapter({
+			deps: {} as never,
+			invalidate: async (target) => {
+				targets.push(target);
+				return "sessionId" in (target as object)
+					? outcome([otherAccount])
+					: outcome([ACCOUNT]);
+			},
+			resolveFallbackAccountId: () => "acc-1",
+		});
+
+		const result = await adapter.invalidateSession({ sessionId: "shared-s1" });
+
+		expect(targets).toEqual([{ accountId: "acc-1" }]);
+		expect(result.accountId).toBe("acc-1");
+	});
+
+	test("uses session id resolution only when no connection account is known", async () => {
+		const targets: unknown[] = [];
+		const adapter = createLifecycleAdapter({
+			deps: {} as never,
+			invalidate: async (target) => {
+				targets.push(target);
+				return outcome([ACCOUNT]);
+			},
 		});
 
 		await adapter.invalidateSession({ sessionId: "s1" });

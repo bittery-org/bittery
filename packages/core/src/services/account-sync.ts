@@ -53,7 +53,10 @@ export interface AccountSyncModule {
 		activeAccountId?: ActiveAccountId;
 	}): Promise<AccountSyncAssembly | null>;
 	/** Lock the Account after Server Session invalidation, leaving UI effects to the app. */
-	invalidateSession(payload: { sessionId: string }): Promise<LifecycleOutcome>;
+	invalidateSession(payload: {
+		sessionId: string;
+		accountId?: string;
+	}): Promise<LifecycleOutcome>;
 }
 
 export interface CreateAccountSyncOptions {
@@ -225,7 +228,9 @@ export function createAccountSync({
 		async invalidateSession(payload) {
 			cached = undefined;
 			return await lockInvalidSession(
-				{ sessionId: payload.sessionId },
+				payload.accountId
+					? { accountId: payload.accountId }
+					: { sessionId: payload.sessionId },
 				lifecycle,
 			);
 		},

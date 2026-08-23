@@ -74,19 +74,11 @@ export function createLifecycleAdapter(
 		): Promise<InvalidatedSession> {
 			const accountId =
 				fallbackAccountId ?? options.resolveFallbackAccountId?.() ?? null;
-			const resolved = toCoreTarget(target, accountId);
+			const resolved = accountId
+				? ({ accountId } satisfies InvalidationTarget)
+				: toCoreTarget(target, null);
 
-			let outcome = await invalidate(resolved, deps);
-			// `StoredSessionData.sessionId` is optional, so an id that matches no
-			// stored session returns `affected: []` with `failures: []` — success and
-			// "never found it" are the same value. Retrying by accountId closes that.
-			if (
-				outcome.affected.length === 0 &&
-				accountId &&
-				!(typeof resolved === "object" && "accountId" in resolved)
-			) {
-				outcome = await invalidate({ accountId }, deps);
-			}
+			const outcome = await invalidate(resolved, deps);
 
 			requireCompleteLifecycleOutcome(outcome, {
 				operation: "Extension lockInvalidSession",

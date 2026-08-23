@@ -1,10 +1,13 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import type { AccountMetadata } from "@bittery/storage/types";
 import { reauthenticateMobileSession } from "./session-reauth";
 
 function outcome(failed = false): LifecycleOutcome {
 	return {
-		affected: [],
+		affected: [
+			{ accountId: "account-a", email: "a@example.com" } as AccountMetadata,
+		],
 		activeAccountId: undefined,
 		activeAccount: null,
 		wasActive: true,
@@ -47,5 +50,19 @@ describe("reauthenticateMobileSession", () => {
 		expect(clearQueries).not.toHaveBeenCalled();
 		expect(notifyExpired).not.toHaveBeenCalled();
 		expect(navigate).not.toHaveBeenCalled();
+	});
+
+	it("rejects an unresolved Account before applying host effects", async () => {
+		const clearQueries = mock(() => {});
+		const unresolved = { ...outcome(), affected: [] };
+
+		await expect(
+			reauthenticateMobileSession(async () => unresolved, {
+				clearQueries,
+				notifyExpired: () => {},
+				navigate: () => {},
+			}),
+		).rejects.toThrow("did not complete safely");
+		expect(clearQueries).not.toHaveBeenCalled();
 	});
 });

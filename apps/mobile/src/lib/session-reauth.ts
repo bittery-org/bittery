@@ -16,6 +16,7 @@ export async function reauthenticateMobileSession(
 ): Promise<void> {
 	const outcome = requireCompleteLifecycleOutcome(await lock(), {
 		operation: "Mobile session reauthentication",
+		requireAffected: true,
 	});
 	effects.clearQueries();
 	effects.notifyExpired();

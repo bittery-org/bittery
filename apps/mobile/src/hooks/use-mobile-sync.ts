@@ -151,9 +151,9 @@ export function useMobileSync(
 	);
 
 	const handleAccountSessionInvalidation = useCallback(
-		async (sessionId: string) => {
+		async (sessionId: string, accountId: string) => {
 			await applyInvalidatedSession(
-				await accountSync.invalidateSession({ sessionId }),
+				await accountSync.invalidateSession({ sessionId, accountId }),
 			);
 			lifecycle.clear();
 		},
@@ -162,15 +162,28 @@ export function useMobileSync(
 
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
-			const revoked = await applyInvalidatedSession(
-				await accountSync.invalidateSession(payload),
-			);
-			if (!revoked) {
+			const accountId = assembly?.sources[0]?.itemCacheAccountId;
+			if (!accountId) {
+				toast.error(m.toast_auth_session_lock_failed());
 				return;
 			}
-			lifecycle.clear();
+			try {
+				await applyInvalidatedSession(
+					await accountSync.invalidateSession({ ...payload, accountId }),
+				);
+				lifecycle.clear();
+			} catch (error) {
+				console.error("[mobile-sync] Session revocation failed:", error);
+				toast.error(m.toast_auth_session_lock_failed());
+			}
 		},
-		[accountSync, applyInvalidatedSession, lifecycle],
+		[
+			accountSync,
+			applyInvalidatedSession,
+			assembly,
+			lifecycle,
+			m.toast_auth_session_lock_failed,
+		],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.
@@ -213,7 +226,10 @@ export function useMobileSync(
 						continue;
 					}
 
-					await handleAccountSessionInvalidation(sessionData.sessionId);
+					await handleAccountSessionInvalidation(
+						sessionData.sessionId,
+						account.accountId,
+					);
 				}
 			}
 		};

@@ -16,6 +16,7 @@ export async function reauthenticateDesktopSession(
 ): Promise<LifecycleOutcome> {
 	const outcome = requireCompleteLifecycleOutcome(await lock(), {
 		operation: "Desktop session reauthentication",
+		requireAffected: true,
 	});
 	effects.clearQueries();
 	effects.notify();

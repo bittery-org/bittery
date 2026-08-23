@@ -35,7 +35,13 @@ function handleUnauthorizedError() {
 	isHandlingAuthError = true;
 
 	void reauthenticateDesktopSession(
-		() => lockInvalidSession("active", lifecycleDeps),
+		async () => {
+			const accountId = await storage.getActiveAccount();
+			if (!accountId) {
+				throw new Error("Unauthorized response has no active Account scope.");
+			}
+			return lockInvalidSession({ accountId }, lifecycleDeps);
+		},
 		{
 			clearQueries: () => queryClient.clear(),
 			notify: () => toast.error(m.toast_auth_session_expired()),

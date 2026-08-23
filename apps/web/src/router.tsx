@@ -37,17 +37,17 @@ function handleUnauthorizedError() {
 
 	isHandlingAuthError = true;
 
-	queryClient.clear();
-
 	// A rejected Server Session requires online reauthentication, not a local Sign-out.
 	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
 	lockActiveSession()
 		.then((outcome) =>
 			requireCompleteLifecycleOutcome(outcome, {
 				operation: "Web session reauthentication",
+				requireAffected: true,
 			}),
 		)
 		.then(() => {
+			queryClient.clear();
 			toast.error(m.toast_auth_session_expired());
 			window.location.href = "/login";
 		})

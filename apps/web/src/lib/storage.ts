@@ -129,7 +129,11 @@ export async function lockActiveSession(
 	refresh?: RefreshAccountRuntime,
 ): Promise<LifecycleOutcome> {
 	await initializeStorage();
-	const outcome = await lockInvalidSession("active", lifecycleDeps);
+	const accountId = await storage.getActiveAccount();
+	if (!accountId) {
+		throw new Error("Unauthorized response has no active Account scope.");
+	}
+	const outcome = await lockInvalidSession({ accountId }, lifecycleDeps);
 	await refresh?.();
 	return outcome;
 }

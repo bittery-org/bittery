@@ -115,7 +115,7 @@ interface AcquireResult {
 async function keepBiometricRestoreOnlyWithUsableSession(
 	storage: AccountStore,
 	accountId: string,
-): Promise<boolean> {
+): Promise<"usable" | "password_required" | "cleanup_failed"> {
 	let usable = false;
 	try {
 		usable = await storage.isSessionValid(accountId);
@@ -127,18 +127,27 @@ async function keepBiometricRestoreOnlyWithUsableSession(
 		);
 	}
 	if (usable) {
-		return true;
+		return "usable";
 	}
 	try {
 		await storage.clearMasterUnlockKey(accountId);
+		return "password_required";
 	} catch (error) {
 		console.error(
 			"[Unlock] Failed to clear unusable biometric restore:",
 			accountId,
 			error,
 		);
+		try {
+			await storage.lockAllAccounts();
+		} catch (fallbackError) {
+			console.error(
+				"[Unlock] Failed to apply fallback biometric lock:",
+				fallbackError,
+			);
+		}
+		return "cleanup_failed";
 	}
-	return false;
 }
 
 /** What the accounts to unlock are, and what the unlock has to restore afterwards. */
@@ -339,11 +348,22 @@ async function acquireOneWithBiometric(
 			failed: [biometricFailure(account, { error: "authentication_failed" })],
 		};
 	}
-	if (!(await keepBiometricRestoreOnlyWithUsableSession(storage, accountId))) {
+	const sessionGate = await keepBiometricRestoreOnlyWithUsableSession(
+		storage,
+		accountId,
+	);
+	if (sessionGate !== "usable") {
 		return {
 			candidates: [],
 			failed: [
-				{ accountId, email: account.email, reason: "password_unlock_required" },
+				{
+					accountId,
+					email: account.email,
+					reason:
+						sessionGate === "cleanup_failed"
+							? "unlock_failed"
+							: "password_unlock_required",
+				},
 			],
 		};
 	}
@@ -397,10 +417,19 @@ async function acquireWithBiometric(
 			failed.push({ accountId, email, reason: "credential_rejected" });
 			continue;
 		}
-		if (
-			!(await keepBiometricRestoreOnlyWithUsableSession(storage, accountId))
-		) {
-			failed.push({ accountId, email, reason: "password_unlock_required" });
+		const sessionGate = await keepBiometricRestoreOnlyWithUsableSession(
+			storage,
+			accountId,
+		);
+		if (sessionGate !== "usable") {
+			failed.push({
+				accountId,
+				email,
+				reason:
+					sessionGate === "cleanup_failed"
+						? "unlock_failed"
+						: "password_unlock_required",
+			});
 			continue;
 		}
 		// Refreshing client: the biometric restore has a usable current Session.

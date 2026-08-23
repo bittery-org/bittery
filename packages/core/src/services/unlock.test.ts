@@ -423,6 +423,39 @@ describe("unlock all accounts", () => {
 		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
 	});
 
+	it("fails closed when clearing an unusable biometric restore fails", async () => {
+		const { storage } = await createStorage({
+			biometric: true,
+			withAuthToken: ["acc-2"],
+		});
+		const clearMasterUnlockKey = storage.clearMasterUnlockKey.bind(storage);
+		storage.clearMasterUnlockKey = async (accountId) => {
+			if (accountId === "acc-1") {
+				throw new Error("secure storage clear failed");
+			}
+			await clearMasterUnlockKey(accountId);
+		};
+
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache, credentialMirror },
+		);
+
+		expect(outcome.unlocked).toEqual(["acc-2"]);
+		expect(outcome.failed).toContainEqual({
+			accountId: "acc-1",
+			email: "a@test.com",
+			reason: "unlock_failed",
+		});
+		expect(outcome.failed).not.toContainEqual(
+			expect.objectContaining({
+				accountId: "acc-1",
+				reason: "password_unlock_required",
+			}),
+		);
+		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
+	});
+
 	it("requires password unlock when the restored biometric Session expired", async () => {
 		const { storage } = await createStorage({ biometric: true });
 		await storage.updateStoredSessionMetadata("acc-1", {

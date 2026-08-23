@@ -134,8 +134,12 @@ export function useWebSync(
 			// The old Server Session is gone, so lock its Account and reauthenticate online.
 			// Device-bound Quick Unlock inputs remain; this is not explicit Sign out.
 			try {
+				const accountId = assembly?.sources[0]?.itemCacheAccountId;
+				if (!accountId) {
+					throw new Error("Sync revocation has no Account scope.");
+				}
 				requireCompleteLifecycleOutcome(
-					await accountSync.invalidateSession(payload),
+					await accountSync.invalidateSession({ ...payload, accountId }),
 					{ operation: "Web session invalidation", requireAffected: true },
 				);
 			} catch (error) {
@@ -152,7 +156,13 @@ export function useWebSync(
 				window.location.href = "/login";
 			}
 		},
-		[accountSync, lifecycle, queryClient, m.toast_auth_session_lock_failed],
+		[
+			accountSync,
+			assembly,
+			lifecycle,
+			queryClient,
+			m.toast_auth_session_lock_failed,
+		],
 	);
 	const onTerminalCommandFailure = useCallback(() => {
 		toast.error(m.sync_command_terminal_error(), {
