@@ -20,47 +20,43 @@ struct JsSerializedPlatformStorageExecutor {
 #[async_trait::async_trait(?Send)]
 impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
-        let promise = self
-            .invoke
-            .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
-            .map_err(|_| replica_invoke_error("Replica persistence invocation failed"))?
-            .dyn_into::<js_sys::Promise>()
-            .map_err(|_| replica_invoke_error("Replica persistence did not return a Promise"))?;
-        let response = JsFuture::from(promise)
-            .await
-            .map_err(|_| replica_invoke_error("Replica persistence invocation failed"))?;
-        response.as_string().ok_or_else(|| {
-            replica_invoke_error("Replica persistence returned a non-string response")
-        })
+        invoke_serialized(&self.invoke, request_json, replica_invoke_error).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl core::SerializedPlatformStorageExecutor for JsSerializedPlatformStorageExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
-        let promise = self
-            .invoke
-            .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
-            .map_err(|_| platform_storage_invoke_error())?
-            .dyn_into::<js_sys::Promise>()
-            .map_err(|_| platform_storage_invoke_error())?;
-        let response = JsFuture::from(promise)
-            .await
-            .map_err(|_| platform_storage_invoke_error())?;
-        response
-            .as_string()
-            .ok_or_else(platform_storage_invoke_error)
+        invoke_serialized(&self.invoke, request_json, platform_storage_invoke_error).await
     }
 }
 
-fn replica_invoke_error(message: &str) -> core::RuntimeError {
+async fn invoke_serialized(
+    invoke: &js_sys::Function,
+    request_json: String,
+    error: fn(&str) -> core::RuntimeError,
+) -> Result<String, core::RuntimeError> {
+    let promise = invoke
+        .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
+        .map_err(|_| error("invocation failed"))?
+        .dyn_into::<js_sys::Promise>()
+        .map_err(|_| error("did not return a Promise"))?;
+    let response = JsFuture::from(promise)
+        .await
+        .map_err(|_| error("invocation failed"))?;
+    response
+        .as_string()
+        .ok_or_else(|| error("returned a non-string response"))
+}
+
+fn replica_invoke_error(reason: &str) -> core::RuntimeError {
     core::RuntimeError {
         code: core::RuntimeErrorCode::InvariantViolation,
-        message: message.into(),
+        message: format!("Replica persistence {reason}"),
     }
 }
 
-fn platform_storage_invoke_error() -> core::RuntimeError {
+fn platform_storage_invoke_error(_reason: &str) -> core::RuntimeError {
     core::RuntimeError {
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Platform storage invocation failed".into(),

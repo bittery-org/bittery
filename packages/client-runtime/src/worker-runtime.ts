@@ -181,7 +181,10 @@ export function createRuntimeWorkerService(
 				closeTask =
 					runtimeTask === undefined
 						? Promise.resolve()
-						: runtimeTask.then((ready) => ready.close());
+						: runtimeTask.then(
+								(ready) => ready.close(),
+								() => undefined,
+							);
 			}
 			return closeTask;
 		},

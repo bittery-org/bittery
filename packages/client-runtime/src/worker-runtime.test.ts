@@ -197,6 +197,62 @@ describe("Runtime worker service", () => {
 		expect(recovered.openCalls).toBe(1);
 	});
 
+	test("close succeeds idempotently when a concurrent open fails", async () => {
+		let rejectOpen!: (error: Error) => void;
+		const opening = new Promise<void>((_resolve, reject) => {
+			rejectOpen = reject;
+		});
+		const runtime = new RuntimeDouble();
+		runtime.open = async () => {
+			runtime.openCalls += 1;
+			await opening;
+		};
+		const { service } = runtimeService(runtime);
+		const command = service.request(
+			{ type: "request", requestId: "opening", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		for (let turn = 0; runtime.openCalls === 0 && turn < 8; turn += 1) {
+			await Promise.resolve();
+		}
+
+		const firstClose = service.close();
+		const repeatedClose = service.close();
+		expect(repeatedClose).toBe(firstClose);
+		rejectOpen(new Error("startup failed while closing"));
+
+		await expect(command).rejects.toThrow("startup failed while closing");
+		await expect(firstClose).resolves.toBeUndefined();
+		expect(runtime.closeCalls).toBe(1);
+		await expect(
+			service.request(
+				{ type: "request", requestId: "late", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toMatchObject({ code: "closed" });
+	});
+
+	test("close preserves an explicit failure from an opened Runtime", async () => {
+		const runtime = new RuntimeDouble();
+		runtime.close = async () => {
+			runtime.closeCalls += 1;
+			throw new Error("Runtime close failed");
+		};
+		const { service } = runtimeService(runtime);
+		await service.request(
+			{ type: "request", requestId: "opened", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+
+		const close = service.close();
+		expect(service.close()).toBe(close);
+		await expect(close).rejects.toThrow("Runtime close failed");
+		expect(runtime.closeCalls).toBe(1);
+	});
+
 	test("forwards an observation before the observe acknowledgement", async () => {
 		const runtime = new RuntimeDouble();
 		const { service } = runtimeService(runtime);
