@@ -220,6 +220,7 @@ impl Replica {
                         || snapshot.user_id != prepared.next_head.user_id
                         || snapshot.incarnation != prepared.next_head.incarnation
                         || snapshot.revision != prepared.next_head.replica_revision
+                        || snapshot.lock_epoch != prepared.next_head.lock_epoch
                         || snapshot.failure != prepared.next_head.failure
                         || !same_replica_rows(current.as_ref(), &snapshot)
                     {
@@ -344,6 +345,12 @@ impl Replica {
                 actual_revision: current.revision,
             });
         }
+        if current.lock_epoch != plan.expected_lock_epoch {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Replica work was fenced by Account lock",
+            ));
+        }
 
         loop {
             let PreparedCommitOutcome {
@@ -387,6 +394,12 @@ impl Replica {
                     if latest.incarnation != expected_incarnation {
                         return Ok(PlanResult::Missing);
                     }
+                    if latest.lock_epoch != plan.expected_lock_epoch {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::AuthenticationRequired,
+                            "Replica work was fenced by Account lock",
+                        ));
+                    }
                     if latest.revision <= attempted_revision {
                         return Err(RuntimeError::new(
                             RuntimeErrorCode::InvariantViolation,
@@ -415,6 +428,9 @@ impl Replica {
             };
             if current.incarnation != expected_incarnation {
                 return Ok(RecomputedPlanResult::Missing);
+            }
+            if current.lock_epoch != plan.expected_lock_epoch {
+                return Ok(RecomputedPlanResult::Fenced { snapshot: current });
             }
             if current.revision != attempted_revision {
                 if current.revision < attempted_revision {
@@ -452,6 +468,15 @@ impl Replica {
                 }
                 PlanResult::Missing => return Ok(RecomputedPlanResult::Missing),
                 PlanResult::Stale { actual_revision } => {
+                    let Some(latest) = self.load_uncached(&account_id).await? else {
+                        return Ok(RecomputedPlanResult::Missing);
+                    };
+                    if latest.incarnation != expected_incarnation {
+                        return Ok(RecomputedPlanResult::Missing);
+                    }
+                    if latest.lock_epoch != plan.expected_lock_epoch {
+                        return Ok(RecomputedPlanResult::Fenced { snapshot: latest });
+                    }
                     if actual_revision <= attempted_revision {
                         return Err(replica_invariant(
                             "Replica persistence reported stale without durable progress",
@@ -577,6 +602,7 @@ impl InMemoryReplica {
         };
         if current.incarnation != plan.expected_incarnation
             || current.revision != plan.expected_replica_revision
+            || current.lock_epoch != plan.expected_lock_epoch
         {
             return Ok(PlanResult::Stale {
                 actual_revision: current.revision,
@@ -879,6 +905,7 @@ mod persistence_contract_tests {
         Delete,
         Add,
         Change,
+        LockEpoch,
     }
 
     struct LyingRowsExecutor {
@@ -898,7 +925,7 @@ mod persistence_contract_tests {
                     let next_head = self.next_head.lock().unwrap().clone();
                     let applied = next_head.is_some();
                     let mut snapshot = self.current.clone();
-                    let head = next_head.unwrap_or_else(|| ReplicaHead {
+                    let mut head = next_head.unwrap_or_else(|| ReplicaHead {
                         account_id: snapshot.account_id.clone(),
                         user_id: snapshot.user_id.clone(),
                         incarnation: snapshot.incarnation.clone(),
@@ -924,6 +951,10 @@ mod persistence_contract_tests {
                             RowCorruption::Change => {
                                 snapshot.items[0].ciphertext = b"hostile-ciphertext".to_vec();
                                 snapshot.operations[0].request_bytes = b"hostile-request".to_vec();
+                            }
+                            RowCorruption::LockEpoch => {
+                                head.lock_epoch = head.lock_epoch.checked_add(1).unwrap();
+                                snapshot.lock_epoch = head.lock_epoch;
                             }
                         }
                     }
@@ -1128,11 +1159,12 @@ mod persistence_contract_tests {
     }
 
     #[tokio::test]
-    async fn rust_rejects_applied_when_preserved_rows_are_deleted_added_or_changed() {
+    async fn rust_rejects_applied_when_preserved_rows_or_install_epoch_change() {
         for corruption in [
             RowCorruption::Delete,
             RowCorruption::Add,
             RowCorruption::Change,
+            RowCorruption::LockEpoch,
         ] {
             let replica = Replica::new(Arc::new(LyingRowsExecutor {
                 current: ReplicaSnapshot {
@@ -1227,6 +1259,40 @@ mod persistence_contract_tests {
         assert_eq!(persistence.advance_calls.load(Ordering::SeqCst), 1);
     }
 
+    #[tokio::test]
+    async fn recomputing_plan_is_fenced_instead_of_retagged_after_lock() {
+        let state = Arc::new(InMemoryReplica::default());
+        state
+            .install(
+                AccountId::from("account-1"),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        let replica = Replica::new(state.clone());
+        let plan = GuardedCommitPlan::new(
+            AccountId::from("account-1"),
+            Incarnation::from("incarnation-1"),
+            0,
+            0,
+            vec![PlanMutation::AcceptOperation(operation(
+                "operation-1",
+                "item-1",
+            ))],
+        );
+        state
+            .set_lock_epoch(&AccountId::from("account-1"), 1)
+            .unwrap();
+
+        let RecomputedPlanResult::Fenced { snapshot } =
+            replica.execute_recomputing(plan).await.unwrap()
+        else {
+            panic!("an old-epoch plan must be fenced");
+        };
+        assert_eq!(snapshot.lock_epoch, 1);
+        assert!(snapshot.operations.is_empty());
+    }
+
     async fn assert_replica_conformance(replica: &Replica) {
         let account_id = AccountId::from("account-1");
         let incarnation = Incarnation::from("incarnation-1");
@@ -1241,6 +1307,7 @@ mod persistence_contract_tests {
                     AccountId::from("missing-account"),
                     incarnation.clone(),
                     0,
+                    0,
                     vec![],
                 ))
                 .await
@@ -1253,6 +1320,7 @@ mod persistence_contract_tests {
                     account_id.clone(),
                     incarnation.clone(),
                     7,
+                    0,
                     vec![],
                 ))
                 .await
@@ -1264,6 +1332,7 @@ mod persistence_contract_tests {
             .execute(GuardedCommitPlan::new(
                 account_id.clone(),
                 incarnation.clone(),
+                0,
                 0,
                 vec![
                     PlanMutation::PutOptimisticItem(item("account-1", "item-invalid")),
@@ -1284,6 +1353,7 @@ mod persistence_contract_tests {
                 account_id.clone(),
                 incarnation.clone(),
                 0,
+                0,
                 vec![PlanMutation::PutOptimisticItem(item(
                     "account-2",
                     "item-cross-account",
@@ -1298,6 +1368,7 @@ mod persistence_contract_tests {
                 .execute(GuardedCommitPlan::new(
                     account_id.clone(),
                     incarnation.clone(),
+                    0,
                     0,
                     vec![
                         PlanMutation::AcceptOperation(operation("operation-1", "item-1")),
@@ -1321,6 +1392,7 @@ mod persistence_contract_tests {
                     account_id.clone(),
                     incarnation,
                     1,
+                    0,
                     vec![PlanMutation::RemoveOperation {
                         operation_id: "operation-1".into(),
                     }],
@@ -1361,6 +1433,7 @@ mod persistence_contract_tests {
                 AccountId::from("account-1"),
                 Incarnation::from("incarnation-1"),
                 41,
+                0,
                 vec![PlanMutation::RemoveOperation {
                     operation_id: "operation-1".into(),
                 }],
@@ -1472,6 +1545,7 @@ mod persistence_contract_tests {
                 AccountId::from("account-1"),
                 Incarnation::from("incarnation-1"),
                 4,
+                0,
                 vec![
                     PlanMutation::AcceptOperation(operation("operation-new", "item-new")),
                     PlanMutation::PutOptimisticItem(item("account-1", "item-new")),
@@ -1594,6 +1668,7 @@ mod persistence_contract_tests {
             GuardedCommitPlan::new(
                 account_id.clone(),
                 Incarnation::from("incarnation-1"),
+                0,
                 0,
                 vec![],
             ),

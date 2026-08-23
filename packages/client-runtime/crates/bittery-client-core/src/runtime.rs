@@ -400,21 +400,6 @@ impl Runtime {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_lock_epoch(&self, account_id: &AccountId, epoch: u64) {
-        let persistence = self
-            .test_persistence
-            .as_ref()
-            .expect("test lock epoch mutation requires in-memory persistence");
-        persistence.set_lock_epoch(account_id, epoch).unwrap();
-        self.replica
-            .cache(persistence.snapshot(account_id).unwrap());
-        self.account_lock_epochs
-            .lock()
-            .expect("Account lock epoch lock poisoned")
-            .insert(account_id.clone(), epoch);
-    }
-
-    #[cfg(test)]
     pub(crate) fn lock_epoch(&self, account_id: &AccountId) -> Option<u64> {
         self.account_lock_epochs
             .lock()
@@ -622,10 +607,13 @@ impl Runtime {
                 "Account lock epoch persistence is pending",
             ));
         }
-        if self.replica.snapshot(account_id).is_none() {
+        let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if snapshot.lock_epoch == u64::MAX {
             return Err(RuntimeError::new(
-                RuntimeErrorCode::AccountMissing,
-                "account is not installed",
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch is exhausted",
             ));
         }
         let _publication = self.publication.lock().expect("publication lock poisoned");
@@ -660,10 +648,12 @@ impl Runtime {
             .expect("pending lock epoch lock poisoned")
             .get(account_id)
             .copied();
-        let desired_epoch = pending_epoch
-            .or_else(|| snapshot.lock_epoch.checked_add(1))
-            .unwrap_or(snapshot.lock_epoch);
-        let overflowed = pending_epoch.is_none() && snapshot.lock_epoch == u64::MAX;
+        let overflowed = snapshot.lock_epoch == u64::MAX;
+        let desired_epoch = if overflowed {
+            snapshot.lock_epoch
+        } else {
+            pending_epoch.unwrap_or(snapshot.lock_epoch + 1)
+        };
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated_delivery = self.invalidate_delivery(account_id);
         self.unlocked_items
@@ -678,10 +668,17 @@ impl Runtime {
             .lock()
             .expect("Account lock epoch lock poisoned")
             .insert(account_id.clone(), desired_epoch);
-        self.lock_epoch_pending
-            .lock()
-            .expect("pending lock epoch lock poisoned")
-            .insert(account_id.clone(), desired_epoch);
+        if overflowed {
+            self.lock_epoch_pending
+                .lock()
+                .expect("pending lock epoch lock poisoned")
+                .remove(account_id);
+        } else {
+            self.lock_epoch_pending
+                .lock()
+                .expect("pending lock epoch lock poisoned")
+                .insert(account_id.clone(), desired_epoch);
+        }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
         drop(execution_guard);
@@ -763,6 +760,12 @@ impl Runtime {
                         "the selected Account module has failed",
                     ));
                 }
+                if snapshot.lock_epoch == u64::MAX {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "Account lock epoch is exhausted",
+                    ));
+                }
                 if self
                     .account_access
                     .lock()
@@ -824,6 +827,7 @@ impl Runtime {
                         account_id.clone(),
                         snapshot.incarnation,
                         snapshot.revision,
+                        lock_epoch,
                         vec![
                             PlanMutation::AcceptOperation(OperationRecord {
                                 operation_id: operation_id.clone(),
@@ -837,6 +841,35 @@ impl Runtime {
                     .await?;
                 let (replica_revision, next_snapshot) = match result {
                     RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
+                    RecomputedPlanResult::Fenced { snapshot } => {
+                        let _publication =
+                            self.publication.lock().expect("publication lock poisoned");
+                        let invalidated_delivery = self.invalidate_delivery(&account_id);
+                        self.replica.cache(snapshot.clone());
+                        self.unlocked_items
+                            .lock()
+                            .expect("unlocked projection lock poisoned")
+                            .remove(&account_id);
+                        self.account_access
+                            .lock()
+                            .expect("Account access lock poisoned")
+                            .insert(account_id.clone(), AccountAccessState::Locked);
+                        self.account_lock_epochs
+                            .lock()
+                            .expect("Account lock epoch lock poisoned")
+                            .insert(account_id.clone(), snapshot.lock_epoch);
+                        self.device_revision.fetch_add(1, Ordering::SeqCst);
+                        drop(_publication);
+                        drop(_execution_guard);
+                        if let Some(token) = invalidated_delivery {
+                            token.wait_for_other_threads();
+                        }
+                        self.publish_all();
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::AuthenticationRequired,
+                            "Account was locked while accepting work",
+                        ));
+                    }
                     RecomputedPlanResult::Missing => {
                         let _publication =
                             self.publication.lock().expect("publication lock poisoned");
@@ -1020,6 +1053,9 @@ impl Runtime {
                 .snapshots()
                 .into_iter()
                 .filter_map(|snapshot| {
+                    if snapshot.lock_epoch == u64::MAX {
+                        return None;
+                    }
                     let desired = pending
                         .get(&snapshot.account_id)
                         .copied()

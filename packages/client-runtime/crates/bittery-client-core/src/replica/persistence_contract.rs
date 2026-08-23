@@ -329,6 +329,7 @@ pub(super) fn prepare_commit(
     if current.account_id != plan.account_id
         || current.incarnation != plan.expected_incarnation
         || current.revision != plan.expected_replica_revision
+        || current.lock_epoch != plan.expected_lock_epoch
     {
         return Err(replica_invariant(
             "cannot prepare a commit against a different Replica head",

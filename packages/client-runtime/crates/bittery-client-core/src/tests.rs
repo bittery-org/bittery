@@ -84,6 +84,7 @@ impl SerializedReplicaExecutor for StaleOnceExecutor {
                     prepared.expected.account_id.clone(),
                     prepared.expected.incarnation.clone(),
                     prepared.expected.replica_revision,
+                    prepared.expected.lock_epoch,
                     vec![
                         PlanMutation::AcceptOperation(OperationRecord {
                             operation_id,
@@ -118,6 +119,66 @@ struct RemoveOnCommitExecutor {
 struct FailFirstLockEpochExecutor {
     state: InMemoryReplica,
     fail_next_advance: AtomicBool,
+}
+
+struct PauseBeforeCommitExecutor {
+    state: InMemoryReplica,
+    pause_next_commit: AtomicBool,
+    commit_reached: (Mutex<bool>, Condvar),
+    commit_released: (Mutex<bool>, Condvar),
+}
+
+impl Default for PauseBeforeCommitExecutor {
+    fn default() -> Self {
+        Self {
+            state: InMemoryReplica::default(),
+            pause_next_commit: AtomicBool::new(true),
+            commit_reached: (Mutex::new(false), Condvar::new()),
+            commit_released: (Mutex::new(false), Condvar::new()),
+        }
+    }
+}
+
+impl PauseBeforeCommitExecutor {
+    fn wait_until_commit_reached(&self) {
+        let (reached, changed) = &self.commit_reached;
+        let mut reached = reached.lock().unwrap();
+        while !*reached {
+            reached = changed.wait(reached).unwrap();
+        }
+    }
+
+    fn release_commit(&self) {
+        let (released, changed) = &self.commit_released;
+        *released.lock().unwrap() = true;
+        changed.notify_all();
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for PauseBeforeCommitExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if matches!(request, ReplicaPersistenceRequest::Commit { .. })
+            && self.pause_next_commit.swap(false, Ordering::SeqCst)
+        {
+            let (reached, changed) = &self.commit_reached;
+            *reached.lock().unwrap() = true;
+            changed.notify_all();
+            let (released, changed) = &self.commit_released;
+            let mut released = released.lock().unwrap();
+            while !*released {
+                released = changed.wait(released).unwrap();
+            }
+        }
+        let response = self.state.invoke(request).await?;
+        serde_json::to_string(&response).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "in-memory response could not be serialized",
+            )
+        })
+    }
 }
 
 impl Default for FailFirstLockEpochExecutor {
@@ -191,9 +252,18 @@ struct AdvanceBeforeLoadExecutor {
     load_calls: AtomicUsize,
 }
 
-#[derive(Default)]
 struct SerializedInMemoryExecutor {
     state: InMemoryReplica,
+    lock_epoch_advances: AtomicUsize,
+}
+
+impl Default for SerializedInMemoryExecutor {
+    fn default() -> Self {
+        Self {
+            state: InMemoryReplica::default(),
+            lock_epoch_advances: AtomicUsize::new(0),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -209,6 +279,9 @@ impl ObservationSink for ProjectionSink {
 impl SerializedReplicaExecutor for SerializedInMemoryExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
         let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if matches!(request, ReplicaPersistenceRequest::AdvanceLockEpoch { .. }) {
+            self.lock_epoch_advances.fetch_add(1, Ordering::SeqCst);
+        }
         let response = self.state.invoke(request).await?;
         serde_json::to_string(&response).map_err(|_| {
             RuntimeError::new(
@@ -245,6 +318,7 @@ impl SerializedReplicaExecutor for AdvanceBeforeLoadExecutor {
                 self.state.execute(GuardedCommitPlan::new(
                     account_id.clone(),
                     Incarnation::from("incarnation-1"),
+                    0,
                     0,
                     vec![
                         PlanMutation::AcceptOperation(OperationRecord {
@@ -444,6 +518,63 @@ async fn failed_lock_epoch_persistence_stays_locked_until_a_successful_retry() {
     runtime.unlock_account(&account_id).await.unwrap();
 }
 
+#[test]
+fn work_started_before_another_runtime_locks_is_fenced_without_plaintext_publication() {
+    let executor = Arc::new(PauseBeforeCommitExecutor::default());
+    let account_id = AccountId::from("account-1");
+    let first = Runtime::with_serialized_replica_executor(executor.clone());
+    block_on_test(first.install_or_replace_account(
+        account_id.clone(),
+        "user-1".into(),
+        Incarnation::from("incarnation-1"),
+    ))
+    .unwrap();
+    block_on_test(first.unlock_account(&account_id)).unwrap();
+    let items = Arc::new(ProjectionSink::default());
+    let _observation = first
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            items.clone(),
+        )
+        .unwrap();
+
+    let second = Runtime::with_serialized_replica_executor(executor.clone());
+    block_on_test(second.restore_known_accounts(vec![account_id.clone()])).unwrap();
+    let request_runtime = first.clone();
+    let request_account = account_id.clone();
+    let request_thread = thread::spawn(move || {
+        block_on_test(
+            request_runtime.request(create_request(request_account), RequestCancellation::new()),
+        )
+    });
+    executor.wait_until_commit_reached();
+
+    block_on_test(second.mark_account_locked(&account_id)).unwrap();
+    executor.release_commit();
+    let error = request_thread.join().unwrap().unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    assert_eq!(
+        first.account_access_state(&account_id),
+        Some(AccountAccessState::Locked)
+    );
+    assert_eq!(first.lock_epoch(&account_id), Some(1));
+
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    block_on_test(restarted.restore_known_accounts(vec![account_id.clone()])).unwrap();
+    let snapshot = restarted.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.lock_epoch, 1);
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.items.is_empty());
+    let delivered = items.0.lock().unwrap();
+    assert_eq!(delivered.len(), 1);
+    let RuntimeProjection::Items(projected) = &delivered[0] else {
+        panic!("expected Items projection");
+    };
+    assert!(projected.items.is_empty());
+}
+
 #[tokio::test]
 async fn restore_is_batch_atomic_and_replaces_the_visible_device_catalog() {
     let executor = Arc::new(SerializedInMemoryExecutor::default());
@@ -587,6 +718,7 @@ async fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
             AccountId::from("missing"),
             incarnation.clone(),
             0,
+            0,
             vec![],
         ))
         .await
@@ -598,6 +730,7 @@ async fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
             account_id.clone(),
             incarnation.clone(),
             4,
+            0,
             vec![],
         ))
         .await
@@ -607,6 +740,7 @@ async fn guarded_plan_is_atomic_and_distinguishes_missing_from_stale() {
     let invalid = GuardedCommitPlan::new(
         account_id.clone(),
         incarnation,
+        0,
         0,
         vec![
             PlanMutation::PutOptimisticItem(optimistic_item(account_id.clone(), "item-1")),
@@ -1121,60 +1255,95 @@ fn queued_plaintext_from_an_old_incarnation_is_dropped_even_if_epoch_matches() {
     assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
 }
 
-#[test]
-fn lock_epoch_overflow_fails_closed_and_drops_queued_plaintext() {
-    let (runtime, account_id, _) = installed_runtime();
-    runtime.set_lock_epoch(&account_id, u64::MAX);
-    let sink = Arc::new(BlockingSink::new());
-    let _handle = runtime
-        .observe(
-            ObservationRequest::Items {
-                account_id: account_id.clone(),
-            },
-            sink.clone(),
+#[tokio::test]
+async fn exhausted_lock_epoch_stays_fail_closed_across_retry_close_and_restart() {
+    let executor = Arc::new(SerializedInMemoryExecutor::default());
+    let account_id = AccountId::from("account-1");
+    let runtime = Runtime::with_serialized_replica_executor(executor.clone());
+    runtime
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-1".into(),
+            Incarnation::from("incarnation-1"),
         )
+        .await
         .unwrap();
-    let first = {
-        let runtime = runtime.clone();
-        let account_id = account_id.clone();
-        thread::spawn(move || run_request(runtime, create_request(account_id)))
-    };
-    sink.wait_until_blocked();
-    let second = {
-        let runtime = runtime.clone();
-        let account_id = account_id.clone();
-        thread::spawn(move || run_request(runtime, create_request(account_id)))
-    };
-    second.join().unwrap();
+    executor
+        .state
+        .set_lock_epoch(&account_id, u64::MAX)
+        .unwrap();
+    runtime
+        .restore_known_accounts(vec![account_id.clone()])
+        .await
+        .unwrap();
 
-    let (locked_sender, locked_receiver) = mpsc::channel();
-    let lock_runtime = runtime.clone();
-    let lock_account = account_id.clone();
-    let locker = thread::spawn(move || {
-        locked_sender
-            .send(block_on_test(
-                lock_runtime.mark_account_locked(&lock_account),
-            ))
-            .unwrap();
-    });
-    while !runtime.lock_epoch_is_pending(&account_id) {
-        thread::yield_now();
-    }
-    assert!(locked_receiver
-        .recv_timeout(Duration::from_millis(30))
-        .is_err());
-    sink.release();
-    first.join().unwrap();
     assert_eq!(
-        locked_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap()
+        runtime.unlock_account(&account_id).await.unwrap_err().code,
+        RuntimeErrorCode::InvariantViolation
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            runtime
+                .mark_account_locked(&account_id)
+                .await
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        assert!(!runtime.lock_epoch_is_pending(&account_id));
+        assert_eq!(
+            runtime.account_access_state(&account_id),
+            Some(AccountAccessState::Locked)
+        );
+    }
+    assert_eq!(
+        runtime
+            .request(
+                create_request(account_id.clone()),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+    runtime.close().await;
+    assert_eq!(executor.lock_epoch_advances.load(Ordering::SeqCst), 0);
+
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    restarted
+        .restore_known_accounts(vec![account_id.clone()])
+        .await
+        .unwrap();
+    assert_eq!(
+        restarted
+            .unlock_account(&account_id)
+            .await
             .unwrap_err()
             .code,
         RuntimeErrorCode::InvariantViolation
     );
-    locker.join().unwrap();
-    assert_eq!(*sink.revisions.lock().unwrap(), vec![0, 1]);
+    assert_eq!(
+        restarted
+            .request(
+                create_request(account_id.clone()),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+    restarted
+        .install_or_replace_account(
+            account_id.clone(),
+            "user-1".into(),
+            Incarnation::from("replacement-incarnation"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(restarted.lock_epoch(&account_id), Some(0));
+    restarted.unlock_account(&account_id).await.unwrap();
 }
 
 #[test]
@@ -1352,6 +1521,7 @@ async fn accepted_plan_keeps_operation_and_overlay_in_one_revision() {
         .execute_plan(GuardedCommitPlan::new(
             account_id.clone(),
             incarnation,
+            0,
             0,
             vec![
                 PlanMutation::AcceptOperation(OperationRecord {

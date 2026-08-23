@@ -69,6 +69,8 @@ pub(crate) struct GuardedCommitPlan {
     pub expected_incarnation: Incarnation,
     #[serde(with = "decimal_u64")]
     pub expected_replica_revision: u64,
+    #[serde(with = "decimal_u64")]
+    pub expected_lock_epoch: u64,
     pub mutations: Vec<PlanMutation>,
 }
 
@@ -77,12 +79,14 @@ impl GuardedCommitPlan {
         account_id: AccountId,
         expected_incarnation: Incarnation,
         expected_replica_revision: u64,
+        expected_lock_epoch: u64,
         mutations: Vec<PlanMutation>,
     ) -> Self {
         Self {
             account_id,
             expected_incarnation,
             expected_replica_revision,
+            expected_lock_epoch,
             mutations,
         }
     }
@@ -149,6 +153,7 @@ pub(crate) enum PlanResult {
 
 pub(crate) enum RecomputedPlanResult {
     Applied { snapshot: ReplicaSnapshot },
+    Fenced { snapshot: ReplicaSnapshot },
     Missing,
 }
 

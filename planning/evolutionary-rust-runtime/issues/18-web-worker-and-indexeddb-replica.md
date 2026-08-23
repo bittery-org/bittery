@@ -34,11 +34,15 @@ legacy crypto Worker behavior stays green during the transition.
 `ReplicaHead.lockEpoch` is a required canonical decimal-u64 field. Rust prepares the closed
 `AdvanceLockEpoch` compare-and-swap; IndexedDB compares Account, User, incarnation, Replica revision,
 and lock epoch in one `heads` transaction and writes only the successor head. Normal commits compare
-and preserve the epoch, so a pre-Lock commit is stale and cannot roll it back. Rust rereads the full
+and preserve the epoch; Rust never retags or recomputes a plan across an epoch mismatch, so a
+pre-Lock commit is fenced and cannot roll the epoch back. Rust rereads the full
 Replica after an applied response and rejects any changed Operation or encrypted optimistic row.
 Runtime Lock invalidates plaintext delivery before awaiting storage and remains fail-closed while a
 failed durable advance is pending. New incarnations start at zero; same-incarnation replay preserves
-the installed durable epoch.
+the installed durable epoch. Runtime close performs its durable advance best-effort only after local
+access and callbacks are closed; no retry survives that process because reopened Accounts restore
+signed out. An exhausted `u64` epoch is terminal for that incarnation and cannot be mistaken for a
+successful same-epoch advance.
 
 ### 2026-08-23 — cold production Runtime transport
 

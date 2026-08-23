@@ -168,6 +168,7 @@ Each Account installation receives a new random incarnation. Every visible guard
 account_id
 expected_incarnation
 expected_replica_revision
+expected_lock_epoch
 ```
 
 A successful visible plan increments the revision exactly once. A mismatched guard returns `Stale`
@@ -179,7 +180,10 @@ and decrypted projections and invalidates old deliveries, then advances the pers
 with an exact compare-and-swap that leaves the Replica revision and every Replica row unchanged.
 Normal guarded writes compare and preserve that epoch, so work prepared before Lock becomes stale.
 The Account stays locked and refuses new plaintext work while an epoch advance needs retry. A new
-incarnation starts at epoch zero; a replay of the same incarnation preserves its durable epoch.
+incarnation starts at epoch zero; a replay of the same incarnation preserves its durable epoch. A
+Runtime close may advance the durable fence best-effort after synchronously closing access and
+callbacks: the closed process accepts no later work, and a restored Account starts signed out, so
+that close-only advance does not require retry across process lifetime.
 
 ### Logical records
 
