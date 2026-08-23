@@ -170,35 +170,6 @@ impl DeviceCatalogDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum StoredKdfAlgorithm {
-    Pbkdf2Sha256,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct StoredKdfProfile {
-    pub(crate) schema_version: u32,
-    pub(crate) algorithm: StoredKdfAlgorithm,
-    pub(crate) iterations: u32,
-}
-
-impl StoredKdfProfile {
-    fn validate(&self) -> Result<(), RuntimeError> {
-        let profile = bittery_crypto_core::KdfProfile {
-            schema_version: self.schema_version,
-            algorithm: match self.algorithm {
-                StoredKdfAlgorithm::Pbkdf2Sha256 => "pbkdf2-sha256".into(),
-            },
-            iterations: self.iterations,
-        };
-        bittery_crypto_core::validate_kdf_profile(&profile, None).map_err(|_| {
-            platform_storage_invariant("pinned KDF profile is outside the supported policy")
-        })
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct VerifiedTravelModePolicy {
@@ -241,7 +212,7 @@ pub(crate) struct AccountMetadataDocument {
     pub(crate) last_active_at_ms: u64,
     pub(crate) biometric_enabled: bool,
     pub(crate) insecure_transport_confirmed: bool,
-    pub(crate) pinned_kdf_profile: StoredKdfProfile,
+    pub(crate) pinned_kdf_profile: bittery_crypto_core::KdfProfile,
     pub(crate) verified_travel_mode: Option<VerifiedTravelModePolicy>,
 }
 
@@ -261,7 +232,7 @@ impl AccountMetadataDocument {
         last_active_at_ms: u64,
         biometric_enabled: bool,
         insecure_transport_confirmed: bool,
-        pinned_kdf_profile: StoredKdfProfile,
+        pinned_kdf_profile: bittery_crypto_core::KdfProfile,
         verified_travel_mode: Option<VerifiedTravelModePolicy>,
     ) -> Result<Self, RuntimeError> {
         let document = Self {
@@ -292,7 +263,9 @@ impl AccountMetadataDocument {
         require_incarnation(&self.incarnation)?;
         require_non_empty(&self.user_id, "Account metadata User identity")?;
         require_non_empty(&self.normalized_server_url, "Account metadata Server URL")?;
-        self.pinned_kdf_profile.validate()?;
+        bittery_crypto_core::validate_kdf_profile(&self.pinned_kdf_profile, None).map_err(
+            |_| platform_storage_invariant("pinned KDF profile is outside the supported policy"),
+        )?;
         if let Some(policy) = &self.verified_travel_mode {
             policy.validate()?;
         }
@@ -320,27 +293,13 @@ impl DeviceKeyDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum StoredEncryptionAlgorithm {
-    #[serde(rename = "AES-GCM-AAD-V1")]
-    AesGcmAadV1,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct EncryptedMasterUnlockKeyDocument {
-    pub(crate) ciphertext: String,
-    pub(crate) iv: String,
-    pub(crate) algorithm: StoredEncryptionAlgorithm,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct QuickUnlockDocument {
     version: u32,
     pub(crate) account_id: AccountId,
     pub(crate) incarnation: Incarnation,
-    pub(crate) encrypted_master_unlock_key: EncryptedMasterUnlockKeyDocument,
+    pub(crate) encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
     pub(crate) secret_key: String,
     pub(crate) created_at_ms: u64,
     pub(crate) expires_at_ms: u64,
@@ -353,7 +312,7 @@ impl QuickUnlockDocument {
     pub(crate) fn new(
         account_id: AccountId,
         incarnation: Incarnation,
-        encrypted_master_unlock_key: EncryptedMasterUnlockKeyDocument,
+        encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
         secret_key: String,
         created_at_ms: u64,
         expires_at_ms: u64,
@@ -387,6 +346,11 @@ impl QuickUnlockDocument {
             &self.encrypted_master_unlock_key.iv,
             "encrypted master unlock key IV",
         )?;
+        if self.encrypted_master_unlock_key.algorithm != "AES-GCM-AAD-V1" {
+            return Err(platform_storage_invariant(
+                "encrypted master unlock key algorithm is unsupported",
+            ));
+        }
         if !bittery_crypto_core::validate_secret_key(&self.secret_key) {
             return Err(platform_storage_invariant("stored Secret Key is invalid"));
         }
@@ -394,35 +358,7 @@ impl QuickUnlockDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum StoredVaultType {
-    Personal,
-    Team,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum StoredVaultRole {
-    Owner,
-    Admin,
-    Member,
-    ReadOnly,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct StoredVaultKeyDocument {
-    pub(crate) vault_id: String,
-    pub(crate) encrypted_vault_key: String,
-    pub(crate) role: StoredVaultRole,
-    pub(crate) vault_name: String,
-    pub(crate) vault_type: StoredVaultType,
-    pub(crate) vault_icon: Option<String>,
-    pub(crate) vault_image_url: Option<String>,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CurrentSessionDocument {
     version: u32,
@@ -432,7 +368,7 @@ pub(crate) struct CurrentSessionDocument {
     pub(crate) session_id: Option<String>,
     pub(crate) expires_at_ms: u64,
     pub(crate) server_expires_at_ms: Option<u64>,
-    pub(crate) vault_keys: Vec<StoredVaultKeyDocument>,
+    pub(crate) vault_keys: Vec<crate::server_contract::AuthVaultKeyResponse>,
     pub(crate) encrypted_private_key: String,
 }
 
@@ -445,7 +381,7 @@ impl CurrentSessionDocument {
         session_id: Option<String>,
         expires_at_ms: u64,
         server_expires_at_ms: Option<u64>,
-        vault_keys: Vec<StoredVaultKeyDocument>,
+        vault_keys: Vec<crate::server_contract::AuthVaultKeyResponse>,
         encrypted_private_key: String,
     ) -> Result<Self, RuntimeError> {
         let document = Self {
@@ -505,7 +441,7 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -532,7 +468,7 @@ enum PlatformStorageRequest {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
     derive(schemars::JsonSchema)
@@ -947,10 +883,10 @@ mod tests {
         Incarnation::from(value)
     }
 
-    fn kdf_profile() -> StoredKdfProfile {
-        StoredKdfProfile {
+    fn kdf_profile() -> bittery_crypto_core::KdfProfile {
+        bittery_crypto_core::KdfProfile {
             schema_version: 1,
-            algorithm: StoredKdfAlgorithm::Pbkdf2Sha256,
+            algorithm: "pbkdf2-sha256".into(),
             iterations: 600_000,
         }
     }
@@ -1018,10 +954,10 @@ mod tests {
         let quick_unlock = QuickUnlockDocument::new(
             account("account"),
             incarnation("generation"),
-            EncryptedMasterUnlockKeyDocument {
+            bittery_crypto_core::EncryptedData {
                 ciphertext: "ciphertext".into(),
                 iv: "iv".into(),
-                algorithm: StoredEncryptionAlgorithm::AesGcmAadV1,
+                algorithm: "AES-GCM-AAD-V1".into(),
             },
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
             10,
@@ -1066,10 +1002,10 @@ mod tests {
         let invalid_secret_key = QuickUnlockDocument::new(
             account("account"),
             incarnation("generation"),
-            EncryptedMasterUnlockKeyDocument {
+            bittery_crypto_core::EncryptedData {
                 ciphertext: "ciphertext".into(),
                 iv: "iv".into(),
-                algorithm: StoredEncryptionAlgorithm::AesGcmAadV1,
+                algorithm: "AES-GCM-AAD-V1".into(),
             },
             "not-a-Secret-Key".into(),
             10,
@@ -1079,9 +1015,56 @@ mod tests {
         );
         assert!(invalid_secret_key.is_err());
 
+        let invalid_envelope = QuickUnlockDocument::new(
+            account("account"),
+            incarnation("generation"),
+            bittery_crypto_core::EncryptedData {
+                ciphertext: "ciphertext".into(),
+                iv: "iv".into(),
+                algorithm: "AES-GCM".into(),
+            },
+            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2".into(),
+            10,
+            20,
+            None,
+            false,
+        );
+        assert!(invalid_envelope.is_err());
+
         let mut invalid_kdf = metadata("account", "generation");
         invalid_kdf.pinned_kdf_profile.iterations = 1;
         assert!(invalid_kdf.validate().is_err());
+    }
+
+    #[test]
+    fn current_session_uses_the_canonical_generated_vault_key_shape() {
+        let document = CurrentSessionDocument::new(
+            account("account"),
+            incarnation("generation"),
+            "session-token".into(),
+            Some("session-id".into()),
+            1_000,
+            Some(2_000),
+            vec![crate::server_contract::AuthVaultKeyResponse {
+                encrypted_vault_key: "encrypted-vault-key".into(),
+                role: crate::server_contract::VaultRole::Owner,
+                vault_icon: Some("key".into()),
+                vault_id: "vault".into(),
+                vault_image_url: None,
+                vault_name: "Personal".into(),
+                vault_type: crate::server_contract::VaultType::Personal,
+            }],
+            "encrypted-private-key".into(),
+        )
+        .expect("canonical Current Session must be valid");
+
+        let encoded = serde_json::to_value(document).expect("Current Session must serialize");
+        assert_eq!(encoded["vaultKeys"][0]["role"], "owner");
+        assert_eq!(encoded["vaultKeys"][0]["vaultType"], "personal");
+        assert_eq!(
+            encoded["vaultKeys"][0]["encryptedVaultKey"],
+            "encrypted-vault-key"
+        );
     }
 
     #[test]
