@@ -1431,6 +1431,7 @@ async fn plaintext_is_redacted_and_never_enters_replica_records() {
         email: "person@example.test".into(),
         master_password: "UNIQUE_MASTER_PASSWORD".into(),
         secret_key: "UNIQUE_SECRET_KEY".into(),
+        insecure_transport_confirmed: false,
     };
     let sign_in_debug = format!("{sign_in:?}");
     assert!(!sign_in_debug.contains("UNIQUE_MASTER_PASSWORD"));

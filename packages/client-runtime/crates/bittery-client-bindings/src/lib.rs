@@ -171,6 +171,7 @@ pub enum RuntimeRequest {
         email: String,
         master_password: Arc<SecretString>,
         secret_key: Arc<SecretString>,
+        insecure_transport_confirmed: bool,
     },
     CreateLoginItem {
         account_id: String,
@@ -481,11 +482,13 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 email,
                 master_password,
                 secret_key,
+                insecure_transport_confirmed,
             } => Self::SignIn {
                 server_url,
                 email,
                 master_password: master_password.value.clone(),
                 secret_key: secret_key.value.clone(),
+                insecure_transport_confirmed,
             },
             RuntimeRequest::CreateLoginItem {
                 account_id,
@@ -738,6 +741,7 @@ mod tests {
             email: "person@example.test".into(),
             master_password: SecretString::new("UNIQUE_MASTER_PASSWORD".into()),
             secret_key: SecretString::new("UNIQUE_SECRET_KEY".into()),
+            insecure_transport_confirmed: false,
         };
         let create = RuntimeRequest::CreateLoginItem {
             account_id: "account-1".into(),

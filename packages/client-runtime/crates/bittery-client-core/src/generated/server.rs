@@ -449,6 +449,17 @@ pub enum SyncEventType {
     OperationResolved,
 }
 
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct TravelModeResponse {
+    pub enabled: bool,
+    #[serde(rename = "enabledAt")]
+    pub enabled_at: Option<String>,
+    #[serde(rename = "hiddenVaultIds")]
+    pub hidden_vault_ids: Vec<String>,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+}
+
 #[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum VaultRole {
     #[serde(rename = "owner")]

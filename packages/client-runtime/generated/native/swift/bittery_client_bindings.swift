@@ -2360,7 +2360,7 @@ public func FfiConverterTypeRuntimeProjection_lower(_ value: RuntimeProjection) 
 
 public enum RuntimeRequest {
 
-    case signIn(serverUrl: String, email: String, masterPassword: SecretString, secretKey: SecretString
+    case signIn(serverUrl: String, email: String, masterPassword: SecretString, secretKey: SecretString, insecureTransportConfirmed: Bool
     )
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
@@ -2385,7 +2385,7 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf)
+        case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf), insecureTransportConfirmed: try FfiConverterBool.read(from: &buf)
         )
 
         case 2: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
@@ -2399,12 +2399,13 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         switch value {
 
 
-        case let .signIn(serverUrl,email,masterPassword,secretKey):
+        case let .signIn(serverUrl,email,masterPassword,secretKey,insecureTransportConfirmed):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(serverUrl, into: &buf)
             FfiConverterString.write(email, into: &buf)
             FfiConverterTypeSecretString.write(masterPassword, into: &buf)
             FfiConverterTypeSecretString.write(secretKey, into: &buf)
+            FfiConverterBool.write(insecureTransportConfirmed, into: &buf)
 
 
         case let .createLoginItem(accountId,vaultId,draft):

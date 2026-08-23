@@ -1,6 +1,7 @@
 #[cfg(test)]
 use crate::replica::PlanResult;
 use crate::{
+    http_transport::{HttpTransport, SerializedHttpExecutor},
     platform_storage::{
         DeviceCatalogAccount, DeviceCatalogDocument, PlatformStorage,
         SerializedPlatformStorageExecutor,
@@ -309,6 +310,7 @@ impl Subscription {
 pub struct Runtime {
     replica: Arc<Replica>,
     platform_storage: Arc<PlatformStorage>,
+    _http_transport: Arc<HttpTransport>,
     #[cfg(test)]
     test_persistence: Option<Arc<InMemoryReplica>>,
     observers: Mutex<HashMap<u64, Arc<Subscription>>>,
@@ -343,6 +345,7 @@ impl Runtime {
         Self::with_persistence(
             persistence,
             Arc::new(PlatformStorage::unavailable()),
+            Arc::new(HttpTransport::unavailable()),
             true,
             #[cfg(test)]
             Some(in_memory),
@@ -365,6 +368,7 @@ impl Runtime {
         Self::with_persistence(
             persistence,
             Arc::new(PlatformStorage::unavailable()),
+            Arc::new(HttpTransport::unavailable()),
             true,
             #[cfg(test)]
             None,
@@ -382,12 +386,14 @@ impl Runtime {
     pub fn with_serialized_executors(
         replica: Arc<dyn SerializedReplicaExecutor>,
         platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        http: Arc<dyn SerializedHttpExecutor>,
     ) -> Arc<Self> {
         let persistence: Arc<dyn ReplicaPersistence> =
             Arc::new(SerializedReplicaPersistence::new(replica));
         Self::with_persistence(
             persistence,
             Arc::new(PlatformStorage::new(platform)),
+            Arc::new(HttpTransport::new(http)),
             false,
             #[cfg(test)]
             None,
@@ -404,12 +410,14 @@ impl Runtime {
     fn with_persistence(
         persistence: Arc<dyn ReplicaPersistence>,
         platform_storage: Arc<PlatformStorage>,
+        http_transport: Arc<HttpTransport>,
         ready: bool,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             replica: Arc::new(Replica::new(persistence)),
             platform_storage,
+            _http_transport: http_transport,
             #[cfg(test)]
             test_persistence,
             observers: Mutex::new(HashMap::new()),
@@ -1551,6 +1559,19 @@ mod startup_tests {
         loads: AtomicUsize,
     }
 
+    struct UnusedHttpExecutor;
+
+    #[async_trait]
+    impl SerializedHttpExecutor for UnusedHttpExecutor {
+        async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+            panic!("startup tests must not invoke HTTP")
+        }
+
+        fn cancel(&self, _dispatch_id: &str) {
+            panic!("startup tests must not cancel HTTP")
+        }
+    }
+
     impl Default for MemoryReplicaExecutor {
         fn default() -> Self {
             Self {
@@ -1743,7 +1764,7 @@ mod startup_tests {
         replica: Arc<MemoryReplicaExecutor>,
         platform: Arc<MemoryPlatformExecutor>,
     ) -> Arc<Runtime> {
-        Runtime::with_serialized_executors(replica, platform)
+        Runtime::with_serialized_executors(replica, platform, Arc::new(UnusedHttpExecutor))
     }
 
     fn active(account_id: &str, generation: &str) -> DeviceCatalogAccount {
@@ -1777,6 +1798,7 @@ mod startup_tests {
                     master_password: "password".into(),
                     secret_key: "A3-TEST".into(),
                     server_url: "https://vault.example.com".into(),
+                    insecure_transport_confirmed: false,
                 },
                 RequestCancellation::new(),
             )
@@ -1941,6 +1963,7 @@ mod startup_tests {
         let runtime = Runtime::with_serialized_executors(
             Arc::new(MemoryReplicaExecutor::default()),
             platform.clone(),
+            Arc::new(UnusedHttpExecutor),
         );
         let opening = {
             let runtime = runtime.clone();

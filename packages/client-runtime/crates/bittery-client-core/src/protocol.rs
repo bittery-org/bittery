@@ -4,6 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tokio::sync::watch;
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -52,6 +53,7 @@ pub enum RuntimeRequest {
         email: String,
         master_password: String,
         secret_key: String,
+        insecure_transport_confirmed: bool,
     },
     CreateLoginItem {
         account_id: AccountId,
@@ -332,8 +334,23 @@ pub trait ObservationSink: Send + Sync + 'static {
     fn publish(&self, projection: RuntimeProjection);
 }
 
-#[derive(Clone, Default)]
-pub struct RequestCancellation(Arc<AtomicBool>);
+struct CancellationState {
+    cancelled: AtomicBool,
+    changed: watch::Sender<bool>,
+}
+
+#[derive(Clone)]
+pub struct RequestCancellation(Arc<CancellationState>);
+
+impl Default for RequestCancellation {
+    fn default() -> Self {
+        let (changed, _) = watch::channel(false);
+        Self(Arc::new(CancellationState {
+            cancelled: AtomicBool::new(false),
+            changed,
+        }))
+    }
+}
 
 impl RequestCancellation {
     pub fn new() -> Self {
@@ -341,10 +358,21 @@ impl RequestCancellation {
     }
 
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        if !self.0.cancelled.swap(true, Ordering::SeqCst) {
+            self.0.changed.send_replace(true);
+        }
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        let mut changed = self.0.changed.subscribe();
+        while !*changed.borrow_and_update() {
+            if changed.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }

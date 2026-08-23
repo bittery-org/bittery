@@ -9,6 +9,7 @@ description = "Shared Bittery client Runtime and Replica policy"
 default = []
 persistence-contract-schema = ["dep:schemars"]
 platform-storage-contract-schema = ["dep:schemars"]
+http-transport-contract-schema = ["dep:schemars"]
 
 [dependencies]
 async-trait.workspace = true
@@ -28,3 +29,8 @@ required-features = ["persistence-contract-schema"]
 name = "generate-platform-storage-contract-schema"
 path = "src/bin/generate_platform_storage_contract_schema.rs"
 required-features = ["platform-storage-contract-schema"]
+
+[[bin]]
+name = "generate-http-transport-contract-schema"
+path = "src/bin/generate_http_transport_contract_schema.rs"
+required-features = ["http-transport-contract-schema"]

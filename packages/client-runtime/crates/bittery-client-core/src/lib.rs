@@ -6,6 +6,9 @@
 // Ticket 19 deliberately lands the closed storage vocabulary before wiring authentication to it.
 #[allow(dead_code)]
 mod platform_storage;
+// Ticket 19 lands the primitive host seam before authentication starts constructing requests.
+#[allow(dead_code)]
+mod http_transport;
 mod protocol;
 mod replica;
 mod runtime;
@@ -16,6 +19,12 @@ mod tests;
 pub mod server_contract {
     include!("generated/server.rs");
 }
+
+#[cfg(feature = "http-transport-contract-schema")]
+#[doc(hidden)]
+pub use http_transport::http_transport_contract_schema;
+#[doc(hidden)]
+pub use http_transport::SerializedHttpExecutor;
 
 #[cfg(feature = "platform-storage-contract-schema")]
 #[doc(hidden)]

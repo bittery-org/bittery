@@ -3980,7 +3980,8 @@ sealed class RuntimeRequest: Disposable  {
         val `serverUrl`: kotlin.String,
         val `email`: kotlin.String,
         val `masterPassword`: uniffi.bittery_client_bindings.SecretString,
-        val `secretKey`: uniffi.bittery_client_bindings.SecretString) : RuntimeRequest()
+        val `secretKey`: uniffi.bittery_client_bindings.SecretString,
+        val `insecureTransportConfirmed`: kotlin.Boolean) : RuntimeRequest()
 
     {
 
@@ -4010,7 +4011,8 @@ sealed class RuntimeRequest: Disposable  {
         this.`serverUrl`,
         this.`email`,
         this.`masterPassword`,
-        this.`secretKey`
+        this.`secretKey`,
+        this.`insecureTransportConfirmed`
     )
 
             }
@@ -4045,6 +4047,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
+                FfiConverterBoolean.read(buf),
                 )
             2 -> RuntimeRequest.CreateLoginItem(
                 FfiConverterString.read(buf),
@@ -4064,6 +4067,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`email`)
                 + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
                 + FfiConverterTypeSecretString.allocationSize(value.`secretKey`)
+                + FfiConverterBoolean.allocationSize(value.`insecureTransportConfirmed`)
             )
         }
         is RuntimeRequest.CreateLoginItem -> {
@@ -4085,6 +4089,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`email`, buf)
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
                 FfiConverterTypeSecretString.write(value.`secretKey`, buf)
+                FfiConverterBoolean.write(value.`insecureTransportConfirmed`, buf)
                 Unit
             }
             is RuntimeRequest.CreateLoginItem -> {
