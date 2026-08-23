@@ -13,14 +13,19 @@ http-transport-contract-schema = ["dep:schemars"]
 
 [dependencies]
 async-trait.workspace = true
+base64.workspace = true
 bittery-crypto-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars = { version = "=1.2.2", optional = true }
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 url.workspace = true
 zeroize.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys = "=0.3.103"
 
 [[bin]]
 name = "generate-persistence-contract-schema"

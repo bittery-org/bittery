@@ -15,6 +15,9 @@ mod auth_http;
 // Ticket 19 keeps the complete unchanged SRP/KDF ceremony behind one private deep module.
 #[allow(dead_code)]
 mod authentication;
+// Ticket 19 keeps compatibility wrapping and time conversion private until Account installation.
+#[allow(dead_code)]
+mod authentication_installation;
 mod protocol;
 mod replica;
 mod runtime;
