@@ -20,3 +20,4 @@ those rather than restating them.
 - [0012 — One generated definition per cross-language type](0012-one-generated-definition-per-cross-language-type.md)
 - [0013 — Rotation plans coordinate Vault key rotation](0013-rotation-plans-coordinate-vault-key-rotation.md)
 - [0014 — Evolve the existing product around a shared Rust runtime](0014-evolve-the-existing-product-around-a-shared-rust-runtime.md)
+- [0015 — Keep biometric unlock local](0015-keep-biometric-unlock-local.md)

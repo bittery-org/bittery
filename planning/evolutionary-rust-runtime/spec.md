@@ -308,6 +308,13 @@ Sign-in with email, master password, and Secret Key. The Runtime never publishes
 or treats missing credentials as a successful Session. This recoverable boundary is explicit because
 browser session storage cannot join an IndexedDB transaction.
 
+Biometric unlock is the one explicit local exception to the fresh online ceremony rule. A successful
+operating-system biometric prompt may unwrap the existing Device-bound master unlock key and unlock
+the encrypted local Replica without persisting a new Auth key, SRP password, or other login
+credential. It does not create or refresh a Server Session. If no usable Session remains, Server
+work waits for password Quick Unlock or Full Sign-in. This keeps biometric unlock while preserving
+the existing crypto core, key hierarchy, and persisted cryptographic formats.
+
 Session renewal runs in Rust through the current refresh route. A missing/expired Session during a
 pending Operation changes its visible waiting reason and preserves the Operation. Flows that require
 re-running SRP use the same Rust-owned existing ceremony; the host only collects credentials.

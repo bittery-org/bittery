@@ -112,3 +112,14 @@ encrypted optimistic overlays.
 - This directly replaces the inconsistent Legacy behavior: generic clients tied availability to the
   previous Server Session while the Extension already allowed the full online ceremony without that
   lifetime gate. There are no users and no stored v1/v2 format migration.
+
+### 2026-08-23 — Biometric unlock remains the local exception
+
+- Biometric unlock remains available and unwraps only the existing Device-bound master unlock key
+  after a successful operating-system prompt. It does not run SRP or mint a fresh Server Session.
+- A missing or unusable Server Session after biometric unlock requires password Quick Unlock or Full
+  Sign-in before Server work can continue.
+- A fresh biometric SRP ceremony was rejected because the existing derivation produces independent
+  Auth and master unlock keys. Reconstructing the Auth key from the stored master unlock key is not
+  possible, while persisting a new Auth key or SRP password would change the sensitive storage and
+  crypto specification that this pivot keeps fixed.

@@ -174,7 +174,7 @@ Getting back into a locked account with the master password alone, using the sto
 _Avoid_: fast unlock, resume, remember me
 
 **Biometric unlock**:
-Quick unlock in which the operating system's biometric prompt stands in for the master password. One prompt covers every account on the device.
+A separate local unlock in which the operating system's biometric prompt releases retained Device-bound key material. It is the only unlock that does not create a fresh Server Session; without a usable Session, the account still needs Quick unlock or Full sign-in for Server work.
 _Avoid_: Face ID, Touch ID, fingerprint login
 
 **Master password re-entry**:
