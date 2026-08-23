@@ -108,5 +108,38 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 	persistentRuntime.free();
 	assert.deepEqual(replicaInvocations, []);
 
+	const platformInvocations = [];
+	const openingRuntime = bindings.WebClientRuntime.withExecutors(
+		async () => {
+			throw new Error("Replica must stay cold while opening an empty catalog");
+		},
+		async (requestJson) => {
+			platformInvocations.push(requestJson);
+			return '{"type":"value","value":null}';
+		},
+	);
+	const openPromise = openingRuntime.open();
+	assert.ok(openPromise instanceof Promise);
+	await openPromise;
+	assert.deepEqual(platformInvocations, [
+		'{"type":"get","area":"devicePlain","key":"bittery:runtime:platform-storage:device-catalog"}',
+	]);
+	await openingRuntime.close();
+	openingRuntime.free();
+
+	const failingRuntime = bindings.WebClientRuntime.withExecutors(
+		async () => "{}",
+		async () => {
+			throw new Error("PRIVATE_BROWSER_QUOTA_DETAIL");
+		},
+	);
+	await assert.rejects(failingRuntime.open(), (error) => {
+		assert.match(String(error), /Platform storage invocation failed/);
+		assert.doesNotMatch(String(error), /PRIVATE_BROWSER_QUOTA_DETAIL/);
+		return true;
+	});
+	await failingRuntime.close();
+	failingRuntime.free();
+
 	assert.deepEqual(productionWasm, [resolve(combinedRoot, "index_bg.wasm")]);
 });

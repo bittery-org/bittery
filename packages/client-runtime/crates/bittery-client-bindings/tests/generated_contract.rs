@@ -38,7 +38,9 @@ fn every_host_exposes_the_stable_async_close_facade() {
 }
 
 #[test]
-fn web_exposes_one_flat_serialized_replica_executor_factory() {
-    assert!(WEB_DECLARATIONS
-        .contains("static withReplicaExecutor(invoke: Function): WebClientRuntime;"));
+fn web_exposes_one_flat_serialized_executor_factory_and_async_open() {
+    assert!(WEB_DECLARATIONS.contains("static withExecutors("));
+    assert!(WEB_DECLARATIONS.contains("replica_invoke: Function,"));
+    assert!(WEB_DECLARATIONS.contains("platform_storage_invoke: Function,"));
+    assert!(WEB_DECLARATIONS.contains("open(): Promise<void>;"));
 }

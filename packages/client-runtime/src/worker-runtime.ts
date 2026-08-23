@@ -2,9 +2,14 @@ export interface ReplicaExecutor {
 	invoke(requestJson: string): Promise<string>;
 }
 
+export interface PlatformStorageExecutor {
+	invoke(requestJson: string): Promise<string>;
+}
+
 interface WebClientRuntimeLike {
 	cancel(requestId: string): void;
 	close(): Promise<void>;
+	open(): Promise<void>;
 	observe_json(
 		observationId: string,
 		requestJson: string,
@@ -16,8 +21,9 @@ interface WebClientRuntimeLike {
 
 export interface RuntimeWasm {
 	WebClientRuntime: {
-		withReplicaExecutor(
-			invoke: (requestJson: string) => Promise<string>,
+		withExecutors(
+			replicaInvoke: (requestJson: string) => Promise<string>,
+			platformStorageInvoke: (requestJson: string) => Promise<string>,
 		): WebClientRuntimeLike;
 	};
 }
@@ -33,6 +39,7 @@ export interface RuntimeWorkerService {
 
 export interface RuntimeWorkerServiceDeps {
 	executor: ReplicaExecutor;
+	platformStorageExecutor: PlatformStorageExecutor;
 	loadWasm(): Promise<RuntimeWasm>;
 }
 
@@ -49,6 +56,12 @@ type RuntimeNotification = {
 
 function invalidInput(message: string): Error {
 	return Object.assign(new Error(message), { code: "invalid-input" });
+}
+
+function closed(): Error {
+	return Object.assign(new Error("The Runtime worker is closing."), {
+		code: "closed",
+	});
 }
 
 function hasExactKeys(
@@ -97,19 +110,35 @@ export function createRuntimeWorkerService(
 ): RuntimeWorkerService {
 	let runtimeTask: Promise<WebClientRuntimeLike> | undefined;
 	let closeTask: Promise<void> | undefined;
-	const runtime = () =>
-		(runtimeTask ??= deps
-			.loadWasm()
-			.then(({ WebClientRuntime }) =>
-				WebClientRuntime.withReplicaExecutor(
-					deps.executor.invoke.bind(deps.executor),
-				),
-			));
+	let closing = false;
+	const runtime = () => {
+		if (closing) return Promise.reject(closed());
+		if (runtimeTask !== undefined) return runtimeTask;
+		const started = deps.loadWasm().then(async ({ WebClientRuntime }) => {
+			const created = WebClientRuntime.withExecutors(
+				deps.executor.invoke.bind(deps.executor),
+				deps.platformStorageExecutor.invoke.bind(deps.platformStorageExecutor),
+			);
+			try {
+				await created.open();
+				return created;
+			} catch (error) {
+				await created.close().catch(() => undefined);
+				throw error;
+			}
+		});
+		runtimeTask = started;
+		void started.catch(() => {
+			if (runtimeTask === started) runtimeTask = undefined;
+		});
+		return started;
+	};
 
 	return {
 		async request(payload, signal, notify) {
 			const command = parseCommand(payload);
 			const ready = await runtime();
+			if (closing) throw closed();
 			if (command.type === "observe") {
 				if (signal.aborted) return undefined;
 				let cancelled = false;
@@ -148,6 +177,7 @@ export function createRuntimeWorkerService(
 		},
 		close() {
 			if (closeTask === undefined) {
+				closing = true;
 				closeTask =
 					runtimeTask === undefined
 						? Promise.resolve()

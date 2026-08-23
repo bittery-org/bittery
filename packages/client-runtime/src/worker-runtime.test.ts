@@ -10,6 +10,7 @@ class RuntimeDouble {
 	readonly observations = new Map<string, (projectionJson: string) => void>();
 	readonly requests: Array<{ requestId: string; requestJson: string }> = [];
 	closeCalls = 0;
+	openCalls = 0;
 	requestResult = Promise.resolve('{"type":"AuthenticationUnavailable"}');
 
 	cancel(requestId: string): void {
@@ -18,6 +19,10 @@ class RuntimeDouble {
 
 	async close(): Promise<void> {
 		this.closeCalls += 1;
+	}
+
+	async open(): Promise<void> {
+		this.openCalls += 1;
 	}
 
 	observe_json(
@@ -41,6 +46,7 @@ class RuntimeDouble {
 
 function runtimeService(runtime: RuntimeDouble) {
 	let persistenceInvocations = 0;
+	let platformStorageInvocations = 0;
 	const service = createRuntimeWorkerService({
 		executor: {
 			async invoke() {
@@ -48,17 +54,149 @@ function runtimeService(runtime: RuntimeDouble) {
 				return "{}";
 			},
 		},
+		platformStorageExecutor: {
+			async invoke() {
+				platformStorageInvocations += 1;
+				return "{}";
+			},
+		},
 		loadWasm: async () =>
 			({
 				WebClientRuntime: {
-					withReplicaExecutor: () => runtime,
+					withExecutors: () => runtime,
 				},
 			}) as unknown as RuntimeWasm,
 	});
-	return { service, persistenceInvocations: () => persistenceInvocations };
+	return {
+		service,
+		persistenceInvocations: () => persistenceInvocations,
+		platformStorageInvocations: () => platformStorageInvocations,
+	};
 }
 
 describe("Runtime worker service", () => {
+	test("passes both serialized executors and opens once before serving commands", async () => {
+		const runtime = new RuntimeDouble();
+		const calls: string[] = [];
+		let replicaInvoke: ((requestJson: string) => Promise<string>) | undefined;
+		let platformInvoke: ((requestJson: string) => Promise<string>) | undefined;
+		const service = createRuntimeWorkerService({
+			executor: {
+				async invoke(requestJson) {
+					calls.push(`replica:${requestJson}`);
+					return "replica-result";
+				},
+			},
+			platformStorageExecutor: {
+				async invoke(requestJson) {
+					calls.push(`platform:${requestJson}`);
+					return "platform-result";
+				},
+			},
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors(replica, platform) {
+						replicaInvoke = replica;
+						platformInvoke = platform;
+						return runtime;
+					},
+				},
+			}),
+		});
+
+		await Promise.all([
+			service.request(
+				{ type: "request", requestId: "one", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+			service.request(
+				{ type: "request", requestId: "two", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		]);
+
+		expect(runtime.openCalls).toBe(1);
+		expect(replicaInvoke).toBeFunction();
+		expect(platformInvoke).toBeFunction();
+		expect(await replicaInvoke?.('{"type":"read"}')).toBe("replica-result");
+		expect(await platformInvoke?.('{"type":"get"}')).toBe("platform-result");
+		expect(calls).toEqual([
+			'replica:{"type":"read"}',
+			'platform:{"type":"get"}',
+		]);
+	});
+
+	test("awaits open before request and closes safely while startup is pending", async () => {
+		let finishOpen!: () => void;
+		const opened = new Promise<void>((resolve) => {
+			finishOpen = resolve;
+		});
+		const runtime = new RuntimeDouble();
+		runtime.open = async () => {
+			runtime.openCalls += 1;
+			await opened;
+		};
+		const { service } = runtimeService(runtime);
+		const request = service.request(
+			{ type: "observe", observationId: "pending", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(runtime.observations.size).toBe(0);
+
+		const close = service.close();
+		finishOpen();
+		await expect(request).rejects.toMatchObject({ code: "closed" });
+		await close;
+
+		expect(runtime.openCalls).toBe(1);
+		expect(runtime.closeCalls).toBe(1);
+		expect(runtime.observations.size).toBe(0);
+	});
+
+	test("retries startup after a failed open instead of memoizing the rejection", async () => {
+		const failed = new RuntimeDouble();
+		failed.open = async () => {
+			failed.openCalls += 1;
+			throw new Error("first startup failed");
+		};
+		const recovered = new RuntimeDouble();
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			loadWasm: async () => {
+				const runtime = loads++ === 0 ? failed : recovered;
+				return {
+					WebClientRuntime: { withExecutors: () => runtime },
+				};
+			},
+		});
+
+		await expect(
+			service.request(
+				{ type: "request", requestId: "first", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toThrow("first startup failed");
+		expect(failed.closeCalls).toBe(1);
+
+		expect(
+			await service.request(
+				{ type: "request", requestId: "retry", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).toBe('{"type":"AuthenticationUnavailable"}');
+		expect(loads).toBe(2);
+		expect(recovered.openCalls).toBe(1);
+	});
+
 	test("forwards an observation before the observe acknowledgement", async () => {
 		const runtime = new RuntimeDouble();
 		const { service } = runtimeService(runtime);
@@ -98,8 +236,9 @@ describe("Runtime worker service", () => {
 			() => undefined,
 		);
 
-		await Promise.resolve();
-		await Promise.resolve();
+		for (let turn = 0; runtime.requests.length < 2 && turn < 8; turn += 1) {
+			await Promise.resolve();
+		}
 		first.abort();
 		await Promise.resolve();
 		expect(runtime.cancelled).toEqual(["first"]);
@@ -175,6 +314,7 @@ describe("Runtime worker service", () => {
 		let loads = 0;
 		const service = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
 			loadWasm: async () => {
 				loads += 1;
 				throw new Error("must stay cold");
@@ -182,6 +322,14 @@ describe("Runtime worker service", () => {
 		});
 
 		await service.close();
+		expect(loads).toBe(0);
+		await expect(
+			service.request(
+				{ type: "request", requestId: "late", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toMatchObject({ code: "closed" });
 		expect(loads).toBe(0);
 	});
 });

@@ -130,6 +130,13 @@ export class WebClientRuntime {
     }
   }
   /**
+   * @returns {Promise<void>}
+   */
+  open() {
+    const ret = wasm.webclientruntime_open(this.__wbg_ptr);
+    return ret;
+  }
+  /**
    * @param {string} request_id
    * @param {string} request_json
    * @returns {Promise<string>}
@@ -167,6 +174,18 @@ export class WebClientRuntime {
     );
     const len0 = WASM_VECTOR_LEN;
     wasm.webclientruntime_unobserve(this.__wbg_ptr, ptr0, len0);
+  }
+  /**
+   * @param {Function} replica_invoke
+   * @param {Function} platform_storage_invoke
+   * @returns {WebClientRuntime}
+   */
+  static withExecutors(replica_invoke, platform_storage_invoke) {
+    const ret = wasm.webclientruntime_withExecutors(
+      replica_invoke,
+      platform_storage_invoke,
+    );
+    return WebClientRuntime.__wrap(ret);
   }
   /**
    * @param {Function} invoke
@@ -2356,7 +2375,7 @@ function __wbg_get_imports() {
       return ret;
     },
     __wbindgen_cast_0000000000000001: function (arg0, arg1) {
-      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 318, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 319, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
       const ret = makeMutClosure(
         arg0,
         arg1,

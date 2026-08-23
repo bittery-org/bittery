@@ -13,6 +13,10 @@ struct JsSerializedReplicaExecutor {
     invoke: js_sys::Function,
 }
 
+struct JsSerializedPlatformStorageExecutor {
+    invoke: js_sys::Function,
+}
+
 #[async_trait::async_trait(?Send)]
 impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
@@ -31,10 +35,35 @@ impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
     }
 }
 
+#[async_trait::async_trait(?Send)]
+impl core::SerializedPlatformStorageExecutor for JsSerializedPlatformStorageExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
+        let promise = self
+            .invoke
+            .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
+            .map_err(|_| platform_storage_invoke_error())?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| platform_storage_invoke_error())?;
+        let response = JsFuture::from(promise)
+            .await
+            .map_err(|_| platform_storage_invoke_error())?;
+        response
+            .as_string()
+            .ok_or_else(platform_storage_invoke_error)
+    }
+}
+
 fn replica_invoke_error(message: &str) -> core::RuntimeError {
     core::RuntimeError {
         code: core::RuntimeErrorCode::InvariantViolation,
         message: message.into(),
+    }
+}
+
+fn platform_storage_invoke_error() -> core::RuntimeError {
+    core::RuntimeError {
+        code: core::RuntimeErrorCode::InvariantViolation,
+        message: "Platform storage invocation failed".into(),
     }
 }
 
@@ -86,12 +115,34 @@ impl WebClientRuntime {
         )))
     }
 
+    #[wasm_bindgen(js_name = withExecutors)]
+    pub fn with_executors(
+        replica_invoke: js_sys::Function,
+        platform_storage_invoke: js_sys::Function,
+    ) -> Self {
+        Self::from_inner(core::Runtime::with_serialized_executors(
+            Arc::new(JsSerializedReplicaExecutor {
+                invoke: replica_invoke,
+            }),
+            Arc::new(JsSerializedPlatformStorageExecutor {
+                invoke: platform_storage_invoke,
+            }),
+        ))
+    }
+
     fn from_inner(inner: Arc<core::Runtime>) -> Self {
         Self {
             inner,
             cancellations: Mutex::new(HashMap::new()),
             observations: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub async fn open(&self) -> Result<(), JsValue> {
+        self.inner
+            .open()
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
     pub async fn request_json(

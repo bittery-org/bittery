@@ -21,8 +21,13 @@ export class WebClientRuntime {
     request_json: string,
     callback: Function,
   ): void;
+  open(): Promise<void>;
   request_json(request_id: string, request_json: string): Promise<string>;
   unobserve(observation_id: string): void;
+  static withExecutors(
+    replica_invoke: Function,
+    platform_storage_invoke: Function,
+  ): WebClientRuntime;
   static withReplicaExecutor(invoke: Function): WebClientRuntime;
 }
 
@@ -1767,6 +1772,7 @@ export interface InitOutput {
     e: number,
     f: any,
   ) => [number, number];
+  readonly webclientruntime_open: (a: number) => any;
   readonly webclientruntime_request_json: (
     a: number,
     b: number,
@@ -1779,6 +1785,7 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => void;
+  readonly webclientruntime_withExecutors: (a: any, b: any) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
   readonly uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
     a: bigint,

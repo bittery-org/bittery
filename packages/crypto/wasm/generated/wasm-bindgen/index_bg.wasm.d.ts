@@ -1175,6 +1175,7 @@ export const webclientruntime_observe_json: (
   e: number,
   f: any,
 ) => [number, number];
+export const webclientruntime_open: (a: number) => any;
 export const webclientruntime_request_json: (
   a: number,
   b: number,
@@ -1187,6 +1188,7 @@ export const webclientruntime_unobserve: (
   b: number,
   c: number,
 ) => void;
+export const webclientruntime_withExecutors: (a: any, b: any) => number;
 export const webclientruntime_withReplicaExecutor: (a: any) => number;
 export const uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
   a: bigint,
