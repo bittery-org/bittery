@@ -19,6 +19,145 @@ mod required_option {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
+#[serde(transparent)]
+pub(crate) struct SecretString(Zeroizing<String>);
+
+impl SecretString {
+    fn new(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+
+    fn into_zeroizing(mut self) -> Zeroizing<String> {
+        Zeroizing::new(std::mem::take(&mut *self.0))
+    }
+}
+
+impl std::ops::Deref for SecretString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
+}
+
+impl AsRef<str> for SecretString {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+impl From<String> for SecretString {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for SecretString {
+    fn from(value: &str) -> Self {
+        Self::new(value.to_owned())
+    }
+}
+
+impl ZeroizeOnDrop for SecretString {}
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        self.zeroize();
+        #[cfg(test)]
+        SECRET_STRING_DROPS_AFTER_ZEROIZE.with(|drops| drops.set(drops.get() + 1));
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Zeroize)]
+pub(crate) struct SecretBytes32(Zeroizing<[u8; 32]>);
+
+impl SecretBytes32 {
+    fn new(value: [u8; 32]) -> Self {
+        Self(Zeroizing::new(value))
+    }
+}
+
+impl std::ops::Deref for SecretBytes32 {
+    type Target = [u8; 32];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Serialize for SecretBytes32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.0.iter())
+    }
+}
+
+impl ZeroizeOnDrop for SecretBytes32 {}
+
+impl Drop for SecretBytes32 {
+    fn drop(&mut self) {
+        self.zeroize();
+        #[cfg(test)]
+        if self.0.iter().all(|byte| *byte == 0) {
+            SECRET_BYTES_DROPS_AFTER_ZEROIZE.with(|drops| drops.set(drops.get() + 1));
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static SECRET_STRING_DROPS_AFTER_ZEROIZE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SECRET_BYTES_DROPS_AFTER_ZEROIZE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn take_secret_drop_observations() -> (usize, usize) {
+    let strings = SECRET_STRING_DROPS_AFTER_ZEROIZE.with(|drops| drops.replace(0));
+    let bytes = SECRET_BYTES_DROPS_AFTER_ZEROIZE.with(|drops| drops.replace(0));
+    (strings, bytes)
+}
+
+impl<'de> Deserialize<'de> for SecretBytes32 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SecretBytesVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for SecretBytesVisitor {
+            type Value = SecretBytes32;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an array of exactly 32 bytes")
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = Zeroizing::new([0_u8; 32]);
+                let mut length = 0;
+                while let Some(byte) = sequence.next_element::<u8>()? {
+                    if length == bytes.len() {
+                        return Err(serde::de::Error::invalid_length(length + 1, &self));
+                    }
+                    bytes[length] = byte;
+                    length += 1;
+                }
+                if length != bytes.len() {
+                    return Err(serde::de::Error::invalid_length(length, &self));
+                }
+                Ok(SecretBytes32(bytes))
+            }
+        }
+
+        deserializer.deserialize_seq(SecretBytesVisitor)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "platform-storage-contract-schema",
@@ -279,14 +418,14 @@ impl AccountMetadataDocument {
 pub(crate) struct DeviceKeyDocument {
     #[zeroize(skip)]
     version: u32,
-    pub(crate) key_bytes: [u8; 32],
+    pub(crate) key_bytes: SecretBytes32,
 }
 
 impl DeviceKeyDocument {
     pub(crate) fn new(key_bytes: [u8; 32]) -> Self {
         Self {
             version: DOCUMENT_VERSION,
-            key_bytes,
+            key_bytes: SecretBytes32::new(key_bytes),
         }
     }
 
@@ -306,7 +445,7 @@ pub(crate) struct QuickUnlockDocument {
     pub(crate) incarnation: Incarnation,
     #[zeroize(skip)]
     pub(crate) encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
-    pub(crate) secret_key: String,
+    pub(crate) secret_key: SecretString,
     #[zeroize(skip)]
     pub(crate) created_at_ms: u64,
     #[zeroize(skip)]
@@ -331,7 +470,7 @@ impl QuickUnlockDocument {
             account_id,
             incarnation,
             encrypted_master_unlock_key,
-            secret_key,
+            secret_key: SecretString::new(secret_key),
             created_at_ms,
             last_master_password_entry_ms,
             biometric_enabled,
@@ -373,7 +512,7 @@ pub(crate) struct CurrentSessionDocument {
     pub(crate) account_id: AccountId,
     #[zeroize(skip)]
     pub(crate) incarnation: Incarnation,
-    pub(crate) token: String,
+    pub(crate) token: SecretString,
     #[zeroize(skip)]
     pub(crate) session_id: Option<String>,
     #[zeroize(skip)]
@@ -402,7 +541,7 @@ impl CurrentSessionDocument {
             version: DOCUMENT_VERSION,
             account_id,
             incarnation,
-            token,
+            token: SecretString::new(token),
             session_id,
             expires_at_ms,
             server_expires_at_ms,
@@ -495,7 +634,11 @@ enum PlatformStorageRequest {
         area: PlatformStorageArea,
         #[zeroize(skip)]
         key: String,
-        value: String,
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(with = "String")
+        )]
+        value: SecretString,
     },
     Delete {
         #[zeroize(skip)]
@@ -519,7 +662,11 @@ enum PlatformStorageRequest {
 enum PlatformStorageResponse {
     Value {
         #[serde(deserialize_with = "required_option::deserialize")]
-        value: Option<String>,
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(with = "Option<String>")
+        )]
+        value: Option<SecretString>,
     },
     #[zeroize(skip)]
     Done,
@@ -826,7 +973,7 @@ impl PlatformStorage {
         self.expect_done(PlatformStorageRequest::Set {
             area,
             key,
-            value: serialized,
+            value: SecretString::new(serialized),
         })
         .await
     }
@@ -842,7 +989,9 @@ impl PlatformStorage {
             })
             .await?;
         match &mut response {
-            PlatformStorageResponse::Value { value } => Ok(value.take().map(Zeroizing::new)),
+            PlatformStorageResponse::Value { value } => {
+                Ok(value.take().map(SecretString::into_zeroizing))
+            }
             PlatformStorageResponse::Done => Err(platform_storage_invariant(
                 "platform storage returned Done for Get",
             )),
@@ -1063,6 +1212,8 @@ mod tests {
     fn sensitive_documents_zeroize_only_their_plaintext_secrets() {
         fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
 
+        assert_zeroize_on_drop::<SecretString>();
+        assert_zeroize_on_drop::<SecretBytes32>();
         assert_zeroize_on_drop::<DeviceKeyDocument>();
         assert_zeroize_on_drop::<QuickUnlockDocument>();
         assert_zeroize_on_drop::<CurrentSessionDocument>();
@@ -1071,7 +1222,7 @@ mod tests {
 
         let mut device_key = DeviceKeyDocument::new([7; 32]).clone();
         device_key.zeroize();
-        assert_eq!(device_key.key_bytes, [0; 32]);
+        assert_eq!(*device_key.key_bytes, [0; 32]);
 
         let mut quick_unlock = quick_unlock_document().clone();
         quick_unlock.zeroize();
@@ -1111,6 +1262,59 @@ mod tests {
             panic!("Value response changed variant while zeroizing");
         };
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn decoded_secret_fields_zeroize_when_a_later_field_makes_deserialization_fail() {
+        // This observes wrapper Drop after zeroize. Rust cannot promise that an allocator or the
+        // compiler never retains inaccessible copies outside the wrapper's owned allocation.
+        let _ = take_secret_drop_observations();
+        assert!(serde_json::from_str::<PlatformStorageRequest>(
+            r#"{"type":"set","area":"sessionSecret","key":"session","value":"request-secret","unexpected":true}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
+
+        assert!(serde_json::from_str::<PlatformStorageResponse>(
+            r#"{"type":"value","value":"response-secret","unexpected":true}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
+
+        assert!(serde_json::from_str::<QuickUnlockDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","encryptedMasterUnlockKey":{"ciphertext":"ciphertext","iv":"iv","algorithm":"AES-GCM-AAD-V1"},"secretKey":"A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2","unexpected":true}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
+
+        assert!(serde_json::from_str::<CurrentSessionDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","token":"session-token","unexpected":true}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
+
+        let raw_device_key = format!(
+            r#"{{"version":1,"keyBytes":[{}],"unexpected":true}}"#,
+            ["7"; 32].join(",")
+        );
+        assert!(serde_json::from_str::<DeviceKeyDocument>(&raw_device_key).is_err());
+        assert_eq!(take_secret_drop_observations(), (0, 1));
+    }
+
+    #[test]
+    fn decoded_secret_fields_zeroize_when_a_later_required_field_is_missing() {
+        let _ = take_secret_drop_observations();
+        assert!(serde_json::from_str::<QuickUnlockDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","encryptedMasterUnlockKey":{"ciphertext":"ciphertext","iv":"iv","algorithm":"AES-GCM-AAD-V1"},"secretKey":"A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2"}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
+
+        assert!(serde_json::from_str::<CurrentSessionDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","token":"session-token"}"#,
+        )
+        .is_err());
+        assert_eq!(take_secret_drop_observations(), (1, 0));
     }
 
     #[tokio::test]
@@ -1478,7 +1682,11 @@ mod tests {
             .extend([
                 PlatformStorageResponse::Done,
                 PlatformStorageResponse::Value {
-                    value: Some(serde_json::to_string(&expected).expect("metadata must serialize")),
+                    value: Some(
+                        serde_json::to_string(&expected)
+                            .expect("metadata must serialize")
+                            .into(),
+                    ),
                 },
                 PlatformStorageResponse::Done,
             ]);
@@ -1532,7 +1740,7 @@ mod tests {
                 .lock()
                 .expect("responses lock poisoned")
                 .push(PlatformStorageResponse::Value {
-                    value: Some(invalid.to_string()),
+                    value: Some(invalid.to_string().into()),
                 });
             let storage = PlatformStorage::new(executor);
 
