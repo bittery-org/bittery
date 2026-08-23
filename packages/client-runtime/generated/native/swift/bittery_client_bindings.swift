@@ -2362,6 +2362,8 @@ public enum RuntimeRequest {
 
     case signIn(serverUrl: String, email: String, masterPassword: SecretString, secretKey: SecretString, insecureTransportConfirmed: Bool
     )
+    case quickUnlock(accountId: String, masterPassword: SecretString
+    )
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
 
@@ -2388,7 +2390,10 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf), insecureTransportConfirmed: try FfiConverterBool.read(from: &buf)
         )
 
-        case 2: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 2: return .quickUnlock(accountId: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf)
+        )
+
+        case 3: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2408,8 +2413,14 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterBool.write(insecureTransportConfirmed, into: &buf)
 
 
-        case let .createLoginItem(accountId,vaultId,draft):
+        case let .quickUnlock(accountId,masterPassword):
             writeInt(&buf, Int32(2))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterTypeSecretString.write(masterPassword, into: &buf)
+
+
+        case let .createLoginItem(accountId,vaultId,draft):
+            writeInt(&buf, Int32(3))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)

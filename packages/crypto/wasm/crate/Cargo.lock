@@ -207,6 +207,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
+ "subtle",
  "thiserror",
  "time",
  "tokio",

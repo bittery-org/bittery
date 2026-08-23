@@ -173,6 +173,10 @@ pub enum RuntimeRequest {
         secret_key: Arc<SecretString>,
         insecure_transport_confirmed: bool,
     },
+    QuickUnlock {
+        account_id: String,
+        master_password: Arc<SecretString>,
+    },
     CreateLoginItem {
         account_id: String,
         vault_id: String,
@@ -189,6 +193,11 @@ impl fmt::Debug for RuntimeRequest {
                 .debug_struct("SignIn")
                 .field("server_url", server_url)
                 .field("email", email)
+                .field("credentials", &"[redacted]")
+                .finish(),
+            Self::QuickUnlock { account_id, .. } => formatter
+                .debug_struct("QuickUnlock")
+                .field("account_id", account_id)
                 .field("credentials", &"[redacted]")
                 .finish(),
             Self::CreateLoginItem {
@@ -490,6 +499,13 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 secret_key: secret_key.value.clone(),
                 insecure_transport_confirmed,
             },
+            RuntimeRequest::QuickUnlock {
+                account_id,
+                master_password,
+            } => Self::QuickUnlock {
+                account_id: account_id.into(),
+                master_password: master_password.value.clone(),
+            },
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -743,6 +759,10 @@ mod tests {
             secret_key: SecretString::new("UNIQUE_SECRET_KEY".into()),
             insecure_transport_confirmed: false,
         };
+        let quick_unlock = RuntimeRequest::QuickUnlock {
+            account_id: "account-1".into(),
+            master_password: SecretString::new("UNIQUE_QUICK_UNLOCK_PASSWORD".into()),
+        };
         let create = RuntimeRequest::CreateLoginItem {
             account_id: "account-1".into(),
             vault_id: "vault-1".into(),
@@ -785,10 +805,11 @@ mod tests {
             },
         };
 
-        let output = format!("{sign_in:?} {create:?} {projection:?}");
+        let output = format!("{sign_in:?} {quick_unlock:?} {create:?} {projection:?}");
         for marker in [
             "UNIQUE_MASTER_PASSWORD",
             "UNIQUE_SECRET_KEY",
+            "UNIQUE_QUICK_UNLOCK_PASSWORD",
             "UNIQUE_TITLE",
             "UNIQUE_URL",
             "UNIQUE_URLS",

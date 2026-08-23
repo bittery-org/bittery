@@ -4,8 +4,9 @@ use crate::{
     auth_http::{AuthClientConfig, AuthHttpClient},
     authentication::{authenticate, AuthenticationInput, VerifiedAuthentication},
     authentication_installation::{
-        prepare_authenticated_installation, AuthenticationInstallationEvidence, Clock,
-        InstallationEntropy, SystemClock, SystemInstallationEntropy,
+        prepare_authenticated_installation, prepare_quick_unlock, unwrap_master_unlock_key,
+        AuthenticationInstallationEvidence, Clock, InstallationEntropy, PreparedQuickUnlock,
+        SystemClock, SystemInstallationEntropy,
     },
     http_transport::{HttpTransport, SerializedHttpExecutor},
     platform_storage::{
@@ -1281,6 +1282,157 @@ impl Runtime {
         Ok(invalidated)
     }
 
+    async fn commit_quick_unlock(
+        &self,
+        snapshot: crate::replica::ReplicaSnapshot,
+        prepared: PreparedQuickUnlock,
+        execution_guard: tokio::sync::MutexGuard<'_, ()>,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let account_id = snapshot.account_id.clone();
+        let user_id = snapshot.user_id.clone();
+
+        if let Err(error) = self
+            .platform_storage
+            .store_account_metadata(&prepared.metadata)
+            .await
+        {
+            return self
+                .finish_failed_quick_unlock(&snapshot, execution_guard, error)
+                .await;
+        }
+        if let Err(error) = self
+            .platform_storage
+            .store_quick_unlock(&prepared.quick_unlock)
+            .await
+        {
+            return self
+                .finish_failed_quick_unlock(&snapshot, execution_guard, error)
+                .await;
+        }
+        if let Err(error) = self
+            .platform_storage
+            .store_current_session(&prepared.current_session)
+            .await
+        {
+            return self
+                .finish_failed_quick_unlock(&snapshot, execution_guard, error)
+                .await;
+        }
+
+        let publication = self.publish_quick_unlock(&snapshot, prepared.master_unlock_key);
+        let invalidated = match publication {
+            Ok(invalidated) if !self.is_closed() => invalidated,
+            Ok(first_invalidated) => {
+                let invalidated = self.fence_quick_unlock(&snapshot);
+                drop(execution_guard);
+                finish_generation_fence(first_invalidated);
+                finish_generation_fence(invalidated);
+                self.publish_all_unless_closed();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::RuntimeClosed,
+                    "Runtime was closed during Quick Unlock",
+                ));
+            }
+            Err(error) => {
+                let invalidated = self.fence_quick_unlock(&snapshot);
+                drop(execution_guard);
+                finish_generation_fence(invalidated);
+                self.publish_all_unless_closed();
+                return Err(error);
+            }
+        };
+        drop(execution_guard);
+        finish_generation_fence(invalidated);
+        self.publish_all_unless_closed();
+        Ok(RuntimeResponse::SignedIn {
+            account_id,
+            user_id,
+        })
+    }
+
+    async fn finish_failed_quick_unlock(
+        &self,
+        snapshot: &crate::replica::ReplicaSnapshot,
+        execution_guard: tokio::sync::MutexGuard<'_, ()>,
+        error: RuntimeError,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let invalidated = self.fence_quick_unlock(snapshot);
+        drop(execution_guard);
+        finish_generation_fence(invalidated);
+        self.publish_all_unless_closed();
+        Err(error)
+    }
+
+    fn publish_quick_unlock(
+        &self,
+        expected: &crate::replica::ReplicaSnapshot,
+        master_unlock_key: Zeroizing<[u8; 32]>,
+    ) -> Result<Option<Arc<DeliveryToken>>, RuntimeError> {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        if self.is_closed() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::RuntimeClosed,
+                "Runtime was closed during Quick Unlock",
+            ));
+        }
+        let current = self.replica.snapshot(&expected.account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if current.incarnation != expected.incarnation
+            || current.user_id != expected.user_id
+            || current.revision != expected.revision
+            || current.lock_epoch != expected.lock_epoch
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account generation changed during Quick Unlock",
+            ));
+        }
+
+        let invalidated = self.invalidate_delivery(&expected.account_id);
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .insert(expected.account_id.clone(), Vec::new());
+        self.clear_live_master_unlock_keys_for_account(&expected.account_id);
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .insert(
+                (expected.account_id.clone(), expected.incarnation.clone()),
+                LiveMasterUnlockKey::new(master_unlock_key),
+            );
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(expected.account_id.clone(), AccountAccessState::Unlocked);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        Ok(invalidated)
+    }
+
+    fn fence_quick_unlock(
+        &self,
+        expected: &crate::replica::ReplicaSnapshot,
+    ) -> Option<Arc<DeliveryToken>> {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        let current = self.replica.snapshot(&expected.account_id)?;
+        if current.incarnation != expected.incarnation || current.user_id != expected.user_id {
+            return None;
+        }
+        let invalidated = self.invalidate_delivery(&expected.account_id);
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .remove(&expected.account_id);
+        self.clear_live_master_unlock_keys_for_account(&expected.account_id);
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(expected.account_id.clone(), AccountAccessState::SignedOut);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        invalidated
+    }
+
     #[doc(hidden)]
     pub async fn restore_known_accounts(
         &self,
@@ -1585,6 +1737,132 @@ impl Runtime {
                     insecure_transport_confirmed,
                 );
                 self.install_verified_authentication(verified, evidence)
+                    .await
+            }
+            RuntimeRequest::QuickUnlock {
+                account_id,
+                master_password,
+            } => {
+                let master_password = Zeroizing::new(master_password);
+                self.ensure_open()?;
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before durable acceptance",
+                    ));
+                }
+                let auth_config = self.auth_client_config.clone().ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationUnavailable,
+                        "authentication is not configured for this Runtime",
+                    )
+                })?;
+                let execution_lock = self.account_execution_lock(&account_id)?;
+                let execution_guard = execution_lock.lock().await;
+                self.ensure_open()?;
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before Quick Unlock preparation",
+                    ));
+                }
+                if self
+                    .lock_epoch_pending
+                    .lock()
+                    .expect("pending lock epoch lock poisoned")
+                    .contains_key(&account_id)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "Account lock epoch persistence is pending",
+                    ));
+                }
+                let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
+                    RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+                })?;
+                if snapshot.failure.is_some() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AccountFailed,
+                        "the selected Account module has failed",
+                    ));
+                }
+                let catalog = self
+                    .platform_storage
+                    .load_device_catalog()
+                    .await?
+                    .ok_or_else(quick_unlock_material_required)?;
+                let catalog_account = catalog
+                    .accounts
+                    .iter()
+                    .find(|candidate| candidate.account_id == account_id)
+                    .ok_or_else(quick_unlock_material_required)?;
+                if catalog_account.pending_install.is_some()
+                    || catalog_account.active_incarnation.as_ref() != Some(&snapshot.incarnation)
+                {
+                    return Err(quick_unlock_material_required());
+                }
+                let metadata = self
+                    .platform_storage
+                    .load_account_metadata_for_authentication(&account_id, &snapshot.incarnation)
+                    .await?
+                    .ok_or_else(quick_unlock_material_required)?;
+                if metadata.user_id != snapshot.user_id {
+                    return Err(quick_unlock_material_required());
+                }
+                let quick_unlock = self
+                    .platform_storage
+                    .load_quick_unlock_for_authentication(&account_id, &snapshot.incarnation)
+                    .await?
+                    .ok_or_else(quick_unlock_material_required)?;
+                let device_key = self
+                    .platform_storage
+                    .load_device_key_for_authentication()
+                    .await?
+                    .ok_or_else(quick_unlock_material_required)?;
+                let stored_master_unlock_key = unwrap_master_unlock_key(
+                    &quick_unlock.encrypted_master_unlock_key,
+                    &device_key.key_bytes,
+                )?;
+                let normalized_email = bittery_crypto_core::normalize_email(&metadata.email);
+                let http = AuthHttpClient::new(
+                    &self.http_transport,
+                    &metadata.normalized_server_url,
+                    metadata.insecure_transport_confirmed,
+                    auth_config,
+                )?;
+                let verified = authenticate(
+                    &http,
+                    AuthenticationInput {
+                        email: &normalized_email,
+                        master_password: &master_password,
+                        secret_key: &quick_unlock.secret_key,
+                        pinned_kdf_profile: Some(&metadata.pinned_kdf_profile),
+                    },
+                    cancellation.clone(),
+                )
+                .await?;
+                drop(master_password);
+                let prepared = prepare_quick_unlock(
+                    verified,
+                    metadata,
+                    quick_unlock,
+                    &stored_master_unlock_key,
+                    &SystemClock,
+                )?;
+                drop(stored_master_unlock_key);
+                before_acceptance();
+                self.ensure_not_closed()?;
+                if cancellation.is_cancelled() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::Cancelled,
+                        "caller cancelled before durable Quick Unlock acceptance",
+                    ));
+                }
+
+                // Every remote and local equality check is complete. Cancellation no longer owns
+                // the accepted session installation; it must finish or fence this exact generation.
+                accepted();
+                self.commit_quick_unlock(snapshot, prepared, execution_guard)
                     .await
             }
             RuntimeRequest::CreateLoginItem {
@@ -2347,6 +2625,13 @@ fn startup_invariant(message: impl Into<String>) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
 }
 
+fn quick_unlock_material_required() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::AuthenticationRequired,
+        "Stored Quick Unlock material is unavailable",
+    )
+}
+
 pub struct ObservationHandle {
     id: u64,
     runtime: Weak<Runtime>,
@@ -2942,6 +3227,7 @@ mod authenticated_installation_tests {
         events: Arc<Mutex<Vec<PersistenceStep>>>,
         invocations: AtomicU64,
         fault: Mutex<Option<PersistenceStep>>,
+        read_fault: Mutex<Option<RuntimeError>>,
         pause: Mutex<Option<Arc<Pause>>>,
         cancel_on_next_write: Mutex<Option<RequestCancellation>>,
     }
@@ -2949,6 +3235,10 @@ mod authenticated_installation_tests {
     impl InstallationPlatform {
         fn fail_at(&self, step: PersistenceStep) {
             *self.fault.lock().unwrap() = Some(step);
+        }
+
+        fn fail_next_read(&self, error: RuntimeError) {
+            *self.read_fault.lock().unwrap() = Some(error);
         }
 
         fn pause_at(&self, pause: Arc<Pause>) {
@@ -3028,11 +3318,15 @@ mod authenticated_installation_tests {
             let key = request["key"].as_str().unwrap().to_owned();
             match request["type"].as_str().unwrap() {
                 "get" => Ok(Zeroizing::new(
-                    json!({
-                        "type": "value",
-                        "value": self.values.lock().unwrap().get(&(area, key)).cloned()
-                    })
-                    .to_string(),
+                    if let Some(error) = self.read_fault.lock().unwrap().take() {
+                        return Err(error);
+                    } else {
+                        json!({
+                            "type": "value",
+                            "value": self.values.lock().unwrap().get(&(area, key)).cloned()
+                        })
+                        .to_string()
+                    },
                 )),
                 "set" => {
                     let serialized = request["value"].as_str().unwrap().to_owned();
@@ -3184,6 +3478,7 @@ mod authenticated_installation_tests {
         BadProof,
         FollowUpError,
         CancelAfterStart,
+        UserMismatch,
     }
 
     struct RoutingAuthHttp {
@@ -3232,6 +3527,10 @@ mod authenticated_installation_tests {
 
         fn requests(&self) -> Vec<Value> {
             self.state.lock().unwrap().requests.clone()
+        }
+
+        fn clear_requests(&self) {
+            self.state.lock().unwrap().requests.clear();
         }
     }
 
@@ -3293,7 +3592,7 @@ mod authenticated_installation_tests {
                         "user": {
                             "email": NORMALIZED_EMAIL,
                             "encryptedPrivateKey": "encrypted-private-key",
-                            "id": "user-1",
+                            "id": if matches!(self.behavior, RoutingAuthBehavior::UserMismatch) { "user-2" } else { "user-1" },
                             "name": "User One",
                             "publicKey": "public-key",
                             "secretKeyHint": "A3-ABCDEF",
@@ -3501,6 +3800,46 @@ mod authenticated_installation_tests {
         }
     }
 
+    fn quick_unlock_request(account_id: &str) -> RuntimeRequest {
+        RuntimeRequest::QuickUnlock {
+            account_id: AccountId::from(account_id),
+            master_password: MASTER_PASSWORD.into(),
+        }
+    }
+
+    fn verified_with_derived_muk() -> VerifiedAuthentication {
+        let mut result = verified("user-1");
+        result.user.email = NORMALIZED_EMAIL.into();
+        result.master_unlock_key = Zeroizing::new(
+            derive_keys(
+                MASTER_PASSWORD,
+                SECRET_KEY,
+                NORMALIZED_EMAIL,
+                &result.kdf_profile,
+            )
+            .unwrap()
+            .master_unlock_key,
+        );
+        result
+    }
+
+    async fn install_quick_unlock_account(runtime: &Runtime, platform: &InstallationPlatform) {
+        runtime
+            .install_verified_authentication_with(
+                verified_with_derived_muk(),
+                evidence(),
+                &FixedClock(NOW_MS),
+                &FixedEntropy::new(&["account-1", "generation-1"]),
+            )
+            .await
+            .unwrap();
+        runtime
+            .mark_account_locked(&AccountId::from("account-1"))
+            .await
+            .unwrap();
+        platform.clear_events();
+    }
+
     #[tokio::test]
     async fn sign_in_routes_the_verified_ceremony_into_one_published_unlocked_account() {
         let http = Arc::new(RoutingAuthHttp::new(
@@ -3549,6 +3888,473 @@ mod authenticated_installation_tests {
         assert_eq!(status.accounts.len(), 1);
         assert_eq!(status.accounts[0].account_id, account_id);
         assert_eq!(status.accounts[0].access, AccountAccessState::Unlocked);
+    }
+
+    #[tokio::test]
+    async fn quick_unlock_reauthenticates_and_updates_only_the_existing_generation_session() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        {
+            let key = (
+                "deviceSecret".into(),
+                "bittery:runtime:platform-storage:account:9:account-1:incarnation:12:generation-1:quick-unlock".into(),
+            );
+            let mut values = platform.values.lock().unwrap();
+            let mut document: Value = serde_json::from_str(values.get(&key).unwrap()).unwrap();
+            document["lastMasterPasswordEntryMs"] = json!(0);
+            values.insert(key, document.to_string());
+        }
+        http.clear_requests();
+        let before = runtime
+            .replica
+            .snapshot(&AccountId::from("account-1"))
+            .unwrap();
+        let catalog_before = platform.catalog().unwrap();
+        let sink = Arc::new(Sink::default());
+        let _observation = runtime
+            .observe(
+                ObservationRequest::RuntimeStatus {
+                    account_id: Some(AccountId::from("account-1")),
+                },
+                sink.clone(),
+            )
+            .unwrap();
+
+        let response = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response,
+            RuntimeResponse::SignedIn {
+                account_id: AccountId::from("account-1"),
+                user_id: "user-1".into(),
+            }
+        );
+        assert_eq!(http.requests().len(), 3);
+        assert_eq!(
+            platform.events(),
+            vec![
+                PersistenceStep::Metadata,
+                PersistenceStep::QuickUnlock,
+                PersistenceStep::CurrentSession,
+            ]
+        );
+        assert_eq!(platform.catalog().unwrap(), catalog_before);
+        let after = runtime
+            .replica
+            .snapshot(&AccountId::from("account-1"))
+            .unwrap();
+        assert_eq!(after, before);
+        assert!(runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+        assert_eq!(
+            runtime.account_access_state(&AccountId::from("account-1")),
+            Some(AccountAccessState::Unlocked)
+        );
+        let quick_unlock = runtime
+            .platform_storage
+            .load_quick_unlock(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(quick_unlock.last_master_password_entry_ms.unwrap() > NOW_MS);
+        assert_eq!(sink.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn quick_unlock_ordinary_failures_leave_generation_and_quick_material_untouched() {
+        for behavior in [
+            RoutingAuthBehavior::BadProof,
+            RoutingAuthBehavior::FollowUpError,
+        ] {
+            let http = Arc::new(RoutingAuthHttp::new(current_kdf_profile(), behavior, None));
+            let (runtime, _replica, platform) = routing_harness(http).await;
+            install_quick_unlock_account(&runtime, &platform).await;
+            let before = runtime
+                .platform_storage
+                .load_quick_unlock(
+                    &AccountId::from("account-1"),
+                    &Incarnation::from("generation-1"),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            platform.clear_events();
+
+            assert!(runtime
+                .request(
+                    quick_unlock_request("account-1"),
+                    RequestCancellation::new(),
+                )
+                .await
+                .is_err());
+            assert!(platform.events().is_empty());
+            let after = runtime
+                .platform_storage
+                .load_quick_unlock(
+                    &AccountId::from("account-1"),
+                    &Incarnation::from("generation-1"),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                after.last_master_password_entry_ms,
+                before.last_master_password_entry_ms
+            );
+            assert_eq!(
+                runtime.account_access_state(&AccountId::from("account-1")),
+                Some(AccountAccessState::Locked)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_quick_unlock_material_and_pending_lock_epoch_fail_before_http() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        http.clear_requests();
+        runtime
+            .platform_storage
+            .remove_quick_unlock(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1"),
+            )
+            .await
+            .unwrap();
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+        assert!(http.requests().is_empty());
+
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        http.clear_requests();
+        runtime
+            .lock_epoch_pending
+            .lock()
+            .unwrap()
+            .insert(AccountId::from("account-1"), 2);
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(http.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn corrupt_quick_material_requires_full_sign_in_but_executor_errors_are_preserved() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        http.clear_requests();
+        platform.values.lock().unwrap().insert(
+            (
+                "deviceSecret".into(),
+                "bittery:runtime:platform-storage:account:9:account-1:incarnation:12:generation-1:quick-unlock".into(),
+            ),
+            "{broken".into(),
+        );
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+        assert!(http.requests().is_empty());
+
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        http.clear_requests();
+        platform.fail_next_read(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationUnavailable,
+            "host storage is offline",
+        ));
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(error.message, "host storage is offline");
+        assert!(http.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mismatched_local_muk_or_server_user_never_starts_quick_unlock_writes() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        let key = (
+            "deviceSecret".into(),
+            "bittery:runtime:platform-storage:account:9:account-1:incarnation:12:generation-1:quick-unlock".into(),
+        );
+        {
+            let mut values = platform.values.lock().unwrap();
+            let mut document: Value = serde_json::from_str(values.get(&key).unwrap()).unwrap();
+            document["encryptedMasterUnlockKey"] = serde_json::to_value(
+                crate::authentication_installation::wrap_master_unlock_key(
+                    &[0x11; 32],
+                    &[0x5A; 32],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            values.insert(key, document.to_string());
+        }
+        platform.clear_events();
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+        assert!(platform.events().is_empty());
+
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::UserMismatch,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        let error = runtime
+            .request(
+                quick_unlock_request("account-1"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert!(platform.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelled_waiter_and_close_cannot_publish_a_stale_quick_unlock() {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        http.clear_requests();
+        platform.clear_events();
+        let lock = runtime
+            .account_execution_lock(&AccountId::from("account-1"))
+            .unwrap();
+        let guard = lock.lock().await;
+        let cancellation = RequestCancellation::new();
+        let waiting = {
+            let runtime = runtime.clone();
+            let cancellation = cancellation.clone();
+            tokio::spawn(async move {
+                runtime
+                    .request(quick_unlock_request("account-1"), cancellation)
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        drop(guard);
+        assert_eq!(
+            waiting.await.unwrap().unwrap_err().code,
+            RuntimeErrorCode::Cancelled
+        );
+        assert_eq!(platform.invocation_count(), 0);
+        assert!(http.requests().is_empty());
+
+        let guard = lock.lock().await;
+        let waiting = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                runtime
+                    .request(
+                        quick_unlock_request("account-1"),
+                        RequestCancellation::new(),
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        let closing = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.close().await })
+        };
+        while !runtime.is_closed() {
+            tokio::task::yield_now().await;
+        }
+        drop(guard);
+        assert_eq!(
+            waiting.await.unwrap().unwrap_err().code,
+            RuntimeErrorCode::RuntimeClosed
+        );
+        closing.await.unwrap();
+        assert!(!runtime.has_live_master_unlock_key(
+            &AccountId::from("account-1"),
+            &Incarnation::from("generation-1")
+        ));
+    }
+
+    #[tokio::test]
+    async fn accepted_quick_unlock_write_failures_fence_without_replacing_the_replica() {
+        for failure in [
+            PersistenceStep::Metadata,
+            PersistenceStep::QuickUnlock,
+            PersistenceStep::CurrentSession,
+        ] {
+            let http = Arc::new(RoutingAuthHttp::new(
+                current_kdf_profile(),
+                RoutingAuthBehavior::Success,
+                None,
+            ));
+            let (runtime, _replica, platform) = routing_harness(http).await;
+            install_quick_unlock_account(&runtime, &platform).await;
+            let before = runtime
+                .replica
+                .snapshot(&AccountId::from("account-1"))
+                .unwrap();
+            platform.fail_at(failure);
+
+            assert!(runtime
+                .request(
+                    quick_unlock_request("account-1"),
+                    RequestCancellation::new(),
+                )
+                .await
+                .is_err());
+            assert_eq!(
+                runtime.account_access_state(&AccountId::from("account-1")),
+                Some(AccountAccessState::SignedOut)
+            );
+            assert!(!runtime.has_live_master_unlock_key(
+                &AccountId::from("account-1"),
+                &Incarnation::from("generation-1")
+            ));
+            assert_eq!(
+                runtime
+                    .replica
+                    .snapshot(&AccountId::from("account-1"))
+                    .unwrap(),
+                before
+            );
+            assert!(runtime
+                .platform_storage
+                .load_quick_unlock(
+                    &AccountId::from("account-1"),
+                    &Incarnation::from("generation-1"),
+                )
+                .await
+                .unwrap()
+                .is_some());
+
+            runtime
+                .request(
+                    quick_unlock_request("account-1"),
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                runtime.account_access_state(&AccountId::from("account-1")),
+                Some(AccountAccessState::Unlocked)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn quick_unlock_cancellation_has_one_final_pre_write_acceptance_boundary() {
+        let cancellation = RequestCancellation::new();
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (runtime, _replica, platform) = routing_harness(http).await;
+        install_quick_unlock_account(&runtime, &platform).await;
+        let error = runtime
+            .request_with_hooks(
+                quick_unlock_request("account-1"),
+                cancellation.clone(),
+                || cancellation.cancel(),
+                || panic!("pre-acceptance cancellation must not be accepted"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+        assert!(platform.events().is_empty());
+
+        let cancellation = RequestCancellation::new();
+        let response = runtime
+            .request_with_acceptance_hook(
+                quick_unlock_request("account-1"),
+                cancellation.clone(),
+                || cancellation.cancel(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(response, RuntimeResponse::SignedIn { .. }));
+        assert_eq!(
+            platform.events(),
+            vec![
+                PersistenceStep::Metadata,
+                PersistenceStep::QuickUnlock,
+                PersistenceStep::CurrentSession,
+            ]
+        );
     }
 
     #[tokio::test]

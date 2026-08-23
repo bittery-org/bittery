@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{decrypt, encrypt, EncryptedData};
+use subtle::ConstantTimeEq;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use zeroize::Zeroizing;
 
@@ -54,6 +55,14 @@ impl InstallationEntropy for SystemInstallationEntropy {
 /// Fully prepared generation documents. Construction validates all authenticated timestamps and
 /// filters hidden Travel Mode Vault keys before any installation write starts.
 pub(crate) struct PreparedAuthenticatedInstallation {
+    pub(crate) metadata: AccountMetadataDocument,
+    pub(crate) quick_unlock: QuickUnlockDocument,
+    pub(crate) current_session: CurrentSessionDocument,
+    pub(crate) master_unlock_key: Zeroizing<[u8; MASTER_UNLOCK_KEY_BYTES]>,
+}
+
+/// Fully prepared writes for re-authenticating one existing Account generation.
+pub(crate) struct PreparedQuickUnlock {
     pub(crate) metadata: AccountMetadataDocument,
     pub(crate) quick_unlock: QuickUnlockDocument,
     pub(crate) current_session: CurrentSessionDocument,
@@ -209,7 +218,7 @@ pub(crate) fn prepare_authenticated_installation(
         incarnation.clone(),
         encrypted_master_unlock_key,
         secret_key,
-        now_ms,
+        metadata.last_active_at_ms,
         Some(now_ms),
         biometric_enabled,
     )?;
@@ -228,6 +237,155 @@ pub(crate) fn prepare_authenticated_installation(
     Ok(PreparedAuthenticatedInstallation {
         metadata,
         quick_unlock,
+        current_session,
+        master_unlock_key: verified.master_unlock_key,
+    })
+}
+
+/// Validates fresh Server evidence against the exact installed generation before any Quick Unlock
+/// write is allowed. The existing Replica and generation identities are intentionally absent from
+/// the returned write set.
+pub(crate) fn prepare_quick_unlock(
+    verified: VerifiedAuthentication,
+    metadata: AccountMetadataDocument,
+    quick_unlock: QuickUnlockDocument,
+    stored_master_unlock_key: &Zeroizing<[u8; MASTER_UNLOCK_KEY_BYTES]>,
+    clock: &dyn Clock,
+) -> Result<PreparedQuickUnlock, RuntimeError> {
+    let now_ms = clock.now_ms()?;
+    if verified.normalized_server_url != metadata.normalized_server_url
+        || verified.user.id != metadata.user_id
+        || verified.kdf_profile != metadata.pinned_kdf_profile
+    {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationUnavailable,
+            "Authenticated Account evidence does not match the installed Account",
+        ));
+    }
+    if !bool::from(
+        verified
+            .master_unlock_key
+            .as_slice()
+            .ct_eq(stored_master_unlock_key.as_slice()),
+    ) {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationRequired,
+            "Stored master unlock key does not match the installed Account",
+        ));
+    }
+    bittery_crypto_core::validate_kdf_profile(
+        &verified.kdf_profile,
+        Some(&metadata.pinned_kdf_profile),
+    )
+    .map_err(|_| {
+        RuntimeError::new(
+            RuntimeErrorCode::AuthenticationUnavailable,
+            "Authenticated KDF profile does not match the installed Account",
+        )
+    })?;
+    if verified.session_id.is_empty() {
+        return Err(invalid_authenticated_session());
+    }
+
+    let mut authenticated_vault_ids = std::collections::HashSet::new();
+    for vault_key in &verified.vault_keys {
+        if vault_key.vault_id.is_empty()
+            || vault_key.encrypted_vault_key.is_empty()
+            || !authenticated_vault_ids.insert(vault_key.vault_id.as_str())
+        {
+            return Err(invalid_authenticated_session());
+        }
+    }
+    let mut hidden_vault_ids = std::collections::HashSet::new();
+    for vault_id in &verified.travel_mode.hidden_vault_ids {
+        if vault_id.is_empty() || !hidden_vault_ids.insert(vault_id.as_str()) {
+            return Err(invalid_authenticated_session());
+        }
+    }
+    if verified.travel_mode.enabled != verified.travel_mode.enabled_at.is_some() {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationUnavailable,
+            "Server Travel Mode activation timestamp is inconsistent",
+        ));
+    }
+    let server_enabled_at_ms = verified
+        .travel_mode
+        .enabled_at
+        .as_deref()
+        .map(parse_server_timestamp_ms)
+        .transpose()?;
+    let verified_travel_mode = VerifiedTravelModePolicy {
+        enabled: verified.travel_mode.enabled,
+        hidden_vault_ids: verified.travel_mode.hidden_vault_ids.clone(),
+        server_enabled_at_ms,
+        server_updated_at_ms: Some(parse_server_timestamp_ms(&verified.travel_mode.updated_at)?),
+        verified_at_ms: now_ms,
+    };
+    if !verified.travel_mode.enabled {
+        hidden_vault_ids.clear();
+    }
+    let vault_keys = verified
+        .vault_keys
+        .into_iter()
+        .filter(|vault_key| !hidden_vault_ids.contains(vault_key.vault_id.as_str()))
+        .collect();
+    let server_expires_at_ms = parse_session_expiry_ms(&verified.expires_at)?;
+    if server_expires_at_ms <= now_ms {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::AuthenticationUnavailable,
+            "Server Session is already expired",
+        ));
+    }
+    let expires_at_ms = now_ms
+        .checked_add(DEFAULT_SESSION_EXPIRY_MS)
+        .ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Device Session expiry overflowed",
+            )
+        })?;
+
+    let account_id = metadata.account_id.clone();
+    let incarnation = metadata.incarnation.clone();
+    let refreshed_name = if verified.user.name.is_empty() {
+        metadata.name
+    } else {
+        verified.user.name
+    };
+    let updated_metadata = AccountMetadataDocument::new(
+        account_id.clone(),
+        incarnation.clone(),
+        metadata.user_id,
+        metadata.email,
+        refreshed_name,
+        metadata.normalized_server_url,
+        verified.user.team_name.or(metadata.team_name),
+        verified.user.team_avatar_url.or(metadata.team_avatar_url),
+        // Quick Unlock reuses the installed Secret Key, so its installed hint remains authoritative.
+        metadata.secret_key_hint,
+        metadata.added_at_ms,
+        metadata.last_active_at_ms,
+        metadata.biometric_enabled,
+        metadata.insecure_transport_confirmed,
+        metadata.pinned_kdf_profile,
+        Some(verified_travel_mode),
+    )?;
+    let updated_quick_unlock = quick_unlock.record_master_password_entry(now_ms)?;
+    let mut token = verified.token;
+    let current_session = CurrentSessionDocument::new(
+        account_id,
+        incarnation,
+        std::mem::take(&mut *token),
+        Some(verified.session_id),
+        expires_at_ms,
+        Some(server_expires_at_ms),
+        vault_keys,
+        verified.user.encrypted_private_key,
+    )?;
+
+    Ok(PreparedQuickUnlock {
+        metadata: updated_metadata,
+        quick_unlock: updated_quick_unlock,
         current_session,
         master_unlock_key: verified.master_unlock_key,
     })
@@ -391,6 +549,40 @@ mod tests {
         AuthenticationInstallationEvidence::new(SECRET_KEY.into(), false)
     }
 
+    fn existing_metadata() -> AccountMetadataDocument {
+        AccountMetadataDocument::new(
+            AccountId::from("account"),
+            Incarnation::from("generation"),
+            "user-1".into(),
+            "alice@example.com".into(),
+            "Stored Name".into(),
+            "https://vault.example.com".into(),
+            Some("Stored Team".into()),
+            Some("stored-avatar".into()),
+            "stored-hint".into(),
+            123,
+            456,
+            true,
+            false,
+            bittery_crypto_core::current_kdf_profile(),
+            None,
+        )
+        .unwrap()
+    }
+
+    fn existing_quick_unlock() -> QuickUnlockDocument {
+        QuickUnlockDocument::new(
+            AccountId::from("account"),
+            Incarnation::from("generation"),
+            wrap_master_unlock_key(&MUK, &DEVICE_KEY).unwrap(),
+            SECRET_KEY.into(),
+            123,
+            Some(456),
+            true,
+        )
+        .unwrap()
+    }
+
     #[test]
     fn wrapper_encrypts_the_standard_base64_plaintext_without_aad() {
         let wrapped = wrap_master_unlock_key(&MUK, &DEVICE_KEY).unwrap();
@@ -427,6 +619,60 @@ mod tests {
             FixedClock(1_777_777_777_123).now_ms().unwrap(),
             1_777_777_777_123
         );
+    }
+
+    #[test]
+    fn quick_unlock_preparation_preserves_existing_generation_and_legacy_optional_metadata() {
+        let mut fresh = verified();
+        fresh.user.name.clear();
+        fresh.user.team_name = None;
+        fresh.user.team_avatar_url = None;
+        fresh.user.secret_key_hint = "changed-server-hint".into();
+        fresh.user.email = "server-canonicalized@example.com".into();
+        let prepared = prepare_quick_unlock(
+            fresh,
+            existing_metadata(),
+            existing_quick_unlock(),
+            &Zeroizing::new(MUK),
+            &FixedClock(1_700_000_000_000),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.metadata.account_id, AccountId::from("account"));
+        assert_eq!(
+            prepared.metadata.incarnation,
+            Incarnation::from("generation")
+        );
+        assert_eq!(prepared.metadata.name, "Stored Name");
+        assert_eq!(prepared.metadata.team_name.as_deref(), Some("Stored Team"));
+        assert_eq!(
+            prepared.metadata.team_avatar_url.as_deref(),
+            Some("stored-avatar")
+        );
+        assert_eq!(prepared.metadata.secret_key_hint, "stored-hint");
+        assert_eq!(prepared.metadata.email, "alice@example.com");
+        assert_eq!(prepared.metadata.last_active_at_ms, 456);
+        assert_eq!(
+            prepared.quick_unlock.last_master_password_entry_ms,
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(prepared.current_session.vault_keys.len(), 1);
+        assert_eq!(prepared.current_session.vault_keys[0].vault_id, "visible");
+    }
+
+    #[test]
+    fn quick_unlock_classifies_a_decryptable_wrong_stored_muk_as_full_sign_in_required() {
+        let error = prepare_quick_unlock(
+            verified(),
+            existing_metadata(),
+            existing_quick_unlock(),
+            &Zeroizing::new([0x11; MASTER_UNLOCK_KEY_BYTES]),
+            &FixedClock(1_700_000_000_000),
+        )
+        .err()
+        .expect("mismatched stored MUK must fail");
+
+        assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
     }
 
     #[test]

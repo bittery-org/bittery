@@ -501,6 +501,17 @@ impl QuickUnlockDocument {
         }
         Ok(())
     }
+
+    /// Consumes the secret-bearing document so password-entry evidence cannot be updated through a
+    /// stale clone while another generation is being installed.
+    pub(crate) fn record_master_password_entry(
+        mut self,
+        entered_at_ms: u64,
+    ) -> Result<Self, RuntimeError> {
+        self.last_master_password_entry_ms = Some(entered_at_ms);
+        self.validate()?;
+        Ok(self)
+    }
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -955,6 +966,30 @@ impl PlatformStorage {
         .await
     }
 
+    pub(crate) async fn load_account_metadata_for_authentication(
+        &self,
+        account_id: &AccountId,
+        incarnation: &Incarnation,
+    ) -> Result<Option<AccountMetadataDocument>, RuntimeError> {
+        require_account_id(account_id)?;
+        require_incarnation(incarnation)?;
+        let expected = account_id.clone();
+        let expected_incarnation = incarnation.clone();
+        self.load_authentication_document(
+            PlatformStorageValue::AccountMetadata(account_id.clone(), incarnation.clone()),
+            move |value: &AccountMetadataDocument| {
+                value.validate()?;
+                require_matching_account(&expected, &value.account_id, "Account metadata")?;
+                require_matching_incarnation(
+                    &expected_incarnation,
+                    &value.incarnation,
+                    "Account metadata",
+                )
+            },
+        )
+        .await
+    }
+
     pub(crate) async fn store_account_metadata(
         &self,
         document: &AccountMetadataDocument,
@@ -990,6 +1025,16 @@ impl PlatformStorage {
         .await
     }
 
+    pub(crate) async fn load_device_key_for_authentication(
+        &self,
+    ) -> Result<Option<DeviceKeyDocument>, RuntimeError> {
+        self.load_authentication_document(
+            PlatformStorageValue::DeviceKey,
+            |value: &DeviceKeyDocument| value.validate(),
+        )
+        .await
+    }
+
     pub(crate) async fn store_device_key(
         &self,
         document: &DeviceKeyDocument,
@@ -1013,6 +1058,30 @@ impl PlatformStorage {
         let expected = account_id.clone();
         let expected_incarnation = incarnation.clone();
         self.load_document(
+            PlatformStorageValue::AccountQuickUnlock(account_id.clone(), incarnation.clone()),
+            move |value: &QuickUnlockDocument| {
+                value.validate()?;
+                require_matching_account(&expected, &value.account_id, "Quick-unlock")?;
+                require_matching_incarnation(
+                    &expected_incarnation,
+                    &value.incarnation,
+                    "Quick-unlock",
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn load_quick_unlock_for_authentication(
+        &self,
+        account_id: &AccountId,
+        incarnation: &Incarnation,
+    ) -> Result<Option<QuickUnlockDocument>, RuntimeError> {
+        require_account_id(account_id)?;
+        require_incarnation(incarnation)?;
+        let expected = account_id.clone();
+        let expected_incarnation = incarnation.clone();
+        self.load_authentication_document(
             PlatformStorageValue::AccountQuickUnlock(account_id.clone(), incarnation.clone()),
             move |value: &QuickUnlockDocument| {
                 value.validate()?;
@@ -1125,6 +1194,25 @@ impl PlatformStorage {
         Ok(Some(document))
     }
 
+    /// Keeps host/executor failures intact while classifying only unusable persisted login material
+    /// as a request for Full sign-in.
+    async fn load_authentication_document<T>(
+        &self,
+        target: PlatformStorageValue,
+        validate: impl FnOnce(&T) -> Result<(), RuntimeError>,
+    ) -> Result<Option<T>, RuntimeError>
+    where
+        T: DeserializeOwned,
+    {
+        let Some(serialized) = self.get(target).await? else {
+            return Ok(None);
+        };
+        let document: T =
+            serde_json::from_str(&serialized).map_err(|_| unavailable_quick_unlock_material())?;
+        validate(&document).map_err(|_| unavailable_quick_unlock_material())?;
+        Ok(Some(document))
+    }
+
     async fn store_document<T>(
         &self,
         target: PlatformStorageValue,
@@ -1227,6 +1315,13 @@ fn require_matching_incarnation(
 
 fn platform_storage_invariant(message: impl Into<String>) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+fn unavailable_quick_unlock_material() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::AuthenticationRequired,
+        "Stored Quick Unlock material is unavailable",
+    )
 }
 
 #[cfg(test)]

@@ -3989,6 +3989,16 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class QuickUnlock(
+        val `accountId`: kotlin.String,
+        val `masterPassword`: uniffi.bittery_client_bindings.SecretString) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
     data class CreateLoginItem(
         val `accountId`: kotlin.String,
         val `vaultId`: kotlin.String,
@@ -4013,6 +4023,14 @@ sealed class RuntimeRequest: Disposable  {
         this.`masterPassword`,
         this.`secretKey`,
         this.`insecureTransportConfirmed`
+    )
+
+            }
+            is RuntimeRequest.QuickUnlock -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`masterPassword`
     )
 
             }
@@ -4049,7 +4067,11 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            2 -> RuntimeRequest.CreateLoginItem(
+            2 -> RuntimeRequest.QuickUnlock(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                )
+            3 -> RuntimeRequest.CreateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
@@ -4068,6 +4090,14 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
                 + FfiConverterTypeSecretString.allocationSize(value.`secretKey`)
                 + FfiConverterBoolean.allocationSize(value.`insecureTransportConfirmed`)
+            )
+        }
+        is RuntimeRequest.QuickUnlock -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
             )
         }
         is RuntimeRequest.CreateLoginItem -> {
@@ -4092,8 +4122,14 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterBoolean.write(value.`insecureTransportConfirmed`, buf)
                 Unit
             }
-            is RuntimeRequest.CreateLoginItem -> {
+            is RuntimeRequest.QuickUnlock -> {
                 buf.putInt(2)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
+                Unit
+            }
+            is RuntimeRequest.CreateLoginItem -> {
+                buf.putInt(3)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)

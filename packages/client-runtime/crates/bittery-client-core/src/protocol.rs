@@ -55,6 +55,10 @@ pub enum RuntimeRequest {
         secret_key: String,
         insecure_transport_confirmed: bool,
     },
+    QuickUnlock {
+        account_id: AccountId,
+        master_password: String,
+    },
     CreateLoginItem {
         account_id: AccountId,
         vault_id: String,
@@ -71,6 +75,11 @@ impl fmt::Debug for RuntimeRequest {
                 .debug_struct("SignIn")
                 .field("server_url", server_url)
                 .field("email", email)
+                .field("credentials", &"[redacted]")
+                .finish(),
+            Self::QuickUnlock { account_id, .. } => formatter
+                .debug_struct("QuickUnlock")
+                .field("account_id", account_id)
                 .field("credentials", &"[redacted]")
                 .finish(),
             Self::CreateLoginItem {
@@ -91,6 +100,7 @@ impl RuntimeRequest {
     pub fn account_id(&self) -> Option<&AccountId> {
         match self {
             Self::SignIn { .. } => None,
+            Self::QuickUnlock { account_id, .. } => Some(account_id),
             Self::CreateLoginItem { account_id, .. } => Some(account_id),
         }
     }

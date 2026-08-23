@@ -1436,6 +1436,14 @@ async fn plaintext_is_redacted_and_never_enters_replica_records() {
     let sign_in_debug = format!("{sign_in:?}");
     assert!(!sign_in_debug.contains("UNIQUE_MASTER_PASSWORD"));
     assert!(!sign_in_debug.contains("UNIQUE_SECRET_KEY"));
+    let quick_unlock = RuntimeRequest::QuickUnlock {
+        account_id: account_id.clone(),
+        master_password: "UNIQUE_QUICK_UNLOCK_PASSWORD".into(),
+    };
+    let quick_unlock_debug = format!("{quick_unlock:?}");
+    assert!(quick_unlock_debug.contains("account-1"));
+    assert!(!quick_unlock_debug.contains("UNIQUE_QUICK_UNLOCK_PASSWORD"));
+    assert_eq!(quick_unlock.account_id(), Some(&account_id));
 
     runtime
         .request(request, RequestCancellation::new())
@@ -1513,6 +1521,15 @@ fn login_draft_and_runtime_wire_match_the_existing_camel_case_subset() {
     assert_eq!(wire["vaultId"], "vault-1");
     assert_eq!(wire["draft"]["customFields"][0]["type"], "password");
     assert!(wire.get("account_id").is_none());
+
+    let quick_unlock = serde_json::to_value(RuntimeRequest::QuickUnlock {
+        account_id: AccountId::from("account-1"),
+        master_password: "secret".into(),
+    })
+    .unwrap();
+    assert_eq!(quick_unlock["type"], "quickUnlock");
+    assert_eq!(quick_unlock["accountId"], "account-1");
+    assert_eq!(quick_unlock["masterPassword"], "secret");
 }
 
 #[tokio::test]
