@@ -178,12 +178,21 @@ export class WebClientRuntime {
   /**
    * @param {Function} replica_invoke
    * @param {Function} platform_storage_invoke
+   * @param {Function} http_invoke
+   * @param {Function} http_cancel
    * @returns {WebClientRuntime}
    */
-  static withExecutors(replica_invoke, platform_storage_invoke) {
+  static withExecutors(
+    replica_invoke,
+    platform_storage_invoke,
+    http_invoke,
+    http_cancel,
+  ) {
     const ret = wasm.webclientruntime_withExecutors(
       replica_invoke,
       platform_storage_invoke,
+      http_invoke,
+      http_cancel,
     );
     return WebClientRuntime.__wrap(ret);
   }

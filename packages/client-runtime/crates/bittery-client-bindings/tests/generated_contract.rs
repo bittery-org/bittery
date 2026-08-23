@@ -6,6 +6,7 @@ const KOTLIN_FACADE: &str = include_str!("../facades/kotlin/BitteryClientRuntime
 const SWIFT_FACADE: &str = include_str!("../facades/swift/BitteryClientRuntime.swift");
 const WEB_DECLARATIONS: &str =
     include_str!("../../../../crypto/wasm/generated/wasm-bindgen/index.d.ts");
+const WEB_BINDING_SOURCE: &str = include_str!("../src/web.rs");
 
 #[test]
 fn native_generated_values_keep_plaintext_behind_opaque_objects() {
@@ -42,5 +43,23 @@ fn web_exposes_one_flat_serialized_executor_factory_and_async_open() {
     assert!(WEB_DECLARATIONS.contains("static withExecutors("));
     assert!(WEB_DECLARATIONS.contains("replica_invoke: Function,"));
     assert!(WEB_DECLARATIONS.contains("platform_storage_invoke: Function,"));
+    assert!(WEB_DECLARATIONS.contains("http_invoke: Function,"));
+    assert!(WEB_DECLARATIONS.contains("http_cancel: Function,"));
     assert!(WEB_DECLARATIONS.contains("open(): Promise<void>;"));
+}
+
+#[test]
+fn web_close_cancels_binding_requests_before_waiting_for_core_close() {
+    let close = WEB_BINDING_SOURCE
+        .find("pub async fn close(&self)")
+        .expect("Web close method");
+    let close_body = &WEB_BINDING_SOURCE[close..];
+    let cancel = close_body
+        .find("cancellation.cancel();")
+        .expect("binding request cancellation");
+    let core_close = close_body
+        .find("self.inner.close().await;")
+        .expect("Core close await");
+
+    assert!(cancel < core_close);
 }

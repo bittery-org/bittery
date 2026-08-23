@@ -1,4 +1,5 @@
 import { IndexedDbReplicaExecutor } from "@bittery/client-runtime/indexeddb-executor";
+import { WebHttpTransportExecutor } from "@bittery/client-runtime/web-http-transport-executor";
 import { createRuntimeWorkerService } from "@bittery/client-runtime/worker-runtime";
 import {
 	createCryptoUniffiBackend,
@@ -11,6 +12,7 @@ import {
 
 const scope = globalThis as unknown as WorkerRouterScope;
 const hostRpc = createWorkerHostRpc(scope);
+const httpExecutor = new WebHttpTransportExecutor();
 
 serveWorkerChannels(scope, {
 	crypto: createCryptoWorkerService(async () =>
@@ -21,6 +23,7 @@ serveWorkerChannels(scope, {
 		platformStorageExecutor: {
 			invoke: (requestJson) => hostRpc.request<string>(requestJson),
 		},
+		httpExecutor,
 		loadWasm: loadCombinedWebWasm,
 	}),
 });

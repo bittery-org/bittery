@@ -27,6 +27,8 @@ export class WebClientRuntime {
   static withExecutors(
     replica_invoke: Function,
     platform_storage_invoke: Function,
+    http_invoke: Function,
+    http_cancel: Function,
   ): WebClientRuntime;
   static withReplicaExecutor(invoke: Function): WebClientRuntime;
 }
@@ -1785,7 +1787,12 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => void;
-  readonly webclientruntime_withExecutors: (a: any, b: any) => number;
+  readonly webclientruntime_withExecutors: (
+    a: any,
+    b: any,
+    c: any,
+    d: any,
+  ) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
   readonly uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
     a: bigint,

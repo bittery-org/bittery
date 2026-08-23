@@ -17,6 +17,11 @@ struct JsSerializedPlatformStorageExecutor {
     invoke: js_sys::Function,
 }
 
+struct JsSerializedHttpExecutor {
+    invoke: js_sys::Function,
+    cancel: js_sys::Function,
+}
+
 #[async_trait::async_trait(?Send)]
 impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
@@ -28,6 +33,20 @@ impl core::SerializedReplicaExecutor for JsSerializedReplicaExecutor {
 impl core::SerializedPlatformStorageExecutor for JsSerializedPlatformStorageExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
         invoke_serialized(&self.invoke, request_json, platform_storage_invoke_error).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl core::SerializedHttpExecutor for JsSerializedHttpExecutor {
+    async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
+        invoke_serialized(&self.invoke, request_json, http_invoke_error).await
+    }
+
+    fn cancel(&self, dispatch_id: &str) {
+        // Cancellation is best-effort and must not expose a host exception to Runtime policy.
+        let _ = self
+            .cancel
+            .call1(&JsValue::UNDEFINED, &JsValue::from_str(dispatch_id));
     }
 }
 
@@ -60,6 +79,13 @@ fn platform_storage_invoke_error(_reason: &str) -> core::RuntimeError {
     core::RuntimeError {
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Platform storage invocation failed".into(),
+    }
+}
+
+fn http_invoke_error(_reason: &str) -> core::RuntimeError {
+    core::RuntimeError {
+        code: core::RuntimeErrorCode::InvariantViolation,
+        message: "HTTP transport invocation failed".into(),
     }
 }
 
@@ -115,6 +141,8 @@ impl WebClientRuntime {
     pub fn with_executors(
         replica_invoke: js_sys::Function,
         platform_storage_invoke: js_sys::Function,
+        http_invoke: js_sys::Function,
+        http_cancel: js_sys::Function,
     ) -> Self {
         Self::from_inner(core::Runtime::with_serialized_executors(
             Arc::new(JsSerializedReplicaExecutor {
@@ -122,6 +150,10 @@ impl WebClientRuntime {
             }),
             Arc::new(JsSerializedPlatformStorageExecutor {
                 invoke: platform_storage_invoke,
+            }),
+            Arc::new(JsSerializedHttpExecutor {
+                invoke: http_invoke,
+                cancel: http_cancel,
             }),
         ))
     }
@@ -215,15 +247,17 @@ impl WebClientRuntime {
     }
 
     pub async fn close(&self) {
-        self.inner.close().await;
-        for cancellation in self
+        let cancellations: Vec<_> = self
             .cancellations
             .lock()
             .expect("cancellation lock poisoned")
-            .values()
-        {
+            .drain()
+            .map(|(_, cancellation)| cancellation)
+            .collect();
+        for cancellation in cancellations {
             cancellation.cancel();
         }
+        self.inner.close().await;
         let observations: Vec<_> = self
             .observations
             .lock()

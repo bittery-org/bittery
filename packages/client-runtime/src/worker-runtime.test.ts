@@ -60,6 +60,7 @@ function runtimeService(runtime: RuntimeDouble) {
 				return "{}";
 			},
 		},
+		httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
 		loadWasm: async () =>
 			({
 				WebClientRuntime: {
@@ -75,11 +76,13 @@ function runtimeService(runtime: RuntimeDouble) {
 }
 
 describe("Runtime worker service", () => {
-	test("passes both serialized executors and opens once before serving commands", async () => {
+	test("passes every serialized executor and opens once before serving commands", async () => {
 		const runtime = new RuntimeDouble();
 		const calls: string[] = [];
 		let replicaInvoke: ((requestJson: string) => Promise<string>) | undefined;
 		let platformInvoke: ((requestJson: string) => Promise<string>) | undefined;
+		let httpInvoke: ((requestJson: string) => Promise<string>) | undefined;
+		let httpCancel: ((dispatchId: string) => void) | undefined;
 		const service = createRuntimeWorkerService({
 			executor: {
 				async invoke(requestJson) {
@@ -93,11 +96,22 @@ describe("Runtime worker service", () => {
 					return "platform-result";
 				},
 			},
+			httpExecutor: {
+				async invoke(requestJson) {
+					calls.push(`http:${requestJson}`);
+					return "http-result";
+				},
+				cancel(dispatchId) {
+					calls.push(`cancel:${dispatchId}`);
+				},
+			},
 			loadWasm: async () => ({
 				WebClientRuntime: {
-					withExecutors(replica, platform) {
+					withExecutors(replica, platform, invokeHttp, cancelHttp) {
 						replicaInvoke = replica;
 						platformInvoke = platform;
+						httpInvoke = invokeHttp;
+						httpCancel = cancelHttp;
 						return runtime;
 					},
 				},
@@ -120,11 +134,17 @@ describe("Runtime worker service", () => {
 		expect(runtime.openCalls).toBe(1);
 		expect(replicaInvoke).toBeFunction();
 		expect(platformInvoke).toBeFunction();
+		expect(httpInvoke).toBeFunction();
+		expect(httpCancel).toBeFunction();
 		expect(await replicaInvoke?.('{"type":"read"}')).toBe("replica-result");
 		expect(await platformInvoke?.('{"type":"get"}')).toBe("platform-result");
+		expect(await httpInvoke?.('{"dispatchId":"one"}')).toBe("http-result");
+		httpCancel?.("one");
 		expect(calls).toEqual([
 			'replica:{"type":"read"}',
 			'platform:{"type":"get"}',
+			'http:{"dispatchId":"one"}',
+			"cancel:one",
 		]);
 	});
 
@@ -169,6 +189,7 @@ describe("Runtime worker service", () => {
 		const service = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
 			loadWasm: async () => {
 				const runtime = loads++ === 0 ? failed : recovered;
 				return {
@@ -371,6 +392,7 @@ describe("Runtime worker service", () => {
 		const service = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
 			loadWasm: async () => {
 				loads += 1;
 				throw new Error("must stay cold");

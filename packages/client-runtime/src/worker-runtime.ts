@@ -6,6 +6,11 @@ export interface PlatformStorageExecutor {
 	invoke(requestJson: string): Promise<string>;
 }
 
+export interface HttpExecutor {
+	invoke(requestJson: string): Promise<string>;
+	cancel(dispatchId: string): void;
+}
+
 interface WebClientRuntimeLike {
 	cancel(requestId: string): void;
 	close(): Promise<void>;
@@ -24,6 +29,8 @@ export interface RuntimeWasm {
 		withExecutors(
 			replicaInvoke: (requestJson: string) => Promise<string>,
 			platformStorageInvoke: (requestJson: string) => Promise<string>,
+			httpInvoke: (requestJson: string) => Promise<string>,
+			httpCancel: (dispatchId: string) => void,
 		): WebClientRuntimeLike;
 	};
 }
@@ -40,6 +47,7 @@ export interface RuntimeWorkerService {
 export interface RuntimeWorkerServiceDeps {
 	executor: ReplicaExecutor;
 	platformStorageExecutor: PlatformStorageExecutor;
+	httpExecutor: HttpExecutor;
 	loadWasm(): Promise<RuntimeWasm>;
 }
 
@@ -118,6 +126,8 @@ export function createRuntimeWorkerService(
 			const created = WebClientRuntime.withExecutors(
 				deps.executor.invoke.bind(deps.executor),
 				deps.platformStorageExecutor.invoke.bind(deps.platformStorageExecutor),
+				deps.httpExecutor.invoke.bind(deps.httpExecutor),
+				deps.httpExecutor.cancel.bind(deps.httpExecutor),
 			);
 			try {
 				await created.open();

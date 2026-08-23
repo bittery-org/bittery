@@ -7,6 +7,9 @@
 		"./indexeddb-executor": {
 			"default": "./src/indexeddb-executor.ts"
 		},
+		"./web-http-transport-executor": {
+			"default": "./src/web-http-transport-executor.ts"
+		},
 		"./worker-runtime": {
 			"default": "./src/worker-runtime.ts"
 		},

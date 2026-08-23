@@ -66,6 +66,7 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 			email: "person@example.test",
 			masterPassword: "UNIQUE_MASTER_PASSWORD",
 			secretKey: "UNIQUE_SECRET_KEY",
+			insecureTransportConfirmed: false,
 		}),
 	);
 	assert.ok(responsePromise instanceof Promise);
@@ -117,6 +118,8 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 			platformInvocations.push(requestJson);
 			return '{"type":"value","value":null}';
 		},
+		async () => '{"type":"networkFailure"}',
+		() => undefined,
 	);
 	const openPromise = openingRuntime.open();
 	assert.ok(openPromise instanceof Promise);
@@ -132,6 +135,8 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 		async () => {
 			throw new Error("PRIVATE_BROWSER_QUOTA_DETAIL");
 		},
+		async () => '{"type":"networkFailure"}',
+		() => undefined,
 	);
 	await assert.rejects(failingRuntime.open(), (error) => {
 		assert.match(String(error), /Platform storage invocation failed/);
