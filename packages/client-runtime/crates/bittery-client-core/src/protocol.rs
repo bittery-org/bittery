@@ -1,3 +1,4 @@
+use crate::wire::decimal_u64;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::{
@@ -42,6 +43,10 @@ string_id!(AccountId);
 string_id!(Incarnation);
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -56,10 +61,18 @@ pub enum RuntimeRequest {
         insecure_transport_confirmed: bool,
     },
     QuickUnlock {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
         account_id: AccountId,
         master_password: String,
     },
     CreateLoginItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
         account_id: AccountId,
         vault_id: String,
         draft: LoginItemDraft,
@@ -107,6 +120,10 @@ impl RuntimeRequest {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginItemDraft {
     pub title: String,
@@ -140,6 +157,10 @@ impl fmt::Debug for LoginItemDraft {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginCustomField {
     pub id: String,
@@ -160,6 +181,10 @@ impl fmt::Debug for LoginCustomField {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub enum CustomFieldKind {
     Text,
@@ -169,6 +194,10 @@ pub enum CustomFieldKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -176,25 +205,76 @@ pub enum CustomFieldKind {
 )]
 pub enum RuntimeResponse {
     SignedIn {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
         account_id: AccountId,
         user_id: String,
     },
     Accepted {
         operation_id: String,
         item_id: String,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
         replica_revision: u64,
     },
 }
 
+/// The declared envelope every external Runtime request answers with.
+///
+/// Serde would otherwise emit its externally tagged `Result` spelling, an implicit wire shape no
+/// contract describes. This adjacent tagging matches `RuntimeProjection`, and it keeps the
+/// success payload intact: `RuntimeResponse` is itself internally tagged on `type`, so an
+/// internally tagged envelope would collide with it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum RuntimeOutcome {
+    Succeeded(RuntimeResponse),
+    Failed(RuntimeError),
+}
+
+impl From<Result<RuntimeResponse, RuntimeError>> for RuntimeOutcome {
+    fn from(value: Result<RuntimeResponse, RuntimeError>) -> Self {
+        match value {
+            Ok(response) => Self::Succeeded(response),
+            Err(error) => Self::Failed(error),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum ObservationRequest {
-    Items { account_id: AccountId },
-    RuntimeStatus { account_id: Option<AccountId> },
+    Items {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
+    RuntimeStatus {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "Option<String>")
+        )]
+        account_id: Option<AccountId>,
+    },
 }
 
 impl ObservationRequest {
@@ -207,6 +287,10 @@ impl ObservationRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum RuntimeProjection {
     Items(ItemsProjection),
@@ -230,16 +314,37 @@ impl RuntimeProjection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemsProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
     pub account_id: AccountId,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
     pub replica_revision: u64,
     pub items: Vec<LoginItemProjection>,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginItemProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
     pub account_id: AccountId,
     pub item_id: String,
     pub vault_id: String,
@@ -280,6 +385,10 @@ impl fmt::Debug for LoginItemProjection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ItemProjectionStatus {
     Pending,
@@ -288,18 +397,44 @@ pub enum ItemProjectionStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatusProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "Option<String>")
+    )]
     pub account_id: Option<AccountId>,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
     pub revision: u64,
     pub accounts: Vec<AccountStatus>,
     pub closed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountStatus {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
     pub account_id: AccountId,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
     pub replica_revision: u64,
     pub access: AccountAccessState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -308,12 +443,20 @@ pub struct AccountStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub enum AccountWaitingReason {
     ReauthenticationRequired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "camelCase")]
 pub enum AccountAccessState {
     SignedOut,
@@ -322,7 +465,13 @@ pub enum AccountAccessState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    any(
+        feature = "persistence-contract-schema",
+        feature = "runtime-protocol-contract-schema"
+    ),
+    derive(schemars::JsonSchema)
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RuntimeErrorCode {
     RuntimeClosed,
@@ -336,6 +485,10 @@ pub enum RuntimeErrorCode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
 #[error("{code:?}: {message}")]
 pub struct RuntimeError {
     pub code: RuntimeErrorCode,
@@ -349,6 +502,26 @@ impl RuntimeError {
             message: message.into(),
         }
     }
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+#[derive(schemars::JsonSchema)]
+#[allow(dead_code)]
+struct RuntimeProtocolContract {
+    request: RuntimeRequest,
+    outcome: RuntimeOutcome,
+    observation: ObservationRequest,
+    projection: RuntimeProjection,
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+#[doc(hidden)]
+pub fn runtime_protocol_contract_schema() -> schemars::Schema {
+    let mut settings = schemars::generate::SchemaSettings::draft2020_12();
+    settings.contract = schemars::generate::Contract::Serialize;
+    settings
+        .into_generator()
+        .into_root_schema_for::<RuntimeProtocolContract>()
 }
 
 pub trait ObservationSink: Send + Sync + 'static {

@@ -21,6 +21,7 @@ mod authentication_installation;
 mod protocol;
 mod replica;
 mod runtime;
+mod wire;
 
 #[cfg(test)]
 mod tests;
@@ -42,11 +43,14 @@ pub use http_transport::SerializedHttpExecutor;
 pub use platform_storage::platform_storage_contract_schema;
 #[doc(hidden)]
 pub use platform_storage::SerializedPlatformStorageExecutor;
+#[cfg(feature = "runtime-protocol-contract-schema")]
+#[doc(hidden)]
+pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, CustomFieldKind,
     ItemProjectionStatus, ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection,
     ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
-    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]

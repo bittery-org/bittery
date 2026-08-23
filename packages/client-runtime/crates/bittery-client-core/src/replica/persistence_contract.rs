@@ -1,9 +1,10 @@
 use super::domain::{
-    apply_plan, decimal_u64, AccountReplica, AuthorityItemRecord, AuthorityVaultRecord,
-    BootstrapAuthority, BootstrapGenerationId, BootstrapGenerationRecord, BootstrapPageReceipt,
-    GuardedCommitPlan, OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord,
-    ReplicaSnapshot, ReplicaState, SyncCursor,
+    apply_plan, AccountReplica, AuthorityItemRecord, AuthorityVaultRecord, BootstrapAuthority,
+    BootstrapGenerationId, BootstrapGenerationRecord, BootstrapPageReceipt, GuardedCommitPlan,
+    OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
+    SyncCursor,
 };
+use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

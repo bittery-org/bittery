@@ -239,7 +239,9 @@ impl WebClientRuntime {
             .expect("cancellation lock poisoned")
             .remove(&request_id);
         self.flush_observations()?;
-        serde_json::to_string(&result).map_err(|error| JsValue::from_str(&error.to_string()))
+        // The declared outcome envelope, not Serde's implicit `Result` spelling, is the contract.
+        let outcome = core::RuntimeOutcome::from(result);
+        serde_json::to_string(&outcome).map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
     pub fn observe_json(
