@@ -24,6 +24,15 @@ export class WebClientRuntime {
   open(): Promise<void>;
   request_json(request_id: string, request_json: string): Promise<string>;
   unobserve(observation_id: string): void;
+  static withConfiguredExecutors(
+    replica_invoke: Function,
+    platform_storage_invoke: Function,
+    http_invoke: Function,
+    http_cancel: Function,
+    client_id: string,
+    platform: string,
+    version: string,
+  ): WebClientRuntime;
   static withExecutors(
     replica_invoke: Function,
     platform_storage_invoke: Function,
@@ -1623,7 +1632,9 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes: () => number;
@@ -1631,6 +1642,7 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
@@ -1703,11 +1715,20 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite: (
+    a: bigint,
+    b: number,
+  ) => number;
   readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id: (
     a: number,
     b: bigint,
@@ -1739,6 +1760,11 @@ export interface InitOutput {
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_title: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at: (
     a: number,
     b: bigint,
     c: number,
@@ -1787,6 +1813,18 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => void;
+  readonly webclientruntime_withConfiguredExecutors: (
+    a: any,
+    b: any,
+    c: any,
+    d: any,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+  ) => [number, number, number];
   readonly webclientruntime_withExecutors: (
     a: any,
     b: any,

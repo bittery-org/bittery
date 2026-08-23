@@ -1,3 +1,8 @@
+import type {
+	RuntimeError,
+	RuntimeErrorCode,
+	RuntimeOutcome,
+} from "@bittery/client-runtime/protocol";
 import type { WorkerRuntime } from "@bittery/client-runtime/worker-runtime";
 
 const RUNTIME_ACCOUNT_ID_KEY = "bittery_runtime_account_id";
@@ -67,29 +72,35 @@ export function runtimeQuickUnlockRequestJson(input: {
 	});
 }
 
+/**
+ * A failed Runtime request. The `code` is the semantic outcome the UI must branch on;
+ * the `message` is Rust diagnostic text and is not a user-facing string.
+ */
+export class RuntimeRequestError extends Error {
+	readonly code: RuntimeErrorCode;
+
+	constructor(error: RuntimeError) {
+		super(error.message);
+		this.name = "RuntimeRequestError";
+		this.code = error.code;
+	}
+}
+
 export function parseRuntimeSignedIn(responseJson: string): {
 	accountId: string;
 	userId: string;
 } {
-	const parsed = JSON.parse(responseJson) as {
-		Ok?: { type?: string; accountId?: string; userId?: string };
-		Err?: { message?: string };
-		type?: string;
-		accountId?: string;
-		userId?: string;
-	};
-	if (parsed.Err) {
-		throw new Error(parsed.Err.message ?? "Runtime Sign-in failed");
+	const outcome = JSON.parse(responseJson) as RuntimeOutcome;
+	if (outcome.type === "failed") {
+		throw new RuntimeRequestError(outcome.value);
 	}
-	const value = parsed.Ok ?? parsed;
-	if (
-		value.type !== "signedIn" ||
-		typeof value.accountId !== "string" ||
-		typeof value.userId !== "string"
-	) {
+	if (outcome.value.type !== "signedIn") {
 		throw new Error("Runtime Sign-in did not return a signed-in Account");
 	}
-	return { accountId: value.accountId, userId: value.userId };
+	return {
+		accountId: outcome.value.accountId,
+		userId: outcome.value.userId,
+	};
 }
 
 /**

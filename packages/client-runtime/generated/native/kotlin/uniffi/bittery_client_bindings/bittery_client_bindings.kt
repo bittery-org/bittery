@@ -681,7 +681,11 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id(
     ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id(
     ): Int
@@ -696,6 +700,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url(
     ): Int
@@ -774,8 +780,12 @@ external fun uniffi_bittery_client_bindings_fn_free_loginitemprojection(`handle`
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Byte
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_note(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -789,6 +799,8 @@ external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_status
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_title(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -961,7 +973,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at() != 48453) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite() != 21525) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id() != 32154) {
@@ -983,6 +1001,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title() != 63640) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at() != 623) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url() != 868) {
@@ -2297,7 +2318,11 @@ public interface LoginItemProjectionInterface {
 
     fun `accountId`(): kotlin.String
 
+    fun `createdAt`(): kotlin.String
+
     fun `customFields`(): List<LoginCustomField>
+
+    fun `favorite`(): kotlin.Boolean
 
     fun `itemId`(): kotlin.String
 
@@ -2312,6 +2337,8 @@ public interface LoginItemProjectionInterface {
     fun `tags`(): List<kotlin.String>
 
     fun `title`(): kotlin.String
+
+    fun `updatedAt`(): kotlin.String
 
     fun `url`(): kotlin.String?
 
@@ -2433,11 +2460,37 @@ open class LoginItemProjection: Disposable, AutoCloseable, LoginItemProjectionIn
     }
 
 
+    override fun `createdAt`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
     override fun `customFields`(): List<LoginCustomField> {
             return FfiConverterSequenceTypeLoginCustomField.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `favorite`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite(
         it,
         _status)
 }
@@ -2529,6 +2582,19 @@ open class LoginItemProjection: Disposable, AutoCloseable, LoginItemProjectionIn
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_title(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `updatedAt`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at(
         it,
         _status)
 }

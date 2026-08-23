@@ -1024,7 +1024,9 @@ export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_id:
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes: () => number;
@@ -1032,6 +1034,7 @@ export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
@@ -1104,11 +1107,20 @@ export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_accoun
   b: bigint,
   c: number,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
 export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite: (
+  a: bigint,
+  b: number,
+) => number;
 export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id: (
   a: number,
   b: bigint,
@@ -1140,6 +1152,11 @@ export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags: 
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_title: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at: (
   a: number,
   b: bigint,
   c: number,
@@ -1188,6 +1205,18 @@ export const webclientruntime_unobserve: (
   b: number,
   c: number,
 ) => void;
+export const webclientruntime_withConfiguredExecutors: (
+  a: any,
+  b: any,
+  c: any,
+  d: any,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+) => [number, number, number];
 export const webclientruntime_withExecutors: (
   a: any,
   b: any,

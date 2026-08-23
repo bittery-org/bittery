@@ -180,6 +180,60 @@ export class WebClientRuntime {
    * @param {Function} platform_storage_invoke
    * @param {Function} http_invoke
    * @param {Function} http_cancel
+   * @param {string} client_id
+   * @param {string} platform
+   * @param {string} version
+   * @returns {WebClientRuntime}
+   */
+  static withConfiguredExecutors(
+    replica_invoke,
+    platform_storage_invoke,
+    http_invoke,
+    http_cancel,
+    client_id,
+    platform,
+    version,
+  ) {
+    const ptr0 = passStringToWasm0(
+      client_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(
+      platform,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(
+      version,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_withConfiguredExecutors(
+      replica_invoke,
+      platform_storage_invoke,
+      http_invoke,
+      http_cancel,
+      ptr0,
+      len0,
+      ptr1,
+      len1,
+      ptr2,
+      len2,
+    );
+    if (ret[2]) {
+      throw takeFromExternrefTable0(ret[1]);
+    }
+    return WebClientRuntime.__wrap(ret[0]);
+  }
+  /**
+   * @param {Function} replica_invoke
+   * @param {Function} platform_storage_invoke
+   * @param {Function} http_invoke
+   * @param {Function} http_cancel
    * @returns {WebClientRuntime}
    */
   static withExecutors(
@@ -2384,7 +2438,7 @@ function __wbg_get_imports() {
       return ret;
     },
     __wbindgen_cast_0000000000000001: function (arg0, arg1) {
-      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 321, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 325, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
       const ret = makeMutClosure(
         arg0,
         arg1,

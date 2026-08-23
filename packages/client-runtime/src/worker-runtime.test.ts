@@ -164,14 +164,16 @@ describe("Runtime worker service", () => {
 				({
 					WebClientRuntime: {
 						withExecutors: () => runtime,
+						// The literal is asserted to `RuntimeWasm` only after it is built, so the
+						// parameters get no contextual type and must be annotated here.
 						withConfiguredExecutors(
-							_replica,
-							_platform,
-							_http,
-							_cancel,
-							clientId,
-							platform,
-							version,
+							_replica: unknown,
+							_platform: unknown,
+							_http: unknown,
+							_cancel: unknown,
+							clientId: string,
+							platform: string,
+							version: string,
 						) {
 							configured.push(clientId, platform, version);
 							return runtime;

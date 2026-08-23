@@ -54,7 +54,9 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 	assert.deepEqual(projections, [
 		{
 			type: "runtimeStatus",
-			value: { accountId: null, revision: 0, accounts: [], closed: false },
+			// Revisions cross the boundary as canonical decimal strings, never as
+			// JSON numbers, so a u64 past 2^53 survives the trip.
+			value: { accountId: null, revision: "0", accounts: [], closed: false },
 		},
 	]);
 
@@ -70,8 +72,10 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 		}),
 	);
 	assert.ok(responsePromise instanceof Promise);
+	// The declared RuntimeOutcome envelope, not Serde's implicit `Result` spelling.
 	assert.deepEqual(JSON.parse(await responsePromise), {
-		Err: {
+		type: "failed",
+		value: {
 			code: "AUTHENTICATION_UNAVAILABLE",
 			message: "authentication is implemented by a later vertical slice",
 		},

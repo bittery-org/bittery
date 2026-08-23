@@ -958,7 +958,11 @@ public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
 
     func accountId()  -> String
 
+    func createdAt()  -> String
+
     func customFields()  -> [LoginCustomField]
+
+    func favorite()  -> Bool
 
     func itemId()  -> String
 
@@ -973,6 +977,8 @@ public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
     func tags()  -> [String]
 
     func title()  -> String
+
+    func updatedAt()  -> String
 
     func url()  -> String?
 
@@ -1044,9 +1050,25 @@ open func accountId() -> String  {
 })
 }
 
+open func createdAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
 open func customFields() -> [LoginCustomField]  {
     return try!  FfiConverterSequenceTypeLoginCustomField.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func favorite() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1103,6 +1125,14 @@ open func tags() -> [String]  {
 open func title() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_loginitemprojection_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func updatedAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -2844,7 +2874,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at() != 48453) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite() != 21525) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id() != 32154) {
@@ -2866,6 +2902,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title() != 63640) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at() != 623) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url() != 868) {

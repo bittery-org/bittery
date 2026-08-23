@@ -33,7 +33,8 @@ describe("Runtime Sign-in", () => {
 		expect(
 			parseRuntimeSignedIn(
 				JSON.stringify({
-					Ok: {
+					type: "succeeded",
+					value: {
 						type: "signedIn",
 						accountId: "account-runtime",
 						userId: "user-1",
@@ -41,11 +42,18 @@ describe("Runtime Sign-in", () => {
 				}),
 			),
 		).toEqual({ accountId: "account-runtime", userId: "user-1" });
+		// The semantic code, not the Rust diagnostic string, is what the UI branches on.
 		expect(() =>
 			parseRuntimeSignedIn(
-				JSON.stringify({ Err: { message: "Session is missing or expired" } }),
+				JSON.stringify({
+					type: "failed",
+					value: {
+						code: "AUTHENTICATION_REQUIRED",
+						message: "Session is missing or expired",
+					},
+				}),
 			),
-		).toThrow("Session is missing or expired");
+		).toThrow(expect.objectContaining({ code: "AUTHENTICATION_REQUIRED" }));
 	});
 
 	test("observes Items for the Account a Runtime Sign-in installed, not an empty catch", async () => {
@@ -54,7 +62,8 @@ describe("Runtime Sign-in", () => {
 			async request(requestId: string, requestJson: string) {
 				this.requests.push({ requestId, requestJson });
 				return JSON.stringify({
-					Ok: {
+					type: "succeeded",
+					value: {
 						type: "signedIn",
 						accountId: "account-runtime",
 						userId: "user-1",
