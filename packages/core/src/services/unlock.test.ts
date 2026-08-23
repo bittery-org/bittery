@@ -260,13 +260,66 @@ describe("unlock all accounts", () => {
 			accounts: [["acc-1", "a@test.com"]],
 		});
 		const deps = passwordDeps(storage);
+		const finishLogin = mock(async () => {
+			throw new ApiError(
+				{
+					type: "about:blank",
+					title: "Invalid credentials",
+					status: 401,
+					code: "AUTHENTICATION_REQUIRED",
+				},
+				null,
+			);
+		});
 		deps.accountAuthClientFactory = async () => {
 			const client = await testAccountAuthClientFactory(storage, "acc-1");
-			client.auth.finishLogin = mock(async () => {
+			client.auth.finishLogin = finishLogin;
+			return client;
+		};
+
+		const outcome = await unlockAllWithPassword({ password: "pw" }, deps);
+
+		expect(finishLogin).toHaveBeenCalledTimes(1);
+		expect(outcome.failed).toEqual([
+			{
+				accountId: "acc-1",
+				email: "a@test.com",
+				reason: "credential_rejected",
+			},
+		]);
+	});
+
+	it("does not call a post-proof Session rejection a wrong password", async () => {
+		const { storage } = await createStorage({
+			accounts: [["acc-1", "a@test.com"]],
+		});
+		const deps = passwordDeps(storage);
+		deps.accountAuthClientFactory = async () => {
+			const client = await testAccountAuthClientFactory(storage, "acc-1");
+			client.auth.finishLogin = mock(async () => ({
+				data: {
+					token: "fresh-token",
+					sessionId: "fresh-session",
+					serverProof: "server-proof",
+					user: {
+						id: "user-acc-1",
+						email: "a@test.com",
+						name: "Account",
+						secretKeyHint: "A3-A••••",
+						publicKey: "public-key",
+						encryptedPrivateKey: "encrypted-private-key",
+						teamName: "Solo",
+						teamAvatarUrl: null,
+					},
+					expiresAt: new Date(Date.now() + 60_000).toISOString(),
+					vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
+				},
+			}));
+			client.auth.drainVaultKeys = mock(async () => {
 				throw new ApiError(
 					{
 						type: "about:blank",
-						title: "Invalid credentials",
+						title: "Session rejected",
 						status: 401,
 						code: "AUTHENTICATION_REQUIRED",
 					},
@@ -276,15 +329,9 @@ describe("unlock all accounts", () => {
 			return client;
 		};
 
-		const outcome = await unlockAllWithPassword({ password: "wrong" }, deps);
+		const outcome = await unlockAllWithPassword({ password: "pw" }, deps);
 
-		expect(outcome.failed).toEqual([
-			{
-				accountId: "acc-1",
-				email: "a@test.com",
-				reason: "credential_rejected",
-			},
-		]);
+		expect(outcome.failed[0]?.reason).toBe("unlock_failed");
 	});
 
 	it("reports transport failures separately from a wrong password", async () => {
@@ -354,6 +401,42 @@ describe("unlock all accounts", () => {
 		expect(outcome.failed).toEqual([]);
 		expect(port.calls.biometricAuthenticate).toBe(1);
 		expect(await storage.getActiveAccount()).toEqual("acc-1");
+	});
+
+	it("requires password unlock for a biometric restore without a usable Session", async () => {
+		const { storage } = await createStorage({
+			biometric: true,
+			withAuthToken: ["acc-2"],
+		});
+
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache, credentialMirror },
+		);
+
+		expect(outcome.unlocked).toEqual(["acc-2"]);
+		expect(outcome.failed).toContainEqual({
+			accountId: "acc-1",
+			email: "a@test.com",
+			reason: "password_unlock_required",
+		});
+		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
+	});
+
+	it("requires password unlock when the restored biometric Session expired", async () => {
+		const { storage } = await createStorage({ biometric: true });
+		await storage.updateStoredSessionMetadata("acc-1", {
+			expiresAt: Date.now() - 1,
+		});
+
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache, credentialMirror },
+		);
+
+		expect(outcome.unlocked).toEqual(["acc-2"]);
+		expect(outcome.failed[0]?.reason).toBe("password_unlock_required");
+		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
 	});
 
 	it("leaves an account outside the requested account ids locked", async () => {
@@ -541,6 +624,23 @@ describe("unlock one account", () => {
 		cryptoPort = createInMemoryCryptoPort();
 		crypto = cryptoPort;
 		itemCache = (await createTestItemCache()).cache;
+	});
+
+	it("does not report a local biometric restore as usable without a Session", async () => {
+		const { storage } = await createStorage({
+			accounts: [["acc-1", "a@test.com"]],
+			biometric: true,
+			withAuthToken: [],
+		});
+
+		const outcome = await unlockAccountWithBiometric(
+			{ accountId: "acc-1", promptMessage: PROMPT },
+			{ storage, itemCache, credentialMirror },
+		);
+
+		expect(outcome.unlocked).toEqual([]);
+		expect(outcome.failed[0]?.reason).toBe("password_unlock_required");
+		expect(await storage.getMasterUnlockKey("acc-1")).toBeNull();
 	});
 
 	it("unlocks only the requested account", async () => {

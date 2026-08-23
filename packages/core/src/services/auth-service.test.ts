@@ -142,6 +142,7 @@ async function makeStore(
 	const { store, port } = await createTestAccountStore({ crypto });
 	for (const metadata of accounts) {
 		await store.addAccount(metadata);
+		await store.storeServerUrl(metadata.serverUrl, metadata.accountId);
 	}
 	return { storage: store, port };
 }

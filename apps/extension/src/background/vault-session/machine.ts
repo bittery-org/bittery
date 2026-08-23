@@ -7,10 +7,9 @@
  *    the reducer says locked. `dispatchNow` therefore returns an already-locked
  *    snapshot while `clear_keys` is still in flight — that is what makes the
  *    synchronous `isUnlocked()` hot path honest.
- * 2. Effects run in emitted order and no effect may reject. The reducer puts
- *    `clear_keys` / `invalidate_session` last, mirroring `_lockInternal`, which
- *    clears alarms and keepalive unconditionally even when the storage lock
- *    fails.
+ * 2. Effects run in emitted order. Awaited `dispatch` reports lifecycle failures;
+ *    detached timer and `dispatchNow` paths log them after the reducer has already
+ *    committed the locked state.
  */
 
 import type { VaultSessionPorts } from "./ports";
@@ -52,7 +51,15 @@ export function createVaultSessionMachine(
 				return;
 			case "arm_auto_lock":
 				ports.chrome.armAutoLock(effect.delayMs, () => {
-					void dispatch({ type: "TIMEOUT_ELAPSED", at: ports.clock.now() });
+					void dispatch({
+						type: "TIMEOUT_ELAPSED",
+						at: ports.clock.now(),
+					}).catch((error) => {
+						console.error(
+							"[vault-session] detached timeout lock failed:",
+							error,
+						);
+					});
 				});
 				return;
 			case "disarm_auto_lock":
@@ -124,7 +131,11 @@ export function createVaultSessionMachine(
 	}
 
 	function dispatchNow(event: VaultSessionEvent): VaultSessionSnapshot {
-		return apply(event).snapshot;
+		const { snapshot, settled } = apply(event);
+		void settled.catch((error) => {
+			console.error("[vault-session] detached dispatch failed:", error);
+		});
+		return snapshot;
 	}
 
 	async function dispatch(

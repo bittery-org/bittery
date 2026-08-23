@@ -7,7 +7,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
-import { requireCompleteSessionLock } from "@/lib/session-reauth";
 import { vaultCrypto, vaultRepository } from "@/lib/vault-runtime";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -135,8 +134,9 @@ export function useWebSync(
 			// The old Server Session is gone, so lock its Account and reauthenticate online.
 			// Device-bound Quick Unlock inputs remain; this is not explicit Sign out.
 			try {
-				requireCompleteSessionLock(
+				requireCompleteLifecycleOutcome(
 					await accountSync.invalidateSession(payload),
+					{ operation: "Web session invalidation", requireAffected: true },
 				);
 			} catch (error) {
 				toast.error(m.toast_auth_session_lock_failed());
@@ -175,3 +175,5 @@ export function useWebSync(
 		onTerminalCommandFailure,
 	});
 }
+
+import { requireCompleteLifecycleOutcome } from "@bittery/core/services/account-lifecycle";

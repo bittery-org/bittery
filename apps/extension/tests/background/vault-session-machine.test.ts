@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type {
 	LifecycleOutcome,
 	LifecycleStepFailure,
@@ -218,6 +218,43 @@ describe("vault session machine — fail-closed effect runner", () => {
 
 		h.releaseLockAll();
 		await settle();
+	});
+
+	test("dispatchNow logs a detached lifecycle rejection", async () => {
+		const error = spyOn(console, "error").mockImplementation(() => {});
+		const h = createHarness({ lockAllError: new Error("storage offline") });
+		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
+
+		const snapshot = h.machine.dispatchNow({
+			type: "LOCK_REQUESTED",
+			source: "popup",
+			at: NOW,
+		});
+		await settle();
+
+		expect(snapshot.unlocked).toBe(false);
+		expect(error).toHaveBeenCalledWith(
+			"[vault-session] detached dispatch failed:",
+			expect.any(Error),
+		);
+		error.mockRestore();
+	});
+
+	test("the auto-lock timer logs a detached lifecycle rejection", async () => {
+		const error = spyOn(console, "error").mockImplementation(() => {});
+		const h = createHarness({ lockAllError: new Error("storage offline") });
+		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
+
+		h.setNow(NOW + SETTINGS_TIMEOUT);
+		h.recorder.fireAutoLock();
+		await settle();
+
+		expect(h.machine.getSnapshot().unlocked).toBe(false);
+		expect(error).toHaveBeenCalledWith(
+			"[vault-session] detached timeout lock failed:",
+			expect.any(Error),
+		);
+		error.mockRestore();
 	});
 
 	test("a refused lock never disconnects sync and reports its code", async () => {
@@ -480,9 +517,7 @@ describe("lifecycle adapter — session invalidation", () => {
 				),
 		});
 
-		await expect(adapter.lockAll()).rejects.toThrow(
-			"lockAllAccounts incomplete",
-		);
+		await expect(adapter.lockAll()).rejects.toThrow("did not complete safely");
 	});
 
 	test("session invalidation rejects instead of projecting step failures", async () => {
@@ -496,7 +531,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		});
 
 		await expect(adapter.invalidateSession("active")).rejects.toThrow(
-			"lockInvalidSession incomplete",
+			"did not complete safely",
 		);
 	});
 });

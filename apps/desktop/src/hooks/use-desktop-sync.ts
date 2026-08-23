@@ -1,5 +1,8 @@
 import { isUnauthorizedApiError } from "@bittery/api-contract";
-import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import {
+	type LifecycleOutcome,
+	requireCompleteLifecycleOutcome,
+} from "@bittery/core/services/account-lifecycle";
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
@@ -11,7 +14,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
-import { requireCompleteDesktopSessionLock } from "@/lib/session-reauth";
 import { storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
@@ -128,7 +130,10 @@ export function useDesktopSync(
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
 		async (outcome: LifecycleOutcome) => {
-			requireCompleteDesktopSessionLock(outcome);
+			requireCompleteLifecycleOutcome(outcome, {
+				operation: "Desktop session invalidation",
+				requireAffected: true,
+			});
 			const invalidated = outcome.affected[0];
 			if (!invalidated) {
 				return null;
@@ -212,17 +217,26 @@ export function useDesktopSync(
 				}
 			}
 		};
+		const reportRevalidationFailure = (error: unknown) => {
+			console.error("[desktop-sync] Session revalidation failed:", error);
+			toast.error(m.toast_auth_session_lock_failed());
+		};
 
-		void revalidateSessions();
+		void revalidateSessions().catch(reportRevalidationFailure);
 		const interval = setInterval(() => {
-			void revalidateSessions();
+			void revalidateSessions().catch(reportRevalidationFailure);
 		}, SESSION_REVALIDATION_INTERVAL_MS);
 
 		return () => {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
+	}, [
+		enabled,
+		handleAccountSessionInvalidation,
+		isInitialized,
+		m.toast_auth_session_lock_failed,
+	]);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const onTerminalCommandFailure = useCallback(() => {

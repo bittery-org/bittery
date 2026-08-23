@@ -21,10 +21,13 @@ import {
 	type CredentialMirror,
 	deleteAccountEverywhere,
 	type LifecycleDeps,
+	type LifecycleOutcome,
+	type LifecycleStepFailure,
 	lockAccount,
 	lockAllAccounts,
 	lockInvalidSession,
 	removeAccount,
+	requireCompleteLifecycleOutcome,
 	type SessionCredentialRef,
 	signOutAccount,
 	wipeDevice,
@@ -207,6 +210,46 @@ function accountKeys(port: InMemoryPlatformPort, accountId: string): string[] {
 async function accountIds(storage: AccountStore): Promise<string[]> {
 	return (await storage.getAccountsList()).map((account) => account.accountId);
 }
+
+function completionOutcome(
+	affected = [accountMetadata({ accountId: "acc-1" })],
+	failures: LifecycleStepFailure[] = [],
+): LifecycleOutcome {
+	return {
+		affected,
+		activeAccountId: "acc-1",
+		activeAccount: affected[0] ?? null,
+		wasActive: affected.length > 0,
+		remaining: affected,
+		failures,
+	};
+}
+
+describe("requireCompleteLifecycleOutcome", () => {
+	it("returns a complete resolved lifecycle outcome", () => {
+		const complete = completionOutcome();
+		expect(
+			requireCompleteLifecycleOutcome(complete, { operation: "test" }),
+		).toBe(complete);
+	});
+
+	it("rejects recorded failures and an unexpectedly unresolved target", () => {
+		expect(() =>
+			requireCompleteLifecycleOutcome(
+				completionOutcome(undefined, [
+					{ accountId: "acc-1", step: "clear_session", cause: "failed" },
+				]),
+				{ operation: "test" },
+			),
+		).toThrow("did not complete safely");
+		expect(() =>
+			requireCompleteLifecycleOutcome(completionOutcome([]), {
+				operation: "test",
+				requireAffected: true,
+			}),
+		).toThrow("did not complete safely");
+	});
+});
 
 describe("lockAccount", () => {
 	it("keeps session_data and every cache segment while dropping the session keys", async () => {

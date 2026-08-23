@@ -50,7 +50,7 @@ describe("reauthenticateDesktopSession", () => {
 					navigateToUnlock,
 				},
 			),
-		).rejects.toThrow("reauthentication lock was incomplete");
+		).rejects.toThrow("did not complete safely");
 		expect(clearQueries).not.toHaveBeenCalled();
 		expect(navigateToUnlock).not.toHaveBeenCalled();
 	});

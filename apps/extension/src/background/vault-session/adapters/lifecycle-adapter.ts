@@ -11,6 +11,7 @@ import {
 	type LifecycleOutcome,
 	lockAllAccounts,
 	lockInvalidSession,
+	requireCompleteLifecycleOutcome,
 } from "@bittery/core/services/account-lifecycle";
 import { lifecycleDeps } from "../../lifecycle";
 import type {
@@ -32,14 +33,6 @@ export interface LifecycleAdapterOptions {
 	 * matches nothing on the device.
 	 */
 	resolveFallbackAccountId?: () => string | null;
-}
-
-function requireComplete(scope: string, outcome: LifecycleOutcome): void {
-	if (outcome.failures.length > 0) {
-		throw new Error(`[vault-session] ${scope} incomplete`, {
-			cause: outcome.failures,
-		});
-	}
 }
 
 function project(outcome: LifecycleOutcome): InvalidatedSession {
@@ -70,7 +63,9 @@ export function createLifecycleAdapter(
 
 	return {
 		async lockAll(): Promise<void> {
-			requireComplete("lockAllAccounts", await lockAll(deps));
+			requireCompleteLifecycleOutcome(await lockAll(deps), {
+				operation: "Extension lockAllAccounts",
+			});
 		},
 
 		async invalidateSession(
@@ -93,7 +88,10 @@ export function createLifecycleAdapter(
 				outcome = await invalidate({ accountId }, deps);
 			}
 
-			requireComplete("lockInvalidSession", outcome);
+			requireCompleteLifecycleOutcome(outcome, {
+				operation: "Extension lockInvalidSession",
+				requireAffected: true,
+			});
 			return project(outcome);
 		},
 	};

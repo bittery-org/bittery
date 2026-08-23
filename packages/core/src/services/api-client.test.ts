@@ -12,6 +12,17 @@ afterEach(() => {
 });
 
 describe("stored Account Quick Unlock client", () => {
+	it("fails closed when the Account has no stored Server URL", async () => {
+		const { store } = await createTestAccountStore();
+		await store.addAccount(
+			accountMetadata({ accountId: "account-a", serverUrl: "" }),
+		);
+
+		await expect(
+			createStoredAccountUnlockApiClient(store, "account-a"),
+		).rejects.toThrow("stored Server URL");
+	});
+
 	it("dispatches to the selected Account's custom Server with its HTTP consent", async () => {
 		const { store } = await createTestAccountStore();
 		await store.addAccount(

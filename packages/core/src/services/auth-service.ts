@@ -4,10 +4,11 @@
  * extensions, or any other runtime.
  */
 
-import type {
-	ApiClient,
-	FinishLoginResponse,
-	LoginAttempt,
+import {
+	type ApiClient,
+	type FinishLoginResponse,
+	isUnauthorizedApiError,
+	type LoginAttempt,
 } from "@bittery/api-contract";
 import type {
 	CryptoPort,
@@ -286,6 +287,40 @@ export interface SRPUnlockDeps {
 		storage: AccountStore,
 		accountId: string,
 	) => Promise<IAuthClient>;
+}
+
+/** The Server rejected the SRP proof itself; later Session failures are not credentials. */
+export class SRPCredentialRejectedError extends Error {
+	readonly code = "SRP_CREDENTIAL_REJECTED";
+	constructor(cause: unknown) {
+		super("The SRP credential proof was rejected.", { cause });
+		this.name = "SRPCredentialRejectedError";
+	}
+}
+
+export function isSRPCredentialRejectedError(
+	error: unknown,
+): error is SRPCredentialRejectedError {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		(("code" in error &&
+			(error as { code?: unknown }).code === "SRP_CREDENTIAL_REJECTED") ||
+			("name" in error &&
+				(error as { name?: unknown }).name === "SRPCredentialRejectedError"))
+	);
+}
+
+function isRejectedSrpProof(error: unknown): boolean {
+	return (
+		isUnauthorizedApiError(error) ||
+		(typeof error === "object" &&
+			error !== null &&
+			"name" in error &&
+			"status" in error &&
+			(error as { name?: unknown }).name === "ApiError" &&
+			(error as { status?: unknown }).status === 401)
+	);
 }
 
 export interface SrpLoginProofDeps {
@@ -778,16 +813,26 @@ export async function performSRPUnlock(
 			srpPassword,
 		);
 
-		const { data: finishResult } = await apiClient.auth.finishLogin(
-			startResult.attemptId,
-			{
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			},
-		);
+		let finishResult: FinishLoginResponse;
+		try {
+			({ data: finishResult } = await apiClient.auth.finishLogin(
+				startResult.attemptId,
+				{
+					clientPublicKey: clientEphemeral.publicKey,
+					clientProof: clientSession.proof,
+				},
+			));
+		} catch (error) {
+			if (isRejectedSrpProof(error)) {
+				throw new SRPCredentialRejectedError(error);
+			}
+			throw error;
+		}
 
-		const serverUrl =
-			(await deps.storage.getServerUrl(accountId)) ?? getDefaultServerUrl();
+		const serverUrl = await deps.storage.getServerUrl(accountId);
+		if (!serverUrl) {
+			throw new Error("Quick Unlock requires the Account's stored Server URL.");
+		}
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
 			clientSession,

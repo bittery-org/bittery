@@ -107,12 +107,14 @@ export async function createStoredAccountUnlockApiClient(
 		storage.getAccountMetadata(accountId),
 		storage.getServerUrl(accountId),
 	]);
-	const resolvedServerUrl = serverUrl || getDefaultServerUrl();
+	if (!serverUrl) {
+		throw new Error("Quick Unlock requires the Account's stored Server URL.");
+	}
 	const metadata = {
 		insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
 	};
 
-	return createApiClientForServer(resolvedServerUrl, undefined, metadata);
+	return createApiClientForServer(serverUrl, undefined, metadata);
 }
 
 export { createAccountApiClient, createApiClientForServer };

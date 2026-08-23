@@ -72,6 +72,32 @@ export interface LifecycleOutcome {
 	failures: LifecycleStepFailure[];
 }
 
+export class IncompleteLifecycleOutcomeError extends Error {
+	constructor(
+		readonly outcome: LifecycleOutcome,
+		operation: string,
+	) {
+		super(`${operation} did not complete safely`, {
+			cause: outcome.failures,
+		});
+		this.name = "IncompleteLifecycleOutcomeError";
+	}
+}
+
+/** Fail closed before a host applies success effects for an incomplete lifecycle operation. */
+export function requireCompleteLifecycleOutcome(
+	outcome: LifecycleOutcome,
+	options: { operation: string; requireAffected?: boolean },
+): LifecycleOutcome {
+	if (
+		outcome.failures.length > 0 ||
+		(options.requireAffected === true && outcome.affected.length === 0)
+	) {
+		throw new IncompleteLifecycleOutcomeError(outcome, options.operation);
+	}
+	return outcome;
+}
+
 export interface SessionCredentialRef {
 	accountId: string;
 	authToken: string | null;

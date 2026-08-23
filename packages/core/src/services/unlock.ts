@@ -7,9 +7,7 @@
  * RN/desktop hooks run the identical flow.
  */
 
-import { isUnauthorizedApiError } from "@bittery/api-contract";
 import type { CryptoPort } from "@bittery/crypto-port";
-import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type {
 	AccountStore,
 	BiometricErrorType,
@@ -24,6 +22,7 @@ import {
 } from "./api-client";
 import {
 	type IAuthClient,
+	isSRPCredentialRejectedError,
 	performSRPUnlock,
 	storeUnlockSessionOwned,
 } from "./auth-service";
@@ -41,6 +40,7 @@ import type { TravelModeApiClient } from "./travel-mode-service";
 export type UnlockFailureReason =
 	| "no_stored_secret_key"
 	| "credential_rejected"
+	| "password_unlock_required"
 	| "unlock_failed"
 	| "travel_mode_unverified";
 
@@ -110,6 +110,35 @@ interface UnlockCandidate {
 interface AcquireResult {
 	candidates: UnlockCandidate[];
 	failed: UnlockFailure[];
+}
+
+async function keepBiometricRestoreOnlyWithUsableSession(
+	storage: AccountStore,
+	accountId: string,
+): Promise<boolean> {
+	let usable = false;
+	try {
+		usable = await storage.isSessionValid(accountId);
+	} catch (error) {
+		console.error(
+			"[Unlock] Failed to validate biometric Session:",
+			accountId,
+			error,
+		);
+	}
+	if (usable) {
+		return true;
+	}
+	try {
+		await storage.clearMasterUnlockKey(accountId);
+	} catch (error) {
+		console.error(
+			"[Unlock] Failed to clear unusable biometric restore:",
+			accountId,
+			error,
+		);
+	}
+	return false;
 }
 
 /** What the accounts to unlock are, and what the unlock has to restore afterwards. */
@@ -195,8 +224,12 @@ async function acquireWithPassword(
 				accountAuthClientFactory ?? createStoredAccountUnlockApiClient
 			)(storage, accountId);
 
-			const serverUrl =
-				(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
+			const serverUrl = await storage.getServerUrl(accountId);
+			if (!serverUrl) {
+				throw new Error(
+					"Quick Unlock requires the Account's stored Server URL.",
+				);
+			}
 			const result = await performSRPUnlock(
 				{ accountId, password },
 				{
@@ -244,7 +277,7 @@ async function acquireWithPassword(
 			failed.push({
 				accountId,
 				email,
-				reason: isUnauthorizedApiError(error)
+				reason: isSRPCredentialRejectedError(error)
 					? "credential_rejected"
 					: "unlock_failed",
 			});
@@ -271,6 +304,18 @@ async function acquireOneWithBiometric(
 	{ storage }: UnlockDeps,
 ): Promise<AcquireResult> {
 	const { accountId } = account;
+	if (!(await storage.isSessionValid(accountId).catch(() => false))) {
+		return {
+			candidates: [],
+			failed: [
+				{
+					accountId,
+					email: account.email,
+					reason: "password_unlock_required",
+				},
+			],
+		};
+	}
 
 	const result = await storage.authenticateWithBiometricEnhanced(
 		promptMessage,
@@ -294,8 +339,15 @@ async function acquireOneWithBiometric(
 			failed: [biometricFailure(account, { error: "authentication_failed" })],
 		};
 	}
+	if (!(await keepBiometricRestoreOnlyWithUsableSession(storage, accountId))) {
+		return {
+			candidates: [],
+			failed: [
+				{ accountId, email: account.email, reason: "password_unlock_required" },
+			],
+		};
+	}
 
-	// A missing token is not fatal: the enforcer then verifies offline.
 	const apiClient = await createStoredAccountApiClient(
 		storage,
 		accountId,
@@ -345,8 +397,13 @@ async function acquireWithBiometric(
 			failed.push({ accountId, email, reason: "credential_rejected" });
 			continue;
 		}
-		// Refreshing client: the biometric restore already produced a live session.
-		// A missing token is not fatal here — the enforcer then verifies offline.
+		if (
+			!(await keepBiometricRestoreOnlyWithUsableSession(storage, accountId))
+		) {
+			failed.push({ accountId, email, reason: "password_unlock_required" });
+			continue;
+		}
+		// Refreshing client: the biometric restore has a usable current Session.
 		const apiClient = await createStoredAccountApiClient(
 			storage,
 			accountId,

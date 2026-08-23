@@ -43,7 +43,7 @@ describe("reauthenticateMobileSession", () => {
 				notifyExpired,
 				navigate,
 			}),
-		).rejects.toThrow("safely lock");
+		).rejects.toThrow("did not complete safely");
 		expect(clearQueries).not.toHaveBeenCalled();
 		expect(notifyExpired).not.toHaveBeenCalled();
 		expect(navigate).not.toHaveBeenCalled();

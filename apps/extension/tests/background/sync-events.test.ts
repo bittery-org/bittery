@@ -119,6 +119,7 @@ mock.module("@bittery/sync", () => ({
 
 mock.module("@bittery/core/services/account-lifecycle", () => ({
 	NO_CREDENTIAL_MIRROR: { purge: async () => {} },
+	requireCompleteLifecycleOutcome: (value: unknown) => value,
 	lockAllAccounts: async () => {
 		lockAllCalls++;
 		return outcome([]);
