@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, time::Duration as StdDuration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -12,7 +12,10 @@ use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
-use crate::db::enums::{SyncEntityType, SyncEventType};
+use crate::db::{
+    enums::{SyncEntityType, SyncEventType},
+    events::{begin_sync_event_transaction, insert_sync_event, lock_sync_event_order},
+};
 use crate::error::AppErrorCode;
 use crate::{
     config::DeploymentMode,
@@ -506,6 +509,236 @@ async fn seed_attachment(
 		.execute(pool)
 		.await
 		.expect("attachment should seed");
+}
+
+async fn seed_commit_order_fixture(pool: &PgPool) -> (String, String, String) {
+    let first_user_id = "sync_order_user_first".to_owned();
+    let second_user_id = "sync_order_user_second".to_owned();
+    let vault_id = "sync_order_vault_shared".to_owned();
+    seed_user(
+        pool,
+        &first_user_id,
+        "First observer",
+        "sync-order-first@example.com",
+    )
+    .await;
+    seed_user(
+        pool,
+        &second_user_id,
+        "Second observer",
+        "sync-order-second@example.com",
+    )
+    .await;
+    seed_vault(
+        pool,
+        &vault_id,
+        "Shared sync order vault",
+        "personal",
+        &first_user_id,
+        None,
+    )
+    .await;
+    seed_vault_key(
+        pool,
+        "sync_order_key_first",
+        &vault_id,
+        &first_user_id,
+        "encrypted-key-first",
+        "owner",
+    )
+    .await;
+    seed_vault_key(
+        pool,
+        "sync_order_key_second",
+        &vault_id,
+        &second_user_id,
+        "encrypted-key-second",
+        "member",
+    )
+    .await;
+    (first_user_id, second_user_id, vault_id)
+}
+
+async fn wait_until_backend_waits_for_advisory_lock(pool: &PgPool, backend_pid: i32) {
+    tokio::time::timeout(StdDuration::from_secs(2), async {
+        loop {
+            let is_waiting: bool = query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND NOT granted)",
+            )
+            .bind(backend_pid)
+            .fetch_one(pool)
+            .await
+            .expect("advisory lock wait should be observable");
+            if is_waiting {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second backend should reach the sync order fence");
+}
+
+#[tokio::test]
+async fn sync_event_cursor_order_survives_inverse_commit_attempt() {
+    with_sync_test_app("sync_event_inverse_commit", |app| async move {
+        let (first_user_id, second_user_id, vault_id) = seed_commit_order_fixture(&app.pool).await;
+        let first_entity_id = "sync_order_entity_first";
+        let second_entity_id = "sync_order_entity_second";
+
+        let mut first = begin_sync_event_transaction(&app.pool)
+            .await
+            .expect("first transaction should begin");
+        insert_sync_event(
+            &mut first,
+            SyncEventType::ItemUpdated,
+            first_entity_id,
+            SyncEntityType::Item,
+            &vault_id,
+            &first_user_id,
+            1,
+            None,
+            None,
+        )
+        .await
+        .expect("first event should be allocated");
+
+        let second_pool = app.pool.clone();
+        let second_vault_id = vault_id.clone();
+        let second_actor_id = second_user_id.clone();
+        let (backend_pid_tx, backend_pid_rx) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let mut transaction = second_pool
+                .begin()
+                .await
+                .expect("second transaction should begin");
+            let backend_pid: i32 = query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *transaction)
+                .await
+                .expect("second backend pid should load");
+            backend_pid_tx
+                .send(backend_pid)
+                .expect("parent should receive the second backend pid");
+            insert_sync_event(
+                &mut transaction,
+                SyncEventType::ItemUpdated,
+                second_entity_id,
+                SyncEntityType::Item,
+                &second_vault_id,
+                &second_actor_id,
+                1,
+                None,
+                None,
+            )
+            .await
+            .expect("second event should eventually be allocated");
+            transaction
+                .commit()
+                .await
+                .expect("second transaction should commit");
+        });
+
+        let backend_pid = backend_pid_rx
+            .await
+            .expect("second backend should report readiness");
+        wait_until_backend_waits_for_advisory_lock(&app.pool, backend_pid).await;
+        assert!(!second.is_finished());
+        first
+            .commit()
+            .await
+            .expect("first transaction should commit");
+        second.await.expect("second event task should finish");
+
+        let first_event_id: String =
+            query_scalar("SELECT id FROM sync_event WHERE entity_id = $1 AND user_id = $2")
+                .bind(first_entity_id)
+                .bind(&first_user_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("first event should be visible");
+        let first_page = get_events_since(
+            &app.pool,
+            &first_user_id,
+            GetEventsSinceInput {
+                since_id: None,
+                vault_ids: None,
+                limit: Some(1),
+            },
+        )
+        .await
+        .expect("first changes page should load");
+        assert_eq!(first_page.events[0].id, first_event_id);
+        assert!(first_page.has_more);
+
+        let next_page = get_events_since(
+            &app.pool,
+            &first_user_id,
+            GetEventsSinceInput {
+                since_id: Some(first_event_id),
+                vault_ids: None,
+                limit: Some(10),
+            },
+        )
+        .await
+        .expect("changes after the first cursor should load");
+        assert_eq!(next_page.events.len(), 1);
+        assert_eq!(next_page.events[0].entity_id, second_entity_id);
+        assert!(!next_page.requires_full_refresh);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sync_event_order_lock_rollback_releases_waiters() {
+    with_sync_test_app("sync_event_lock_rollback", |app| async move {
+        let mut first = begin_sync_event_transaction(&app.pool)
+            .await
+            .expect("first transaction should begin");
+        let lock_count: i64 = query_scalar(
+            "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted",
+        )
+        .fetch_one(&mut *first)
+        .await
+        .expect("held advisory locks should be countable");
+        assert_eq!(lock_count, 1, "the transaction should hold one order lock");
+
+        let second_pool = app.pool.clone();
+        let (backend_pid_tx, backend_pid_rx) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let mut transaction = second_pool
+                .begin()
+                .await
+                .expect("second transaction should begin");
+            let backend_pid: i32 = query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *transaction)
+                .await
+                .expect("second backend pid should load");
+            backend_pid_tx
+                .send(backend_pid)
+                .expect("parent should receive the second backend pid");
+            lock_sync_event_order(&mut transaction)
+                .await
+                .expect("second transaction should acquire the released lock");
+            transaction
+                .commit()
+                .await
+                .expect("second transaction should commit");
+        });
+        let backend_pid = backend_pid_rx
+            .await
+            .expect("second backend should report readiness");
+        wait_until_backend_waits_for_advisory_lock(&app.pool, backend_pid).await;
+        assert!(!second.is_finished());
+        first
+            .rollback()
+            .await
+            .expect("rolling back should release transaction locks");
+        tokio::time::timeout(StdDuration::from_secs(2), second)
+            .await
+            .expect("rollback should unblock the waiter")
+            .expect("waiter task should finish");
+    })
+    .await;
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     config::DeploymentMode,
-    db::events::generate_resource_id,
+    db::events::{begin_sync_event_transaction, generate_resource_id},
     db::{
         enums::{BillingPlan, BillingStatus, SyncEventType, VaultRole, VaultType},
         models::DbTeamBillingEntitlementRow,
@@ -174,8 +174,7 @@ pub(crate) async fn add_vault_member(
     if existing_member.is_some() {
         return Err(AppError::conflict("User is already a member of this vault"));
     }
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault member add transaction"))?;
     query(

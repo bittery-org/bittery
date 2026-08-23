@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     config::DeploymentMode,
-    db::events::generate_resource_id,
+    db::events::{begin_sync_event_transaction, generate_resource_id},
     db::{
         enums::{SyncEventType, VaultRole},
         models::{DbBootstrapAttachmentRow, DbBootstrapItemRow},
@@ -252,8 +252,7 @@ pub(crate) async fn create_vault_attachment(
             "Uploaded attachment does not match the reserved encrypted size.",
         ));
     }
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment create transaction"))?;
     query(
@@ -286,7 +285,7 @@ pub(crate) async fn create_vault_attachment(
         .await
         .map_err(|error| database_error(error, "Failed to consume attachment reservation"))?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &scoped_item.vault_id,
@@ -476,8 +475,7 @@ pub(crate) async fn update_vault_attachment(
     let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     assert_item_write_access(attachment.role, "Access denied")?;
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment update transaction"))?;
     query(
@@ -491,7 +489,7 @@ pub(crate) async fn update_vault_attachment(
 	.await
 	.map_err(|error| database_error(error, "Failed to update attachment"))?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
@@ -535,8 +533,7 @@ pub(crate) async fn delete_vault_attachment(
             AppError::internal("An internal error occurred")
         })?;
     let item_version = load_item_row(pool, &attachment.item_id).await?.version;
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment delete transaction"))?;
     query("DELETE FROM item_attachment WHERE id = $1")
@@ -545,7 +542,7 @@ pub(crate) async fn delete_vault_attachment(
         .await
         .map_err(|error| database_error(error, "Failed to delete attachment"))?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,

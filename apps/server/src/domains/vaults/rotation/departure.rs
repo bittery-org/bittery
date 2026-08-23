@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     config::DeploymentMode,
     db::enums::{BillingPlan, BillingStatus, KeyRotationReason, TeamRole, TeamType},
+    db::events::begin_serializable_sync_event_transaction,
     domains::billing::{entitlements::team_management_enabled, sync_team_seats_best_effort},
     error::AppError,
     integrations::stripe::BillingGateway,
@@ -233,12 +234,7 @@ async fn finalize(
     intent: Intent,
     plan_ids: &[String],
 ) -> Result<(DepartureResult, BillingPlan), AppError> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *tx)
+    let mut tx = begin_serializable_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Member departure operation failed"))?;
     let member: (

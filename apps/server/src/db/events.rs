@@ -1,7 +1,7 @@
 use rand::random;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{query, query_as, PgPool, Postgres};
+use sqlx::{query, query_as, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 
 use crate::{
@@ -10,7 +10,48 @@ use crate::{
         models::DbScopedItemAccessRow,
     },
     error::AppError,
+    shared::transaction::database_error,
 };
+
+const SYNC_EVENT_ORDER_LOCK_NAMESPACE: &str = "bittery:sync-event";
+const SYNC_EVENT_ORDER_LOCK_KEY: &str = "commit-order";
+
+/// Begin a transaction that may emit sync events.
+///
+/// The global transaction lock is deliberately acquired before any Domain read, row lock or
+/// mutation. This conservative ordering makes sequence allocation follow commit visibility without
+/// introducing row/advisory lock cycles. It serializes sync-producing writes until a future buffered
+/// event tail can narrow the critical section.
+pub async fn begin_sync_event_transaction(
+    pool: &PgPool,
+) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    lock_sync_event_order(&mut transaction).await?;
+    Ok(transaction)
+}
+
+pub async fn begin_serializable_sync_event_transaction(
+    pool: &PgPool,
+) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        .execute(&mut *transaction)
+        .await?;
+    lock_sync_event_order(&mut transaction).await?;
+    Ok(transaction)
+}
+
+/// Assert/reacquire the global sync-event commit-order lock before allocating a sequence.
+pub async fn lock_sync_event_order(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))")
+        .bind(SYNC_EVENT_ORDER_LOCK_NAMESPACE)
+        .bind(SYNC_EVENT_ORDER_LOCK_KEY)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
 
 /// Generate a prefixed random ID (e.g. `audit_0a1b2c3d4e5f6789`).
 pub fn generate_resource_id(prefix: &str) -> String {
@@ -73,8 +114,8 @@ pub async fn insert_audit_event<'e>(
 ///
 /// The `metadata` field is optional — when `None`, the column is omitted from the insert.
 #[allow(clippy::too_many_arguments)]
-pub async fn insert_sync_event<'e>(
-    executor: impl sqlx::Executor<'e, Database = Postgres>,
+pub async fn insert_sync_event(
+    transaction: &mut Transaction<'_, Postgres>,
     event_type: SyncEventType,
     entity_id: &str,
     entity_type: SyncEntityType,
@@ -84,6 +125,9 @@ pub async fn insert_sync_event<'e>(
     client_id: Option<&str>,
     metadata: Option<&str>,
 ) -> Result<(), AppError> {
+    lock_sync_event_order(transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to serialize sync event order"))?;
     let id = generate_resource_id("sync");
     match metadata {
         Some(metadata) => {
@@ -100,7 +144,7 @@ pub async fn insert_sync_event<'e>(
             .bind(client_id)
             .bind(metadata)
             .bind(OffsetDateTime::now_utc())
-            .execute(executor)
+            .execute(&mut **transaction)
             .await
         }
         None => {
@@ -116,7 +160,7 @@ pub async fn insert_sync_event<'e>(
             .bind(version)
             .bind(client_id)
             .bind(OffsetDateTime::now_utc())
-            .execute(executor)
+            .execute(&mut **transaction)
             .await
         }
     }
@@ -129,8 +173,8 @@ pub async fn insert_sync_event<'e>(
 
 /// Insert a user-scoped sync event without a vault association.
 #[allow(clippy::too_many_arguments)]
-pub async fn insert_user_sync_event<'e>(
-    executor: impl sqlx::Executor<'e, Database = Postgres>,
+pub async fn insert_user_sync_event(
+    transaction: &mut Transaction<'_, Postgres>,
     event_type: SyncEventType,
     entity_id: &str,
     entity_type: SyncEntityType,
@@ -139,6 +183,9 @@ pub async fn insert_user_sync_event<'e>(
     client_id: Option<&str>,
     metadata: Option<&str>,
 ) -> Result<(), AppError> {
+    lock_sync_event_order(transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to serialize sync event order"))?;
     let id = generate_resource_id("sync");
     match metadata {
         Some(metadata) => {
@@ -154,7 +201,7 @@ pub async fn insert_user_sync_event<'e>(
             .bind(client_id)
             .bind(metadata)
             .bind(OffsetDateTime::now_utc())
-            .execute(executor)
+            .execute(&mut **transaction)
             .await
         }
         None => {
@@ -169,7 +216,7 @@ pub async fn insert_user_sync_event<'e>(
             .bind(version)
             .bind(client_id)
             .bind(OffsetDateTime::now_utc())
-            .execute(executor)
+            .execute(&mut **transaction)
             .await
         }
     }

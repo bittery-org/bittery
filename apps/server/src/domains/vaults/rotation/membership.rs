@@ -6,7 +6,10 @@ use sqlx::{query, query_as, PgPool};
 
 use crate::{
     config::DeploymentMode,
-    db::enums::{BillingPlan, BillingStatus, KeyRotationReason, VaultRole, VaultType},
+    db::{
+        enums::{BillingPlan, BillingStatus, KeyRotationReason, VaultRole, VaultType},
+        events::begin_serializable_sync_event_transaction,
+    },
     domains::billing::entitlements::resolve_vault_sharing_entitlement,
     error::AppError,
     shared::transaction::database_error,
@@ -208,12 +211,7 @@ pub(crate) async fn finalize_removal(
     target_id: &str,
     plan_id: &str,
 ) -> Result<VaultMemberRemovalResult, AppError> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
-    query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *tx)
+    let mut tx = begin_serializable_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Vault membership operation failed"))?;
     let policy = vault_key_rotation::lock_plan_policy(&mut tx, plan_id)

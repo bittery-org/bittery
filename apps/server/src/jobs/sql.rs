@@ -4,6 +4,7 @@ use time::{Duration, OffsetDateTime};
 use tracing::{error, info};
 
 use crate::{
+    db::events::{begin_sync_event_transaction, lock_sync_event_order},
     db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate},
     integrations::storage,
 };
@@ -187,9 +188,11 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
             })
             .collect();
 
-        let mut transaction = pool.begin().await?;
+        let mut transaction = begin_sync_event_transaction(pool).await?;
 
         if !event_rows.is_empty() {
+            lock_sync_event_order(&mut transaction).await?;
+
             let mut ids = Vec::with_capacity(event_rows.len());
             let mut entity_ids = Vec::with_capacity(event_rows.len());
             let mut vault_ids = Vec::with_capacity(event_rows.len());

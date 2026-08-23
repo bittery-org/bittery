@@ -12,7 +12,7 @@ use crate::{
             CreateItemRejectionCode, ItemCategory, OperationKind, OperationOutcomeStatus,
             SyncEntityType, SyncEventType,
         },
-        events::insert_user_sync_event,
+        events::{begin_sync_event_transaction, insert_user_sync_event},
     },
     domains::vaults::{self, CreateItemEffect, CreateItemEffectInput},
     error::AppError,
@@ -165,8 +165,7 @@ pub(crate) async fn execute_create_item(
     input: CreateItemOperationInput,
 ) -> Result<OperationResolution, AppError> {
     let fingerprint = create_item_fingerprint(&input);
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start Operation transaction"))?;
     acquire_advisory_lock(
@@ -258,7 +257,7 @@ pub(crate) async fn execute_create_item(
     };
 
     insert_user_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::OperationResolved,
         &input.operation_id,
         SyncEntityType::Operation,

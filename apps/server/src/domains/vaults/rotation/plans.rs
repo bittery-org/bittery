@@ -16,6 +16,7 @@ use crate::{
         KeyRotationReason, VaultKeyRotationManifestKind, VaultKeyRotationPlanState,
         VaultKeyRotationStaleReason,
     },
+    db::events::lock_sync_event_order,
     error::AppError,
     shared::transaction::database_error,
 };
@@ -540,6 +541,7 @@ pub(crate) async fn finalize_locked_plan(
     plan_id: &str,
     initiator_user_id: &str,
 ) -> Result<RotationResult, FinalizeError> {
+    lock_sync_event_order(tx).await?;
     let plan = sqlx::query_as!(
         PlanRow,
         r#"SELECT p.vault_id,
@@ -946,6 +948,7 @@ pub(crate) async fn cleanup_rotation_plans(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::events::begin_sync_event_transaction;
     use crate::test_support::{
         seed_item, seed_user, seed_vault, seed_vault_key, with_api_test_app,
     };
@@ -1064,7 +1067,9 @@ mod tests {
             .await
             .expect("removal plan should be created");
             stage_test_plan(&app.pool, &plan.id).await;
-            let mut tx = app.pool.begin().await.expect("transaction should start");
+            let mut tx = begin_sync_event_transaction(&app.pool)
+                .await
+                .expect("transaction should start");
 
             finalize_locked_plan(&mut tx, &plan.id, "rotation_user")
                 .await
@@ -1129,7 +1134,7 @@ mod tests {
             .await;
             let _other_plan = create_test_plan(&app.pool).await;
             stage_test_plan(&app.pool, &plan.id).await;
-            let mut tx = app.pool.begin().await.unwrap();
+            let mut tx = begin_sync_event_transaction(&app.pool).await.unwrap();
 
             let result = finalize_locked_plan(&mut tx, &plan.id, "rotation_user").await;
 
@@ -1154,7 +1159,7 @@ mod tests {
 			.expect("attachment should seed");
 			let _other_plan = create_test_plan(&app.pool).await;
 			stage_test_plan(&app.pool, &plan.id).await;
-			let mut tx = app.pool.begin().await.unwrap();
+			let mut tx = begin_sync_event_transaction(&app.pool).await.unwrap();
 
 			let result = finalize_locked_plan(&mut tx, &plan.id, "rotation_user").await;
 

@@ -20,7 +20,9 @@ use super::{
 };
 use crate::{
     config::DeploymentMode,
-    db::events::{generate_resource_id, insert_audit_event, insert_sync_event},
+    db::events::{
+        begin_sync_event_transaction, generate_resource_id, insert_audit_event, insert_sync_event,
+    },
     db::{
         enums::{CreateItemRejectionCode, SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
@@ -384,7 +386,7 @@ pub(crate) async fn apply_create_item(
     )
     .await?;
     insert_item_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::ItemCreated,
         &input.item_id,
         &input.vault_id,
@@ -432,8 +434,7 @@ pub(crate) async fn bulk_import_vault_items(
         ));
     }
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start bulk import transaction"))?;
     for item in &input.items {
@@ -493,8 +494,7 @@ pub(crate) async fn update_vault_item(
         || input.encryption_iv.is_some()
         || input.encryption_algorithm.is_some();
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start item update transaction"))?;
     let new_version = query_scalar::<_, i32>(
@@ -513,7 +513,7 @@ pub(crate) async fn update_vault_item(
 	.map_err(|error| database_error(error, "Failed to update item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -547,8 +547,7 @@ pub(crate) async fn toggle_vault_favorite(
     assert_item_write_access(access.role, "Access denied")?;
 
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start favorite update transaction"))?;
     let new_version = query_scalar::<_, i32>(
@@ -563,7 +562,7 @@ pub(crate) async fn toggle_vault_favorite(
         .map_err(|error| database_error(error, "Failed to update favorite state"))?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -590,8 +589,7 @@ pub(crate) async fn delete_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start item delete transaction"))?;
     let new_version = query_scalar::<_, i32>(
@@ -607,7 +605,7 @@ pub(crate) async fn delete_vault_item(
         .map_err(|error| database_error(error, "Failed to delete item"))?
         .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -709,8 +707,7 @@ pub(crate) async fn restore_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start item restore transaction"))?;
     let new_version = query_scalar::<_, i32>(
@@ -725,7 +722,7 @@ pub(crate) async fn restore_vault_item(
     .map_err(|error| database_error(error, "Failed to restore item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemRestored,
         &input.item_id,
         &existing_item.vault_id,
@@ -775,8 +772,7 @@ pub(crate) async fn move_vault_item(
     assert_item_write_access(target_access.role, "Cannot move items to a read-only vault")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start item move transaction"))?;
     let new_version = query_scalar::<_, i32>(
@@ -843,8 +839,7 @@ pub(crate) async fn permanently_delete_vault_item(
     assert_item_write_access(access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start permanent delete transaction"))?;
     let deleted_version = query_scalar::<_, i32>(
@@ -857,7 +852,7 @@ pub(crate) async fn permanently_delete_vault_item(
     .map_err(|error| database_error(error, "Failed to permanently delete item"))?
     .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemPermanentlyDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -890,7 +885,7 @@ async fn insert_bulk_import_sync_event(
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultUpdated,
         vault_id,
         SyncEntityType::Vault,
@@ -934,7 +929,7 @@ async fn insert_item_sync_event_with_metadata(
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         event_type,
         item_id,
         SyncEntityType::Item,

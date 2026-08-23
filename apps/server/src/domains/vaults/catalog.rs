@@ -11,7 +11,9 @@ use super::{
 };
 use crate::{
     config::{format_timestamp, DeploymentMode},
-    db::events::{generate_resource_id, insert_audit_event, insert_sync_event},
+    db::events::{
+        begin_sync_event_transaction, generate_resource_id, insert_audit_event, insert_sync_event,
+    },
     db::{
         enums::{BillingPlan, BillingStatus, SyncEntityType, SyncEventType, VaultRole, VaultType},
         models::DbVaultRoleRow,
@@ -287,8 +289,7 @@ pub(crate) async fn create_vault(
         shared_vault_limit = entitlement.shared_vault_limit;
     }
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
     if input.vault_type == VaultType::Team {
@@ -368,8 +369,7 @@ pub(crate) async fn update_vault(
         .clone()
         .unwrap_or(current_vault.image_key.clone());
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
     query("UPDATE vault SET name = $1, icon = $2, image_key = $3, updated_at = $4 WHERE id = $5")
@@ -475,8 +475,7 @@ pub(crate) async fn convert_vault_type(
         shared_vault_limit = entitlement.shared_vault_limit;
     }
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault conversion transaction"))?;
     if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
@@ -578,8 +577,7 @@ pub(crate) async fn delete_vault(
     .await
     .map_err(|error| database_error(error, "Failed to load vault members"))?;
 
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault delete transaction"))?;
     insert_vault_deleted_sync_event(
@@ -710,7 +708,7 @@ async fn insert_vault_created_sync_event(
     client_id: Option<&str>,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultCreated,
         vault_id,
         SyncEntityType::Vault,
@@ -747,7 +745,7 @@ async fn insert_vault_updated_sync_event(
     client_id: Option<&str>,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultUpdated,
         vault_id,
         SyncEntityType::Vault,
@@ -806,7 +804,7 @@ pub(super) async fn insert_vault_member_sync_event(
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         event_type,
         entity_id,
         SyncEntityType::VaultMember,
@@ -826,7 +824,7 @@ async fn insert_vault_deleted_sync_event(
     client_id: Option<&str>,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultDeleted,
         vault_id,
         SyncEntityType::Vault,
@@ -846,7 +844,7 @@ async fn insert_vault_access_revoked_sync_event(
     client_id: Option<&str>,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultAccessRevoked,
         vault_id,
         SyncEntityType::Vault,

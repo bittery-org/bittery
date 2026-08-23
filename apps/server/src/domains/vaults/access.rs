@@ -85,8 +85,8 @@ pub(super) async fn load_item_row<'e>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn insert_item_sync_event<'e>(
-    executor: impl sqlx::Executor<'e, Database = Postgres>,
+pub(super) async fn insert_item_sync_event(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
     event_type: SyncEventType,
     item_id: &str,
     vault_id: &str,
@@ -95,7 +95,7 @@ pub(super) async fn insert_item_sync_event<'e>(
     version: i32,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        executor,
+        transaction,
         event_type,
         item_id,
         SyncEntityType::Item,
