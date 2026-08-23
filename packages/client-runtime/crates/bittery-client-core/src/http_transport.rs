@@ -1,9 +1,12 @@
 use crate::{RequestCancellation, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,8 +97,66 @@ impl HttpRequest {
         if !is_absolute_url(&self.url) {
             return Err(transport_invariant("HTTP request URL is not absolute"));
         }
+        if matches!(self.method, HttpMethod::Get | HttpMethod::Head) && !self.body.is_empty() {
+            return Err(transport_invariant(
+                "HTTP GET and HEAD requests cannot carry a body",
+            ));
+        }
+        let mut names = HashSet::with_capacity(self.headers.len());
+        for header in &self.headers {
+            if !is_http_token(&header.name) {
+                return Err(transport_invariant("HTTP request header name is invalid"));
+            }
+            if header
+                .value
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+                || header
+                    .value
+                    .as_bytes()
+                    .last()
+                    .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                return Err(transport_invariant(
+                    "HTTP request header value requires host normalization",
+                ));
+            }
+            if !names.insert(header.name.to_ascii_lowercase()) {
+                return Err(transport_invariant(
+                    "HTTP request header name is duplicated",
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'a'..=b'z'
+                    | b'A'..=b'Z'
+                    | b'0'..=b'9'
+                    | b'!'
+                    | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+            )
+        })
 }
 
 fn is_absolute_url(value: &str) -> bool {
@@ -318,7 +379,7 @@ mod tests {
                     value: "one".to_owned(),
                 },
                 HttpHeader {
-                    name: "x-first".to_owned(),
+                    name: "x-second".to_owned(),
                     value: "two".to_owned(),
                 },
             ],
@@ -344,7 +405,7 @@ mod tests {
         assert_eq!(
             executor.requests.lock().unwrap().as_slice(),
             [
-                r#"{"dispatchId":"dispatch-7","method":"POST","url":"https://vault.example.test/auth/start","headers":[{"name":"x-first","value":"one"},{"name":"x-first","value":"two"}],"body":[0,1,255],"maxResponseBytes":2}"#
+                r#"{"dispatchId":"dispatch-7","method":"POST","url":"https://vault.example.test/auth/start","headers":[{"name":"x-first","value":"one"},{"name":"x-second","value":"two"}],"body":[0,1,255],"maxResponseBytes":2}"#
             ]
         );
         assert_eq!(
@@ -364,6 +425,71 @@ mod tests {
                 body: vec![9, 8],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_get_and_head_bodies_before_host_invocation() {
+        for method in [HttpMethod::Get, HttpMethod::Head] {
+            let executor = Arc::new(StubExecutor::responding(r#"{"type":"networkFailure"}"#));
+            let dispatch = HttpDispatch::new(
+                method,
+                "https://vault.example.test/auth/start".into(),
+                vec![],
+                vec![1],
+                0,
+            );
+            let error = HttpTransport::new(executor.clone())
+                .execute_with_dispatch_id(dispatch, RequestCancellation::new(), "dispatch-7".into())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert!(executor.requests.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_ambiguous_or_normalized_request_headers_before_host_invocation() {
+        let cases = [
+            vec![
+                HttpHeader {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                },
+                HttpHeader {
+                    name: "Content-Type".into(),
+                    value: "text/plain".into(),
+                },
+            ],
+            vec![HttpHeader {
+                name: "not a token".into(),
+                value: "value".into(),
+            }],
+            vec![HttpHeader {
+                name: "x-test".into(),
+                value: " leading".into(),
+            }],
+            vec![HttpHeader {
+                name: "x-test".into(),
+                value: "trailing\t".into(),
+            }],
+        ];
+
+        for headers in cases {
+            let executor = Arc::new(StubExecutor::responding(r#"{"type":"networkFailure"}"#));
+            let dispatch = HttpDispatch::new(
+                HttpMethod::Post,
+                "https://vault.example.test/auth/start".into(),
+                headers,
+                vec![],
+                0,
+            );
+            let error = HttpTransport::new(executor.clone())
+                .execute_with_dispatch_id(dispatch, RequestCancellation::new(), "dispatch-7".into())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert!(executor.requests.lock().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]
@@ -453,7 +579,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserves_executor_contract_errors_as_seam_failures() {
+    async fn redacts_executor_contract_errors_as_invariant_failures() {
         let executor = Arc::new(StubExecutor {
             response: Mutex::new(Some(Err(RuntimeError::new(
                 RuntimeErrorCode::RuntimeClosed,
