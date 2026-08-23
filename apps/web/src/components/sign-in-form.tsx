@@ -3,6 +3,7 @@ import {
 	performSRPLogin,
 	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
+import { unlockAccountWithPassword } from "@bittery/core/services/unlock";
 import {
 	createApiClientForServer,
 	getDefaultServerUrl,
@@ -20,6 +21,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { forgetActiveSession, itemCache, storage } from "@/lib/storage";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
@@ -125,6 +127,7 @@ export default function SignInForm({
 					initialEmail={initialEmail}
 					initialSecretKey={initialSecretKey}
 					isQuickUnlock={isQuickUnlock}
+					quickUnlockAccountId={sessionState?.accountId ?? undefined}
 					isCloudMode={isCloudMode}
 					canShowSignup={canShowSignup}
 					hasInvitationRedirect={hasInvitationRedirect}
@@ -147,6 +150,7 @@ function SignInFormContent({
 	initialEmail,
 	initialSecretKey,
 	isQuickUnlock,
+	quickUnlockAccountId,
 	isCloudMode,
 	canShowSignup,
 	hasInvitationRedirect,
@@ -161,6 +165,7 @@ function SignInFormContent({
 	initialEmail: string;
 	initialSecretKey: string;
 	isQuickUnlock: boolean;
+	quickUnlockAccountId?: string;
 	isCloudMode: boolean;
 	canShowSignup: boolean;
 	hasInvitationRedirect: boolean;
@@ -192,6 +197,7 @@ function SignInFormContent({
 		queryFn: async () =>
 			(await ceremonyApiClient.auth.checkEmail({ email })).data,
 		enabled:
+			!isQuickUnlock &&
 			email.includes("@") &&
 			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
 		staleTime: 60 * 1000,
@@ -204,6 +210,21 @@ function SignInFormContent({
 			password: string;
 			secretKey: string;
 		}) => {
+			if (isQuickUnlock) {
+				const accountId = quickUnlockAccountId;
+				if (!accountId) {
+					throw new Error(m.toast_auth_unlock_error_failed());
+				}
+				const outcome = await unlockAccountWithPassword(
+					{ accountId, password: input.password },
+					{ crypto, ...lifecycleDeps },
+				);
+				if (outcome.unlocked.length === 0) {
+					throw new Error(m.toast_auth_unlock_error_failed());
+				}
+				await manager.refresh();
+				return outcome;
+			}
 			const normalizedEmail = input.email.trim().toLowerCase();
 			if (
 				requiresInsecureTransportConfirmation &&

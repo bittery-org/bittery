@@ -74,21 +74,13 @@ export function createVaultSessionMachine(
 				refusal = effect.code;
 				return;
 			case "clear_keys":
-				return ports.lifecycle.lockAll().catch((error) => {
-					console.error(
-						`[vault-session] clear_keys (${effect.reason}) failed:`,
-						error,
-					);
-				});
+				return ports.lifecycle.lockAll();
 			case "invalidate_session":
 				return ports.lifecycle
 					.invalidateSession(
 						effect.sessionId ? { sessionId: effect.sessionId } : "active",
 					)
-					.then(() => undefined)
-					.catch((error) => {
-						console.error("[vault-session] invalidate_session failed:", error);
-					});
+					.then(() => undefined);
 		}
 	}
 

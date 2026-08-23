@@ -7,6 +7,7 @@
  * RN/desktop hooks run the identical flow.
  */
 
+import { isUnauthorizedApiError } from "@bittery/api-contract";
 import type { CryptoPort } from "@bittery/crypto-port";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type {
@@ -40,6 +41,7 @@ import type { TravelModeApiClient } from "./travel-mode-service";
 export type UnlockFailureReason =
 	| "no_stored_secret_key"
 	| "credential_rejected"
+	| "unlock_failed"
 	| "travel_mode_unverified";
 
 /**
@@ -239,7 +241,13 @@ async function acquireWithPassword(
 				failed.push({ accountId, email, reason: "travel_mode_unverified" });
 				continue;
 			}
-			failed.push({ accountId, email, reason: "credential_rejected" });
+			failed.push({
+				accountId,
+				email,
+				reason: isUnauthorizedApiError(error)
+					? "credential_rejected"
+					: "unlock_failed",
+			});
 		}
 	}
 

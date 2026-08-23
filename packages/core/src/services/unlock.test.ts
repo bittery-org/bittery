@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { ApiError } from "@bittery/api-contract";
 import type { KdfProfile } from "@bittery/crypto-port";
 import {
 	createInMemoryCryptoPort,
@@ -236,7 +237,7 @@ describe("unlock all accounts", () => {
 		expect(outcome.failed).toEqual([]);
 	});
 
-	it("reports credential_rejected when the unlock itself fails", async () => {
+	it("reports unlock_failed when required local material is unreadable", async () => {
 		const { storage } = await createStorage({ withKdfProfile: ["acc-2"] });
 
 		const outcome = await unlockAllWithPassword(
@@ -249,9 +250,55 @@ describe("unlock all accounts", () => {
 			{
 				accountId: "acc-1",
 				email: "a@test.com",
+				reason: "unlock_failed",
+			},
+		]);
+	});
+
+	it("reports credential_rejected only for a rejected SRP proof", async () => {
+		const { storage } = await createStorage({
+			accounts: [["acc-1", "a@test.com"]],
+		});
+		const deps = passwordDeps(storage);
+		deps.accountAuthClientFactory = async () => {
+			const client = await testAccountAuthClientFactory(storage, "acc-1");
+			client.auth.finishLogin = mock(async () => {
+				throw new ApiError(
+					{
+						type: "about:blank",
+						title: "Invalid credentials",
+						status: 401,
+						code: "AUTHENTICATION_REQUIRED",
+					},
+					null,
+				);
+			});
+			return client;
+		};
+
+		const outcome = await unlockAllWithPassword({ password: "wrong" }, deps);
+
+		expect(outcome.failed).toEqual([
+			{
+				accountId: "acc-1",
+				email: "a@test.com",
 				reason: "credential_rejected",
 			},
 		]);
+	});
+
+	it("reports transport failures separately from a wrong password", async () => {
+		const { storage } = await createStorage({
+			accounts: [["acc-1", "a@test.com"]],
+		});
+		const deps = passwordDeps(storage);
+		deps.accountAuthClientFactory = async () => {
+			throw new TypeError("network down");
+		};
+
+		const outcome = await unlockAllWithPassword({ password: "pw" }, deps);
+
+		expect(outcome.failed[0]?.reason).toBe("unlock_failed");
 	});
 
 	it("leaves the active account untouched when setActive is false", async () => {

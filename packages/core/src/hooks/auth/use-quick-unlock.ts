@@ -61,6 +61,8 @@ function failureMessage(reason: UnlockFailureReason | undefined): string {
 			return m.auth_error_no_stored_secret_key();
 		case "travel_mode_unverified":
 			return m.auth_error_travel_mode_verify_failed();
+		case "unlock_failed":
+			return m.toast_auth_unlock_error_failed();
 		default:
 			return m.toast_auth_unlock_error_failed();
 	}

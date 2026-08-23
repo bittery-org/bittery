@@ -1,9 +1,8 @@
 /**
  * The only file in `vault-session/` importing the C1 lifecycle service.
  *
- * Neither C1 entry point ever rejects — a failed step lands in
- * `outcome.failures` — so this adapter reports failures rather than
- * translating them, and the machine's `.catch` guards are belt-and-braces.
+ * C1 reports incomplete work in `outcome.failures`; the adapter turns that into
+ * a rejection so the machine's settled contract cannot project a partial lock as success.
  */
 
 import {
@@ -35,9 +34,11 @@ export interface LifecycleAdapterOptions {
 	resolveFallbackAccountId?: () => string | null;
 }
 
-function reportFailures(scope: string, outcome: LifecycleOutcome): void {
+function requireComplete(scope: string, outcome: LifecycleOutcome): void {
 	if (outcome.failures.length > 0) {
-		console.error(`[vault-session] ${scope} incomplete:`, outcome.failures);
+		throw new Error(`[vault-session] ${scope} incomplete`, {
+			cause: outcome.failures,
+		});
 	}
 }
 
@@ -69,7 +70,7 @@ export function createLifecycleAdapter(
 
 	return {
 		async lockAll(): Promise<void> {
-			reportFailures("lockAllAccounts", await lockAll(deps));
+			requireComplete("lockAllAccounts", await lockAll(deps));
 		},
 
 		async invalidateSession(
@@ -92,7 +93,7 @@ export function createLifecycleAdapter(
 				outcome = await invalidate({ accountId }, deps);
 			}
 
-			reportFailures("lockInvalidSession", outcome);
+			requireComplete("lockInvalidSession", outcome);
 			return project(outcome);
 		},
 	};

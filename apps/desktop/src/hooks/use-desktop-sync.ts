@@ -11,6 +11,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
+import { requireCompleteDesktopSessionLock } from "@/lib/session-reauth";
 import { storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
@@ -127,6 +128,7 @@ export function useDesktopSync(
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
 		async (outcome: LifecycleOutcome) => {
+			requireCompleteDesktopSessionLock(outcome);
 			const invalidated = outcome.affected[0];
 			if (!invalidated) {
 				return null;

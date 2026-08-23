@@ -9,6 +9,7 @@ import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateMobileSyncClientId } from "@/lib/sync-client-id";
+import { reauthenticateMobileSession } from "./session-reauth";
 
 const discoveryPolicy = { operatorEnabled: true, accountConfirmed: true };
 
@@ -33,18 +34,21 @@ function handleUnauthorizedError() {
 
 	isHandlingAuthError = true;
 
-	void lockInvalidSession("active", lifecycleDeps)
-		.then((outcome) => {
-			queryClient.clear();
-			toast.error(m.toast_auth_session_expired());
-
+	void reauthenticateMobileSession(
+		() => lockInvalidSession("active", lifecycleDeps),
+		{
+			clearQueries: () => queryClient.clear(),
+			notifyExpired: () => toast.error(m.toast_auth_session_expired()),
 			// A 401 with no active account still has to leave the screen that produced
 			// it: staying put swallows the error and strands the user on a dead view.
-			window.location.href = outcome.wasActive ? "/unlock" : "/";
-		})
-		.catch(() => {
-			isHandlingAuthError = false;
-		});
+			navigate: (wasActive) => {
+				window.location.href = wasActive ? "/unlock" : "/";
+			},
+		},
+	).catch(() => {
+		toast.error(m.toast_auth_session_lock_failed());
+		isHandlingAuthError = false;
+	});
 }
 
 const queryClient = new QueryClient({

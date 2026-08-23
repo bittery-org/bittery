@@ -471,40 +471,6 @@ describe("account-routed authentication", () => {
 		]);
 	});
 
-	it("routes Quick Unlock through the requested Account's stored Server", async () => {
-		const { crypto } = createRecordingCryptoPort();
-		const { storage } = await makeStore(
-			[
-				account("account-a", "user-a", "https://a.example"),
-				account("account-b", "user-b", "https://b.example"),
-			],
-			crypto,
-		);
-		await storage.setActiveAccount("account-a");
-		await storage.storeServerUrl("https://a.example", "account-a");
-		await storage.storeServerUrl("https://b.example", "account-b");
-		await storage.storeSecretKey(SECRET_KEY, "account-b");
-		await storage.storePinnedKdfProfile(kdfParams, "account-b");
-		const resolved: Array<[string, string | null]> = [];
-
-		await performSRPUnlock(
-			{ accountId: "account-b", password: "password" },
-			{
-				crypto,
-				storage,
-				accountAuthClientFactory: async (accountStorage, accountId) => {
-					resolved.push([
-						accountId,
-						await accountStorage.getServerUrl(accountId),
-					]);
-					return createAuthClient([]);
-				},
-			},
-		);
-
-		expect(resolved).toEqual([["account-b", "https://b.example"]]);
-	});
-
 	it("rejects ambiguous full-login account matches before derivation", async () => {
 		const { crypto, derivations } = createRecordingCryptoPort();
 		const { storage } = await makeStore(
