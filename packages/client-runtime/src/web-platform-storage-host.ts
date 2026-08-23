@@ -19,20 +19,24 @@ export class WebPlatformStorageHost {
 
 	async invoke(requestJson: unknown): Promise<string> {
 		const request = parseRequest(requestJson);
-		const storage = this.storage(request.area);
 		let response: PlatformStorageResponse;
-		switch (request.type) {
-			case "get":
-				response = { type: "value", value: storage.getItem(request.key) };
-				break;
-			case "set":
-				storage.setItem(request.key, request.value);
-				response = { type: "done" };
-				break;
-			case "delete":
-				storage.removeItem(request.key);
-				response = { type: "done" };
-				break;
+		try {
+			const storage = this.storage(request.area);
+			switch (request.type) {
+				case "get":
+					response = { type: "value", value: storage.getItem(request.key) };
+					break;
+				case "set":
+					storage.setItem(request.key, request.value);
+					response = { type: "done" };
+					break;
+				case "delete":
+					storage.removeItem(request.key);
+					response = { type: "done" };
+					break;
+			}
+		} catch {
+			throw new PlatformStorageHostError();
 		}
 		if (!validatePlatformStorageResponse(response)) {
 			throw new Error(
@@ -47,6 +51,15 @@ export class WebPlatformStorageHost {
 			return this.deps?.session ?? requireStorage(globalThis.sessionStorage);
 		}
 		return this.deps?.device ?? requireStorage(globalThis.localStorage);
+	}
+}
+
+class PlatformStorageHostError extends Error {
+	readonly code = "platform-storage-failure";
+
+	constructor() {
+		super("Browser platform storage operation failed.");
+		this.name = "PlatformStorageHostError";
 	}
 }
 

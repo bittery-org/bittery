@@ -114,7 +114,7 @@ describe("Web platform storage host", () => {
 		}
 	});
 
-	test("propagates browser storage failures without fabricating success", async () => {
+	test("normalizes browser storage failures without leaking host error details", async () => {
 		for (const operation of ["get", "set", "delete"] as const) {
 			const device = new StorageDouble();
 			device.throwOn = operation;
@@ -132,9 +132,19 @@ describe("Web platform storage host", () => {
 						}
 					: { type: operation, area: "devicePlain", key: "key" };
 
-			await expect(host.invoke(request(envelope))).rejects.toThrow(
-				`${operation} failed`,
-			);
+			try {
+				await host.invoke(request(envelope));
+				throw new Error("expected the platform storage operation to fail");
+			} catch (error) {
+				expect(error).toBeInstanceOf(Error);
+				expect((error as Error).message).toBe(
+					"Browser platform storage operation failed.",
+				);
+				expect((error as Error & { code?: string }).code).toBe(
+					"platform-storage-failure",
+				);
+				expect((error as Error).message).not.toContain(`${operation} failed`);
+			}
 		}
 	});
 });

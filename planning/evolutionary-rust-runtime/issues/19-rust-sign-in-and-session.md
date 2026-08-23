@@ -51,3 +51,15 @@ credential lifetime.
   Device-storage migration and without a parallel v2 key, schema, or client stack. The Runtime
   preserves the established storage lifetimes and authentication behavior, not the old Account-store
   representation.
+
+### 2026-08-23 — Generation-scoped storage boundary
+
+- Device-bound Account metadata and quick-unlock material, plus Session-bound credentials, are
+  addressed by both stable Account ID and installation incarnation. A repeated full Sign-in stages a
+  new generation without overwriting the active generation.
+- The Rust-owned Device catalog records the active incarnation and an optional pending installation
+  intent. Startup reconciles that intent with the durable Replica head before publishing any Account.
+  This gives the non-transactional platform stores one small recoverable publication boundary.
+- Rust owns the closed, versioned document shapes and their storage lifetimes. Hosts only execute
+  primitive string `get`, `set`, and `delete` requests; master password and raw master unlock key have
+  no persistable document field.

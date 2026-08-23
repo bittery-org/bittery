@@ -3,6 +3,8 @@
 //! This crate deliberately knows no host framework or binding generator. Platform crates translate
 //! its closed protocol and execute primitive ports; they do not own Runtime behavior.
 
+// Ticket 19 deliberately lands the closed storage vocabulary before wiring authentication to it.
+#[allow(dead_code)]
 mod platform_storage;
 mod protocol;
 mod replica;
@@ -19,9 +21,7 @@ pub mod server_contract {
 #[doc(hidden)]
 pub use platform_storage::platform_storage_contract_schema;
 #[doc(hidden)]
-pub use platform_storage::{
-    PlatformStorage, PlatformStorageValue, SerializedPlatformStorageExecutor,
-};
+pub use platform_storage::SerializedPlatformStorageExecutor;
 pub use protocol::{
     AccountAccessState, AccountId, AccountStatus, CustomFieldKind, ItemProjectionStatus,
     ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
