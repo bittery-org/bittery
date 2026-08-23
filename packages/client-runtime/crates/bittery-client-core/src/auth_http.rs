@@ -109,17 +109,18 @@ impl<'transport> AuthHttpClient<'transport> {
         cancellation: RequestCancellation,
     ) -> Result<Vec<AuthVaultKeyResponse>, RuntimeError> {
         validate_bearer(token)?;
+        let CursorPageAuthVaultKeyResponse {
+            has_more,
+            items,
+            next_cursor: page_cursor,
+        } = initial_page;
+        let mut cursor = next_cursor(has_more, page_cursor, items.len())?;
         let mut vault_keys = VaultKeyAccumulator::new();
-        vault_keys.append(initial_page.items)?;
-        let mut cursor = next_cursor(initial_page.has_more, initial_page.next_cursor)?;
-        let mut seen = HashSet::new();
+        vault_keys.append(items)?;
+        let mut cursor_evidence = CursorEvidence::new();
 
         while let Some(current) = cursor {
-            if !seen.insert(current.clone()) {
-                return Err(authentication_failure(
-                    "Server returned a repeated Vault-key cursor",
-                ));
-            }
+            cursor_evidence.record(&current)?;
             let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
             url.query_pairs_mut().append_pair("cursor", &current);
             let page: CursorPageAuthVaultKeyResponse = self
@@ -131,8 +132,13 @@ impl<'transport> AuthHttpClient<'transport> {
                     cancellation.clone(),
                 )
                 .await?;
-            vault_keys.append(page.items)?;
-            cursor = next_cursor(page.has_more, page.next_cursor)?;
+            let CursorPageAuthVaultKeyResponse {
+                has_more,
+                items,
+                next_cursor: page_cursor,
+            } = page;
+            cursor = next_cursor(has_more, page_cursor, items.len())?;
+            vault_keys.append(items)?;
         }
         Ok(vault_keys.into_items())
     }
@@ -286,6 +292,54 @@ impl<'transport> AuthHttpClient<'transport> {
             .map_err(|_| invariant("Normalized Server URL cannot own path segments"))?
             .extend(segments);
         Ok(url)
+    }
+}
+
+struct CursorEvidence {
+    seen: HashSet<String>,
+    total_bytes: usize,
+}
+
+impl CursorEvidence {
+    fn new() -> Self {
+        Self {
+            seen: HashSet::new(),
+            total_bytes: 0,
+        }
+    }
+
+    fn record(&mut self, cursor: &str) -> Result<(), RuntimeError> {
+        self.record_with_limits(cursor, MAX_AUTH_VAULT_KEYS, MAX_AUTH_VAULT_KEY_BYTES)
+    }
+
+    fn record_with_limits(
+        &mut self,
+        cursor: &str,
+        max_cursors: usize,
+        max_bytes: usize,
+    ) -> Result<(), RuntimeError> {
+        if self.seen.contains(cursor) {
+            return Err(authentication_failure(
+                "Server returned a repeated Vault-key cursor",
+            ));
+        }
+        if self.seen.len() >= max_cursors {
+            return Err(authentication_failure(
+                "Server returned too many Vault-key cursors",
+            ));
+        }
+        let new_bytes = self
+            .total_bytes
+            .checked_add(cursor.len())
+            .ok_or_else(|| authentication_failure("Server returned too much cursor data"))?;
+        if new_bytes > max_bytes {
+            return Err(authentication_failure(
+                "Server returned too much cursor data",
+            ));
+        }
+        self.total_bytes = new_bytes;
+        self.seen.insert(cursor.to_owned());
+        Ok(())
     }
 }
 
@@ -477,13 +531,20 @@ fn require_json_content_type(headers: &[HttpHeader]) -> Result<(), RuntimeError>
     Ok(())
 }
 
-fn next_cursor(has_more: bool, cursor: Option<String>) -> Result<Option<String>, RuntimeError> {
-    match (has_more, cursor) {
-        (true, Some(cursor)) if !cursor.is_empty() => Ok(Some(cursor)),
-        (true, _) => Err(authentication_failure(
+fn next_cursor(
+    has_more: bool,
+    cursor: Option<String>,
+    item_count: usize,
+) -> Result<Option<String>, RuntimeError> {
+    match (has_more, cursor, item_count) {
+        (true, _, 0) => Err(authentication_failure(
+            "Server returned a Vault-key continuation without progress",
+        )),
+        (true, Some(cursor), _) if !cursor.is_empty() => Ok(Some(cursor)),
+        (true, _, _) => Err(authentication_failure(
             "Server returned an incomplete Vault-key page",
         )),
-        (false, _) => Ok(None),
+        (false, _, _) => Ok(None),
     }
 }
 
@@ -821,7 +882,11 @@ mod tests {
         let executor = Arc::new(ScriptedExecutor::new(vec![completed(
             200,
             "application/json",
-            json!({ "hasMore": true, "items": [], "nextCursor": "cursor-1" }),
+            json!({
+                "hasMore": true,
+                "items": [vault_key("vault-2")],
+                "nextCursor": "cursor-1"
+            }),
         )]));
         let transport = HttpTransport::new(executor.clone());
         let client =
@@ -833,7 +898,7 @@ mod tests {
                     "fresh-token",
                     CursorPageAuthVaultKeyResponse {
                         has_more: true,
-                        items: vec![],
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
                         next_cursor: None,
                     },
                     RequestCancellation::new(),
@@ -849,7 +914,7 @@ mod tests {
                     "fresh-token",
                     CursorPageAuthVaultKeyResponse {
                         has_more: true,
-                        items: vec![],
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
                         next_cursor: Some("cursor-1".into()),
                     },
                     RequestCancellation::new(),
@@ -858,6 +923,69 @@ mod tests {
         );
         assert_eq!(repeated.code, RuntimeErrorCode::AuthenticationUnavailable);
         assert_eq!(executor.requests().len(), 1);
+
+        let empty_executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            json!({ "hasMore": true, "items": [], "nextCursor": "fresh-cursor-2" }),
+        )]));
+        let empty_transport = HttpTransport::new(empty_executor.clone());
+        let empty_client = AuthHttpClient::new(
+            &empty_transport,
+            "https://vault.example.test",
+            false,
+            metadata(),
+        )
+        .unwrap();
+        let no_progress = expect_error(
+            empty_client
+                .drain_vault_keys(
+                    "fresh-token",
+                    CursorPageAuthVaultKeyResponse {
+                        has_more: true,
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
+                        next_cursor: Some("fresh-cursor-1".into()),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+        assert_eq!(
+            no_progress.code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(empty_executor.requests().len(), 1);
+    }
+
+    #[test]
+    fn cursor_evidence_rejects_repetition_count_and_byte_overflow_at_exact_boundaries() {
+        let mut exact = CursorEvidence::new();
+        exact.record_with_limits("one", 2, 6).unwrap();
+        exact.record_with_limits("two", 2, 6).unwrap();
+        assert_eq!(exact.seen.len(), 2);
+        assert_eq!(exact.total_bytes, 6);
+
+        let repeated = exact.record_with_limits("one", usize::MAX, usize::MAX);
+        assert_eq!(
+            repeated.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        let too_many = exact.record_with_limits("three", 2, usize::MAX);
+        assert_eq!(
+            too_many.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(exact.seen.len(), 2);
+        assert_eq!(exact.total_bytes, 6);
+
+        let mut oversized = CursorEvidence::new();
+        let too_large = oversized.record_with_limits("abc", usize::MAX, 2);
+        assert_eq!(
+            too_large.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert!(oversized.seen.is_empty());
+        assert_eq!(oversized.total_bytes, 0);
     }
 
     #[test]
