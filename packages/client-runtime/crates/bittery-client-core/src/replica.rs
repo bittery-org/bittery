@@ -12,6 +12,15 @@ mod persistence_contract;
 #[cfg(test)]
 use domain::apply_plan;
 use domain::AccountReplica;
+#[cfg(test)]
+use domain::{
+    AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
+    AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthoritySnapshot,
+    BootstrapContinuation, BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor,
+    BootstrapPageIdentity, CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult,
+    PromoteBootstrapPlan, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
+    StageBootstrapPageResult, SyncCursor,
+};
 pub(crate) use domain::{
     GuardedCommitPlan, OperationRecord, PlanMutation, PlanResult, RecomputedPlanResult,
     ReplicaItemRecord, ReplicaSnapshot,
@@ -46,6 +55,700 @@ pub(crate) trait ReplicaPersistence: PersistenceRequirements {
         &self,
         request: ReplicaPersistenceRequest,
     ) -> Result<ReplicaPersistenceResponse, RuntimeError>;
+}
+
+#[cfg(test)]
+mod bootstrap_authority_tests {
+    use super::*;
+
+    fn installed() -> (InMemoryReplica, AccountId) {
+        let replica = InMemoryReplica::default();
+        let account_id = AccountId::from("account-bootstrap");
+        replica
+            .install(
+                account_id.clone(),
+                "user-bootstrap".into(),
+                Incarnation::from("incarnation-bootstrap"),
+            )
+            .unwrap();
+        (replica, account_id)
+    }
+
+    fn guard(account_id: &AccountId, revision: u64) -> BootstrapGuard {
+        BootstrapGuard {
+            account_id: account_id.clone(),
+            user_id: "user-bootstrap".into(),
+            incarnation: Incarnation::from("incarnation-bootstrap"),
+            expected_replica_revision: revision,
+            expected_lock_epoch: 0,
+        }
+    }
+
+    fn generation(value: &str) -> BootstrapGenerationId {
+        BootstrapGenerationId(value.into())
+    }
+
+    fn vault(value: &str) -> AuthorityVaultRecord {
+        AuthorityVaultRecord {
+            id: value.into(),
+            name: format!("Vault {value}"),
+            vault_type: AuthorityVaultType::Personal,
+            icon: None,
+            image_url: None,
+            encrypted_vault_key: format!("wrapped-{value}"),
+            role: AuthorityVaultRole::Owner,
+        }
+    }
+
+    fn item(value: &str, vault_id: &str) -> AuthorityItemRecord {
+        AuthorityItemRecord {
+            id: value.into(),
+            vault_id: vault_id.into(),
+            category: AuthorityItemCategory::Login,
+            favorite: false,
+            encrypted_data: format!("ciphertext-{value}"),
+            encryption_iv: format!("iv-{value}"),
+            encryption_algorithm: "AES-GCM".into(),
+            version: 1,
+            encryption_version: 1,
+            encrypted_by_user_id: "user-bootstrap".into(),
+            last_modified_by: "user-bootstrap".into(),
+            created_at: "2026-08-23T00:00:00Z".into(),
+            updated_at: "2026-08-23T00:00:00Z".into(),
+            deleted_at: None,
+            attachments: vec![],
+        }
+    }
+
+    fn begin(
+        replica: &InMemoryReplica,
+        account_id: &AccountId,
+        revision: u64,
+        generation_id: &str,
+    ) -> PlanResult {
+        replica
+            .begin_bootstrap(BeginBootstrapPlan {
+                guard: guard(account_id, revision),
+                generation_id: generation(generation_id),
+            })
+            .unwrap()
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "test plan fields stay explicit")]
+    fn page(
+        account_id: &AccountId,
+        revision: u64,
+        generation_id: &str,
+        page_identity: u64,
+        request_cursor: BootstrapPageCursor,
+        fingerprint_byte: u8,
+        watermark: SyncCursor,
+        continuation: BootstrapContinuation,
+        item_id: &str,
+    ) -> StageBootstrapPagePlan {
+        StageBootstrapPagePlan {
+            guard: guard(account_id, revision),
+            generation_id: generation(generation_id),
+            page_identity: BootstrapPageIdentity(page_identity),
+            request_cursor,
+            raw_response_fingerprint: Sha256Fingerprint([fingerprint_byte; 32]),
+            pinned_watermark: watermark,
+            continuation,
+            vaults: vec![vault("vault-1")],
+            items: vec![item(item_id, "vault-1")],
+        }
+    }
+
+    fn promote(
+        replica: &InMemoryReplica,
+        account_id: &AccountId,
+        revision: u64,
+        generation_id: &str,
+    ) -> PlanResult {
+        replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                guard: guard(account_id, revision),
+                generation_id: generation(generation_id),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn bootstrap_is_cold_then_promotes_only_a_complete_captured_generation() {
+        let (replica, account_id) = installed();
+        let cold = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(cold.state, ReplicaState::Cold);
+        assert_eq!(cold.active_cursor, SyncCursor::Cold);
+        assert!(cold.active_generation.is_none());
+
+        assert_eq!(
+            begin(&replica, &account_id, 0, "generation-1"),
+            PlanResult::Applied {
+                replica_revision: 1
+            }
+        );
+        assert!(replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                guard: guard(&account_id, 1),
+                generation_id: generation("generation-1"),
+            })
+            .is_err());
+        assert_eq!(replica.snapshot(&account_id).unwrap().revision, 1);
+
+        assert_eq!(
+            replica
+                .stage_bootstrap_page(page(
+                    &account_id,
+                    1,
+                    "generation-1",
+                    0,
+                    BootstrapPageCursor::Initial,
+                    1,
+                    SyncCursor::CapturedEmpty,
+                    BootstrapContinuation::Final,
+                    "item-1",
+                ))
+                .unwrap(),
+            StageBootstrapPageResult::Applied
+        );
+        assert_eq!(replica.snapshot(&account_id).unwrap().revision, 1);
+        let staged = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert!(staged.visible_items.is_empty());
+        assert_eq!(staged.staged_item_count, 1);
+
+        assert_eq!(
+            promote(&replica, &account_id, 1, "generation-1"),
+            PlanResult::Applied {
+                replica_revision: 2
+            }
+        );
+        let ready = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(ready.state, ReplicaState::Ready);
+        assert_eq!(ready.active_cursor, SyncCursor::CapturedEmpty);
+        assert_eq!(ready.visible_items, vec![item("item-1", "vault-1")]);
+    }
+
+    #[test]
+    fn old_ready_authority_remains_visible_until_the_new_generation_promotes() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "old");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "old",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedValue {
+                    id: "event-1".into(),
+                },
+                BootstrapContinuation::Final,
+                "old-item",
+            ))
+            .unwrap();
+        promote(&replica, &account_id, 1, "old");
+
+        begin(&replica, &account_id, 2, "new");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                3,
+                "new",
+                0,
+                BootstrapPageCursor::Initial,
+                2,
+                SyncCursor::CapturedValue {
+                    id: "event-2".into(),
+                },
+                BootstrapContinuation::Final,
+                "new-item",
+            ))
+            .unwrap();
+        let staging = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(staging.state, ReplicaState::Bootstrapping);
+        assert_eq!(staging.visible_items, vec![item("old-item", "vault-1")]);
+
+        promote(&replica, &account_id, 3, "new");
+        let promoted = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(promoted.visible_items, vec![item("new-item", "vault-1")]);
+        assert_eq!(
+            promoted.active_cursor,
+            SyncCursor::CapturedValue {
+                id: "event-2".into()
+            }
+        );
+    }
+
+    #[test]
+    fn page_replay_is_exact_and_mismatch_has_no_effect() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "generation-1");
+        let first = page(
+            &account_id,
+            1,
+            "generation-1",
+            0,
+            BootstrapPageCursor::Initial,
+            7,
+            SyncCursor::CapturedValue {
+                id: "event-1".into(),
+            },
+            BootstrapContinuation::More {
+                next_cursor: "page-2".into(),
+            },
+            "item-1",
+        );
+        assert_eq!(
+            replica.stage_bootstrap_page(first.clone()).unwrap(),
+            StageBootstrapPageResult::Applied
+        );
+        let after_apply = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(
+            replica.stage_bootstrap_page(first.clone()).unwrap(),
+            StageBootstrapPageResult::Replayed
+        );
+        assert_eq!(
+            replica.bootstrap_snapshot(&account_id).unwrap(),
+            after_apply
+        );
+
+        let mut mismatch = first;
+        mismatch.raw_response_fingerprint = Sha256Fingerprint([8; 32]);
+        assert_eq!(
+            replica.stage_bootstrap_page(mismatch).unwrap(),
+            StageBootstrapPageResult::ReplayMismatch
+        );
+        assert_eq!(
+            replica.bootstrap_snapshot(&account_id).unwrap(),
+            after_apply
+        );
+
+        assert_eq!(
+            replica
+                .stage_bootstrap_page(page(
+                    &account_id,
+                    1,
+                    "generation-1",
+                    1,
+                    BootstrapPageCursor::After {
+                        cursor: "page-2".into()
+                    },
+                    9,
+                    SyncCursor::CapturedValue {
+                        id: "event-1".into()
+                    },
+                    BootstrapContinuation::Final,
+                    "item-2",
+                ))
+                .unwrap(),
+            StageBootstrapPageResult::Applied
+        );
+    }
+
+    #[test]
+    fn every_bootstrap_command_obeys_identity_revision_and_lock_guards() {
+        let (replica, account_id) = installed();
+        let mut wrong = guard(&account_id, 0);
+        wrong.user_id = "another-user".into();
+        assert_eq!(
+            replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: wrong,
+                    generation_id: generation("stale"),
+                })
+                .unwrap(),
+            PlanResult::Stale { actual_revision: 0 }
+        );
+        let mut wrong = guard(&account_id, 0);
+        wrong.incarnation = Incarnation::from("another-incarnation");
+        assert_eq!(
+            replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: wrong,
+                    generation_id: generation("stale"),
+                })
+                .unwrap(),
+            PlanResult::Stale { actual_revision: 0 }
+        );
+        let mut wrong = guard(&account_id, 0);
+        wrong.expected_lock_epoch = 1;
+        assert_eq!(
+            replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: wrong,
+                    generation_id: generation("stale"),
+                })
+                .unwrap(),
+            PlanResult::Stale { actual_revision: 0 }
+        );
+        assert_eq!(
+            begin(&replica, &account_id, 1, "wrong-revision"),
+            PlanResult::Stale { actual_revision: 0 }
+        );
+
+        assert_eq!(
+            replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: BootstrapGuard {
+                        account_id: AccountId::from("missing"),
+                        ..guard(&account_id, 0)
+                    },
+                    generation_id: generation("missing"),
+                })
+                .unwrap(),
+            PlanResult::Missing
+        );
+
+        begin(&replica, &account_id, 0, "guarded");
+        let unchanged = replica.bootstrap_snapshot(&account_id).unwrap();
+        let mut stale_page = page(
+            &account_id,
+            1,
+            "guarded",
+            0,
+            BootstrapPageCursor::Initial,
+            1,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "item-1",
+        );
+        stale_page.guard.user_id = "another-user".into();
+        assert_eq!(
+            replica.stage_bootstrap_page(stale_page).unwrap(),
+            StageBootstrapPageResult::Stale { actual_revision: 1 }
+        );
+        let mut stale_promote = guard(&account_id, 1);
+        stale_promote.incarnation = Incarnation::from("another-incarnation");
+        assert_eq!(
+            replica
+                .promote_bootstrap(PromoteBootstrapPlan {
+                    guard: stale_promote,
+                    generation_id: generation("guarded"),
+                })
+                .unwrap(),
+            PlanResult::Stale { actual_revision: 1 }
+        );
+        assert_eq!(
+            replica
+                .abandon_bootstrap(AbandonBootstrapPlan {
+                    guard: guard(&account_id, 2),
+                    generation_id: generation("guarded"),
+                })
+                .unwrap(),
+            PlanResult::Stale { actual_revision: 1 }
+        );
+        let mut stale_cleanup = guard(&account_id, 1);
+        stale_cleanup.expected_lock_epoch = 1;
+        assert_eq!(
+            replica
+                .cleanup_bootstrap_generation(CleanupBootstrapGenerationPlan {
+                    guard: stale_cleanup,
+                    generation_id: generation("guarded"),
+                })
+                .unwrap(),
+            CleanupBootstrapGenerationResult::Stale { actual_revision: 1 }
+        );
+        assert_eq!(replica.bootstrap_snapshot(&account_id).unwrap(), unchanged);
+    }
+
+    #[test]
+    fn abandon_and_cleanup_restore_visibility_and_protect_reachable_generations() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "active");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "active",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedEmpty,
+                BootstrapContinuation::Final,
+                "kept-item",
+            ))
+            .unwrap();
+        promote(&replica, &account_id, 1, "active");
+        assert_eq!(
+            replica
+                .cleanup_bootstrap_generation(CleanupBootstrapGenerationPlan {
+                    guard: guard(&account_id, 2),
+                    generation_id: generation("active"),
+                })
+                .unwrap(),
+            CleanupBootstrapGenerationResult::Protected
+        );
+
+        begin(&replica, &account_id, 2, "abandoned");
+        assert_eq!(
+            replica
+                .cleanup_bootstrap_generation(CleanupBootstrapGenerationPlan {
+                    guard: guard(&account_id, 3),
+                    generation_id: generation("abandoned"),
+                })
+                .unwrap(),
+            CleanupBootstrapGenerationResult::Protected
+        );
+        assert_eq!(
+            replica
+                .abandon_bootstrap(AbandonBootstrapPlan {
+                    guard: guard(&account_id, 3),
+                    generation_id: generation("abandoned"),
+                })
+                .unwrap(),
+            PlanResult::Applied {
+                replica_revision: 4
+            }
+        );
+        let ready = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(ready.state, ReplicaState::Ready);
+        assert_eq!(ready.visible_items, vec![item("kept-item", "vault-1")]);
+
+        let cleanup = CleanupBootstrapGenerationPlan {
+            guard: guard(&account_id, 4),
+            generation_id: generation("abandoned"),
+        };
+        assert_eq!(
+            replica
+                .cleanup_bootstrap_generation(cleanup.clone())
+                .unwrap(),
+            CleanupBootstrapGenerationResult::Applied
+        );
+        assert_eq!(
+            replica.cleanup_bootstrap_generation(cleanup).unwrap(),
+            CleanupBootstrapGenerationResult::Applied
+        );
+        assert_eq!(replica.snapshot(&account_id).unwrap().revision, 4);
+        assert_eq!(
+            replica
+                .bootstrap_snapshot(&account_id)
+                .unwrap()
+                .generation_ids,
+            vec![generation("active")]
+        );
+    }
+
+    #[test]
+    fn abandoning_the_first_generation_restores_cold_without_exposing_rows() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "abandoned-cold");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "abandoned-cold",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedEmpty,
+                BootstrapContinuation::Final,
+                "never-visible",
+            ))
+            .unwrap();
+        assert_eq!(
+            replica
+                .abandon_bootstrap(AbandonBootstrapPlan {
+                    guard: guard(&account_id, 1),
+                    generation_id: generation("abandoned-cold"),
+                })
+                .unwrap(),
+            PlanResult::Applied {
+                replica_revision: 2
+            }
+        );
+        let snapshot = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(snapshot.state, ReplicaState::Cold);
+        assert_eq!(snapshot.active_cursor, SyncCursor::Cold);
+        assert!(snapshot.visible_items.is_empty());
+        assert_eq!(snapshot.staged_item_count, 0);
+    }
+
+    #[test]
+    fn invalid_page_watermark_cursor_and_duplicates_leave_staging_unchanged() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "generation-1");
+        let before = replica.bootstrap_snapshot(&account_id).unwrap();
+
+        let mut cold = page(
+            &account_id,
+            1,
+            "generation-1",
+            0,
+            BootstrapPageCursor::Initial,
+            1,
+            SyncCursor::Cold,
+            BootstrapContinuation::Final,
+            "item-1",
+        );
+        assert_eq!(
+            replica.stage_bootstrap_page(cold.clone()).unwrap_err().code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        cold.pinned_watermark = SyncCursor::CapturedEmpty;
+        cold.request_cursor = BootstrapPageCursor::After {
+            cursor: "wrong".into(),
+        };
+        assert_eq!(
+            replica.stage_bootstrap_page(cold.clone()).unwrap_err().code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        cold.request_cursor = BootstrapPageCursor::Initial;
+        cold.items.push(cold.items[0].clone());
+        assert_eq!(
+            replica.stage_bootstrap_page(cold).unwrap_err().code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        assert_eq!(replica.bootstrap_snapshot(&account_id).unwrap(), before);
+    }
+
+    #[test]
+    fn later_pages_must_preserve_the_pinned_nullable_watermark_and_page_position() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "generation-1");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "generation-1",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedEmpty,
+                BootstrapContinuation::More {
+                    next_cursor: "page-2".into(),
+                },
+                "item-1",
+            ))
+            .unwrap();
+        let before = replica.bootstrap_snapshot(&account_id).unwrap();
+        let changed_watermark = page(
+            &account_id,
+            1,
+            "generation-1",
+            1,
+            BootstrapPageCursor::After {
+                cursor: "page-2".into(),
+            },
+            2,
+            SyncCursor::CapturedValue {
+                id: "unexpected".into(),
+            },
+            BootstrapContinuation::Final,
+            "item-2",
+        );
+        assert_eq!(
+            replica
+                .stage_bootstrap_page(changed_watermark)
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        let wrong_identity = page(
+            &account_id,
+            1,
+            "generation-1",
+            2,
+            BootstrapPageCursor::After {
+                cursor: "page-2".into(),
+            },
+            2,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "item-2",
+        );
+        assert_eq!(
+            replica
+                .stage_bootstrap_page(wrong_identity)
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::InvariantViolation
+        );
+        assert_eq!(replica.bootstrap_snapshot(&account_id).unwrap(), before);
+    }
+
+    #[test]
+    fn optimistic_commits_preserve_bootstrap_authority() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "generation-1");
+        replica
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "generation-1",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedEmpty,
+                BootstrapContinuation::Final,
+                "item-1",
+            ))
+            .unwrap();
+        promote(&replica, &account_id, 1, "generation-1");
+        let authority = replica.bootstrap_snapshot(&account_id).unwrap();
+
+        assert_eq!(
+            replica
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    Incarnation::from("incarnation-bootstrap"),
+                    2,
+                    0,
+                    vec![PlanMutation::AcceptOperation(OperationRecord {
+                        operation_id: "operation-1".into(),
+                        item_id: "item-new".into(),
+                        request_bytes: vec![1, 2, 3],
+                    })],
+                ))
+                .unwrap(),
+            PlanResult::Applied {
+                replica_revision: 3
+            }
+        );
+        assert_eq!(replica.bootstrap_snapshot(&account_id).unwrap(), authority);
+    }
+
+    #[tokio::test]
+    async fn a_replacement_incarnation_starts_with_cold_bootstrap_authority() {
+        let persistence = Arc::new(InMemoryReplica::default());
+        let account_id = AccountId::from("account-bootstrap");
+        persistence
+            .install(
+                account_id.clone(),
+                "user-bootstrap".into(),
+                Incarnation::from("incarnation-bootstrap"),
+            )
+            .unwrap();
+        begin(&persistence, &account_id, 0, "generation-1");
+        persistence
+            .stage_bootstrap_page(page(
+                &account_id,
+                1,
+                "generation-1",
+                0,
+                BootstrapPageCursor::Initial,
+                1,
+                SyncCursor::CapturedEmpty,
+                BootstrapContinuation::Final,
+                "item-1",
+            ))
+            .unwrap();
+        promote(&persistence, &account_id, 1, "generation-1");
+
+        Replica::new(persistence.clone())
+            .install_or_replace(
+                account_id.clone(),
+                "user-bootstrap".into(),
+                Incarnation::from("replacement-incarnation"),
+            )
+            .await
+            .unwrap();
+        let bootstrap = persistence.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(bootstrap.state, ReplicaState::Cold);
+        assert_eq!(bootstrap.active_cursor, SyncCursor::Cold);
+        assert!(bootstrap.generation_ids.is_empty());
+        assert!(bootstrap.visible_items.is_empty());
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -560,7 +1263,13 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
 
 #[derive(Default)]
 pub(crate) struct InMemoryReplica {
-    accounts: Mutex<HashMap<AccountId, AccountReplica>>,
+    state: Mutex<InMemoryReplicaState>,
+}
+
+#[derive(Default)]
+struct InMemoryReplicaState {
+    accounts: HashMap<AccountId, AccountReplica>,
+    bootstrap: HashMap<AccountId, domain::BootstrapAuthority>,
 }
 
 impl InMemoryReplica {
@@ -571,14 +1280,17 @@ impl InMemoryReplica {
         user_id: String,
         incarnation: Incarnation,
     ) -> Result<(), RuntimeError> {
-        let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-        if accounts.contains_key(&account_id) {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        if state.accounts.contains_key(&account_id) {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::AccountAlreadyInstalled,
                 "account is already installed",
             ));
         }
-        accounts.insert(
+        state
+            .bootstrap
+            .insert(account_id.clone(), domain::BootstrapAuthority::default());
+        state.accounts.insert(
             account_id.clone(),
             AccountReplica {
                 account_id,
@@ -596,8 +1308,8 @@ impl InMemoryReplica {
 
     #[cfg(test)]
     pub(crate) fn execute(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
-        let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-        let Some(current) = accounts.get(&plan.account_id) else {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let Some(current) = state.accounts.get(&plan.account_id) else {
             return Ok(PlanResult::Missing);
         };
         if current.incarnation != plan.expected_incarnation
@@ -610,9 +1322,9 @@ impl InMemoryReplica {
         }
 
         let account_id = plan.account_id.clone();
-        let next = apply_plan(current.snapshot(), plan)?;
+        let next = AccountReplica::from_snapshot(apply_plan(current.snapshot(), plan)?);
         let revision = next.revision;
-        accounts.insert(account_id, AccountReplica::from_snapshot(next));
+        state.accounts.insert(account_id, next);
         Ok(PlanResult::Applied {
             replica_revision: revision,
         })
@@ -620,18 +1332,113 @@ impl InMemoryReplica {
 
     #[cfg(test)]
     pub(crate) fn remove(&self, account_id: &AccountId) {
-        self.accounts
-            .lock()
-            .expect("replica lock poisoned")
-            .remove(account_id);
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        state.accounts.remove(account_id);
+        state.bootstrap.remove(account_id);
     }
 
     pub(crate) fn snapshot(&self, account_id: &AccountId) -> Option<ReplicaSnapshot> {
-        self.accounts
+        self.state
             .lock()
             .expect("replica lock poisoned")
+            .accounts
             .get(account_id)
             .map(AccountReplica::snapshot)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bootstrap_snapshot(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<BootstrapAuthoritySnapshot> {
+        self.state
+            .lock()
+            .expect("replica lock poisoned")
+            .bootstrap
+            .get(account_id)
+            .map(domain::BootstrapAuthority::snapshot)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn begin_bootstrap(
+        &self,
+        plan: BeginBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account_id = plan.guard.account_id.clone();
+        let Some(mut account) = state.accounts.remove(&account_id) else {
+            return Ok(PlanResult::Missing);
+        };
+        let result =
+            account.begin_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
+        state.accounts.insert(account_id, account);
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stage_bootstrap_page(
+        &self,
+        plan: StageBootstrapPagePlan,
+    ) -> Result<StageBootstrapPageResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account_id = plan.guard.account_id.clone();
+        let Some(mut account) = state.accounts.remove(&account_id) else {
+            return Ok(StageBootstrapPageResult::Missing);
+        };
+        let result = account
+            .stage_bootstrap_page(state.bootstrap.entry(account_id.clone()).or_default(), plan);
+        state.accounts.insert(account_id, account);
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn promote_bootstrap(
+        &self,
+        plan: PromoteBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account_id = plan.guard.account_id.clone();
+        let Some(mut account) = state.accounts.remove(&account_id) else {
+            return Ok(PlanResult::Missing);
+        };
+        let result =
+            account.promote_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
+        state.accounts.insert(account_id, account);
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn abandon_bootstrap(
+        &self,
+        plan: AbandonBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account_id = plan.guard.account_id.clone();
+        let Some(mut account) = state.accounts.remove(&account_id) else {
+            return Ok(PlanResult::Missing);
+        };
+        let result =
+            account.abandon_bootstrap(state.bootstrap.entry(account_id.clone()).or_default(), plan);
+        state.accounts.insert(account_id, account);
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cleanup_bootstrap_generation(
+        &self,
+        plan: CleanupBootstrapGenerationPlan,
+    ) -> Result<CleanupBootstrapGenerationResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account_id = plan.guard.account_id.clone();
+        let Some(mut account) = state.accounts.remove(&account_id) else {
+            return Ok(CleanupBootstrapGenerationResult::Missing);
+        };
+        let result = account.cleanup_bootstrap_generation(
+            state.bootstrap.entry(account_id.clone()).or_default(),
+            plan,
+        );
+        state.accounts.insert(account_id, account);
+        result
     }
 
     #[cfg(test)]
@@ -640,8 +1447,8 @@ impl InMemoryReplica {
         account_id: &AccountId,
         code: RuntimeErrorCode,
     ) -> Result<(), RuntimeError> {
-        let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-        let account = accounts.get_mut(account_id).ok_or_else(|| {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account = state.accounts.get_mut(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
         account.failure = Some(code);
@@ -655,8 +1462,8 @@ impl InMemoryReplica {
         account_id: &AccountId,
         lock_epoch: u64,
     ) -> Result<(), RuntimeError> {
-        let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-        let account = accounts.get_mut(account_id).ok_or_else(|| {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account = state.accounts.get_mut(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
         account.lock_epoch = lock_epoch;
@@ -691,9 +1498,9 @@ impl ReplicaPersistence for InMemoryReplica {
                 Ok(ReplicaPersistenceResponse::Loaded { head, rows })
             }
             ReplicaPersistenceRequest::Install { prepared } => {
-                let mut accounts = self.accounts.lock().expect("replica lock poisoned");
+                let mut state = self.state.lock().expect("replica lock poisoned");
                 let account_id = prepared.next_head.account_id.clone();
-                let matches = match (&prepared.expected, accounts.get(&account_id)) {
+                let matches = match (&prepared.expected, state.accounts.get(&account_id)) {
                     (
                         ExpectedReplicaInstall::Missing {
                             account_id: expected,
@@ -723,7 +1530,7 @@ impl ReplicaPersistence for InMemoryReplica {
                         result: ReplicaInstallResult::Stale,
                     });
                 }
-                match accounts.get_mut(&account_id) {
+                match state.accounts.get_mut(&account_id) {
                     Some(current) => {
                         current.user_id = prepared.next_head.user_id;
                         current.incarnation = prepared.next_head.incarnation;
@@ -733,8 +1540,8 @@ impl ReplicaPersistence for InMemoryReplica {
                     }
                     None => {
                         let head = prepared.next_head;
-                        accounts.insert(
-                            account_id,
+                        state.accounts.insert(
+                            account_id.clone(),
                             AccountReplica {
                                 account_id: head.account_id,
                                 user_id: head.user_id,
@@ -748,13 +1555,16 @@ impl ReplicaPersistence for InMemoryReplica {
                         );
                     }
                 }
+                state
+                    .bootstrap
+                    .insert(account_id, domain::BootstrapAuthority::default());
                 Ok(ReplicaPersistenceResponse::Installed {
                     result: ReplicaInstallResult::Applied,
                 })
             }
             ReplicaPersistenceRequest::Commit { prepared } => {
-                let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-                let Some(current) = accounts.get(&prepared.expected.account_id) else {
+                let mut state = self.state.lock().expect("replica lock poisoned");
+                let Some(current) = state.accounts.get(&prepared.expected.account_id) else {
                     return Ok(ReplicaPersistenceResponse::Committed {
                         result: PlanResult::Missing,
                     });
@@ -794,7 +1604,8 @@ impl ReplicaPersistence for InMemoryReplica {
                     rows,
                 )?
                 .ok_or_else(|| replica_invariant("prepared Replica commit lost its head"))?;
-                accounts.insert(next.account_id.clone(), AccountReplica::from_snapshot(next));
+                let next = AccountReplica::from_snapshot(next);
+                state.accounts.insert(next.account_id.clone(), next);
                 Ok(ReplicaPersistenceResponse::Committed {
                     result: PlanResult::Applied {
                         replica_revision: expected_next_revision,
@@ -802,8 +1613,8 @@ impl ReplicaPersistence for InMemoryReplica {
                 })
             }
             ReplicaPersistenceRequest::AdvanceLockEpoch { prepared } => {
-                let mut accounts = self.accounts.lock().expect("replica lock poisoned");
-                let Some(current) = accounts.get_mut(&prepared.expected.account_id) else {
+                let mut state = self.state.lock().expect("replica lock poisoned");
+                let Some(current) = state.accounts.get_mut(&prepared.expected.account_id) else {
                     return Ok(ReplicaPersistenceResponse::LockEpochAdvanced {
                         result: LockEpochAdvanceResult::Missing,
                     });

@@ -1,6 +1,6 @@
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(super) mod decimal_u64 {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -123,6 +123,332 @@ pub(crate) struct ReplicaItemRecord {
     pub optimistic: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the closed Replica state schema is implemented in slices"
+)]
+pub(crate) enum ReplicaState {
+    #[default]
+    Cold,
+    Bootstrapping,
+    Ready,
+    RefreshRequired,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) enum SyncCursor {
+    #[default]
+    Cold,
+    CapturedEmpty,
+    CapturedValue {
+        id: String,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) enum BootstrapPageCursor {
+    #[default]
+    Initial,
+    After {
+        cursor: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) enum BootstrapContinuation {
+    Final,
+    More { next_cursor: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapGenerationId(pub(crate) String);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapPageIdentity(pub(crate) u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct Sha256Fingerprint(pub(crate) [u8; 32]);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the authority schema mirrors every current Server value"
+)]
+pub(crate) enum AuthorityVaultType {
+    Personal,
+    Team,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the authority schema mirrors every current Server value"
+)]
+pub(crate) enum AuthorityVaultRole {
+    Owner,
+    Admin,
+    Member,
+    ReadOnly,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the authority schema mirrors every current Server value"
+)]
+pub(crate) enum AuthorityItemCategory {
+    Login,
+    SecureNote,
+    CreditCard,
+    Identity,
+    Totp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct AuthorityVaultRecord {
+    pub id: String,
+    pub name: String,
+    pub vault_type: AuthorityVaultType,
+    pub icon: Option<String>,
+    pub image_url: Option<String>,
+    pub encrypted_vault_key: String,
+    pub role: AuthorityVaultRole,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct AuthorityAttachmentRecord {
+    pub id: String,
+    pub item_id: String,
+    pub vault_id: String,
+    pub storage_key: String,
+    pub encrypted_name: String,
+    pub encryption_iv: String,
+    pub encryption_algorithm: String,
+    pub encrypted_attachment_key: String,
+    pub attachment_key_iv: String,
+    pub attachment_key_algorithm: String,
+    pub encrypted_content_type: String,
+    pub encrypted_content_type_iv: String,
+    pub envelope_version: i32,
+    pub file_size: i32,
+    pub uploaded_by: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct AuthorityItemRecord {
+    pub id: String,
+    pub vault_id: String,
+    pub category: AuthorityItemCategory,
+    pub favorite: bool,
+    pub encrypted_data: String,
+    pub encryption_iv: String,
+    pub encryption_algorithm: String,
+    pub version: i32,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub attachments: Vec<AuthorityAttachmentRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapGuard {
+    pub account_id: AccountId,
+    pub user_id: String,
+    pub incarnation: Incarnation,
+    pub expected_replica_revision: u64,
+    pub expected_lock_epoch: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BeginBootstrapPlan {
+    pub guard: BootstrapGuard,
+    pub generation_id: BootstrapGenerationId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct StageBootstrapPagePlan {
+    pub guard: BootstrapGuard,
+    pub generation_id: BootstrapGenerationId,
+    pub page_identity: BootstrapPageIdentity,
+    pub request_cursor: BootstrapPageCursor,
+    pub raw_response_fingerprint: Sha256Fingerprint,
+    pub pinned_watermark: SyncCursor,
+    pub continuation: BootstrapContinuation,
+    pub vaults: Vec<AuthorityVaultRecord>,
+    pub items: Vec<AuthorityItemRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct PromoteBootstrapPlan {
+    pub guard: BootstrapGuard,
+    pub generation_id: BootstrapGenerationId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct AbandonBootstrapPlan {
+    pub guard: BootstrapGuard,
+    pub generation_id: BootstrapGenerationId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct CleanupBootstrapGenerationPlan {
+    pub guard: BootstrapGuard,
+    pub generation_id: BootstrapGenerationId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) enum StageBootstrapPageResult {
+    Applied,
+    Replayed,
+    ReplayMismatch,
+    Stale { actual_revision: u64 },
+    Missing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) enum CleanupBootstrapGenerationResult {
+    Applied,
+    Protected,
+    Stale { actual_revision: u64 },
+    Missing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapGenerationRecord {
+    pub generation_id: BootstrapGenerationId,
+    pub fallback_state: ReplicaState,
+    pub pinned_watermark: SyncCursor,
+    pub next_page_identity: BootstrapPageIdentity,
+    pub next_page_cursor: BootstrapPageCursor,
+    pub final_page_staged: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapPageReceipt {
+    pub generation_id: BootstrapGenerationId,
+    pub page_identity: BootstrapPageIdentity,
+    pub request_cursor: BootstrapPageCursor,
+    pub raw_response_fingerprint: Sha256Fingerprint,
+    pub pinned_watermark: SyncCursor,
+    pub continuation: BootstrapContinuation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(crate) struct BootstrapAuthoritySnapshot {
+    pub state: ReplicaState,
+    pub active_generation: Option<BootstrapGenerationId>,
+    pub active_cursor: SyncCursor,
+    pub staging_generation: Option<BootstrapGenerationId>,
+    pub visible_vaults: Vec<AuthorityVaultRecord>,
+    pub visible_items: Vec<AuthorityItemRecord>,
+    pub generation_ids: Vec<BootstrapGenerationId>,
+    pub generation_records: Vec<BootstrapGenerationRecord>,
+    pub page_receipts: Vec<BootstrapPageReceipt>,
+    pub staged_vault_count: usize,
+    pub staged_item_count: usize,
+}
+
+#[derive(Clone, Default)]
+#[allow(
+    dead_code,
+    reason = "the persistence wire consumes this closed model next"
+)]
+pub(super) struct BootstrapAuthority {
+    state: ReplicaState,
+    active_generation: Option<BootstrapGenerationId>,
+    active_cursor: SyncCursor,
+    staging_generation: Option<BootstrapGenerationId>,
+    generations: HashMap<BootstrapGenerationId, BootstrapGenerationRecord>,
+    pages: HashMap<(BootstrapGenerationId, BootstrapPageIdentity), BootstrapPageReceipt>,
+    vaults: HashMap<(BootstrapGenerationId, String), AuthorityVaultRecord>,
+    items: HashMap<(BootstrapGenerationId, String), AuthorityItemRecord>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -223,6 +549,315 @@ impl AccountReplica {
         }
     }
 
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    pub(super) fn begin_bootstrap(
+        &mut self,
+        bootstrap: &mut BootstrapAuthority,
+        plan: BeginBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(&plan.guard) {
+            return Ok(result);
+        }
+        bootstrap.validate()?;
+        validate_identifier(&plan.generation_id.0, "Bootstrap generation")?;
+        if bootstrap.staging_generation.is_some() {
+            return Err(replica_invariant(
+                "a Bootstrap generation is already staging",
+            ));
+        }
+        if bootstrap.generations.contains_key(&plan.generation_id)
+            || bootstrap
+                .pages
+                .keys()
+                .any(|(generation_id, _)| generation_id == &plan.generation_id)
+            || bootstrap
+                .vaults
+                .keys()
+                .any(|(generation_id, _)| generation_id == &plan.generation_id)
+            || bootstrap
+                .items
+                .keys()
+                .any(|(generation_id, _)| generation_id == &plan.generation_id)
+        {
+            return Err(replica_invariant(
+                "Bootstrap generation identity was reused",
+            ));
+        }
+        let fallback_state = bootstrap.state;
+        if fallback_state == ReplicaState::Bootstrapping {
+            return Err(replica_invariant("Bootstrap fallback state is invalid"));
+        }
+        let next_revision = increment_revision(self.revision)?;
+        let mut next = bootstrap.clone();
+        next.generations.insert(
+            plan.generation_id.clone(),
+            BootstrapGenerationRecord {
+                generation_id: plan.generation_id.clone(),
+                fallback_state,
+                pinned_watermark: SyncCursor::Cold,
+                next_page_identity: BootstrapPageIdentity(0),
+                next_page_cursor: BootstrapPageCursor::Initial,
+                final_page_staged: false,
+            },
+        );
+        next.state = ReplicaState::Bootstrapping;
+        next.staging_generation = Some(plan.generation_id);
+        next.validate()?;
+        *bootstrap = next;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    pub(super) fn stage_bootstrap_page(
+        &mut self,
+        bootstrap: &mut BootstrapAuthority,
+        plan: StageBootstrapPagePlan,
+    ) -> Result<StageBootstrapPageResult, RuntimeError> {
+        if let Some(result) = self.stage_guard_result(&plan.guard) {
+            return Ok(result);
+        }
+        bootstrap.validate()?;
+        if bootstrap.state != ReplicaState::Bootstrapping
+            || bootstrap.staging_generation.as_ref() != Some(&plan.generation_id)
+        {
+            return Ok(StageBootstrapPageResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        let receipt_key = (plan.generation_id.clone(), plan.page_identity);
+        if let Some(receipt) = bootstrap.pages.get(&receipt_key) {
+            return Ok(
+                if receipt.request_cursor == plan.request_cursor
+                    && receipt.raw_response_fingerprint == plan.raw_response_fingerprint
+                {
+                    StageBootstrapPageResult::Replayed
+                } else {
+                    StageBootstrapPageResult::ReplayMismatch
+                },
+            );
+        }
+        let generation = bootstrap
+            .generations
+            .get(&plan.generation_id)
+            .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?;
+        if generation.final_page_staged
+            || generation.next_page_identity != plan.page_identity
+            || generation.next_page_cursor != plan.request_cursor
+        {
+            return Err(replica_invariant(
+                "Bootstrap page does not match the expected page position",
+            ));
+        }
+        validate_captured_cursor(&plan.pinned_watermark)?;
+        if generation.pinned_watermark != SyncCursor::Cold
+            && generation.pinned_watermark != plan.pinned_watermark
+        {
+            return Err(replica_invariant(
+                "Bootstrap watermark changed between pages",
+            ));
+        }
+        validate_continuation(&plan.continuation)?;
+        validate_authority_page(&plan.vaults, &plan.items)?;
+        for item in &plan.items {
+            if bootstrap
+                .items
+                .contains_key(&(plan.generation_id.clone(), item.id.clone()))
+            {
+                return Err(replica_invariant(
+                    "Bootstrap Item appeared in more than one page",
+                ));
+            }
+        }
+
+        let next_identity = plan
+            .page_identity
+            .0
+            .checked_add(1)
+            .ok_or_else(|| replica_invariant("Bootstrap page identity overflowed"))?;
+        let mut next = bootstrap.clone();
+        for vault in &plan.vaults {
+            next.vaults.insert(
+                (plan.generation_id.clone(), vault.id.clone()),
+                vault.clone(),
+            );
+        }
+        for item in &plan.items {
+            next.items
+                .insert((plan.generation_id.clone(), item.id.clone()), item.clone());
+        }
+        next.pages.insert(
+            receipt_key,
+            BootstrapPageReceipt {
+                generation_id: plan.generation_id.clone(),
+                page_identity: plan.page_identity,
+                request_cursor: plan.request_cursor.clone(),
+                raw_response_fingerprint: plan.raw_response_fingerprint,
+                pinned_watermark: plan.pinned_watermark.clone(),
+                continuation: plan.continuation.clone(),
+            },
+        );
+        let generation = next
+            .generations
+            .get_mut(&plan.generation_id)
+            .expect("staging generation was checked above");
+        generation.pinned_watermark = plan.pinned_watermark;
+        generation.next_page_identity = BootstrapPageIdentity(next_identity);
+        match plan.continuation {
+            BootstrapContinuation::Final => generation.final_page_staged = true,
+            BootstrapContinuation::More { next_cursor } => {
+                generation.next_page_cursor = BootstrapPageCursor::After {
+                    cursor: next_cursor,
+                };
+            }
+        }
+        next.validate()?;
+        *bootstrap = next;
+        Ok(StageBootstrapPageResult::Applied)
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    pub(super) fn promote_bootstrap(
+        &mut self,
+        bootstrap: &mut BootstrapAuthority,
+        plan: PromoteBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(&plan.guard) {
+            return Ok(result);
+        }
+        bootstrap.validate()?;
+        if bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
+            return Ok(PlanResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        let generation = bootstrap
+            .generations
+            .get(&plan.generation_id)
+            .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?;
+        if !generation.final_page_staged {
+            return Err(replica_invariant(
+                "cannot promote an incomplete Bootstrap generation",
+            ));
+        }
+        validate_captured_cursor(&generation.pinned_watermark)?;
+        let pinned_watermark = generation.pinned_watermark.clone();
+        let next_revision = increment_revision(self.revision)?;
+        let mut next = bootstrap.clone();
+        next.active_generation = Some(plan.generation_id);
+        next.active_cursor = pinned_watermark;
+        next.staging_generation = None;
+        next.state = ReplicaState::Ready;
+        next.validate()?;
+        *bootstrap = next;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    pub(super) fn abandon_bootstrap(
+        &mut self,
+        bootstrap: &mut BootstrapAuthority,
+        plan: AbandonBootstrapPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(&plan.guard) {
+            return Ok(result);
+        }
+        bootstrap.validate()?;
+        if bootstrap.staging_generation.as_ref() != Some(&plan.generation_id) {
+            return Ok(PlanResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        let fallback_state = bootstrap
+            .generations
+            .get(&plan.generation_id)
+            .ok_or_else(|| replica_invariant("staging Bootstrap generation is missing"))?
+            .fallback_state;
+        let next_revision = increment_revision(self.revision)?;
+        let mut next = bootstrap.clone();
+        next.staging_generation = None;
+        next.state = fallback_state;
+        next.validate()?;
+        *bootstrap = next;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    pub(super) fn cleanup_bootstrap_generation(
+        &mut self,
+        bootstrap: &mut BootstrapAuthority,
+        plan: CleanupBootstrapGenerationPlan,
+    ) -> Result<CleanupBootstrapGenerationResult, RuntimeError> {
+        if self.account_id != plan.guard.account_id {
+            return Ok(CleanupBootstrapGenerationResult::Missing);
+        }
+        if !self.matches_guard(&plan.guard) {
+            return Ok(CleanupBootstrapGenerationResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        bootstrap.validate()?;
+        if bootstrap.active_generation.as_ref() == Some(&plan.generation_id)
+            || bootstrap.staging_generation.as_ref() == Some(&plan.generation_id)
+        {
+            return Ok(CleanupBootstrapGenerationResult::Protected);
+        }
+        let mut next = bootstrap.clone();
+        next.generations.remove(&plan.generation_id);
+        next.pages
+            .retain(|(generation_id, _), _| generation_id != &plan.generation_id);
+        next.vaults
+            .retain(|(generation_id, _), _| generation_id != &plan.generation_id);
+        next.items
+            .retain(|(generation_id, _), _| generation_id != &plan.generation_id);
+        next.validate()?;
+        *bootstrap = next;
+        Ok(CleanupBootstrapGenerationResult::Applied)
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    fn matches_guard(&self, guard: &BootstrapGuard) -> bool {
+        self.account_id == guard.account_id
+            && self.user_id == guard.user_id
+            && self.incarnation == guard.incarnation
+            && self.revision == guard.expected_replica_revision
+            && self.lock_epoch == guard.expected_lock_epoch
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    fn guard_result(&self, guard: &BootstrapGuard) -> Option<PlanResult> {
+        if self.account_id != guard.account_id {
+            Some(PlanResult::Missing)
+        } else if !self.matches_guard(guard) {
+            Some(PlanResult::Stale {
+                actual_revision: self.revision,
+            })
+        } else {
+            None
+        }
+    }
+
+    #[allow(dead_code, reason = "the persistence wire invokes this model next")]
+    fn stage_guard_result(&self, guard: &BootstrapGuard) -> Option<StageBootstrapPageResult> {
+        if self.account_id != guard.account_id {
+            Some(StageBootstrapPageResult::Missing)
+        } else if !self.matches_guard(guard) {
+            Some(StageBootstrapPageResult::Stale {
+                actual_revision: self.revision,
+            })
+        } else {
+            None
+        }
+    }
+
     fn apply(&mut self, mutation: PlanMutation) -> Result<(), RuntimeError> {
         match mutation {
             PlanMutation::PutOptimisticItem(item) => {
@@ -277,5 +912,340 @@ impl AccountReplica {
             operations,
             failure: self.failure,
         }
+    }
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+impl BootstrapAuthority {
+    fn validate(&self) -> Result<(), RuntimeError> {
+        let active_is_cold = self.active_cursor == SyncCursor::Cold;
+        if self.active_generation.is_none() != active_is_cold {
+            return Err(replica_invariant(
+                "active Bootstrap generation and Cursor disagree",
+            ));
+        }
+        match self.state {
+            ReplicaState::Cold => {
+                if self.active_generation.is_some() || self.staging_generation.is_some() {
+                    return Err(replica_invariant("cold Replica has a Bootstrap generation"));
+                }
+            }
+            ReplicaState::Ready | ReplicaState::RefreshRequired => {
+                if self.active_generation.is_none() || self.staging_generation.is_some() {
+                    return Err(replica_invariant("ready Replica head is inconsistent"));
+                }
+            }
+            ReplicaState::Bootstrapping => {
+                let staging = self.staging_generation.as_ref().ok_or_else(|| {
+                    replica_invariant("bootstrapping Replica has no staging generation")
+                })?;
+                if !self.generations.contains_key(staging) {
+                    return Err(replica_invariant("staging Bootstrap generation is missing"));
+                }
+            }
+        }
+        if let Some(active) = &self.active_generation {
+            let generation = self
+                .generations
+                .get(active)
+                .ok_or_else(|| replica_invariant("active Bootstrap generation is missing"))?;
+            if !generation.final_page_staged || generation.pinned_watermark != self.active_cursor {
+                return Err(replica_invariant(
+                    "active Bootstrap generation is not complete at its active Cursor",
+                ));
+            }
+        }
+        for (generation_id, generation) in &self.generations {
+            if generation_id != &generation.generation_id
+                || generation.fallback_state == ReplicaState::Bootstrapping
+            {
+                return Err(replica_invariant(
+                    "Bootstrap generation control record is inconsistent",
+                ));
+            }
+            let mut receipts: Vec<_> = self
+                .pages
+                .iter()
+                .filter(|((receipt_generation, _), _)| receipt_generation == generation_id)
+                .map(|(_, receipt)| receipt)
+                .collect();
+            receipts.sort_by_key(|receipt| receipt.page_identity.0);
+            if u64::try_from(receipts.len()).ok() != Some(generation.next_page_identity.0) {
+                return Err(replica_invariant(
+                    "Bootstrap page receipt sequence has a gap",
+                ));
+            }
+            let mut expected_cursor = BootstrapPageCursor::Initial;
+            let mut terminal = false;
+            for (expected_identity, receipt) in receipts.iter().enumerate() {
+                let expected_identity = u64::try_from(expected_identity)
+                    .map_err(|_| replica_invariant("Bootstrap page identity overflowed"))?;
+                if receipt.generation_id != *generation_id
+                    || receipt.page_identity != BootstrapPageIdentity(expected_identity)
+                    || receipt.request_cursor != expected_cursor
+                    || receipt.pinned_watermark != generation.pinned_watermark
+                    || terminal
+                {
+                    return Err(replica_invariant(
+                        "Bootstrap page receipt chain is inconsistent",
+                    ));
+                }
+                validate_captured_cursor(&receipt.pinned_watermark)?;
+                match &receipt.continuation {
+                    BootstrapContinuation::Final => terminal = true,
+                    BootstrapContinuation::More { next_cursor } => {
+                        validate_identifier(next_cursor, "next Bootstrap page Cursor")?;
+                        expected_cursor = BootstrapPageCursor::After {
+                            cursor: next_cursor.clone(),
+                        };
+                    }
+                }
+            }
+            if generation.next_page_identity.0 == 0 {
+                if generation.pinned_watermark != SyncCursor::Cold
+                    || generation.next_page_cursor != BootstrapPageCursor::Initial
+                    || generation.final_page_staged
+                {
+                    return Err(replica_invariant(
+                        "empty Bootstrap generation control record is inconsistent",
+                    ));
+                }
+            } else if generation.pinned_watermark == SyncCursor::Cold
+                || generation.final_page_staged != terminal
+                || (!terminal && generation.next_page_cursor != expected_cursor)
+            {
+                return Err(replica_invariant(
+                    "Bootstrap generation progress is inconsistent",
+                ));
+            }
+        }
+        for ((generation_id, page_identity), receipt) in &self.pages {
+            if generation_id != &receipt.generation_id || page_identity != &receipt.page_identity {
+                return Err(replica_invariant(
+                    "Bootstrap page receipt key is inconsistent",
+                ));
+            }
+        }
+        for ((generation_id, record_id), vault) in &self.vaults {
+            if !self.generations.contains_key(generation_id) || record_id != &vault.id {
+                return Err(replica_invariant("Bootstrap Vault key is inconsistent"));
+            }
+        }
+        for ((generation_id, record_id), item) in &self.items {
+            if !self.generations.contains_key(generation_id) || record_id != &item.id {
+                return Err(replica_invariant("Bootstrap Item key is inconsistent"));
+            }
+            validate_authority_page(&[], std::slice::from_ref(item))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn snapshot(&self) -> BootstrapAuthoritySnapshot {
+        let mut visible_vaults = Vec::new();
+        let mut visible_items = Vec::new();
+        if let Some(active) = &self.active_generation {
+            visible_vaults.extend(
+                self.vaults
+                    .iter()
+                    .filter(|((generation_id, _), _)| generation_id == active)
+                    .map(|(_, vault)| vault.clone()),
+            );
+            visible_items.extend(
+                self.items
+                    .iter()
+                    .filter(|((generation_id, _), _)| generation_id == active)
+                    .map(|(_, item)| item.clone()),
+            );
+        }
+        visible_vaults.sort_by(|left, right| left.id.cmp(&right.id));
+        visible_items.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut generation_ids: Vec<_> = self.generations.keys().cloned().collect();
+        generation_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut generation_records: Vec<_> = self.generations.values().cloned().collect();
+        generation_records.sort_by(|left, right| left.generation_id.0.cmp(&right.generation_id.0));
+        let mut page_receipts: Vec<_> = self.pages.values().cloned().collect();
+        page_receipts.sort_by(|left, right| {
+            (&left.generation_id.0, left.page_identity.0)
+                .cmp(&(&right.generation_id.0, right.page_identity.0))
+        });
+        let staged_vault_count = self.staging_generation.as_ref().map_or(0, |staging| {
+            self.vaults
+                .keys()
+                .filter(|(generation_id, _)| generation_id == staging)
+                .count()
+        });
+        let staged_item_count = self.staging_generation.as_ref().map_or(0, |staging| {
+            self.items
+                .keys()
+                .filter(|(generation_id, _)| generation_id == staging)
+                .count()
+        });
+        BootstrapAuthoritySnapshot {
+            state: self.state,
+            active_generation: self.active_generation.clone(),
+            active_cursor: self.active_cursor.clone(),
+            staging_generation: self.staging_generation.clone(),
+            visible_vaults,
+            visible_items,
+            generation_ids,
+            generation_records,
+            page_receipts,
+            staged_vault_count,
+            staged_item_count,
+        }
+    }
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn increment_revision(revision: u64) -> Result<u64, RuntimeError> {
+    revision
+        .checked_add(1)
+        .ok_or_else(|| replica_invariant("Replica revision overflowed"))
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn validate_identifier(value: &str, label: &str) -> Result<(), RuntimeError> {
+    if value.is_empty() {
+        Err(replica_invariant(format!("{label} must not be empty")))
+    } else {
+        Ok(())
+    }
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn validate_captured_cursor(cursor: &SyncCursor) -> Result<(), RuntimeError> {
+    match cursor {
+        SyncCursor::Cold => Err(replica_invariant(
+            "a staged Bootstrap page must capture a watermark",
+        )),
+        SyncCursor::CapturedEmpty => Ok(()),
+        SyncCursor::CapturedValue { id } => validate_identifier(id, "captured Cursor"),
+    }
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn validate_continuation(continuation: &BootstrapContinuation) -> Result<(), RuntimeError> {
+    match continuation {
+        BootstrapContinuation::Final => Ok(()),
+        BootstrapContinuation::More { next_cursor } => {
+            validate_identifier(next_cursor, "next Bootstrap page Cursor")
+        }
+    }
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn validate_authority_page(
+    vaults: &[AuthorityVaultRecord],
+    items: &[AuthorityItemRecord],
+) -> Result<(), RuntimeError> {
+    let mut vault_ids = HashSet::new();
+    for vault in vaults {
+        validate_identifier(&vault.id, "Vault")?;
+        if !vault_ids.insert(&vault.id) {
+            return Err(replica_invariant(
+                "Bootstrap page contains a duplicate Vault",
+            ));
+        }
+    }
+    let mut item_ids = HashSet::new();
+    for item in items {
+        validate_identifier(&item.id, "Item")?;
+        validate_identifier(&item.vault_id, "Item Vault")?;
+        if !item_ids.insert(&item.id) {
+            return Err(replica_invariant(
+                "Bootstrap page contains a duplicate Item",
+            ));
+        }
+        let mut attachment_ids = HashSet::new();
+        for attachment in &item.attachments {
+            validate_identifier(&attachment.id, "Attachment")?;
+            if attachment.item_id != item.id || attachment.vault_id != item.vault_id {
+                return Err(replica_invariant(
+                    "Bootstrap Attachment scope does not match its Item",
+                ));
+            }
+            if !attachment_ids.insert(&attachment.id) {
+                return Err(replica_invariant(
+                    "Bootstrap Item contains a duplicate Attachment",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code, reason = "the persistence wire invokes this model next")]
+fn replica_invariant(message: impl Into<String>) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+#[cfg(test)]
+mod bootstrap_head_invariant_tests {
+    use super::*;
+
+    fn generation_record(id: &str) -> BootstrapGenerationRecord {
+        BootstrapGenerationRecord {
+            generation_id: BootstrapGenerationId(id.into()),
+            fallback_state: ReplicaState::Cold,
+            pinned_watermark: SyncCursor::Cold,
+            next_page_identity: BootstrapPageIdentity(0),
+            next_page_cursor: BootstrapPageCursor::Initial,
+            final_page_staged: false,
+        }
+    }
+
+    #[test]
+    fn cold_ready_and_refresh_required_heads_enforce_active_cursor_pairing() {
+        let generation_id = BootstrapGenerationId("active".into());
+        let mut authority = BootstrapAuthority {
+            active_generation: Some(generation_id.clone()),
+            ..BootstrapAuthority::default()
+        };
+        assert!(authority.validate().is_err());
+
+        authority.state = ReplicaState::Ready;
+        authority.active_cursor = SyncCursor::CapturedEmpty;
+        authority.generations.insert(
+            generation_id.clone(),
+            BootstrapGenerationRecord {
+                pinned_watermark: SyncCursor::CapturedEmpty,
+                next_page_identity: BootstrapPageIdentity(1),
+                final_page_staged: true,
+                ..generation_record("active")
+            },
+        );
+        authority.pages.insert(
+            (generation_id.clone(), BootstrapPageIdentity(0)),
+            BootstrapPageReceipt {
+                generation_id: generation_id.clone(),
+                page_identity: BootstrapPageIdentity(0),
+                request_cursor: BootstrapPageCursor::Initial,
+                raw_response_fingerprint: Sha256Fingerprint([1; 32]),
+                pinned_watermark: SyncCursor::CapturedEmpty,
+                continuation: BootstrapContinuation::Final,
+            },
+        );
+        assert!(authority.validate().is_ok());
+
+        authority.state = ReplicaState::RefreshRequired;
+        assert!(authority.validate().is_ok());
+
+        authority.active_cursor = SyncCursor::Cold;
+        assert!(authority.validate().is_err());
+    }
+
+    #[test]
+    fn bootstrapping_requires_an_existing_staging_generation() {
+        let generation_id = BootstrapGenerationId("staging".into());
+        let mut authority = BootstrapAuthority {
+            state: ReplicaState::Bootstrapping,
+            staging_generation: Some(generation_id.clone()),
+            ..BootstrapAuthority::default()
+        };
+        assert!(authority.validate().is_err());
+        authority
+            .generations
+            .insert(generation_id, generation_record("staging"));
+        assert!(authority.validate().is_ok());
     }
 }
