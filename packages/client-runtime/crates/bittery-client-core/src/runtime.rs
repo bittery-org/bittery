@@ -1,6 +1,10 @@
 #[cfg(test)]
 use crate::replica::PlanResult;
 use crate::{
+    platform_storage::{
+        DeviceCatalogAccount, DeviceCatalogDocument, PlatformStorage,
+        SerializedPlatformStorageExecutor,
+    },
     replica::{
         GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, RecomputedPlanResult,
         Replica, ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
@@ -304,12 +308,14 @@ impl Subscription {
 
 pub struct Runtime {
     replica: Arc<Replica>,
+    platform_storage: Arc<PlatformStorage>,
     #[cfg(test)]
     test_persistence: Option<Arc<InMemoryReplica>>,
     observers: Mutex<HashMap<u64, Arc<Subscription>>>,
     next_observer_id: AtomicU64,
     device_revision: AtomicU64,
     closed: AtomicBool,
+    ready: AtomicBool,
     close_complete: AtomicBool,
     close_state_cleaned: AtomicBool,
     close_finished: tokio::sync::Notify,
@@ -336,6 +342,8 @@ impl Runtime {
         let persistence: Arc<dyn ReplicaPersistence> = in_memory.clone();
         Self::with_persistence(
             persistence,
+            Arc::new(PlatformStorage::unavailable()),
+            true,
             #[cfg(test)]
             Some(in_memory),
         )
@@ -356,6 +364,31 @@ impl Runtime {
             Arc::new(SerializedReplicaPersistence::new(executor));
         Self::with_persistence(
             persistence,
+            Arc::new(PlatformStorage::unavailable()),
+            true,
+            #[cfg(test)]
+            None,
+        )
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "the serialized Web executors and Runtime share one single-threaded Worker"
+        )
+    )]
+    pub fn with_serialized_executors(
+        replica: Arc<dyn SerializedReplicaExecutor>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+    ) -> Arc<Self> {
+        let persistence: Arc<dyn ReplicaPersistence> =
+            Arc::new(SerializedReplicaPersistence::new(replica));
+        Self::with_persistence(
+            persistence,
+            Arc::new(PlatformStorage::new(platform)),
+            false,
             #[cfg(test)]
             None,
         )
@@ -370,16 +403,20 @@ impl Runtime {
     )]
     fn with_persistence(
         persistence: Arc<dyn ReplicaPersistence>,
+        platform_storage: Arc<PlatformStorage>,
+        ready: bool,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             replica: Arc::new(Replica::new(persistence)),
+            platform_storage,
             #[cfg(test)]
             test_persistence,
             observers: Mutex::new(HashMap::new()),
             next_observer_id: AtomicU64::new(1),
             device_revision: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+            ready: AtomicBool::new(ready),
             close_complete: AtomicBool::new(false),
             close_state_cleaned: AtomicBool::new(false),
             close_finished: tokio::sync::Notify::new(),
@@ -392,6 +429,117 @@ impl Runtime {
             delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Restores the durable Device catalog before the production Runtime accepts work.
+    pub async fn open(&self) -> Result<(), RuntimeError> {
+        let _catalog_guard = self.catalog_transition.lock().await;
+        self.ensure_not_closed()?;
+        if self.ready.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let Some(catalog) = self.platform_storage.load_device_catalog().await? else {
+            let _publication = self.publication.lock().expect("publication lock poisoned");
+            self.ensure_not_closed()?;
+            self.publish_restored_accounts(&[]);
+            self.ready.store(true, Ordering::SeqCst);
+            return Ok(());
+        };
+
+        let mut reconciled_accounts = Vec::with_capacity(catalog.accounts.len());
+        let mut restored = Vec::with_capacity(catalog.accounts.len());
+        let mut orphaned_generations = Vec::new();
+        let mut corrected = false;
+
+        for account in &catalog.accounts {
+            self.ensure_not_closed()?;
+            let snapshot = self.replica.load_uncached(&account.account_id).await?;
+            let (active, orphaned) = reconcile_catalog_account(account, snapshot.as_ref())?;
+            corrected |= active != account.active_incarnation || account.pending_install.is_some();
+            if let Some(orphaned) = orphaned {
+                orphaned_generations.push((account.account_id.clone(), orphaned));
+            }
+            let Some(active) = active else {
+                continue;
+            };
+            let snapshot = snapshot
+                .ok_or_else(|| startup_invariant("active Account has no durable Replica"))?;
+            let metadata = self
+                .platform_storage
+                .load_account_metadata(&account.account_id, &active)
+                .await?
+                .ok_or_else(|| startup_invariant("active Account has no generation metadata"))?;
+            if snapshot.account_id != account.account_id
+                || snapshot.incarnation != active
+                || snapshot.user_id != metadata.user_id
+            {
+                return Err(startup_invariant(
+                    "active Account Replica and generation metadata disagree",
+                ));
+            }
+            reconciled_accounts.push(DeviceCatalogAccount {
+                account_id: account.account_id.clone(),
+                active_incarnation: Some(active),
+                pending_install: None,
+            });
+            restored.push(snapshot);
+        }
+
+        if corrected {
+            self.ensure_not_closed()?;
+            let reconciled = DeviceCatalogDocument::new(reconciled_accounts)?;
+            self.platform_storage
+                .store_device_catalog(&reconciled)
+                .await?;
+            for (account_id, incarnation) in orphaned_generations {
+                let _ = self
+                    .platform_storage
+                    .remove_account_metadata(&account_id, &incarnation)
+                    .await;
+                let _ = self
+                    .platform_storage
+                    .remove_quick_unlock(&account_id, &incarnation)
+                    .await;
+                let _ = self
+                    .platform_storage
+                    .remove_current_session(&account_id, &incarnation)
+                    .await;
+            }
+        }
+
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.ensure_not_closed()?;
+        self.publish_restored_accounts(&restored);
+        self.ready.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn publish_restored_accounts(&self, restored: &[crate::replica::ReplicaSnapshot]) {
+        self.replica.replace_cache(restored);
+        *self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned") = restored
+            .iter()
+            .map(|snapshot| (snapshot.account_id.clone(), AccountAccessState::SignedOut))
+            .collect();
+        self.unlocked_items
+            .lock()
+            .expect("unlocked projection lock poisoned")
+            .clear();
+        *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned") = restored
+            .iter()
+            .map(|snapshot| (snapshot.account_id.clone(), snapshot.lock_epoch))
+            .collect();
+        self.lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .clear();
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
     }
 
     #[cfg(test)]
@@ -1264,6 +1412,18 @@ impl Runtime {
     }
 
     fn ensure_open(&self) -> Result<(), RuntimeError> {
+        self.ensure_not_closed()?;
+        if !self.ready.load(Ordering::SeqCst) {
+            Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Runtime must finish opening before it accepts work",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_not_closed(&self) -> Result<(), RuntimeError> {
         if self.is_closed() {
             Err(RuntimeError::new(
                 RuntimeErrorCode::RuntimeClosed,
@@ -1273,6 +1433,51 @@ impl Runtime {
             Ok(())
         }
     }
+}
+
+fn reconcile_catalog_account(
+    account: &DeviceCatalogAccount,
+    snapshot: Option<&crate::replica::ReplicaSnapshot>,
+) -> Result<
+    (
+        Option<crate::protocol::Incarnation>,
+        Option<crate::protocol::Incarnation>,
+    ),
+    RuntimeError,
+> {
+    let Some(pending) = &account.pending_install else {
+        let active = account
+            .active_incarnation
+            .clone()
+            .ok_or_else(|| startup_invariant("catalog Account has no active incarnation"))?;
+        if snapshot.is_none_or(|snapshot| snapshot.incarnation != active) {
+            return Err(startup_invariant(
+                "active catalog incarnation does not match the durable Replica head",
+            ));
+        }
+        return Ok((Some(active), None));
+    };
+
+    match snapshot.map(|snapshot| &snapshot.incarnation) {
+        Some(head) if head == &pending.incarnation => Ok((
+            Some(pending.incarnation.clone()),
+            account.active_incarnation.clone(),
+        )),
+        Some(head) if Some(head) == account.active_incarnation.as_ref() => Ok((
+            account.active_incarnation.clone(),
+            Some(pending.incarnation.clone()),
+        )),
+        None if account.active_incarnation.is_none() => {
+            Ok((None, Some(pending.incarnation.clone())))
+        }
+        _ => Err(startup_invariant(
+            "pending Account installation cannot be reconciled with the durable Replica head",
+        )),
+    }
+}
+
+fn startup_invariant(message: impl Into<String>) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
 }
 
 pub struct ObservationHandle {
@@ -1301,5 +1506,459 @@ impl ObservationHandle {
 impl Drop for ObservationHandle {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use crate::{
+        platform_storage::{AccountMetadataDocument, PendingAccountInstallIntent},
+        protocol::Incarnation,
+        replica::{
+            InMemoryReplica, ReplicaPersistence, ReplicaPersistenceRequest,
+            SerializedReplicaExecutor,
+        },
+        ObservationSink, RequestCancellation, RuntimeRequest,
+    };
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+    use std::sync::atomic::AtomicUsize;
+    use std::{future::Future, task::Wake, thread};
+
+    struct ThreadWake(thread::Thread);
+
+    impl Wake for ThreadWake {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let waker = Arc::new(ThreadWake(thread::current())).into();
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(value) => return value,
+                std::task::Poll::Pending => thread::park(),
+            }
+        }
+    }
+
+    struct MemoryReplicaExecutor {
+        state: InMemoryReplica,
+        loads: AtomicUsize,
+    }
+
+    impl Default for MemoryReplicaExecutor {
+        fn default() -> Self {
+            Self {
+                state: InMemoryReplica::default(),
+                loads: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SerializedReplicaExecutor for MemoryReplicaExecutor {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+            if matches!(request, ReplicaPersistenceRequest::Load { .. }) {
+                self.loads.fetch_add(1, Ordering::SeqCst);
+            }
+            serde_json::to_string(&self.state.invoke(request).await?)
+                .map_err(|_| startup_invariant("test Replica response could not serialize"))
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryPlatformExecutor {
+        values: Mutex<HashMap<(String, String), String>>,
+        deletes: Mutex<Vec<String>>,
+        fail_next_set: AtomicBool,
+    }
+
+    #[derive(Default)]
+    struct PausingPlatformExecutor {
+        inner: MemoryPlatformExecutor,
+        reached: (Mutex<bool>, Condvar),
+        released: (Mutex<bool>, Condvar),
+    }
+
+    impl PausingPlatformExecutor {
+        fn wait_until_reached(&self) {
+            let mut reached = self.reached.0.lock().unwrap();
+            while !*reached {
+                reached = self.reached.1.wait(reached).unwrap();
+            }
+        }
+
+        fn release(&self) {
+            *self.released.0.lock().unwrap() = true;
+            self.released.1.notify_all();
+        }
+    }
+
+    impl MemoryPlatformExecutor {
+        fn put<T: serde::Serialize>(&self, area: &str, key: String, value: &T) {
+            self.values
+                .lock()
+                .unwrap()
+                .insert((area.into(), key), serde_json::to_string(value).unwrap());
+        }
+
+        fn catalog(&self) -> Option<DeviceCatalogDocument> {
+            self.values
+                .lock()
+                .unwrap()
+                .get(&("devicePlain".into(), catalog_key()))
+                .map(|value| serde_json::from_str(value).unwrap())
+        }
+    }
+
+    #[async_trait]
+    impl SerializedPlatformStorageExecutor for MemoryPlatformExecutor {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            let request: Value = serde_json::from_str(&request_json).unwrap();
+            let area = request["area"].as_str().unwrap().to_owned();
+            let key = request["key"].as_str().unwrap().to_owned();
+            match request["type"].as_str().unwrap() {
+                "get" => Ok(json!({
+                    "type": "value",
+                    "value": self.values.lock().unwrap().get(&(area, key)).cloned()
+                })
+                .to_string()),
+                "set" => {
+                    if self.fail_next_set.swap(false, Ordering::SeqCst) {
+                        return Err(startup_invariant("injected catalog write failure"));
+                    }
+                    self.values
+                        .lock()
+                        .unwrap()
+                        .insert((area, key), request["value"].as_str().unwrap().to_owned());
+                    Ok(json!({"type": "done"}).to_string())
+                }
+                "delete" => {
+                    self.values.lock().unwrap().remove(&(area, key.clone()));
+                    self.deletes.lock().unwrap().push(key);
+                    Ok(json!({"type": "done"}).to_string())
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SerializedPlatformStorageExecutor for PausingPlatformExecutor {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            if serde_json::from_str::<Value>(&request_json).unwrap()["type"] == "get" {
+                *self.reached.0.lock().unwrap() = true;
+                self.reached.1.notify_all();
+                let mut released = self.released.0.lock().unwrap();
+                while !*released {
+                    released = self.released.1.wait(released).unwrap();
+                }
+            }
+            self.inner.invoke(request_json).await
+        }
+    }
+
+    #[derive(Default)]
+    struct Sink(Mutex<Vec<RuntimeProjection>>);
+
+    impl ObservationSink for Sink {
+        fn publish(&self, projection: RuntimeProjection) {
+            self.0.lock().unwrap().push(projection);
+        }
+    }
+
+    fn catalog_key() -> String {
+        "bittery:runtime:platform-storage:device-catalog".into()
+    }
+
+    fn generation_key(account: &str, incarnation: &str, document: &str) -> String {
+        format!(
+            "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
+            account.len(),
+            incarnation.len()
+        )
+    }
+
+    fn account(value: &str) -> AccountId {
+        AccountId::from(value)
+    }
+
+    fn incarnation(value: &str) -> Incarnation {
+        Incarnation::from(value)
+    }
+
+    fn metadata(account_id: &str, generation: &str, user_id: &str) -> AccountMetadataDocument {
+        AccountMetadataDocument::new(
+            account(account_id),
+            incarnation(generation),
+            user_id.into(),
+            "user@example.com".into(),
+            "User".into(),
+            "https://vault.example.com".into(),
+            None,
+            None,
+            "A3-TEST".into(),
+            1,
+            2,
+            false,
+            false,
+            bittery_crypto_core::KdfProfile {
+                schema_version: 1,
+                algorithm: "pbkdf2-sha256".into(),
+                iterations: 600_000,
+            },
+            None,
+        )
+        .unwrap()
+    }
+
+    fn seed_catalog(platform: &MemoryPlatformExecutor, accounts: Vec<DeviceCatalogAccount>) {
+        platform.put(
+            "devicePlain",
+            catalog_key(),
+            &DeviceCatalogDocument::new(accounts).unwrap(),
+        );
+    }
+
+    fn seed_metadata(
+        platform: &MemoryPlatformExecutor,
+        account_id: &str,
+        generation: &str,
+        user_id: &str,
+    ) {
+        platform.put(
+            "devicePlain",
+            generation_key(account_id, generation, "metadata"),
+            &metadata(account_id, generation, user_id),
+        );
+    }
+
+    fn production_runtime(
+        replica: Arc<MemoryReplicaExecutor>,
+        platform: Arc<MemoryPlatformExecutor>,
+    ) -> Arc<Runtime> {
+        Runtime::with_serialized_executors(replica, platform)
+    }
+
+    fn active(account_id: &str, generation: &str) -> DeviceCatalogAccount {
+        DeviceCatalogAccount {
+            account_id: account(account_id),
+            active_incarnation: Some(incarnation(generation)),
+            pending_install: None,
+        }
+    }
+
+    fn pending(account_id: &str, active: Option<&str>, pending: &str) -> DeviceCatalogAccount {
+        DeviceCatalogAccount {
+            account_id: account(account_id),
+            active_incarnation: active.map(incarnation),
+            pending_install: Some(PendingAccountInstallIntent {
+                incarnation: incarnation(pending),
+                expected_active_incarnation: active.map(incarnation),
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn production_runtime_is_cold_and_missing_catalog_opens_without_scanning_replica() {
+        let replica = Arc::new(MemoryReplicaExecutor::default());
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        let runtime = production_runtime(replica.clone(), platform);
+        let error = runtime
+            .request(
+                RuntimeRequest::SignIn {
+                    email: "user@example.com".into(),
+                    master_password: "password".into(),
+                    secret_key: "A3-TEST".into(),
+                    server_url: "https://vault.example.com".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(runtime
+            .observe(
+                ObservationRequest::RuntimeStatus { account_id: None },
+                Arc::new(Sink::default()),
+            )
+            .is_err());
+
+        runtime.open().await.unwrap();
+        runtime.open().await.unwrap();
+        assert_eq!(replica.loads.load(Ordering::SeqCst), 0);
+        assert!(runtime.replica.snapshots().is_empty());
+    }
+
+    #[tokio::test]
+    async fn open_restores_final_active_accounts_signed_out_once() {
+        let replica = Arc::new(MemoryReplicaExecutor::default());
+        replica
+            .state
+            .install(
+                account("account-1"),
+                "user-1".into(),
+                incarnation("generation-1"),
+            )
+            .unwrap();
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+        seed_metadata(&platform, "account-1", "generation-1", "user-1");
+        let runtime = production_runtime(replica.clone(), platform);
+
+        runtime.open().await.unwrap();
+        runtime.open().await.unwrap();
+
+        assert_eq!(replica.loads.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.device_revision.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime.account_access_state(&account("account-1")),
+            Some(AccountAccessState::SignedOut)
+        );
+        assert_eq!(runtime.lock_epoch(&account("account-1")), Some(0));
+    }
+
+    #[tokio::test]
+    async fn open_promotes_or_rolls_back_pending_install_from_the_replica_head() {
+        for (head, expected_active, expected_orphan) in
+            [("new", "new", "old"), ("old", "old", "new")]
+        {
+            let replica = Arc::new(MemoryReplicaExecutor::default());
+            replica
+                .state
+                .install(account("account"), "user".into(), incarnation(head))
+                .unwrap();
+            let platform = Arc::new(MemoryPlatformExecutor::default());
+            seed_catalog(&platform, vec![pending("account", Some("old"), "new")]);
+            seed_metadata(&platform, "account", head, "user");
+            let runtime = production_runtime(replica, platform.clone());
+
+            runtime.open().await.unwrap();
+
+            let catalog = platform.catalog().unwrap();
+            assert_eq!(
+                catalog.accounts[0].active_incarnation,
+                Some(incarnation(expected_active))
+            );
+            assert!(catalog.accounts[0].pending_install.is_none());
+            assert!(platform
+                .deletes
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|key| key.contains(expected_orphan)));
+        }
+    }
+
+    #[tokio::test]
+    async fn open_removes_an_uncommitted_first_install() {
+        let replica = Arc::new(MemoryReplicaExecutor::default());
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        seed_catalog(&platform, vec![pending("account", None, "new")]);
+        let runtime = production_runtime(replica, platform.clone());
+
+        runtime.open().await.unwrap();
+
+        assert!(platform.catalog().unwrap().accounts.is_empty());
+        assert!(runtime.replica.snapshots().is_empty());
+    }
+
+    #[tokio::test]
+    async fn open_fails_atomically_for_missing_third_or_metadata_mismatched_heads() {
+        for scenario in ["missing", "third", "user"] {
+            let replica = Arc::new(MemoryReplicaExecutor::default());
+            if scenario != "missing" {
+                let generation = if scenario == "third" { "third" } else { "old" };
+                replica
+                    .state
+                    .install(account("account"), "user".into(), incarnation(generation))
+                    .unwrap();
+            }
+            let platform = Arc::new(MemoryPlatformExecutor::default());
+            seed_catalog(&platform, vec![active("account", "old")]);
+            if scenario == "user" {
+                seed_metadata(&platform, "account", "old", "another-user");
+            }
+            let runtime = production_runtime(replica, platform);
+
+            assert!(runtime.open().await.is_err(), "scenario {scenario}");
+            assert!(runtime.replica.snapshots().is_empty());
+            assert!(runtime
+                .observe(
+                    ObservationRequest::RuntimeStatus { account_id: None },
+                    Arc::new(Sink::default()),
+                )
+                .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn corrective_catalog_write_failure_exposes_nothing_and_open_retries() {
+        let replica = Arc::new(MemoryReplicaExecutor::default());
+        replica
+            .state
+            .install(account("account"), "user".into(), incarnation("old"))
+            .unwrap();
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        seed_catalog(&platform, vec![pending("account", Some("old"), "new")]);
+        seed_metadata(&platform, "account", "old", "user");
+        platform.fail_next_set.store(true, Ordering::SeqCst);
+        let runtime = production_runtime(replica, platform.clone());
+
+        assert!(runtime.open().await.is_err());
+        assert!(runtime.replica.snapshots().is_empty());
+        assert!(platform.catalog().unwrap().accounts[0]
+            .pending_install
+            .is_some());
+        runtime.open().await.unwrap();
+        assert!(platform.catalog().unwrap().accounts[0]
+            .pending_install
+            .is_none());
+        assert_eq!(runtime.replica.snapshots().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn closed_cold_runtime_never_opens() {
+        let runtime = production_runtime(
+            Arc::new(MemoryReplicaExecutor::default()),
+            Arc::new(MemoryPlatformExecutor::default()),
+        );
+        runtime.close().await;
+        let error = runtime.open().await.unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::RuntimeClosed);
+        assert!(runtime.replica.snapshots().is_empty());
+    }
+
+    #[test]
+    fn close_racing_open_prevents_startup_publication() {
+        let platform = Arc::new(PausingPlatformExecutor::default());
+        let runtime = Runtime::with_serialized_executors(
+            Arc::new(MemoryReplicaExecutor::default()),
+            platform.clone(),
+        );
+        let opening = {
+            let runtime = runtime.clone();
+            thread::spawn(move || block_on(runtime.open()))
+        };
+        platform.wait_until_reached();
+        let closing = {
+            let runtime = runtime.clone();
+            thread::spawn(move || block_on(runtime.close()))
+        };
+        while !runtime.is_closed() {
+            thread::yield_now();
+        }
+        platform.release();
+
+        let error = opening.join().unwrap().unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::RuntimeClosed);
+        closing.join().unwrap();
+        assert!(runtime.replica.snapshots().is_empty());
     }
 }

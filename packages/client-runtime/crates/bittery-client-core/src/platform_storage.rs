@@ -524,9 +524,25 @@ pub(crate) struct PlatformStorage {
     executor: Arc<dyn SerializedPlatformStorageExecutor>,
 }
 
+struct UnavailablePlatformStorageExecutor;
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl SerializedPlatformStorageExecutor for UnavailablePlatformStorageExecutor {
+    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+        Err(platform_storage_invariant(
+            "this Runtime has no production platform storage executor",
+        ))
+    }
+}
+
 impl PlatformStorage {
     pub(crate) fn new(executor: Arc<dyn SerializedPlatformStorageExecutor>) -> Self {
         Self { executor }
+    }
+
+    pub(crate) fn unavailable() -> Self {
+        Self::new(Arc::new(UnavailablePlatformStorageExecutor))
     }
 
     pub(crate) async fn load_device_catalog(

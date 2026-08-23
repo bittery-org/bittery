@@ -29,6 +29,20 @@ credential lifetime.
 
 ## Comments
 
+### 2026-08-23 — cold Runtime startup and catalog recovery
+
+- A production Runtime is cold until `open` restores the Rust-owned Device catalog. Requests and
+  observations fail closed before that point; the existing in-memory and Replica-only constructors
+  remain immediately usable for their established test and conformance roles.
+- Startup reads only the Accounts named by the catalog and publishes the recovered batch once, as
+  signed out. A missing catalog is an authoritative empty Device and does not trigger a Replica scan.
+- A pending installation is promoted when its Replica head is durable, rolled back when the expected
+  active head remains durable, or removed when a first installation has no head. Any other head,
+  missing active head, or mismatch with generation metadata fails the complete startup attempt.
+- A corrected catalog must be durable before any Account becomes visible. Old generation metadata,
+  quick-unlock material, and Session credentials are then removed best-effort. A failed attempt
+  exposes no partial Accounts and `open` can be retried; closing always wins a startup race.
+
 ### 2026-08-23 — durable lock epoch prerequisite
 
 The installed Account head now carries a required durable decimal-u64 lock epoch. Lock clears live

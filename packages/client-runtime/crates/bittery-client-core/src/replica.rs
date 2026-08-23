@@ -129,7 +129,7 @@ impl Replica {
         Ok(snapshot)
     }
 
-    async fn load_uncached(
+    pub(crate) async fn load_uncached(
         &self,
         account_id: &AccountId,
     ) -> Result<Option<ReplicaSnapshot>, RuntimeError> {
