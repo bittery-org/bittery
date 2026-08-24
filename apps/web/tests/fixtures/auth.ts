@@ -271,9 +271,39 @@ export async function signUp(
 		await page.goto(new URL("/home", appOrigin).href);
 		await page.waitForURL("**/home", { timeout });
 	}
+	// Signup installs the legacy browser account before the process-owned Rust
+	// Runtime has authenticated it. The Runtime route guard therefore sends the
+	// first visit through the existing password Quick Unlock ceremony. Complete
+	// that real ceremony so this helper's promise (a usable signed-in page) stays
+	// true while the migration has two installation moments.
+	const unlockButton = page.getByRole("button", {
+		name: "Unlock Vault",
+		exact: true,
+	});
+	const needsRuntimeUnlock = await Promise.race([
+		unlockButton.waitFor({ state: "visible", timeout }).then(() => true),
+		appShell(page)
+			.waitFor({ state: "visible", timeout })
+			.then(() => false),
+	]);
+	let secretKey: string | undefined;
+	if (needsRuntimeUnlock) {
+		// A just-created legacy account has no Rust installation to quick-unlock yet.
+		// Keep the Secret Key before switching the form, then perform the full Rust
+		// Sign-in that creates that installation.
+		secretKey = await readSecretKey(page);
+		await page
+			.getByRole("button", { name: "Sign in with a different account" })
+			.click();
+		await page.locator("#email").fill(user.email);
+		await page.locator("#secretKey").fill(secretKey);
+		await page.locator("#password").fill(user.password);
+		await page.getByRole("button", { name: "Sign In", exact: true }).click();
+		await page.waitForURL("**/home", { timeout });
+	}
 	await waitForAppReady(page);
 
-	return { ...user, secretKey: await readSecretKey(page) };
+	return { ...user, secretKey: secretKey ?? (await readSecretKey(page)) };
 }
 
 export interface SelfHostedSignUpOptions {
