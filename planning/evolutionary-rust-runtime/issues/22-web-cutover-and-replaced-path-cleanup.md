@@ -58,3 +58,19 @@ pending offline work. It contradicts the standing rule that an accepted Operatio
 until an authoritative semantic outcome, and it deletes the receipts that refuse a completed
 Operation ID a second time. Replace it with an additive migration before release; a destructive
 upgrade must not survive the cutover this ticket performs.
+
+### 2026-08-24 — decision: do not gate the not-yet-ported write paths
+
+The first Runtime slice knows only `CreateLoginItem`, so after this cutover update, delete,
+favorite, move, and share still write to the transitional repository the vault pages no longer
+read, and appear to do nothing.
+
+Decided: do not spend work making those actions refuse or explain themselves. This rebuild ships
+only once every path is ported and tested, so no user ever meets the gap, and gating UI that is
+about to be replaced is throwaway work. Pull the remaining operations over step by step instead.
+
+Consequence for this ticket's scope: it covers the read cutover, the create path, deletion of the
+Web-only orchestration those replace, and the import audit. The remaining write kinds move in
+ticket 28, which is sequenced immediately after and is the real end of the Web cutover. Until 28
+lands, the import audit in this ticket's verification can only assert that no Web *read* path and
+no *create* path reaches a transitional owner.
