@@ -1,7 +1,7 @@
 # Shared Replica adapter conformance
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 22
 Spec: ../spec.md#shared-replica-conformance
 
@@ -66,3 +66,18 @@ current migration and Rust SQLite as the native adapter. This ticket's closed lo
 shared history corpus are the durable cross-host seam: common SQL files would not by themselves prove
 common semantics. Slice C therefore proceeds on IndexedDB after A and B; a later SQLite/OPFS Web
 prototype in ticket 34 consumes the same corpus without changing Runtime policy.
+
+### 2026-08-24 — delivered
+
+Slice A landed the native-only Rust SQLite Replica adapter behind the closed persistence contract.
+Slice B landed the Rust-generated logical history corpus and replay against the in-memory and SQLite
+adapters. Slice C replayed that exact corpus through IndexedDB and proved transaction rollback at
+every injected write boundary. Independent review findings about cross-Account Delete safety,
+guard-result precedence, and the production visibility of failure injection were verified as real
+defects and corrected; two apparent rollback/scope failures were verified as fixture bugs and their
+fixtures were repaired.
+
+`pnpm check:ci` and `pnpm check:ci:rust` both pass from a clean tree with the development database
+configuration. Deliberately left open: replacing the destructive IndexedDB version upgrade with an
+additive migration remains a release gate outside this ticket, and SQLite/OPFS for Web remains the
+separate prototype in ticket 34.
