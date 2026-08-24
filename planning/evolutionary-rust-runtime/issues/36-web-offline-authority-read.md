@@ -1,7 +1,7 @@
 # Web offline authoritative Replica read
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 32, 35
 Spec: ../spec.md#bootstrap
 
@@ -49,3 +49,19 @@ The independently verifiable boundary is the whole path from online authoritativ
 Worker replacement and online unlock to a rendered read after transport disconnection. Seeding,
 restart, or transport harness changes without that final behavior would not satisfy a separate spec
 statement, so one implementer and reviewer own the complete scenario.
+
+### 2026-08-24 — resolved
+
+Commit `bb4ec003` adds the real cloud Playwright path: a fresh browser profile bootstraps an
+authoritative encrypted Login Item, replaces its Runtime Worker, restores the Account locked,
+unlocks online, tears down and recreates the Items observation after transport disconnection, and
+renders the plaintext from byte-identical Account-scoped IndexedDB Replica authority. The test
+proves exactly one Runtime Worker before and after replacement, no post-disconnect API response,
+no legacy Item authority, and no plaintext marker in either browser database, console, Server
+diagnostics, or Server ciphertext. The initial red and first review exposed harness defects rather
+than a product defect; the corrected behavioral Worker probe received an independent clear review.
+
+Deliberately left open: ticket 30 still owns whether Bootstrap, catch-up, or held SSE are attempted
+after disconnection and owns all reconnect/backoff behavior. This test constrains successful
+post-disconnect responses, not attempts. The focused cloud E2E, Web typecheck, Biome, and both
+`pnpm check:ci` gates passed from a clean tree.

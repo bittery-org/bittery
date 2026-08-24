@@ -1,7 +1,7 @@
 # SQLite complete Replica failure matrix
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 31
 Spec: ../spec.md#shared-replica-conformance
 
@@ -48,3 +48,18 @@ open until the complete matrix is executable and independently reviewed.
 Claimed after Ticket 36 landed. This remains one independently verifiable Rust test slice: extend
 the SQLite failure-injection corpus across Install, accepted Operation Commit, authoritative
 reconciliation Commit, and Lock without changing adapter semantics.
+
+### 2026-08-24 — resolved
+
+Commit `2976d505` completes the test-only SQLite matrix. Requests captured from Rust Domain
+operations cover replacement Install, accepted Operation Commit, authoritative reconciliation
+Commit, and Lock. Every head/row statement boundary receives an injected failure; the database is
+then reopened and the complete canonical Account head and row bytes must equal the pre-request
+state. The same request without injection must reach the complete Domain-derived post-state after
+another reopen. Independent review found neither a product defect nor a fixture defect, and no
+adapter semantics changed.
+
+Deliberately left open: no new persistence behavior or retry policy is introduced; this ticket only
+closes the missing executable proof. The focused matrix, SQLite module, full client-core suite,
+corpus drift/conformance checks, formatting, Clippy, and both `pnpm check:ci` gates passed from a
+clean tree.
