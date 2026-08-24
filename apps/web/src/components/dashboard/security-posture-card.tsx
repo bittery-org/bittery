@@ -1,4 +1,3 @@
-import { useItems } from "@bittery/core/hooks";
 import { usePasswordSecurity } from "@bittery/core/hooks/use-password-security";
 import type { SecurityRecommendation } from "@bittery/shared/password-analysis";
 import { Button, cn } from "@bittery/ui";
@@ -11,6 +10,7 @@ import {
 } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
 import { useDeferredValue, useMemo } from "react";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 import { ScoreRing } from "./score-ring";
 
@@ -49,7 +49,7 @@ function getRecommendationTitle(
 
 export function SecurityPostureCard() {
 	const { m } = useI18n();
-	const { items } = useItems();
+	const { items } = useRuntimeItems();
 
 	// Defer so zxcvbn analysis doesn't block first paint (same as Sentinel).
 	const deferredItems = useDeferredValue(items);

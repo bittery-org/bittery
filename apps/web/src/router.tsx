@@ -29,7 +29,7 @@ import { runtimeClient } from "./lib/crypto";
 import { AccountRuntimeProvider } from "./providers/account-runtime-provider";
 import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
-import { SyncProvider } from "./providers/sync-provider";
+import { TransitionalSyncProvider } from "./providers/transitional-sync-provider";
 import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
@@ -171,9 +171,9 @@ export const getRouter = () => {
 					<ApiProvider apiClient={apiClient}>
 						<RuntimeProvider client={runtimeClient}>
 							<AccountRuntimeProvider queryClient={queryClient}>
-								<SyncProvider queryClient={queryClient}>
+								<TransitionalSyncProvider queryClient={queryClient}>
 									<WebPlatformProvider>{children}</WebPlatformProvider>
-								</SyncProvider>
+								</TransitionalSyncProvider>
 							</AccountRuntimeProvider>
 						</RuntimeProvider>
 					</ApiProvider>

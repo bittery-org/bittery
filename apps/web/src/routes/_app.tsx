@@ -8,7 +8,6 @@ import {
 } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/layout/sidebar";
 import { RevealLoader } from "@/components/loader";
-import { useVaultKeysSync } from "@/hooks/use-vault-keys-sync";
 import { runtimeClient } from "@/lib/crypto";
 import {
 	evaluateRuntimeSessionAccess,
@@ -31,7 +30,6 @@ export const Route = createFileRoute("/_app")({
 });
 
 function AppLayout() {
-	useVaultKeysSync();
 	const isLoading = useRouterState({ select: (s) => s.isLoading });
 	const isVaultsRoute = !!useMatch({
 		from: "/_app/vaults",

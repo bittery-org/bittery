@@ -1,7 +1,7 @@
 # Web cutover and replaced-path cleanup
 
 Type: task
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 21, 27
 Spec: ../spec.md#web-cutover
 
@@ -74,3 +74,40 @@ Web-only orchestration those replace, and the import audit. The remaining write 
 ticket 28, which is sequenced immediately after and is the real end of the Web cutover. Until 28
 lands, the import audit in this ticket's verification can only assert that no Web *read* path and
 no *create* path reaches a transitional owner.
+
+### 2026-08-24 — the narrowed scope is delivered
+
+The read cutover is complete. `useItems`, `useVaultInfo` and `useAllVaultKeys` have no Web reader
+left: the dashboard's recent activity and security cards, the security report, the Vault page header
+and role, the nav sidebar, its tag grouping and its Item counts all read one `Items` observation.
+The Items projection now names each Item's Vault, so a list row, a sidebar entry and a Vault header
+never disagree.
+
+`VaultProjection.writable` became `VaultProjection.role`, carrying the Server's own closed
+`VaultRole` spelling. The sidebar needs Owner/Admin to offer edit and delete, and the Vault page
+needs it for member management and type conversion; neither is derivable from a boolean, while
+"may I write here" is derivable from the role. It stays inside the declared `Items` variant, so no
+third observation was invented.
+
+Web owns no transitional Sync loop any more. `useWebSync`, its `AccountSyncLifecycle`, its assembled
+`SyncSource`, its SSE connection and `useVaultKeysSync` are deleted, not disabled. What is left is
+`providers/transitional-sync-provider.tsx`: React Query invalidation for the Teams, invitations and
+Vault-member REST reads, plus an inert outbound queue so `PlatformProvider` still builds. The
+remaining transitional writes therefore behave exactly as the decision below accepted — they apply
+locally and go nowhere.
+
+The fake audit is replaced. `apps/web/scripts/web-import-graph.ts` walks the whole Web entry graph
+from `router.tsx` and `routeTree.gen.ts`, following `import()` so lazy routes cannot hide, and
+`transitional-reachability.ts` classifies every transitional symbol it reaches. A symbol the table
+does not classify fails, so a new consumer cannot slip in the way `useItems` did. Ticket 28 tightens
+it by adding `item-write` to `FORBIDDEN_KINDS`.
+
+What ticket 28 still owes, as the audit records it: the five write kinds; the four holdout reads that
+exist only to serve them (`useDeletedItems` in Trash, `useMoveTargetVaults` in the move dialog,
+`useAllVaultKeys` in bulk import, `useItemAttachments` in the detail pane); and Attachments, which
+the first Runtime slice does not model at all.
+
+Two things are outside every ticket so far and want an owner. Vault create, update, delete and type
+conversion are still transitional and have no ticket. `tests/e2e/sync.spec.ts` asserts live
+cross-device propagation, which is a capability Web no longer has until the Runtime owns live Sync;
+it is annotated in `apps/web/tests/CONTEXT.md` rather than deleted.

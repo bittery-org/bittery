@@ -3,7 +3,6 @@ import {
 	useConvertVaultType,
 	useDeleteItem,
 	useUpdateItem,
-	useVaultInfo,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
@@ -33,7 +32,6 @@ import {
 	Skeleton,
 	toast,
 	VaultAvatar,
-	type VaultOption,
 } from "@bittery/ui";
 import {
 	IconEllipsis as Dots,
@@ -52,6 +50,7 @@ import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
+import { creatableVaults, findRuntimeVault } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -78,8 +77,15 @@ function VaultDetailPage() {
 	const [isMakeSharedDialogOpen, setIsMakeSharedDialogOpen] = useState(false);
 	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 
-	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
-	const { items: allItems, accountId, state: itemsState } = useRuntimeItems();
+	const {
+		items: allItems,
+		accountId,
+		vaults,
+		state: itemsState,
+	} = useRuntimeItems();
+	// The Runtime names this Vault in the same projection as its Items, so the header,
+	// the role and the member affordances all read one source.
+	const vault = findRuntimeVault(vaults, vaultId);
 	const decryptedItems = useMemo(
 		() => allItems.filter((item) => item.vaultId === vaultId),
 		[allItems, vaultId],
@@ -102,12 +108,12 @@ function VaultDetailPage() {
 
 	const availableTags = useAvailableTags(decryptedItems);
 
-	const role = vaultInfo?.role;
+	const role = vault?.role;
 	const isOwner = role === "owner";
-	const canWriteItems = role !== "read-only";
+	const canWriteItems = vault?.writable === true;
 	const canManageMembers = role === "owner" || role === "admin";
-	const canMakeShared = isOwner && vaultInfo?.vaultType === "personal";
-	const canMakePrivate = isOwner && vaultInfo?.vaultType === "team";
+	const canMakeShared = isOwner && vault?.type === "personal";
+	const canMakePrivate = isOwner && vault?.type === "team";
 	const hasMemberData = Array.isArray(membersQuery.data);
 	const memberCount = membersQuery.data?.length ?? 0;
 	const canMakePrivateNow =
@@ -193,11 +199,11 @@ function VaultDetailPage() {
 
 	const handleConvertVaultType = async (targetType: "personal" | "team") => {
 		try {
-			if (!vaultInfo?.accountId) throw new Error();
+			if (!vault) throw new Error();
 			await convertVaultType.mutateAsync({
 				vaultId,
 				targetType,
-				accountId: vaultInfo.accountId,
+				accountId: vault.accountId,
 			});
 			if (targetType === "team") {
 				setIsMakeSharedDialogOpen(false);
@@ -215,7 +221,7 @@ function VaultDetailPage() {
 		}
 	};
 
-	if (isLoadingVault) {
+	if (itemsState === "loading") {
 		return (
 			<div className="flex w-full flex-1 items-center justify-center">
 				<Skeleton className="h-48 w-64 rounded-xl" />
@@ -223,7 +229,17 @@ function VaultDetailPage() {
 		);
 	}
 
-	if (!vaultInfo) {
+	// A locked or unreachable Runtime has not said this Vault is missing. Saying so here
+	// would turn a lock screen into "your Vault is gone".
+	if (itemsState !== "ready") {
+		return (
+			<div className="flex min-h-0 w-full flex-1 flex-col">
+				<ItemListState state={itemsState} />
+			</div>
+		);
+	}
+
+	if (!vault) {
 		return (
 			<div className="flex w-full flex-1 flex-col items-center justify-center gap-3 text-center">
 				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -236,15 +252,9 @@ function VaultDetailPage() {
 		);
 	}
 
-	const itemFormVaults: VaultOption[] = [
-		{
-			id: vaultInfo.vaultId,
-			name: vaultInfo.vaultName,
-			type: vaultInfo.vaultType,
-			icon: vaultInfo.vaultIcon,
-			imageUrl: vaultInfo.vaultImageUrl,
-		},
-	];
+	// The first Runtime create slice seals a Login Item into a writable personal Vault, so
+	// this Vault is offered only when it is one. Offering it otherwise offers a refusal.
+	const itemFormVaults = creatableVaults([vault]);
 
 	return (
 		<>
@@ -258,19 +268,19 @@ function VaultDetailPage() {
 				{/* Vault header */}
 				<div className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5 xl:h-12">
 					<VaultAvatar
-						name={vaultInfo.vaultName}
-						icon={vaultInfo.vaultIcon}
-						imageUrl={vaultInfo.vaultImageUrl}
+						name={vault.name}
+						icon={vault.icon}
+						imageUrl={vault.imageUrl}
 						size="xs"
 					/>
 					<span className="min-w-0 truncate font-medium text-sm">
-						{vaultInfo.vaultName}
+						{vault.name}
 					</span>
 					<Badge variant="secondary" className="ml-auto shrink-0">
 						{itemCount}
 					</Badge>
 					<div className="flex shrink-0 items-center gap-1">
-						{canWriteItems && (
+						{itemFormVaults.length > 0 && (
 							<Button
 								variant="ghost"
 								size="sm"
@@ -349,16 +359,12 @@ function VaultDetailPage() {
 
 				{/* Item list */}
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
-					{itemsState === "ready" ? (
-						<ItemList
-							items={decryptedItems}
-							isLoading={false}
-							onItemSelect={handleItemSelect}
-							selectedItemId={selectedItemId ?? undefined}
-						/>
-					) : (
-						<ItemListState state={itemsState} />
-					)}
+					<ItemList
+						items={decryptedItems}
+						isLoading={false}
+						onItemSelect={handleItemSelect}
+						selectedItemId={selectedItemId ?? undefined}
+					/>
 				</div>
 			</div>
 
@@ -439,7 +445,7 @@ function VaultDetailPage() {
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-4">
-						{canManageMembers && vaultInfo.vaultType === "team" && (
+						{canManageMembers && vault.type === "team" && (
 							<AddMemberDialog vaultId={vaultId} />
 						)}
 						{membersQuery.isLoading ? (
@@ -454,7 +460,7 @@ function VaultDetailPage() {
 								userRole={role ?? "member"}
 							/>
 						)}
-						{vaultInfo.vaultType === "personal" && (
+						{vault.type === "personal" && (
 							<div className="flex items-center gap-3 rounded-xl border border-dashed p-5 text-muted-foreground text-sm">
 								<Lock className="h-5 w-5 shrink-0" />
 								<p>{m.vaults_detail_members_personal_hint()}</p>

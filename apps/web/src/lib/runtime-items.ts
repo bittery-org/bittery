@@ -10,6 +10,7 @@ import type {
 } from "@bittery/client-runtime/protocol";
 import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
+import type { VaultRole } from "@bittery/shared/vault-mapping";
 import type { VaultOption } from "@bittery/ui";
 
 /**
@@ -25,9 +26,29 @@ export type RuntimeListItem = UnifiedItem & {
 
 /** A Vault the Runtime knows, in the shape the existing item form already reads. */
 export type RuntimeVaultOption = VaultOption & {
+	/** This Account's membership, in the Server's own closed set. */
+	readonly role: VaultRole;
 	/** Whether this Device may write Items here. The Vault's role, not the create rule. */
 	readonly writable: boolean;
+	/** The Account the Vault belongs to, as the Runtime names it. */
+	readonly accountId: string;
 };
+
+/**
+ * One Vault as the nav sidebar renders it.
+ *
+ * The field names are the sidebar's, which grew around the transitional Vault-key record.
+ * Renaming them is a UI change, not a cutover, so the mapping happens here instead.
+ */
+export interface VaultNavEntry {
+	readonly vaultId: string;
+	readonly vaultName: string;
+	readonly vaultType: "personal" | "team";
+	readonly vaultIcon: string | null;
+	readonly vaultImageUrl: string | null;
+	readonly role: VaultRole;
+	readonly accountId: string;
+}
 
 const NO_ITEMS: RuntimeListItem[] = [];
 const NO_VAULTS: RuntimeVaultOption[] = [];
@@ -84,7 +105,7 @@ export function deriveRuntimeItemsView(
 		return {
 			items: mapRuntimeItemsProjection(items.value),
 			accountId: items.value.accountId,
-			vaults: mapRuntimeVaults(items.value.vaults),
+			vaults: mapRuntimeVaults(items.value),
 			state: "ready",
 			code: null,
 		};
@@ -119,6 +140,9 @@ export function deriveRuntimeItemsView(
 export function mapRuntimeItemsProjection(
 	projection: ItemsProjection,
 ): RuntimeListItem[] {
+	const vaults = new Map(
+		projection.vaults.map((vault) => [vault.vaultId, vault]),
+	);
 	return projection.items.map((item) => ({
 		id: item.itemId,
 		accountId: item.accountId,
@@ -150,27 +174,58 @@ export function mapRuntimeItemsProjection(
 			iv: "",
 			algorithm: "",
 		},
+		// The Runtime names the Vault in the same projection, so the dashboard, the
+		// security report and the list all read one source. An Item whose Vault the
+		// projection does not carry keeps an empty name rather than borrowing another
+		// Vault's: a wrong Vault label in a password manager is worse than none.
 		vault: {
 			id: item.vaultId,
-			name: "",
-			type: "personal",
-			icon: null,
-			imageUrl: null,
+			name: vaults.get(item.vaultId)?.name ?? "",
+			type: vaults.get(item.vaultId)?.vaultType ?? "personal",
+			icon: vaults.get(item.vaultId)?.icon ?? null,
+			imageUrl: vaults.get(item.vaultId)?.imageUrl ?? null,
 		},
 	}));
 }
 
 /** The Vaults of one projection, in the shape the existing item form reads. */
 export function mapRuntimeVaults(
-	vaults: ItemsProjection["vaults"],
+	projection: ItemsProjection,
 ): RuntimeVaultOption[] {
-	return vaults.map((vault) => ({
+	return projection.vaults.map((vault) => ({
 		id: vault.vaultId,
 		name: vault.name,
 		type: vault.vaultType,
 		icon: vault.icon ?? null,
 		imageUrl: vault.imageUrl ?? null,
-		writable: vault.writable,
+		role: vault.role,
+		// Every role but read-only may write an Item. The Runtime publishes the role and
+		// the host asks its own question of it, so "may I write here" is answered once.
+		writable: vault.role !== "read-only",
+		accountId: projection.accountId,
+	}));
+}
+
+/** One Vault by id, or `null` when this Account does not hold it. Never a guess. */
+export function findRuntimeVault(
+	vaults: readonly RuntimeVaultOption[],
+	vaultId: string,
+): RuntimeVaultOption | null {
+	return vaults.find((vault) => vault.id === vaultId) ?? null;
+}
+
+/** The Vaults the nav sidebar renders, in the field names it already reads. */
+export function vaultNavEntries(
+	vaults: readonly RuntimeVaultOption[],
+): VaultNavEntry[] {
+	return vaults.map((vault) => ({
+		vaultId: vault.id,
+		vaultName: vault.name,
+		vaultType: vault.type,
+		vaultIcon: vault.icon ?? null,
+		vaultImageUrl: vault.imageUrl ?? null,
+		role: vault.role,
+		accountId: vault.accountId,
 	}));
 }
 

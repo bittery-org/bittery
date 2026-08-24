@@ -42,7 +42,7 @@ use crate::{
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
     ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, RequestCancellation,
     RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection, VaultProjection, VaultProjectionType,
+    RuntimeStatusProjection, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -1478,7 +1478,12 @@ fn visible_vaults(snapshot: &ReplicaSnapshot) -> Vec<VaultProjection> {
             },
             icon: vault.icon.clone(),
             image_url: vault.image_url.clone(),
-            writable: vault.role != AuthorityVaultRole::ReadOnly,
+            role: match vault.role {
+                AuthorityVaultRole::Owner => VaultProjectionRole::Owner,
+                AuthorityVaultRole::Admin => VaultProjectionRole::Admin,
+                AuthorityVaultRole::Member => VaultProjectionRole::Member,
+                AuthorityVaultRole::ReadOnly => VaultProjectionRole::ReadOnly,
+            },
         })
         .collect();
     vaults.sort_by(|left, right| left.vault_id.cmp(&right.vault_id));

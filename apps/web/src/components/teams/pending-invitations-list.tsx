@@ -10,7 +10,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 interface Invitation {
 	id: string;

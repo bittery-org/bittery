@@ -668,22 +668,32 @@
         "name": {
           "type": "string"
         },
+        "role": {
+          "description": "This Account's membership in the Vault. A host derives \"may I write an Item here\"\nfrom it (anything but `ReadOnly`), and the manage affordances an Owner or Admin has\nand a Member does not. The first slice's narrower create rule filters on the Vault\ntype as well.",
+          "$ref": "#/$defs/VaultProjectionRole"
+        },
         "vaultId": {
           "type": "string"
         },
         "vaultType": {
           "$ref": "#/$defs/VaultProjectionType"
-        },
-        "writable": {
-          "description": "Whether this Device may write Items here. It answers the Vault's role, not the first\nslice's narrower create rule, so a host that only creates Login Items in a personal\nVault filters on the Vault type as well.",
-          "type": "boolean"
         }
       },
       "required": [
         "vaultId",
         "name",
         "vaultType",
-        "writable"
+        "role"
+      ]
+    },
+    "VaultProjectionRole": {
+      "description": "One Account's membership in one Vault.\n\nThe values are the Server's own closed `VaultRole` set, spelled the way the Server spells\nthem, so a host that already renders a role does not need a second vocabulary and a\ntranslation table between the two.",
+      "type": "string",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "read-only"
       ]
     },
     "VaultProjectionType": {

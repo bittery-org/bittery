@@ -3667,9 +3667,9 @@ data class VaultProjection (
     var `imageUrl`: kotlin.String?
     ,
     /**
-     * Whether this Device may write Items here.
+     * This Account's membership in the Vault. Anything but `ReadOnly` may write an Item here.
      */
-    var `writable`: kotlin.Boolean
+    var `role`: VaultProjectionRole
 
 ){
 
@@ -3691,7 +3691,7 @@ public object FfiConverterTypeVaultProjection: FfiConverterRustBuffer<VaultProje
             FfiConverterTypeVaultProjectionType.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
-            FfiConverterBoolean.read(buf),
+            FfiConverterTypeVaultProjectionRole.read(buf),
         )
     }
 
@@ -3701,7 +3701,7 @@ public object FfiConverterTypeVaultProjection: FfiConverterRustBuffer<VaultProje
             FfiConverterTypeVaultProjectionType.allocationSize(value.`vaultType`) +
             FfiConverterOptionalString.allocationSize(value.`icon`) +
             FfiConverterOptionalString.allocationSize(value.`imageUrl`) +
-            FfiConverterBoolean.allocationSize(value.`writable`)
+            FfiConverterTypeVaultProjectionRole.allocationSize(value.`role`)
     )
 
     override fun write(value: VaultProjection, buf: ByteBuffer) {
@@ -3710,7 +3710,7 @@ public object FfiConverterTypeVaultProjection: FfiConverterRustBuffer<VaultProje
             FfiConverterTypeVaultProjectionType.write(value.`vaultType`, buf)
             FfiConverterOptionalString.write(value.`icon`, buf)
             FfiConverterOptionalString.write(value.`imageUrl`, buf)
-            FfiConverterBoolean.write(value.`writable`, buf)
+            FfiConverterTypeVaultProjectionRole.write(value.`role`, buf)
     }
 }
 
@@ -4495,6 +4495,45 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * One Account's membership in one Vault, in the Server's own closed set.
+ */
+
+enum class VaultProjectionRole {
+
+    OWNER,
+    ADMIN,
+    MEMBER,
+    READ_ONLY;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultProjectionRole: FfiConverterRustBuffer<VaultProjectionRole> {
+    override fun read(buf: ByteBuffer) = try {
+        VaultProjectionRole.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VaultProjectionRole) = 4UL
+
+    override fun write(value: VaultProjectionRole, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 

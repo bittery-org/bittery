@@ -8,11 +8,13 @@ import type { ItemsProjection } from "@bittery/client-runtime/protocol";
 import {
 	creatableVaults,
 	deriveRuntimeItemsView,
+	findRuntimeVault,
 	mapRuntimeItemsProjection,
 	mapRuntimeVaults,
 	refuseCreate,
 	toLoginItemDraft,
 	unsupportedDraftFields,
+	vaultNavEntries,
 } from "./runtime-items";
 
 function session(
@@ -21,10 +23,17 @@ function session(
 	return { ...LOADING_SESSION, ...partial } as RuntimeSessionSnapshot;
 }
 
+const PERSONAL_VAULT = {
+	vaultId: "vault-1",
+	name: "Personal",
+	vaultType: "personal" as const,
+	role: "owner" as const,
+};
+
 const ONE_ITEM: ItemsProjection = {
 	accountId: "account-1",
 	replicaRevision: "4",
-	vaults: [],
+	vaults: [PERSONAL_VAULT],
 	items: [
 		{
 			itemId: "item-1",
@@ -39,12 +48,23 @@ const ONE_ITEM: ItemsProjection = {
 	],
 };
 
+/**
+ * Every page that renders a list of Items.
+ *
+ * These assertions say what each page *does* read. What no page may read is not checked
+ * here any more: `scripts/transitional-reachability.test.ts` audits the whole Web entry
+ * graph for that, because the file list this used to grep reported the migration complete
+ * while three consumers outside it were still on `useItems`.
+ */
 const ITEM_LIST_PAGES = [
 	"../routes/_app/vaults/index.tsx",
 	"../routes/_app/vaults/favorites.tsx",
 	"../routes/_app/vaults/tag.$tagName.tsx",
 	"../routes/_app/vaults/$vaultId/index.tsx",
 	"../routes/_app/vaults/route.tsx",
+	"../routes/_app/security.lazy.tsx",
+	"../components/dashboard/recent-activity-card.tsx",
+	"../components/dashboard/security-posture-card.tsx",
 ] as const;
 
 describe("Runtime Items projection mapping", () => {
@@ -153,6 +173,35 @@ describe("Runtime Items projection mapping", () => {
 		expect(mapped?.customFields).toBeUndefined();
 	});
 
+	test("an Item carries its Vault, so no page needs a second source", () => {
+		const [mapped] = mapRuntimeItemsProjection({
+			...ONE_ITEM,
+			vaults: [
+				{
+					vaultId: "vault-1",
+					name: "Personal",
+					vaultType: "personal",
+					icon: "lock",
+					imageUrl: "https://images.test/vault.png",
+					role: "owner",
+				},
+			],
+		});
+		expect(mapped?.vault).toEqual({
+			id: "vault-1",
+			name: "Personal",
+			type: "personal",
+			icon: "lock",
+			imageUrl: "https://images.test/vault.png",
+		});
+	});
+
+	test("an Item whose Vault the projection omits is named, not invented", () => {
+		const [mapped] = mapRuntimeItemsProjection({ ...ONE_ITEM, vaults: [] });
+		expect(mapped?.vault.id).toBe("vault-1");
+		expect(mapped?.vault.name).toBe("");
+	});
+
 	test("existing ItemList still owns filter and sort", () => {
 		const source = readFileSync(
 			new URL("../components/vault/item-list.tsx", import.meta.url),
@@ -175,12 +224,12 @@ describe("Runtime Items projection mapping", () => {
 		expect(hook).not.toMatch(/\buseState\b/);
 		expect(hook).not.toMatch(/\buseItems\b/);
 		expect(hook).not.toContain("useAccountSwitcher");
+	});
 
+	test("every page that lists Items reads the Runtime observation", () => {
 		for (const relative of ITEM_LIST_PAGES) {
 			const source = readFileSync(new URL(relative, import.meta.url), "utf8");
 			expect(source).toContain("useRuntimeItems");
-			expect(source).not.toMatch(/\buseItems\b/);
-			expect(source).not.toMatch(/\buseVaultItems\b/);
 		}
 	});
 
@@ -325,19 +374,19 @@ describe("the Vaults a create can use", () => {
 			vaultId: "personal-1",
 			name: "Personal",
 			vaultType: "personal" as const,
-			writable: true,
+			role: "owner" as const,
 		},
 		{
 			vaultId: "readonly-1",
 			name: "Shared with me",
 			vaultType: "personal" as const,
-			writable: false,
+			role: "read-only" as const,
 		},
 		{
 			vaultId: "team-1",
 			name: "Team",
 			vaultType: "team" as const,
-			writable: true,
+			role: "member" as const,
 		},
 	];
 
@@ -355,18 +404,69 @@ describe("the Vaults a create can use", () => {
 			"team-1",
 		]);
 		expect(view.vaults[0]?.name).toBe("Personal");
+		expect(view.vaults[0]?.role).toBe("owner");
 		expect(view.vaults[0]?.writable).toBe(true);
+		expect(view.vaults[1]?.role).toBe("read-only");
 		expect(view.vaults[1]?.writable).toBe(false);
 	});
 
+	test("a Vault carries the Account it belongs to, as the Runtime names it", () => {
+		const vaults = mapRuntimeVaults({ ...ONE_ITEM, vaults: VAULTS });
+		expect(vaults.every((vault) => vault.accountId === "account-1")).toBe(true);
+	});
+
 	test("only a writable personal Vault is offered as a create target", () => {
-		expect(creatableVaults(mapRuntimeVaults(VAULTS)).map((v) => v.id)).toEqual([
-			"personal-1",
-		]);
+		expect(
+			creatableVaults(mapRuntimeVaults({ ...ONE_ITEM, vaults: VAULTS })).map(
+				(v) => v.id,
+			),
+		).toEqual(["personal-1"]);
 	});
 
 	test("an Account with no Vaults offers none instead of guessing", () => {
-		expect(creatableVaults(mapRuntimeVaults([]))).toEqual([]);
+		expect(
+			creatableVaults(mapRuntimeVaults({ ...ONE_ITEM, vaults: [] })),
+		).toEqual([]);
+	});
+
+	test("a page that needs one Vault finds it, and says so when it cannot", () => {
+		const vaults = mapRuntimeVaults({ ...ONE_ITEM, vaults: VAULTS });
+		expect(findRuntimeVault(vaults, "team-1")?.name).toBe("Team");
+		expect(findRuntimeVault(vaults, "missing-1")).toBeNull();
+	});
+
+	test("the nav sidebar reads the Runtime's Vaults, keys and all", () => {
+		expect(
+			vaultNavEntries(mapRuntimeVaults({ ...ONE_ITEM, vaults: VAULTS })),
+		).toEqual([
+			{
+				vaultId: "personal-1",
+				vaultName: "Personal",
+				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
+				role: "owner",
+				accountId: "account-1",
+			},
+			{
+				vaultId: "readonly-1",
+				vaultName: "Shared with me",
+				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
+				role: "read-only",
+				accountId: "account-1",
+			},
+			{
+				vaultId: "team-1",
+				vaultName: "Team",
+				vaultType: "team",
+				vaultIcon: null,
+				vaultImageUrl: null,
+				role: "member",
+				accountId: "account-1",
+			},
+		]);
 	});
 });
 
@@ -418,14 +518,14 @@ describe("where a create goes", () => {
 		"../routes/_app/vaults/tag.$tagName.tsx",
 		"../routes/_app/vaults/$vaultId/index.tsx",
 	] as const;
-	/** The three pages whose write affordances came from the transitional Vault keys. */
-	const RUNTIME_VAULT_PAGES = CREATE_PAGES.slice(0, 3);
+	/** The three pages that offer a create across every Vault the Account holds. */
+	const ALL_VAULT_PAGES = CREATE_PAGES.slice(0, 3);
 
-	test("every vault page asks the Runtime, never the transitional repository", () => {
+	test("every vault page hands its create to the Runtime", () => {
 		for (const relative of CREATE_PAGES) {
 			const source = readFileSync(new URL(relative, import.meta.url), "utf8");
 			expect(source).toContain("useAcceptLoginItem");
-			expect(source).not.toMatch(/\buseCreateItem\b/);
+			expect(source).toContain("creatableVaults");
 		}
 		const hook = readFileSync(
 			new URL("../hooks/use-accept-login-item.ts", import.meta.url),
@@ -440,12 +540,28 @@ describe("where a create goes", () => {
 	});
 
 	test("the writable Vault comes from the Runtime, so an Item is not read-only", () => {
-		for (const relative of RUNTIME_VAULT_PAGES) {
+		for (const relative of ALL_VAULT_PAGES) {
 			const source = readFileSync(new URL(relative, import.meta.url), "utf8");
 			expect(source).toContain("canWriteVault");
-			expect(source).toContain("creatableVaults");
-			expect(source).not.toMatch(/\buseAllVaultKeys\b/);
 		}
+		// The single-Vault page asks the same question of the one Vault it renders.
+		const vaultPage = readFileSync(
+			new URL("../routes/_app/vaults/$vaultId/index.tsx", import.meta.url),
+			"utf8",
+		);
+		expect(vaultPage).toContain("findRuntimeVault");
+		expect(vaultPage).toContain("vault?.writable === true");
+	});
+
+	test("the vault sidebar and its counts read the Runtime projection", () => {
+		const layout = readFileSync(
+			new URL("../routes/_app/vaults/route.tsx", import.meta.url),
+			"utf8",
+		);
+		expect(layout).toContain("vaultNavEntries");
+		expect(layout).toContain(
+			'useItemCounts(itemsState === "ready" ? items : undefined)',
+		);
 	});
 });
 

@@ -1,7 +1,6 @@
 import {
 	type CreateVaultInput,
 	useAccountSwitcher,
-	useAllVaultKeys,
 	useAvailableTags,
 	useCreateVault,
 	useDeleteVault,
@@ -29,6 +28,7 @@ import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
+import { findRuntimeVault, vaultNavEntries } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -42,8 +42,11 @@ function VaultsLayout() {
 	const params = useParams({ strict: false });
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
-	const { vaultKeys } = useAllVaultKeys();
-	const { items, state: itemsState } = useRuntimeItems();
+	// One projection feeds the whole sidebar: the Vaults it lists, the tags it groups by
+	// and the counts beside them. Before this the Vault rows came from the transitional
+	// Vault keys, which a Runtime Sign-in never fills, so the sidebar was empty.
+	const { items, vaults, state: itemsState } = useRuntimeItems();
+	const sidebarVaults = vaultNavEntries(vaults);
 	const availableTags = useAvailableTags(items);
 	// A count of nothing is not a count of zero: only a ready projection may claim one.
 	const itemCounts = useItemCounts(itemsState === "ready" ? items : undefined);
@@ -85,9 +88,7 @@ function VaultsLayout() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
+		const accountId = findRuntimeVault(vaults, vaultId)?.accountId;
 		if (!accountId) throw new Error();
 		await updateVault.mutateAsync({
 			vaultId,
@@ -106,9 +107,7 @@ function VaultsLayout() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
+		const accountId = findRuntimeVault(vaults, vaultId)?.accountId;
 		if (!accountId) throw new Error();
 		await deleteVault.mutateAsync({ vaultId, accountId });
 		setDeletingVault(null);
@@ -127,7 +126,7 @@ function VaultsLayout() {
 				<aside className="hidden w-54 shrink-0 flex-col border-r lg:flex">
 					<VaultNavSidebar
 						hasHeaderInset
-						vaults={vaultKeys}
+						vaults={sidebarVaults}
 						tags={tags}
 						itemCounts={itemCounts}
 						currentVaultId={currentVaultId}
@@ -162,7 +161,7 @@ function VaultsLayout() {
 				<Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
 					<SheetContent side="left" className="w-64 p-0">
 						<VaultNavSidebar
-							vaults={vaultKeys}
+							vaults={sidebarVaults}
 							tags={tags}
 							itemCounts={itemCounts}
 							currentVaultId={currentVaultId}

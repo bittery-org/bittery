@@ -35,3 +35,20 @@ restore would leave the code path the fixture bypasses with no coverage at all.
 Sync state is deliberately outside a snapshot: two contexts sharing a
 `bittery_sync_client_id` would be one device, and self-echo suppression would
 stop being exercised. `sync.spec.ts` pins that the two ids differ.
+
+## `sync.spec.ts` outlived the loop it tests
+
+The Web cutover (ticket 22) deleted Web's transitional Sync ownership: there is
+no `useWebSync`, no assembled `SyncSource` and no SSE stream in the browser any
+more, because the Runtime owns Sync ownership for the Accounts it signs in and
+two active writers for one Account are forbidden. Live cross-device propagation
+is therefore a capability the Web host does not currently have, so this file
+cannot pass until the Runtime owns live Sync. It is kept, not deleted, because
+what it asserts is still what the product promises; the two client ids it pins
+are still minted, one per tab for the transitional REST calls and one per device
+for the Runtime.
+
+The same holds for the write kinds ticket 22 left transitional. Update, delete,
+favorite, move and share still apply to the repository the vault pages no longer
+read, so the specs that assert their result are red by construction until ticket
+28 routes them through the Runtime.

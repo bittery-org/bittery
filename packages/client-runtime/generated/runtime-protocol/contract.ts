@@ -126,14 +126,15 @@ export interface VaultProjection {
 icon?: (string | null)
 imageUrl?: (string | null)
 name: string
+/**
+ * This Account's membership in the Vault. A host derives "may I write an Item here"
+ * from it (anything but `ReadOnly`), and the manage affordances an Owner or Admin has
+ * and a Member does not. The first slice's narrower create rule filters on the Vault
+ * type as well.
+ */
+role: ("owner" | "admin" | "member" | "read-only")
 vaultId: string
 vaultType: VaultProjectionType
-/**
- * Whether this Device may write Items here. It answers the Vault's role, not the first
- * slice's narrower create rule, so a host that only creates Login Items in a personal
- * Vault filters on the Vault type as well.
- */
-writable: boolean
 }
 export interface RuntimeStatusProjection {
 accountId: (string | null)

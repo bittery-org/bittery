@@ -374,14 +374,23 @@ pub struct VaultProjection {
     pub vault_type: VaultProjectionType,
     pub icon: Option<String>,
     pub image_url: Option<String>,
-    /// Whether this Device may write Items here.
-    pub writable: bool,
+    /// This Account's membership in the Vault. Anything but `ReadOnly` may write an Item here.
+    pub role: VaultProjectionRole,
 }
 
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum VaultProjectionType {
     Personal,
     Team,
+}
+
+/// One Account's membership in one Vault, in the Server's own closed set.
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum VaultProjectionRole {
+    Owner,
+    Admin,
+    Member,
+    ReadOnly,
 }
 
 impl fmt::Debug for ItemsProjection {
@@ -754,7 +763,7 @@ impl From<core::VaultProjection> for VaultProjection {
             vault_type,
             icon,
             image_url,
-            writable,
+            role,
         } = value;
         Self {
             vault_id,
@@ -762,7 +771,18 @@ impl From<core::VaultProjection> for VaultProjection {
             vault_type: vault_type.into(),
             icon,
             image_url,
-            writable,
+            role: role.into(),
+        }
+    }
+}
+
+impl From<core::VaultProjectionRole> for VaultProjectionRole {
+    fn from(value: core::VaultProjectionRole) -> Self {
+        match value {
+            core::VaultProjectionRole::Owner => Self::Owner,
+            core::VaultProjectionRole::Admin => Self::Admin,
+            core::VaultProjectionRole::Member => Self::Member,
+            core::VaultProjectionRole::ReadOnly => Self::ReadOnly,
         }
     }
 }
@@ -940,7 +960,7 @@ mod tests {
                     vault_type: VaultProjectionType::Personal,
                     icon: None,
                     image_url: None,
-                    writable: true,
+                    role: VaultProjectionRole::Owner,
                 }],
             },
         };

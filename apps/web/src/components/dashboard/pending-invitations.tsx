@@ -20,7 +20,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { de as dateFnsDe, enUS as dateFnsEnUS } from "date-fns/locale";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 export function PendingInvitations() {
 	const api = useApiClient();

@@ -1,4 +1,4 @@
-import type { VaultItemCounts, VaultKeyWithAccount } from "@bittery/core/hooks";
+import type { VaultItemCounts } from "@bittery/core/hooks";
 import {
 	ActiveRail,
 	activeRailTarget,
@@ -26,6 +26,7 @@ import {
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { useRef } from "react";
+import type { VaultNavEntry } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 import { useVaultDnd } from "@/providers/vault-dnd-provider";
 
@@ -40,20 +41,13 @@ const navRowClass = (isActive: boolean) =>
 		: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground";
 
 /**
- * What one sidebar row renders: the vault fields of a held vault key, and nothing else.
- * Narrowed from the canonical `VaultKeyWithAccount` so the sidebar never asks for the
- * wrapped key material or the account metadata it does not group by.
+ * What one sidebar row renders, and nothing else.
+ *
+ * Declared here rather than narrowed from the transitional Vault-key record: the Runtime's
+ * Vault projection fills these rows now, and it carries no wrapped key material and no
+ * account metadata the sidebar does not group by.
  */
-type SidebarVault = Pick<
-	VaultKeyWithAccount,
-	| "vaultId"
-	| "vaultName"
-	| "vaultType"
-	| "vaultIcon"
-	| "vaultImageUrl"
-	| "role"
-	| "accountId"
->;
+type SidebarVault = VaultNavEntry;
 
 interface DroppableVaultEntryProps {
 	vault: SidebarVault;

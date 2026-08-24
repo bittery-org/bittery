@@ -18,7 +18,7 @@ import {
 } from "@/lib/import";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "@/providers/sync-provider";
+import { useQueryInvalidator } from "@/providers/transitional-sync-provider";
 
 const IMPORT_BATCH_SIZE = 200;
 const DEFAULT_CREATED_VAULT_ICON = "lock";

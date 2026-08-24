@@ -657,8 +657,9 @@ async fn the_items_projection_names_the_vaults_a_host_may_offer() {
     assert_eq!(vaults[0].vault_id, TEST_VAULT_ID);
     assert_eq!(vaults[0].name, "Personal");
     assert_eq!(vaults[0].vault_type, VaultProjectionType::Personal);
-    assert!(
-        vaults[0].writable,
+    assert_eq!(
+        vaults[0].role,
+        VaultProjectionRole::Owner,
         "an owned personal Vault is where a create goes"
     );
 }
@@ -683,8 +684,9 @@ async fn a_read_only_vault_is_projected_as_one() {
 
     let vaults = visible(&runtime, &account_id).vaults;
     assert_eq!(vaults.len(), 1);
-    assert!(
-        !vaults[0].writable,
+    assert_eq!(
+        vaults[0].role,
+        VaultProjectionRole::ReadOnly,
         "the same refusal the create path makes, before the user tries"
     );
 }

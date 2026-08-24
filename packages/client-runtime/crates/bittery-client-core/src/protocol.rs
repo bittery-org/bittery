@@ -390,10 +390,29 @@ pub struct VaultProjection {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
-    /// Whether this Device may write Items here. It answers the Vault's role, not the first
-    /// slice's narrower create rule, so a host that only creates Login Items in a personal
-    /// Vault filters on the Vault type as well.
-    pub writable: bool,
+    /// This Account's membership in the Vault. A host derives "may I write an Item here"
+    /// from it (anything but `ReadOnly`), and the manage affordances an Owner or Admin has
+    /// and a Member does not. The first slice's narrower create rule filters on the Vault
+    /// type as well.
+    pub role: VaultProjectionRole,
+}
+
+/// One Account's membership in one Vault.
+///
+/// The values are the Server's own closed `VaultRole` set, spelled the way the Server spells
+/// them, so a host that already renders a role does not need a second vocabulary and a
+/// translation table between the two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum VaultProjectionRole {
+    Owner,
+    Admin,
+    Member,
+    ReadOnly,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

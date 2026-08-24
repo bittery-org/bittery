@@ -60,6 +60,15 @@ authority. Ticket 16 uses an unmistakable simulated sealed marker only to prove 
 atomicity; the Sign-in/create slice replaces it with existing crypto-core encryption and AAD before
 production use.
 
+The `Items` observation carries the Vaults its Items live in, each with the Account's role in the
+Server's own closed `VaultRole` spelling. A host derives "may I write an Item here" from the role
+rather than being handed a second boolean, and the same projection names the Vault a list row, a
+sidebar entry or a Vault header renders. That is deliberate reuse of one observation: after the Web
+cutover no transitional reader holds Vault metadata at all, and a separate Vault observation would
+publish a second revision line a host would have to reconcile against the Items it just received.
+Vault membership, Attachments and deleted Items are not in it; they still belong to the read paths
+that own them.
+
 The first Login shape is a closed subset of the existing TypeScript `DecryptedItemData`: `title`,
 optional `url`, `urls`, optional `username`, optional `password`, optional `notes`, optional `note`,
 `customFields`, and `tags`. A Custom field retains the existing `id`, `label`, `value`, and closed

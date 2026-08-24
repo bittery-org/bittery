@@ -1844,22 +1844,22 @@ public struct VaultProjection: Equatable, Hashable {
     public var icon: String?
     public var imageUrl: String?
     /**
-     * Whether this Device may write Items here.
+     * This Account's membership in the Vault. Anything but `ReadOnly` may write an Item here.
      */
-    public var writable: Bool
+    public var role: VaultProjectionRole
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(vaultId: String, name: String, vaultType: VaultProjectionType, icon: String?, imageUrl: String?,
         /**
-         * Whether this Device may write Items here.
-         */writable: Bool) {
+         * This Account's membership in the Vault. Anything but `ReadOnly` may write an Item here.
+         */role: VaultProjectionRole) {
         self.vaultId = vaultId
         self.name = name
         self.vaultType = vaultType
         self.icon = icon
         self.imageUrl = imageUrl
-        self.writable = writable
+        self.role = role
     }
 
 
@@ -1883,7 +1883,7 @@ public struct FfiConverterTypeVaultProjection: FfiConverterRustBuffer {
                 vaultType: FfiConverterTypeVaultProjectionType.read(from: &buf),
                 icon: FfiConverterOptionString.read(from: &buf),
                 imageUrl: FfiConverterOptionString.read(from: &buf),
-                writable: FfiConverterBool.read(from: &buf)
+                role: FfiConverterTypeVaultProjectionRole.read(from: &buf)
         )
     }
 
@@ -1893,7 +1893,7 @@ public struct FfiConverterTypeVaultProjection: FfiConverterRustBuffer {
         FfiConverterTypeVaultProjectionType.write(value.vaultType, into: &buf)
         FfiConverterOptionString.write(value.icon, into: &buf)
         FfiConverterOptionString.write(value.imageUrl, into: &buf)
-        FfiConverterBool.write(value.writable, into: &buf)
+        FfiConverterTypeVaultProjectionRole.write(value.role, into: &buf)
     }
 }
 
@@ -2726,6 +2726,90 @@ public func FfiConverterTypeRuntimeResponse_lift(_ buf: RustBuffer) throws -> Ru
 #endif
 public func FfiConverterTypeRuntimeResponse_lower(_ value: RuntimeResponse) -> RustBuffer {
     return FfiConverterTypeRuntimeResponse.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * One Account's membership in one Vault, in the Server's own closed set.
+ */
+
+public enum VaultProjectionRole: Equatable, Hashable {
+
+    case owner
+    case admin
+    case member
+    case readOnly
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaultProjectionRole: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultProjectionRole: FfiConverterRustBuffer {
+    typealias SwiftType = VaultProjectionRole
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultProjectionRole {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .owner
+
+        case 2: return .admin
+
+        case 3: return .member
+
+        case 4: return .readOnly
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VaultProjectionRole, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .owner:
+            writeInt(&buf, Int32(1))
+
+
+        case .admin:
+            writeInt(&buf, Int32(2))
+
+
+        case .member:
+            writeInt(&buf, Int32(3))
+
+
+        case .readOnly:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjectionRole_lift(_ buf: RustBuffer) throws -> VaultProjectionRole {
+    return try FfiConverterTypeVaultProjectionRole.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjectionRole_lower(_ value: VaultProjectionRole) -> RustBuffer {
+    return FfiConverterTypeVaultProjectionRole.lower(value)
 }
 
 

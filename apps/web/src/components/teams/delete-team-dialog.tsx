@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 interface DeleteTeamDialogProps {
 	teamId: string;
