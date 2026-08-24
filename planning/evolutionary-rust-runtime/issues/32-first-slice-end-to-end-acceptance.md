@@ -1,7 +1,7 @@
 # First-slice end-to-end acceptance
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 22
 Spec: ../spec.md#end-to-end
 
@@ -40,3 +40,12 @@ projection.
 Start with the complete scenario failing before any harness or product fix and include that output in
 the implementation report. Run the targeted cloud Playwright test with the development database,
 then `pnpm check:ci` and `pnpm check:ci:rust` from a clean tree.
+
+## Comments
+
+### 2026-08-24 — kept as one acceptance slice
+
+This ticket stays whole. Its one independently verifiable outcome is the complete Playwright path
+through Worker, IndexedDB, HTTP Server, PostgreSQL, and rendered projection. A harness-only or
+partial-trace split would not satisfy a separately observable spec statement; the targeted scenario
+is therefore the red/green boundary for one implementer and one independent reviewer.
