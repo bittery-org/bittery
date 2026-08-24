@@ -35,6 +35,7 @@ export interface ApiPageRequest {
 }
 
 export interface SyncBootstrapRequest extends ApiPageRequest {
+	phase: SyncBootstrapPage["phase"];
 	syncCursor?: string;
 	syncCursorCaptured?: boolean;
 }

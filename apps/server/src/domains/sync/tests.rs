@@ -7,7 +7,7 @@ use axum::{
 };
 use rand::random;
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
@@ -772,7 +772,7 @@ async fn sync_handlers_reject_malformed_request_input() {
 
             let cases = [
                 (
-                    "/api/v1/sync/bootstrap?limit=0",
+                    "/api/v1/sync/bootstrap?phase=vaults&limit=0",
                     "BAD_REQUEST",
                     "Invalid params",
                 ),
@@ -1260,50 +1260,100 @@ async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
 }
 
 #[tokio::test]
-async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachments() {
+async fn bootstrap_vault_phase_returns_an_accessible_personal_vault_with_zero_items() {
+    with_self_hosted_sync_test_app("sync_bootstrap_empty_vault", |app| async move {
+        let user_id = "user_sync_empty_vault";
+        let vault_id = "vault_sync_empty_personal";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Empty Vault Owner",
+            "sync-empty-vault@example.com",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            vault_id,
+            "Encrypted Empty Vault",
+            "personal",
+            user_id,
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vault_key_sync_empty_personal",
+            vault_id,
+            user_id,
+            "encrypted-empty-vault-key",
+            "owner",
+        )
+        .await;
+
+        let session = app.issue_session(user_id).await;
+        let response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/bootstrap?phase=vaults",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+
+        response.assert_contract_status();
+        assert_eq!(response.body["phase"], json!("vaults"));
+        assert_eq!(response.body["hasMore"], json!(false));
+        assert_eq!(response.body["nextCursor"], Value::Null);
+        assert_eq!(response.body["vaults"].as_array().unwrap().len(), 1);
+        assert_eq!(response.body["vaults"][0]["id"], json!(vault_id));
+        assert_eq!(
+            response.body["vaults"][0]["encryptedVaultKey"],
+            json!("encrypted-empty-vault-key")
+        );
+        assert!(response.body.get("items").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_phases_paginate_vaults_then_items_with_one_pinned_watermark() {
     with_self_hosted_sync_test_app("sync_bootstrap_items_success", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
 
-        let first_page = app
+        let first_vault_page = app
             .api_json(
                 Method::GET,
-                "/api/v1/sync/bootstrap?limit=1",
+                "/api/v1/sync/bootstrap?phase=vaults&limit=1",
                 None,
                 headers.clone(),
             )
             .await;
-        first_page.assert_contract_status();
+        first_vault_page.assert_contract_status();
+        assert_eq!(first_vault_page.body["phase"], json!("vaults"));
         assert_eq!(
-            first_page.body["items"]
+            first_vault_page.body["vaults"]
                 .as_array()
-                .expect("items should be an array")
+                .expect("vaults should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            first_page.body["items"][0]["id"],
-            json!(fixture.primary_item_id)
+            first_vault_page.body["vaults"][0]["id"],
+            json!(fixture.primary_vault_id)
         );
         assert_eq!(
-            first_page.body["items"][0]["attachments"]
-                .as_array()
-                .expect("attachments should be an array")
-                .len(),
-            1
-        );
-        assert_eq!(
-            first_page.body["items"][0]["vault"]["encryptedVaultKey"],
+            first_vault_page.body["vaults"][0]["encryptedVaultKey"],
             json!("encrypted-vault-key-primary")
         );
-        assert_eq!(first_page.body["hasMore"], json!(true));
+        assert_eq!(first_vault_page.body["hasMore"], json!(true));
         assert_eq!(
-            first_page.body["nextCursor"],
-            json!(fixture.primary_item_id)
+            first_vault_page.body["nextCursor"],
+            json!(fixture.primary_vault_id)
         );
         assert_eq!(
-            first_page.body["syncCursor"]["id"],
+            first_vault_page.body["syncCursor"]["id"],
             json!(fixture.secondary_event_id)
         );
 
@@ -1323,32 +1373,85 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
         )
         .await;
 
-        let second_page_path = format!(
-            "/api/v1/sync/bootstrap?cursor={}&syncCursor={}",
-            fixture.primary_item_id, fixture.secondary_event_id
+        let second_vault_page_path = format!(
+            "/api/v1/sync/bootstrap?phase=vaults&cursor={}&syncCursor={}&limit=1",
+            fixture.primary_vault_id, fixture.secondary_event_id
         );
-        let second_page = app
-            .api_json(Method::GET, &second_page_path, None, headers)
+        let second_vault_page = app
+            .api_json(Method::GET, &second_vault_page_path, None, headers.clone())
             .await;
-        second_page.assert_contract_status();
+        second_vault_page.assert_contract_status();
         assert_eq!(
-            second_page.body["items"]
+            second_vault_page.body["vaults"]
                 .as_array()
-                .expect("items should be an array")
+                .expect("vaults should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            second_page.body["items"][0]["id"],
-            json!(fixture.secondary_item_id)
+            second_vault_page.body["vaults"][0]["id"],
+            json!(fixture.secondary_vault_id)
         );
-        assert_eq!(second_page.body["hasMore"], json!(false));
-        assert_eq!(second_page.body["nextCursor"], Value::Null);
+        assert_eq!(second_vault_page.body["hasMore"], json!(false));
+        assert_eq!(second_vault_page.body["nextCursor"], Value::Null);
         assert_eq!(
-            second_page.body["syncCursor"]["id"],
+            second_vault_page.body["syncCursor"]["id"],
             json!(fixture.secondary_event_id)
         );
-        assert_ne!(second_page.body["syncCursor"]["id"], json!(later_event_id));
+        assert_ne!(
+            second_vault_page.body["syncCursor"]["id"],
+            json!(later_event_id)
+        );
+
+        let first_item_page = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/bootstrap?phase=items&syncCursor={}&limit=1",
+                    fixture.secondary_event_id
+                ),
+                None,
+                headers.clone(),
+            )
+            .await;
+        first_item_page.assert_contract_status();
+        assert_eq!(first_item_page.body["phase"], json!("items"));
+        assert_eq!(
+            first_item_page.body["items"][0]["id"],
+            json!(fixture.primary_item_id)
+        );
+        assert_eq!(
+            first_item_page.body["items"][0]["attachments"]
+                .as_array()
+                .expect("attachments should be an array")
+                .len(),
+            1
+        );
+        assert!(first_item_page.body["items"][0].get("vault").is_none());
+        assert_eq!(first_item_page.body["hasMore"], json!(true));
+
+        let second_item_page = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/bootstrap?phase=items&cursor={}&syncCursor={}&limit=1",
+                    fixture.primary_item_id, fixture.secondary_event_id
+                ),
+                None,
+                headers,
+            )
+            .await;
+        second_item_page.assert_contract_status();
+        assert_eq!(
+            second_item_page.body["items"][0]["id"],
+            json!(fixture.secondary_item_id)
+        );
+        assert_eq!(second_item_page.body["hasMore"], json!(false));
+        assert_eq!(second_item_page.body["nextCursor"], Value::Null);
+        assert_eq!(
+            second_item_page.body["syncCursor"]["id"],
+            json!(fixture.secondary_event_id)
+        );
     })
     .await;
 }
@@ -1367,7 +1470,7 @@ async fn bootstrap_rejects_invalid_or_inaccessible_sync_cursors() {
             let response = app
                 .api_json(
                     Method::GET,
-                    &format!("/api/v1/sync/bootstrap?syncCursor={sync_cursor}"),
+                    &format!("/api/v1/sync/bootstrap?phase=vaults&syncCursor={sync_cursor}"),
                     None,
                     headers.clone(),
                 )
@@ -1398,7 +1501,7 @@ async fn bootstrap_captures_sync_cursor_before_fetching_the_first_item_page() {
                 request_app
                     .api_json(
                         Method::GET,
-                        "/api/v1/sync/bootstrap?limit=1",
+                        "/api/v1/sync/bootstrap?phase=items&limit=1",
                         None,
                         headers,
                     )
@@ -1464,7 +1567,7 @@ async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
         let first_page = app
             .api_json(
                 Method::GET,
-                "/api/v1/sync/bootstrap?limit=1",
+                "/api/v1/sync/bootstrap?phase=items&limit=1",
                 None,
                 headers.clone(),
             )
@@ -1495,7 +1598,7 @@ async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
             .api_json(
                 Method::GET,
                 &format!(
-                    "/api/v1/sync/bootstrap?cursor={}&limit=1&syncCursorCaptured=true",
+                    "/api/v1/sync/bootstrap?phase=items&cursor={}&limit=1&syncCursorCaptured=true",
                     next_cursor
                 ),
                 None,
@@ -1537,8 +1640,8 @@ async fn max_ciphertext_bootstrap_pages_stay_byte_bounded_and_continue() {
         let mut seen_ids = Vec::new();
         for _ in 0..4 {
             let query = cursor.as_deref().map_or_else(
-                || "limit=500".to_string(),
-                |cursor| format!("limit=500&cursor={cursor}"),
+                || "phase=items&limit=500".to_string(),
+                |cursor| format!("phase=items&limit=500&cursor={cursor}"),
             );
             let response = app
                 .api_json(
@@ -1605,13 +1708,12 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
         let large_name = "n".repeat(crate::domains::vaults::VAULT_NAME_MAX_CHARS);
         let large_key = "k".repeat(crate::domains::vaults::key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
         let expected_ids: Vec<String> = (0..70)
-            .map(|index| format!("sync_metadata_item_{index:03}"))
+            .map(|index| format!("sync_metadata_vault_{index:03}"))
             .collect();
-        for (index, item_id) in expected_ids.iter().enumerate() {
-            let vault_id = format!("sync_metadata_vault_{index:03}");
+        for (index, vault_id) in expected_ids.iter().enumerate() {
             seed_vault(
                 &app.pool,
-                &vault_id,
+                vault_id,
                 &large_name,
                 "personal",
                 &fixture.owner_user_id,
@@ -1621,20 +1723,10 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
             seed_vault_key(
                 &app.pool,
                 &format!("sync_metadata_key_{index:03}"),
-                &vault_id,
+                vault_id,
                 &fixture.owner_user_id,
                 &large_key,
                 "owner",
-            )
-            .await;
-            seed_item(
-                &app.pool,
-                item_id,
-                &vault_id,
-                "login",
-                "ciphertext",
-                "iv",
-                &fixture.owner_user_id,
             )
             .await;
         }
@@ -1643,8 +1735,8 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
         let mut seen_ids = Vec::new();
         for _ in 0..4 {
             let query = cursor.as_deref().map_or_else(
-                || "limit=500".to_string(),
-                |cursor| format!("limit=500&cursor={cursor}"),
+                || "phase=vaults&limit=500".to_string(),
+                |cursor| format!("phase=vaults&limit=500&cursor={cursor}"),
             );
             let response = app
                 .api_json(
@@ -1657,9 +1749,9 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
             response.assert_contract_status();
             assert!(response.body_bytes <= crate::http::pagination::RESPONSE_PAGE_BYTES);
             seen_ids.extend(
-                response.body["items"]
+                response.body["vaults"]
                     .as_array()
-                    .expect("bootstrap page should contain items")
+                    .expect("bootstrap page should contain vaults")
                     .iter()
                     .filter_map(|item| item["id"].as_str().map(str::to_string)),
             );
@@ -1673,8 +1765,8 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
                     .to_string(),
             );
         }
-        for item_id in expected_ids {
-            assert_eq!(seen_ids.iter().filter(|seen| **seen == item_id).count(), 1);
+        for vault_id in expected_ids {
+            assert_eq!(seen_ids.iter().filter(|seen| **seen == vault_id).count(), 1);
         }
     })
     .await;

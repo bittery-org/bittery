@@ -12,6 +12,11 @@ pub struct BoundedBootstrapRows {
     pub has_more: bool,
 }
 
+pub struct BoundedBootstrapVaultRows {
+    pub rows: Vec<DbBootstrapVaultAccessRow>,
+    pub has_more: bool,
+}
+
 pub struct BoundedSyncEventRows {
     pub rows: Vec<DbSyncEventRow>,
     pub has_more: bool,
@@ -259,6 +264,63 @@ pub async fn fetch_bootstrap_items(
     .await
     .map_err(|error| database_error(error, "Failed to materialize bounded bootstrap item page"))?;
     Ok(BoundedBootstrapRows { rows, has_more })
+}
+
+pub async fn fetch_bootstrap_vaults(
+    pool: &PgPool,
+    user_id: &str,
+    cursor: Option<&str>,
+    limit: i32,
+) -> Result<BoundedBootstrapVaultRows, AppError> {
+    let weights = query_as::<_, BootstrapPageWeight>(
+        r#"WITH candidates AS (
+            SELECT vk.vault_id AS id, ROW_NUMBER() OVER (ORDER BY vk.vault_id ASC)::bigint AS position,
+                   (4096 + octet_length(vk.vault_id) + octet_length(v.name) + octet_length(v.type::text)
+                    + coalesce(octet_length(v.icon), 0) + coalesce(octet_length(v.image_key), 0)
+                    + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text))::bigint AS estimated_bytes
+            FROM vault_key vk
+            INNER JOIN vault v ON v.id = vk.vault_id
+            WHERE vk.user_id = $1 AND ($2::text IS NULL OR vk.vault_id > $2)
+            ORDER BY vk.vault_id ASC LIMIT $3
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#,
+    )
+    .bind(user_id)
+    .bind(cursor)
+    .bind(limit + 1)
+    .bind(BOOTSTRAP_QUERY_BYTES)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to size bootstrap vault page"))?;
+    let Some(first) = weights.first() else {
+        return Ok(BoundedBootstrapVaultRows {
+            rows: Vec::new(),
+            has_more: false,
+        });
+    };
+    if first.cumulative_bytes > BOOTSTRAP_QUERY_BYTES {
+        return Err(AppError::payload_too_large(
+            "A single bootstrap vault exceeds the response page byte budget.",
+        ));
+    }
+    let has_more = weights
+        .last()
+        .is_some_and(|last| last.position < last.candidate_count);
+    let vault_ids: Vec<String> = weights.into_iter().map(|weight| weight.id).collect();
+    let rows = query_as::<_, DbBootstrapVaultAccessRow>(
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
+    )
+    .bind(user_id)
+    .bind(&vault_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to materialize bounded bootstrap vault page"))?;
+    Ok(BoundedBootstrapVaultRows { rows, has_more })
 }
 
 pub async fn load_bootstrap_attachment_rows(

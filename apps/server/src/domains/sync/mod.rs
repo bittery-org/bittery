@@ -1,7 +1,6 @@
 use axum::response::sse::Event;
 use rand::random;
 use serde::{Deserialize, Serialize};
-use sqlx::query_as;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 
@@ -10,16 +9,17 @@ use crate::{
     db::models::*,
     domains::billing::entitlements::attachments_enabled_for_user,
     domains::sync::records::{
-        fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
-        fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
+        fetch_bootstrap_items, fetch_bootstrap_vaults, fetch_latest_visible_event_id,
+        fetch_user_vault_ids, fetch_visible_cursor_event, fetch_visible_events_since,
+        load_bootstrap_attachment_rows,
     },
     error::AppError,
     integrations::storage,
     shapes::{
-        attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
-        sync_changes_shape, sync_cursor_shape, sync_event_shape,
+        attachment_shape, bootstrap_vault_summary_shape, item_shape, sync_changes_shape,
+        sync_cursor_shape, sync_event_shape,
     },
-    shared::{transaction::database_error, validate_resource_id},
+    shared::validate_resource_id,
 };
 
 pub(crate) const SSE_EVENTS_PATH: &str = "/api/v1/sync/events";
@@ -37,10 +37,18 @@ pub struct GetEventsSinceInput {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BootstrapItemsInput {
+    pub phase: BootstrapPhase,
     pub cursor: Option<String>,
     pub sync_cursor: Option<String>,
     pub sync_cursor_captured: bool,
     pub limit: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapPhase {
+    Vaults,
+    Items,
 }
 
 sync_event_shape!(service_struct {
@@ -78,15 +86,31 @@ item_shape! {
     #[serde(rename_all = "camelCase")]
     pub struct BootstrapItemResponse {
         attachments: Vec<BootstrapAttachmentResponse>,
-        vault: Option<BootstrapVaultSummary>,
     }
 }
 
-bootstrap_items_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct BootstrapItemsResponse
-});
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum BootstrapItemsResponse {
+    Vaults {
+        vaults: Vec<BootstrapVaultSummary>,
+        #[serde(rename = "nextCursor")]
+        next_cursor: Option<String>,
+        #[serde(rename = "syncCursor")]
+        sync_cursor: Option<SyncCursorResponse>,
+        #[serde(rename = "hasMore")]
+        has_more: bool,
+    },
+    Items {
+        items: Vec<BootstrapItemResponse>,
+        #[serde(rename = "nextCursor")]
+        next_cursor: Option<String>,
+        #[serde(rename = "syncCursor")]
+        sync_cursor: Option<SyncCursorResponse>,
+        #[serde(rename = "hasMore")]
+        has_more: bool,
+    },
+}
 
 pub(crate) const DEFAULT_EVENTS_LIMIT: i32 = 100;
 const DEFAULT_BOOTSTRAP_LIMIT: i32 = 500;
@@ -205,6 +229,51 @@ pub(crate) async fn bootstrap_items(
             .map(|id| SyncCursorResponse { id }),
     };
 
+    match input.phase {
+        BootstrapPhase::Vaults => {
+            let paged_vaults =
+                fetch_bootstrap_vaults(pool, user_id, input.cursor.as_deref(), limit).await?;
+            let count_has_more = paged_vaults.rows.len() > limit as usize;
+            let has_more = paged_vaults.has_more || count_has_more;
+            let paged_vaults = paged_vaults.rows;
+            let result_vaults = if has_more {
+                paged_vaults
+                    .into_iter()
+                    .take(limit as usize)
+                    .collect::<Vec<_>>()
+            } else {
+                paged_vaults
+            };
+            let next_cursor = if has_more {
+                result_vaults.last().map(|vault| vault.vault_id.clone())
+            } else {
+                None
+            };
+            let vaults = result_vaults
+                .into_iter()
+                .map(|vault| BootstrapVaultSummary {
+                    id: vault.vault_id,
+                    name: vault.vault_name,
+                    vault_type: vault.vault_type,
+                    icon: vault.vault_icon,
+                    image_url: vault
+                        .vault_image_key
+                        .as_deref()
+                        .and_then(|key| object_storage.public_url(key)),
+                    encrypted_vault_key: vault.encrypted_vault_key,
+                    role: vault.role,
+                })
+                .collect();
+            return Ok(BootstrapItemsResponse::Vaults {
+                vaults,
+                next_cursor,
+                sync_cursor,
+                has_more,
+            });
+        }
+        BootstrapPhase::Items => {}
+    }
+
     let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
     let paged_items = fetch_bootstrap_items(pool, user_id, input.cursor.as_deref(), limit).await?;
     let count_has_more = paged_items.rows.len() > limit as usize;
@@ -229,46 +298,7 @@ pub(crate) async fn bootstrap_items(
     } else {
         std::collections::HashMap::new()
     };
-    let mut selected_vault_ids: Vec<String> = result_items
-        .iter()
-        .map(|item| item.vault_id.clone())
-        .collect();
-    selected_vault_ids.sort_unstable();
-    selected_vault_ids.dedup();
-    let user_vaults = if selected_vault_ids.is_empty() {
-        Vec::new()
-    } else {
-        query_as::<_, DbBootstrapVaultAccessRow>(
-            "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2)",
-        )
-        .bind(user_id)
-        .bind(&selected_vault_ids)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| database_error(error, "Failed to load user vaults"))?
-    };
-    let vault_map: std::collections::HashMap<String, BootstrapVaultSummary> = user_vaults
-        .into_iter()
-        .map(|vault| {
-            (
-                vault.vault_id.clone(),
-                BootstrapVaultSummary {
-                    id: vault.vault_id,
-                    name: vault.vault_name,
-                    vault_type: vault.vault_type,
-                    icon: vault.vault_icon,
-                    image_url: vault
-                        .vault_image_key
-                        .as_deref()
-                        .and_then(|key| object_storage.public_url(key)),
-                    encrypted_vault_key: vault.encrypted_vault_key,
-                    role: vault.role,
-                },
-            )
-        })
-        .collect();
-
-    Ok(BootstrapItemsResponse {
+    Ok(BootstrapItemsResponse::Items {
         items: result_items
             .into_iter()
             .map(|item| {
@@ -276,8 +306,7 @@ pub(crate) async fn bootstrap_items(
                     .get(&item.id)
                     .cloned()
                     .unwrap_or_default();
-                let vault = vault_map.get(&item.vault_id).cloned();
-                BootstrapItemResponse::compose(item.into(), attachments, vault)
+                BootstrapItemResponse::compose(item.into(), attachments)
             })
             .collect(),
         next_cursor,

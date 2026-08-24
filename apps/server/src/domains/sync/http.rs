@@ -12,8 +12,8 @@ use crate::{
     domains::sync,
     domains::sync::sse as sync_sse,
     shapes::{
-        attachment_shape, bootstrap_items_shape, bootstrap_vault_summary_shape, item_shape,
-        sync_changes_shape, sync_cursor_shape, sync_event_shape,
+        attachment_shape, bootstrap_vault_summary_shape, item_shape, sync_changes_shape,
+        sync_cursor_shape, sync_event_shape,
     },
     AppState,
 };
@@ -30,6 +30,8 @@ use crate::http::{
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
 struct BootstrapQuery {
+    #[param(inline)]
+    phase: BootstrapPhase,
     cursor: Option<String>,
     sync_cursor: Option<String>,
     #[serde(default)]
@@ -39,6 +41,13 @@ struct BootstrapQuery {
     limit: u16,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum BootstrapPhase {
+    Vaults,
+    Items,
+}
+
 fn default_bootstrap_limit() -> u16 {
     MAX_PAGE_SIZE
 }
@@ -46,6 +55,10 @@ fn default_bootstrap_limit() -> u16 {
 impl From<BootstrapQuery> for sync::BootstrapItemsInput {
     fn from(value: BootstrapQuery) -> Self {
         Self {
+            phase: match value.phase {
+                BootstrapPhase::Vaults => sync::BootstrapPhase::Vaults,
+                BootstrapPhase::Items => sync::BootstrapPhase::Items,
+            },
             cursor: value.cursor,
             sync_cursor: value.sync_cursor,
             sync_cursor_captured: value.sync_cursor_captured,
@@ -199,29 +212,67 @@ item_shape! {
     #[serde(rename_all = "camelCase")]
     struct BootstrapItemResponse {
         attachments: Vec<BootstrapAttachmentResponse>,
-        vault: Option<BootstrapVaultSummary>,
     }
 }
 
 impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
     fn from(value: sync::BootstrapItemResponse) -> Self {
-        let (item, (attachments, vault)) = value.decompose();
-        Self::compose(
-            item,
-            attachments.into_iter().map(Into::into).collect(),
-            vault.map(Into::into),
-        )
+        let (item, (attachments,)) = value.decompose();
+        Self::compose(item, attachments.into_iter().map(Into::into).collect())
     }
 }
 
-bootstrap_items_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct BootstrapItemsResponse
-});
-bootstrap_items_shape!(shape_from {
-    sync::BootstrapItemsResponse => BootstrapItemsResponse
-});
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+enum BootstrapItemsResponse {
+    Vaults {
+        vaults: Vec<BootstrapVaultSummary>,
+        #[serde(rename = "nextCursor")]
+        next_cursor: Option<String>,
+        #[serde(rename = "syncCursor")]
+        sync_cursor: Option<SyncCursorResponse>,
+        #[serde(rename = "hasMore")]
+        has_more: bool,
+    },
+    Items {
+        items: Vec<BootstrapItemResponse>,
+        #[serde(rename = "nextCursor")]
+        next_cursor: Option<String>,
+        #[serde(rename = "syncCursor")]
+        sync_cursor: Option<SyncCursorResponse>,
+        #[serde(rename = "hasMore")]
+        has_more: bool,
+    },
+}
+
+impl From<sync::BootstrapItemsResponse> for BootstrapItemsResponse {
+    fn from(value: sync::BootstrapItemsResponse) -> Self {
+        match value {
+            sync::BootstrapItemsResponse::Vaults {
+                vaults,
+                next_cursor,
+                sync_cursor,
+                has_more,
+            } => Self::Vaults {
+                vaults: vaults.into_iter().map(Into::into).collect(),
+                next_cursor,
+                sync_cursor: sync_cursor.map(Into::into),
+                has_more,
+            },
+            sync::BootstrapItemsResponse::Items {
+                items,
+                next_cursor,
+                sync_cursor,
+                has_more,
+            } => Self::Items {
+                items: items.into_iter().map(Into::into).collect(),
+                next_cursor,
+                sync_cursor: sync_cursor.map(Into::into),
+                has_more,
+            },
+        }
+    }
+}
 
 sync_event_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -278,9 +329,29 @@ async fn bootstrap(
     )
     .await?
     .into();
-    if truncate_serialized(&mut response.items, RESPONSE_PAGE_ITEMS_BYTES)? {
-        response.has_more = true;
-        response.next_cursor = response.items.last().map(|item| item.id.clone());
+    match &mut response {
+        BootstrapItemsResponse::Vaults {
+            vaults,
+            next_cursor,
+            has_more,
+            ..
+        } => {
+            if truncate_serialized(vaults, RESPONSE_PAGE_ITEMS_BYTES)? {
+                *has_more = true;
+                *next_cursor = vaults.last().map(|vault| vault.id.clone());
+            }
+        }
+        BootstrapItemsResponse::Items {
+            items,
+            next_cursor,
+            has_more,
+            ..
+        } => {
+            if truncate_serialized(items, RESPONSE_PAGE_ITEMS_BYTES)? {
+                *has_more = true;
+                *next_cursor = items.last().map(|item| item.id.clone());
+            }
+        }
     }
     Ok(Json(response))
 }
@@ -362,7 +433,7 @@ mod tests {
 
     #[test]
     fn bootstrap_wire_mapping_preserves_camel_case_and_nullable_fields() {
-        let response: BootstrapItemsResponse = ServiceBootstrapItemsResponse {
+        let response: BootstrapItemsResponse = ServiceBootstrapItemsResponse::Items {
             items: vec![ServiceBootstrapItemResponse {
                 id: "item_test".to_string(),
                 vault_id: "vault_test".to_string(),
@@ -396,15 +467,6 @@ mod tests {
                     uploaded_by: "user_test".to_string(),
                     created_at: "2026-08-10T10:30:00Z".to_string(),
                 }],
-                vault: Some(ServiceBootstrapVaultSummary {
-                    id: "vault_test".to_string(),
-                    name: "encrypted-vault-name".to_string(),
-                    vault_type: VaultType::Personal,
-                    icon: None,
-                    image_url: None,
-                    encrypted_vault_key: "wrapped-key".to_string(),
-                    role: VaultRole::Owner,
-                }),
             }],
             next_cursor: Some("item_test".to_string()),
             sync_cursor: Some(ServiceSyncCursorResponse {
@@ -415,6 +477,7 @@ mod tests {
         .into();
 
         let json = serde_json::to_value(response).expect("bootstrap response should serialize");
+        assert_eq!(json["phase"], json!("items"));
         assert_eq!(json["nextCursor"], json!("item_test"));
         assert_eq!(json["syncCursor"]["id"], json!("event_test"));
         assert_eq!(json["items"][0]["lastModifiedBy"], json!("user_test"));
@@ -423,7 +486,28 @@ mod tests {
             json["items"][0]["attachments"][0]["encryptedContentTypeIv"],
             json!("content-type-iv")
         );
-        assert_eq!(json["items"][0]["vault"]["vaultType"], json!("personal"));
+        assert!(json["items"][0].get("vault").is_none());
+
+        let vault_response: BootstrapItemsResponse = ServiceBootstrapItemsResponse::Vaults {
+            vaults: vec![ServiceBootstrapVaultSummary {
+                id: "vault_test".to_string(),
+                name: "encrypted-vault-name".to_string(),
+                vault_type: VaultType::Personal,
+                icon: None,
+                image_url: None,
+                encrypted_vault_key: "wrapped-key".to_string(),
+                role: VaultRole::Owner,
+            }],
+            next_cursor: None,
+            sync_cursor: None,
+            has_more: false,
+        }
+        .into();
+        let vault_json =
+            serde_json::to_value(vault_response).expect("vault response should serialize");
+        assert_eq!(vault_json["phase"], json!("vaults"));
+        assert_eq!(vault_json["vaults"][0]["vaultType"], json!("personal"));
+        assert!(vault_json.get("items").is_none());
     }
 
     #[test]
@@ -500,13 +584,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bootstrap_query_requires_a_closed_phase() {
+        for uri in [
+            "/sync/bootstrap?limit=1",
+            "/sync/bootstrap?phase=attachments&limit=1",
+        ] {
+            let (mut parts, _) = Request::builder().uri(uri).body(()).unwrap().into_parts();
+            BootstrapApiQuery::from_request_parts(&mut parts, &())
+                .await
+                .expect_err("bootstrap phase must be present and known");
+        }
+    }
+
+    #[tokio::test]
     async fn sync_query_limits_match_the_published_page_bound() {
         for (limit, expected_code) in [
             (0, ErrorCode::BadRequest),
             (MAX_PAGE_SIZE + 1, ErrorCode::InvalidPageLimit),
         ] {
             let (mut bootstrap_parts, _) = Request::builder()
-                .uri(format!("/sync/bootstrap?limit={limit}"))
+                .uri(format!("/sync/bootstrap?phase=vaults&limit={limit}"))
                 .body(())
                 .unwrap()
                 .into_parts();
@@ -528,7 +625,7 @@ mod tests {
 
         for limit in [1, MAX_PAGE_SIZE] {
             let (mut bootstrap_parts, _) = Request::builder()
-                .uri(format!("/sync/bootstrap?limit={limit}"))
+                .uri(format!("/sync/bootstrap?phase=vaults&limit={limit}"))
                 .body(())
                 .unwrap()
                 .into_parts();
@@ -569,6 +666,24 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .contains(&json!("lastModifiedBy"))
+        );
+        assert!(
+            openapi["components"]["schemas"]["BootstrapItemResponse"]["properties"]
+                .get("vault")
+                .is_none()
+        );
+        let bootstrap_branches = openapi["components"]["schemas"]["BootstrapItemsResponse"]
+            ["oneOf"]
+            .as_array()
+            .expect("bootstrap response should be a phase-tagged union");
+        assert_eq!(bootstrap_branches.len(), 2);
+        assert_eq!(
+            bootstrap_branches[0]["properties"]["phase"]["enum"][0],
+            json!("vaults")
+        );
+        assert_eq!(
+            bootstrap_branches[1]["properties"]["phase"]["enum"][0],
+            json!("items")
         );
     }
 

@@ -455,7 +455,7 @@ export interface ApiClient {
 	};
 	readonly sync: {
 		bootstrap(
-			page?: SyncBootstrapRequest,
+			page: SyncBootstrapRequest,
 		): Promise<ApiResult<SyncBootstrapPage>>;
 		changes(input?: {
 			sinceId?: string;
@@ -603,8 +603,27 @@ function validateVaultKeyPage(
 
 function validateBootstrap(value: unknown): SyncBootstrapPage {
 	const page = object(value, "/sync/bootstrap");
-	if (!Array.isArray(page.items)) {
-		throw new TypeError("/sync/bootstrap/items must be an array.");
+	const phase = string(page.phase, "/sync/bootstrap/phase");
+	if (phase === "vaults") {
+		if (!Array.isArray(page.vaults)) {
+			throw new TypeError("/sync/bootstrap/vaults must be an array.");
+		}
+		if (page.items !== undefined) {
+			throw new TypeError(
+				"/sync/bootstrap/items must be absent during vaults.",
+			);
+		}
+	} else if (phase === "items") {
+		if (!Array.isArray(page.items)) {
+			throw new TypeError("/sync/bootstrap/items must be an array.");
+		}
+		if (page.vaults !== undefined) {
+			throw new TypeError(
+				"/sync/bootstrap/vaults must be absent during items.",
+			);
+		}
+	} else {
+		throw new TypeError('/sync/bootstrap/phase must be "vaults" or "items".');
 	}
 	boolean(page.hasMore, "/sync/bootstrap/hasMore");
 	if (page.nextCursor !== undefined && page.nextCursor !== null) {

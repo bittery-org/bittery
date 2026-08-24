@@ -370,8 +370,10 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
+				const phase = new URL(request.url).searchParams.get("phase");
 				return Response.json({
-					items: [],
+					phase,
+					...(phase === "vaults" ? { vaults: [] } : { items: [] }),
 					hasMore: false,
 					syncCursor: malformed ? { id: 42 } : null,
 				});
@@ -379,6 +381,7 @@ describe("Bittery API facade", () => {
 		});
 
 		const result = await client.sync.bootstrap({
+			phase: "items",
 			cursor: "page-2",
 			syncCursor: "evt-bootstrap",
 			syncCursorCaptured: true,
@@ -386,14 +389,23 @@ describe("Bittery API facade", () => {
 		expect(result.data.syncCursor).toBeNull();
 		expect(new URL(requests[0]?.url ?? "").searchParams).toEqual(
 			new URLSearchParams({
+				phase: "items",
 				cursor: "page-2",
 				syncCursor: "evt-bootstrap",
 				syncCursorCaptured: "true",
 			}),
 		);
+		const vaultResult = await client.sync.bootstrap({
+			phase: "vaults",
+			syncCursorCaptured: true,
+		});
+		expect(vaultResult.data.phase).toBe("vaults");
+		if (vaultResult.data.phase === "vaults") {
+			expect(vaultResult.data.vaults).toEqual([]);
+		}
 
 		malformed = true;
-		await expect(client.sync.bootstrap()).rejects.toThrow(
+		await expect(client.sync.bootstrap({ phase: "items" })).rejects.toThrow(
 			"/sync/bootstrap/syncCursor/id must be a non-empty string",
 		);
 	});

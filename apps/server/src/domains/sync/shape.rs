@@ -15,18 +15,6 @@ macro_rules! bootstrap_vault_summary_shape {
     };
 }
 
-/// One page of the bootstrap cache, plus the sync cursor it was captured at.
-macro_rules! bootstrap_items_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            items: Vec<BootstrapItemResponse> = each,
-            next_cursor: Option<String>,
-            sync_cursor: Option<SyncCursorResponse> = maybe,
-            has_more: bool,
-        } }
-    };
-}
-
 /// The position in the event log a client has consumed up to.
 macro_rules! sync_cursor_shape {
     ($emit:ident $args:tt) => {
@@ -71,6 +59,5 @@ macro_rules! sync_changes_shape {
 }
 
 pub(crate) use {
-    bootstrap_items_shape, bootstrap_vault_summary_shape, sync_changes_shape, sync_cursor_shape,
-    sync_event_shape,
+    bootstrap_vault_summary_shape, sync_changes_shape, sync_cursor_shape, sync_event_shape,
 };

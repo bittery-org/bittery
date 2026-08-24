@@ -5455,6 +5455,18 @@
         "operationId": "bootstrapSync",
         "parameters": [
           {
+            "name": "phase",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vaults",
+                "items"
+              ]
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -13604,16 +13616,6 @@
           "updatedAt": {
             "type": "string"
           },
-          "vault": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/BootstrapVaultSummary"
-              }
-            ]
-          },
           "vaultId": {
             "type": "string"
           },
@@ -13624,38 +13626,90 @@
         }
       },
       "BootstrapItemsResponse": {
-        "type": "object",
-        "required": [
-          "items",
-          "hasMore"
-        ],
-        "properties": {
-          "hasMore": {
-            "type": "boolean"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BootstrapItemResponse"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaults",
+              "hasMore",
+              "phase"
+            ],
+            "properties": {
+              "hasMore": {
+                "type": "boolean"
+              },
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "vaults"
+                ]
+              },
+              "syncCursor": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SyncCursorResponse"
+                  }
+                ]
+              },
+              "vaults": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BootstrapVaultSummary"
+                }
+              }
             }
           },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "syncCursor": {
-            "oneOf": [
-              {
-                "type": "null"
+          {
+            "type": "object",
+            "required": [
+              "items",
+              "hasMore",
+              "phase"
+            ],
+            "properties": {
+              "hasMore": {
+                "type": "boolean"
               },
-              {
-                "$ref": "#/components/schemas/SyncCursorResponse"
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BootstrapItemResponse"
+                }
+              },
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "items"
+                ]
+              },
+              "syncCursor": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SyncCursorResponse"
+                  }
+                ]
               }
-            ]
+            }
           }
-        }
+        ]
       },
       "BootstrapVaultSummary": {
         "type": "object",

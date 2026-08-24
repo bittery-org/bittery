@@ -1652,15 +1652,23 @@ export interface components {
             readonly id: string;
             readonly lastModifiedBy: string;
             readonly updatedAt: string;
-            readonly vault?: null | components["schemas"]["BootstrapVaultSummary"];
             readonly vaultId: string;
             /** Format: int32 */
             readonly version: number;
         };
         readonly BootstrapItemsResponse: {
             readonly hasMore: boolean;
+            readonly nextCursor?: string | null;
+            /** @enum {string} */
+            readonly phase: "vaults";
+            readonly syncCursor?: null | components["schemas"]["SyncCursorResponse"];
+            readonly vaults: readonly components["schemas"]["BootstrapVaultSummary"][];
+        } | {
+            readonly hasMore: boolean;
             readonly items: readonly components["schemas"]["BootstrapItemResponse"][];
             readonly nextCursor?: string | null;
+            /** @enum {string} */
+            readonly phase: "items";
             readonly syncCursor?: null | components["schemas"]["SyncCursorResponse"];
         };
         readonly BootstrapVaultSummary: {
@@ -6939,7 +6947,8 @@ export interface operations {
     };
     readonly bootstrapSync: {
         readonly parameters: {
-            readonly query?: {
+            readonly query: {
+                readonly phase: "vaults" | "items";
                 readonly cursor?: string;
                 readonly syncCursor?: string;
                 readonly syncCursorCaptured?: boolean;
