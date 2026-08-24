@@ -224,3 +224,22 @@ slice. Before starting it, the new boundary is split once more:
 These are sequential and path-disjoint: the first owns Server schema/domain/routes/generated Server
 contract; the second owns Client Runtime Move preparation and its protocol/Replica tests. Neither
 widens ordinary Attachment service ownership or Share delivery.
+
+### 2026-08-25 — Attachment Move staging lease and interface resolved
+
+The maintainer selected one idempotent, User- and Operation-scoped staging manifest. It fixes the
+complete stable `(User, Operation, Attachment)` identity set and renews upload credentials together;
+individual upload-preparation calls do not independently define completeness.
+
+Prepared staging has a rolling 24-hour lease, renewed by every manifest or credential access. Lease
+expiry may delete only reproducible staged ciphertext and upload progress. It never expires the
+accepted Runtime Operation, changes its immutable intent, or creates a semantic Operation outcome.
+When the same Operation resumes, Runtime obtains the same stable staging identities, checks what is
+present, and reuploads missing target-scoped ciphertext.
+
+Finalization with missing, expired, or incomplete staging returns HTTP `409` with the closed code
+`attachment_staging_incomplete` and retains no outcome. Runtime classifies it as a non-terminal
+preparation state, renews the manifest, and resumes upload. This is distinct from the terminal
+`attachment_state_conflict`, which proves that accepted Item or Attachment authority became stale.
+No UI cancellation, retry count, Account removal, or elapsed lease may turn either prepared staging
+or the accepted Operation into a false terminal result.
