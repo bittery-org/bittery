@@ -1,7 +1,7 @@
 # SQLite complete Replica failure matrix
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 31
 Spec: ../spec.md#shared-replica-conformance
 
@@ -42,3 +42,9 @@ both full gates from a clean tree.
 
 This is a verification blocker, not evidence of a known SQLite transaction defect. Ticket 23 remains
 open until the complete matrix is executable and independently reviewed.
+
+### 2026-08-24 — claimed
+
+Claimed after Ticket 36 landed. This remains one independently verifiable Rust test slice: extend
+the SQLite failure-injection corpus across Install, accepted Operation Commit, authoritative
+reconciliation Commit, and Lock without changing adapter semantics.
