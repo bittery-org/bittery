@@ -1,7 +1,7 @@
 # Offline create, retry, and reconciliation
 
 Type: task
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 17, 20
 Spec: ../spec.md#offline-create
 
@@ -51,3 +51,15 @@ acceptance scenario:
 - **D, Web create flow.** Route the existing create-Login-Item UI at the Runtime request.
 
 The full acceptance scenario in the specification is the gate on slice D, not on A.
+
+### 2026-08-24 — all four slices landed
+
+A (durable accept), B (dispatch and unbounded retry), C (outcome and exactly-once
+reconciliation), and D (Web create flow and the spawned dispatch loop) are implemented and green.
+Acceptance-scenario steps 5 through 9 are satisfiable in the Web stack: an Item created offline is
+visible as pending at once, survives a Worker kill, retries without a host call, and reconciles to
+one authoritative Item and one compact receipt.
+
+The scenario cannot yet be *asserted* end to end by the Playwright acceptance test, because ticket
+22 still owes the reads and writes around it: Vault metadata and tag grouping still come from the
+transitional repository, and update, delete, favorite, move, and share still write to it.
