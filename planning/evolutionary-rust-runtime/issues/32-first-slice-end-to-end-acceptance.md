@@ -1,7 +1,7 @@
 # First-slice end-to-end acceptance
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 22, 35
 Spec: ../spec.md#end-to-end
 
@@ -58,3 +58,25 @@ derives Bootstrap Vault summaries only from Items on the current page, so an emp
 has no wire representation and cannot become Runtime authority. Ticket 35 owns the separately
 claimed Server/contract/Runtime correction; this ticket deliberately does not infer how Vault
 summaries fit the bounded Bootstrap protocol.
+
+### 2026-08-24 — delivered
+
+The cloud Playwright scenario now drives full Rust Sign-in and two-phase Bootstrap, accepts an
+offline encrypted Login Item durably, observes real Worker closure and replacement, restores the
+exact Operation from IndexedDB, removes the initiating UI observation, and then survives six
+transient failures, Session renewal, duplicate dispatch, and loss of the first successful response.
+It reconciles through retained outcome lookup to one visible authoritative Item, one compact local
+receipt, and the exact Server Item, audit, Item event, Operation outcome, and `operation_resolved`
+event multiplicities.
+
+The test causally equates the durable Operation identity and prepared bytes with every wire attempt,
+uses an explicit post-restore dispatch latch, asserts Account scope on durable rows, and checks the
+plaintext marker against IndexedDB, Server diagnostic fields, actual Server output, and browser
+console. Independent review classified the missing empty Vault as a real product defect fixed by
+ticket 35, a normalized diagnostic-route mismatch as a fixture bug, and pre-restart dispatch plus
+durable-to-wire equality gaps as real acceptance-test defects; all are corrected. The targeted E2E,
+`pnpm check:ci`, and `pnpm check:ci:rust` pass from a clean tree.
+
+Deliberately left open: the deterministic finite SSE frame proves reconciliation only. Long-held SSE
+reconnect and backoff remain ticket 30, and the existing `sync.spec.ts` live cross-device gate is not
+claimed here.

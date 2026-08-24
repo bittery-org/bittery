@@ -1,7 +1,7 @@
 # Empty Vault Bootstrap authority
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 22
 Spec: ../spec.md#bootstrap
 
@@ -94,3 +94,22 @@ protocol.
 
 Ticket 32's green E2E diff remains independent and uncommitted until its final review. Ticket 35
 still resolves only after C, that E2E path, and both clean-tree full gates.
+
+### 2026-08-24 — delivered
+
+Slice A landed the required closed Server phase, bounded standalone Vault pages, Item pages without
+embedded Vault authority, and regenerated OpenAPI, TypeScript, and Rust wire contracts. Slice B
+landed Runtime phase orchestration, phase-and-cursor-bound durable page identity and replay
+fingerprints, standalone Vault staging, two-terminal-phase promotion, and regenerated cross-adapter
+histories. Slice C propagated the in-place contract to the still-compiled transitional TypeScript
+readers without a compatibility default or parallel Vault-list fallback.
+
+Ticket 32's real browser path now observes the formerly empty personal Vault and accepts its first
+offline Item. Independent review found and corrected real malformed-continuation and cursor-bound
+fingerprint gaps; reported legacy rollback failures were fixture coverage defects and now cover the
+Item-phase boundary. `pnpm check:ci` and `pnpm check:ci:rust` pass from a clean tree with the required
+development database configuration.
+
+Deliberately left open: this ticket does not decide or implement the held-SSE reconnect/backoff loop
+owned by ticket 30, and it does not change the separately recorded additive IndexedDB migration or
+future SQLite/OPFS prototype gates.
