@@ -1,0 +1,817 @@
+//! One fake Device and one fake Server, shared by the dispatch and reconciliation slices.
+//!
+//! The Server here is deliberately not a stub. It keeps the same final-only
+//! `(User, Operation ID)` outcome table the real Server keeps, recomputes the same
+//! length-delimited fingerprint from the raw body it received, answers the same
+//! `GET /operations/{id}` lookup after a lost response, and counts Item rows separately from
+//! requests. That is what lets these tests assert *effects* rather than call counts.
+
+use super::*;
+use crate::{
+    auth_http::{AuthClientConfig, ClientPlatform},
+    authentication_installation::Clock,
+    device_timer::DeviceTimer,
+    platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
+    protocol::Incarnation,
+    replica::{
+        InMemoryReplica, OperationRecord, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+    },
+    test_fixtures::{seed_ready_personal_vault, TEST_VAULT_ID},
+    LoginItemDraft,
+};
+use async_trait::async_trait;
+use create::create_item_fingerprint;
+use serde_json::{json, Value};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::atomic::AtomicUsize,
+};
+use zeroize::Zeroizing;
+
+pub(super) const ACCOUNT: &str = "account-1";
+pub(super) const USER: &str = "user-1";
+pub(super) const INCARNATION: &str = "incarnation-1";
+pub(super) const SERVER_URL: &str = "https://vault.example.test";
+pub(super) const START_MS: u64 = 1_700_000_000_000;
+pub(super) const FIRST_TOKEN: &str = "session-token-1";
+pub(super) const SECOND_TOKEN: &str = "session-token-2";
+
+// ---------------------------------------------------------------- controllable Device time
+
+pub(super) struct TestClock(pub(super) AtomicU64);
+
+impl TestClock {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self(AtomicU64::new(START_MS)))
+    }
+
+    pub(super) fn now(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn advance(&self, milliseconds: u64) {
+        self.0.fetch_add(milliseconds, Ordering::SeqCst);
+    }
+}
+
+impl Clock for TestClock {
+    fn now_ms(&self) -> Result<u64, RuntimeError> {
+        Ok(self.now())
+    }
+}
+
+/// Records every delay the dispatcher asks for. Either time passes at once, or it never passes,
+/// which is how a test freezes the Runtime between two durable states.
+pub(super) struct TestTimer {
+    pub(super) clock: Arc<TestClock>,
+    pub(super) requests: Mutex<Vec<u64>>,
+    pub(super) hold: AtomicBool,
+    pub(super) released: tokio::sync::Notify,
+}
+
+impl TestTimer {
+    pub(super) fn advancing(clock: Arc<TestClock>) -> Arc<Self> {
+        Arc::new(Self {
+            clock,
+            requests: Mutex::new(Vec::new()),
+            hold: AtomicBool::new(false),
+            released: tokio::sync::Notify::new(),
+        })
+    }
+
+    pub(super) fn holding(clock: Arc<TestClock>) -> Arc<Self> {
+        let timer = Self::advancing(clock);
+        timer.hold.store(true, Ordering::SeqCst);
+        timer
+    }
+
+    pub(super) fn requested(&self) -> Vec<u64> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl DeviceTimer for TestTimer {
+    async fn sleep_ms(&self, milliseconds: u64) {
+        self.requests.lock().unwrap().push(milliseconds);
+        if self.hold.load(Ordering::SeqCst) {
+            self.released.notified().await;
+        } else {
+            self.clock.advance(milliseconds);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- the Device's local stores
+
+pub(super) struct MemoryPlatform {
+    pub(super) values: Mutex<BTreeMap<(String, String), String>>,
+}
+
+impl MemoryPlatform {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            values: Mutex::new(BTreeMap::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl crate::platform_storage::SerializedPlatformStorageExecutor for MemoryPlatform {
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError> {
+        let request: Value = serde_json::from_str(&request_json).unwrap();
+        let area = request["area"].as_str().unwrap().to_owned();
+        let key = request["key"].as_str().unwrap().to_owned();
+        Ok(Zeroizing::new(match request["type"].as_str().unwrap() {
+            "get" => json!({
+                "type": "value",
+                "value": self.values.lock().unwrap().get(&(area, key)).cloned(),
+            })
+            .to_string(),
+            "set" => {
+                self.values
+                    .lock()
+                    .unwrap()
+                    .insert((area, key), request["value"].as_str().unwrap().to_owned());
+                json!({ "type": "done" }).to_string()
+            }
+            "delete" => {
+                self.values.lock().unwrap().remove(&(area, key));
+                json!({ "type": "done" }).to_string()
+            }
+            other => panic!("unexpected platform storage request {other}"),
+        }))
+    }
+}
+
+pub(super) struct PlainReplica {
+    pub(super) state: InMemoryReplica,
+    /// Commits to reject before any durable write, so a test can prove all-or-nothing.
+    pending_commit_failures: AtomicUsize,
+    failed_commits: AtomicUsize,
+}
+
+impl PlainReplica {
+    pub(super) fn new(state: InMemoryReplica) -> Arc<Self> {
+        Arc::new(Self {
+            state,
+            pending_commit_failures: AtomicUsize::new(0),
+            failed_commits: AtomicUsize::new(0),
+        })
+    }
+
+    pub(super) fn fail_next_commits(&self, count: usize) {
+        self.pending_commit_failures
+            .fetch_add(count, Ordering::SeqCst);
+    }
+
+    pub(super) fn failed_commits(&self) -> usize {
+        self.failed_commits.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl SerializedReplicaExecutor for PlainReplica {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        if matches!(request, ReplicaPersistenceRequest::Commit { .. })
+            && self
+                .pending_commit_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                    pending.checked_sub(1)
+                })
+                .is_ok()
+        {
+            self.failed_commits.fetch_add(1, Ordering::SeqCst);
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "injected commit failure",
+            ));
+        }
+        Ok(serde_json::to_string(&self.state.invoke(request).await?).unwrap())
+    }
+}
+
+// ---------------------------------------------------------------- the fake Server
+
+#[derive(Clone, Debug)]
+pub(super) struct RecordedRequest {
+    pub(super) method: String,
+    pub(super) url: String,
+    pub(super) headers: Vec<(String, String)>,
+    pub(super) body: Vec<u8>,
+}
+
+impl RecordedRequest {
+    pub(super) fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(header, _)| header.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Fault {
+    NetworkFailure,
+    Status(u16),
+}
+
+#[derive(Clone)]
+pub(super) enum RefreshBehavior {
+    Renews(&'static str),
+    Unauthorized,
+}
+
+/// What the Server retained for one `(User, Operation ID)`. Final only, exactly like the real row.
+#[derive(Clone)]
+pub(super) struct StoredOutcome {
+    pub(super) fingerprint: [u8; 32],
+    pub(super) result: StoredResult,
+}
+
+#[derive(Clone)]
+pub(super) enum StoredResult {
+    Applied { item_id: String, version: i32 },
+    Rejected { code: &'static str },
+}
+
+/// One Item row the Server actually holds, with the ciphertext the client sent it.
+#[derive(Clone)]
+pub(super) struct StoredItem {
+    pub(super) id: String,
+    pub(super) vault_id: String,
+    pub(super) encrypted_data: String,
+    pub(super) encryption_iv: String,
+    pub(super) encryption_algorithm: String,
+    pub(super) version: i32,
+}
+
+pub(super) struct FakeServer {
+    pub(super) requests: Mutex<Vec<RecordedRequest>>,
+    /// The Server's final-only Operation table, keyed the way the real one is keyed.
+    pub(super) outcomes: Mutex<BTreeMap<String, StoredOutcome>>,
+    /// Every Item row the Server actually created. This is the effect under test.
+    pub(super) created_items: Mutex<Vec<StoredItem>>,
+    pub(super) faults: Mutex<VecDeque<Fault>>,
+    /// Faults for the authoritative Item read, so reconciliation can fail after a real outcome.
+    pub(super) item_faults: Mutex<VecDeque<Fault>>,
+    /// Faults for the outcome lookup.
+    pub(super) outcome_faults: Mutex<VecDeque<Fault>>,
+    /// Rejection codes the Server answers instead of applying, one per create.
+    pub(super) rejections: Mutex<VecDeque<&'static str>>,
+    /// Drops the create response *after* the Server committed, which is response loss.
+    pub(super) lose_responses: AtomicUsize,
+    pub(super) accepted_tokens: Mutex<Vec<String>>,
+    pub(super) refresh: Mutex<RefreshBehavior>,
+    pub(super) create_calls: AtomicUsize,
+    pub(super) refresh_calls: AtomicUsize,
+    pub(super) item_calls: AtomicUsize,
+    pub(super) outcome_calls: AtomicUsize,
+    /// What `GET /sync/changes` answers: events plus the exact Cursor they end at.
+    pub(super) sync_events: Mutex<Vec<Value>>,
+    pub(super) sync_cursor: Mutex<Option<String>>,
+}
+
+impl FakeServer {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            requests: Mutex::new(Vec::new()),
+            outcomes: Mutex::new(BTreeMap::new()),
+            created_items: Mutex::new(Vec::new()),
+            faults: Mutex::new(VecDeque::new()),
+            item_faults: Mutex::new(VecDeque::new()),
+            outcome_faults: Mutex::new(VecDeque::new()),
+            rejections: Mutex::new(VecDeque::new()),
+            lose_responses: AtomicUsize::new(0),
+            accepted_tokens: Mutex::new(vec![FIRST_TOKEN.to_owned()]),
+            refresh: Mutex::new(RefreshBehavior::Unauthorized),
+            create_calls: AtomicUsize::new(0),
+            refresh_calls: AtomicUsize::new(0),
+            item_calls: AtomicUsize::new(0),
+            outcome_calls: AtomicUsize::new(0),
+            sync_events: Mutex::new(Vec::new()),
+            sync_cursor: Mutex::new(None),
+        })
+    }
+
+    pub(super) fn script(&self, faults: impl IntoIterator<Item = Fault>) {
+        self.faults.lock().unwrap().extend(faults);
+    }
+
+    pub(super) fn script_item_faults(&self, faults: impl IntoIterator<Item = Fault>) {
+        self.item_faults.lock().unwrap().extend(faults);
+    }
+
+    pub(super) fn reject_next(&self, code: &'static str) {
+        self.rejections.lock().unwrap().push_back(code);
+    }
+
+    /// The Server commits, and the client never sees the answer.
+    pub(super) fn lose_next_response(&self) {
+        self.lose_responses.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(super) fn creates(&self) -> usize {
+        self.create_calls.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn outcome_lookups(&self) -> usize {
+        self.outcome_calls.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn create_requests(&self) -> Vec<RecordedRequest> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.method == "PUT")
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn created_items(&self) -> Vec<String> {
+        self.created_items
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|item| item.id.clone())
+            .collect()
+    }
+
+    pub(super) fn authorized(&self, request: &RecordedRequest) -> bool {
+        request.header("authorization").is_some_and(|value| {
+            value.strip_prefix("Bearer ").is_some_and(|token| {
+                self.accepted_tokens
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|accepted| accepted == token)
+            })
+        })
+    }
+
+    pub(super) fn handle_create(&self, request: &RecordedRequest) -> Value {
+        self.create_calls.fetch_add(1, Ordering::SeqCst);
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        if let Some(fault) = self.faults.lock().unwrap().pop_front() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
+        }
+        let Some(operation_id) = request.header("idempotency-key") else {
+            return completed(400, b"{}".to_vec());
+        };
+        let path = request.url.trim_start_matches(SERVER_URL);
+        let segments: Vec<&str> = path.split('/').collect();
+        let (vault_id, item_id) = (segments[4], segments[6]);
+        let fingerprint = create_item_fingerprint(vault_id, item_id, &request.body).0;
+
+        let mut outcomes = self.outcomes.lock().unwrap();
+        if let Some(stored) = outcomes.get(operation_id) {
+            if stored.fingerprint != fingerprint {
+                // The same Operation ID with other bytes is identity reuse, never a replay.
+                return completed(
+                    422,
+                    serde_json::to_vec(&json!({
+                        "type": "about:blank",
+                        "title": "Unprocessable Entity",
+                        "status": 422,
+                        "code": "OPERATION_ID_REUSED",
+                    }))
+                    .unwrap(),
+                );
+            }
+            // The retained outcome replays. No second Item row is ever written.
+            return completed(200, outcome_body(operation_id, &stored.result));
+        }
+        let result = match self.rejections.lock().unwrap().pop_front() {
+            Some(code) => StoredResult::Rejected { code },
+            None => {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                self.created_items.lock().unwrap().push(StoredItem {
+                    id: item_id.to_owned(),
+                    vault_id: vault_id.to_owned(),
+                    encrypted_data: body["encryptedData"].as_str().unwrap().to_owned(),
+                    encryption_iv: body["encryptionIv"].as_str().unwrap().to_owned(),
+                    encryption_algorithm: body["encryptionAlgorithm"].as_str().unwrap().to_owned(),
+                    version: 1,
+                });
+                StoredResult::Applied {
+                    item_id: item_id.to_owned(),
+                    version: 1,
+                }
+            }
+        };
+        outcomes.insert(
+            operation_id.to_owned(),
+            StoredOutcome {
+                fingerprint,
+                result: result.clone(),
+            },
+        );
+        drop(outcomes);
+        if self
+            .lose_responses
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                pending.checked_sub(1)
+            })
+            .is_ok()
+        {
+            // Committed on the Server, never seen by the client.
+            return json!({ "type": "networkFailure" });
+        }
+        completed(200, outcome_body(operation_id, &result))
+    }
+
+    /// `GET /api/v1/operations/{operationId}`: the retained outcome, after a lost response.
+    pub(super) fn handle_outcome_lookup(&self, request: &RecordedRequest) -> Value {
+        self.outcome_calls.fetch_add(1, Ordering::SeqCst);
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        if let Some(fault) = self.outcome_faults.lock().unwrap().pop_front() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
+        }
+        let operation_id = request.url.rsplit('/').next().unwrap();
+        match self.outcomes.lock().unwrap().get(operation_id) {
+            Some(stored) => completed(200, outcome_body(operation_id, &stored.result)),
+            None => completed(404, b"{}".to_vec()),
+        }
+    }
+
+    /// `GET /api/v1/items/{itemId}`: the authoritative encrypted Item.
+    pub(super) fn handle_item(&self, request: &RecordedRequest) -> Value {
+        self.item_calls.fetch_add(1, Ordering::SeqCst);
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        if let Some(fault) = self.item_faults.lock().unwrap().pop_front() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
+        }
+        let item_id = request.url.rsplit('/').next().unwrap();
+        let stored = self
+            .created_items
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|item| item.id == item_id)
+            .cloned();
+        match stored {
+            Some(item) => completed(200, item_body(&item)),
+            None => completed(404, b"{}".to_vec()),
+        }
+    }
+
+    /// Publishes the `operation_resolved` event the real Server writes in the same transaction.
+    pub(super) fn script_operation_event(&self, operation_id: &str, cursor: &str) {
+        self.sync_events.lock().unwrap().push(json!({
+            "id": cursor,
+            "type": "operation_resolved",
+            "entityType": "operation",
+            "entityId": operation_id,
+            "userId": USER,
+            "vaultId": null,
+            "clientId": null,
+            "metadata": null,
+            "timestamp": "1700000000000",
+            "version": 1,
+        }));
+        *self.sync_cursor.lock().unwrap() = Some(cursor.to_owned());
+    }
+
+    pub(super) fn handle_sync_changes(&self, request: &RecordedRequest) -> Value {
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        let events = self.sync_events.lock().unwrap().clone();
+        let cursor = self
+            .sync_cursor
+            .lock()
+            .unwrap()
+            .clone()
+            .map(|id| json!({ "id": id }));
+        completed(
+            200,
+            serde_json::to_vec(&json!({
+                "events": events,
+                "cursor": cursor,
+                "hasMore": false,
+                "requiresFullRefresh": false,
+            }))
+            .unwrap(),
+        )
+    }
+
+    pub(super) fn handle_refresh(&self, request: &RecordedRequest) -> Value {
+        self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+        match self.refresh.lock().unwrap().clone() {
+            RefreshBehavior::Unauthorized => completed(401, b"{}".to_vec()),
+            RefreshBehavior::Renews(token) => {
+                let _ = request;
+                self.accepted_tokens.lock().unwrap().push(token.to_owned());
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({
+                        "token": token,
+                        "sessionId": "session-1",
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                    }))
+                    .unwrap(),
+                )
+            }
+        }
+    }
+}
+
+pub(super) fn completed(status: u16, body: Vec<u8>) -> Value {
+    json!({
+        "type": "completed",
+        "status": status,
+        "headers": [{ "name": "content-type", "value": "application/json" }],
+        "body": body,
+    })
+}
+
+pub(super) fn outcome_body(operation_id: &str, result: &StoredResult) -> Vec<u8> {
+    let result = match result {
+        StoredResult::Applied { item_id, version } => {
+            json!({ "status": "applied", "itemId": item_id, "version": version })
+        }
+        StoredResult::Rejected { code } => json!({ "status": "rejected", "code": code }),
+    };
+    serde_json::to_vec(&json!({
+        "operationId": operation_id,
+        "kind": "create_item",
+        "result": result,
+    }))
+    .unwrap()
+}
+
+pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "id": item.id,
+        "vaultId": item.vault_id,
+        "category": "login",
+        "favorite": false,
+        "encryptedData": item.encrypted_data,
+        "encryptionIv": item.encryption_iv,
+        "encryptionAlgorithm": item.encryption_algorithm,
+        "encryptionVersion": 1,
+        "version": item.version,
+        "encryptedByUserId": USER,
+        "lastModifiedBy": USER,
+        "createdAt": "2026-08-24T00:00:00Z",
+        "updatedAt": "2026-08-24T00:00:00Z",
+        "deletedAt": null,
+    }))
+    .unwrap()
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for FakeServer {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let value: Value = serde_json::from_str(&request_json).unwrap();
+        let request = RecordedRequest {
+            method: value["method"].as_str().unwrap().to_owned(),
+            url: value["url"].as_str().unwrap().to_owned(),
+            headers: value["headers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|header| {
+                    (
+                        header["name"].as_str().unwrap().to_owned(),
+                        header["value"].as_str().unwrap().to_owned(),
+                    )
+                })
+                .collect(),
+            body: value["body"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|byte| byte.as_u64().unwrap() as u8)
+                .collect(),
+        };
+        self.requests.lock().unwrap().push(request.clone());
+        let response = if request.url.ends_with("/api/v1/sessions/current/refresh") {
+            self.handle_refresh(&request)
+        } else if request.method == "PUT" {
+            self.handle_create(&request)
+        } else if request.method == "GET" && request.url.contains("/api/v1/sync/changes") {
+            self.handle_sync_changes(&request)
+        } else if request.method == "GET" && request.url.contains("/api/v1/sync/events") {
+            // The SSE hint is only a wake-up. A non-200 is a normal, silent answer.
+            completed(204, Vec::new())
+        } else if request.method == "GET" && request.url.contains("/api/v1/operations/") {
+            self.handle_outcome_lookup(&request)
+        } else if request.method == "GET" && request.url.contains("/api/v1/items/") {
+            self.handle_item(&request)
+        } else {
+            panic!("unexpected route {} {}", request.method, request.url);
+        };
+        Ok(response.to_string())
+    }
+
+    fn cancel(&self, _dispatch_id: &str) {}
+}
+
+// ---------------------------------------------------------------- harness
+
+pub(super) struct Harness {
+    pub(super) runtime: Arc<Runtime>,
+    pub(super) account_id: AccountId,
+    pub(super) replica: Arc<PlainReplica>,
+    pub(super) platform: Arc<MemoryPlatform>,
+    pub(super) server: Arc<FakeServer>,
+    pub(super) clock: Arc<TestClock>,
+    pub(super) timer: Arc<TestTimer>,
+}
+
+pub(super) fn auth_config() -> AuthClientConfig {
+    AuthClientConfig::new(
+        "client-1".to_owned(),
+        ClientPlatform::Web,
+        "1.0.0".to_owned(),
+    )
+    .unwrap()
+}
+
+pub(super) async fn seeded(hold_time: bool) -> Harness {
+    let state = InMemoryReplica::default();
+    let account_id = AccountId::from(ACCOUNT);
+    state
+        .install(
+            account_id.clone(),
+            USER.to_owned(),
+            Incarnation::from(INCARNATION),
+        )
+        .unwrap();
+    seed_ready_personal_vault(&state, &account_id).unwrap();
+    let replica = PlainReplica::new(state);
+    let platform = MemoryPlatform::new();
+    let server = FakeServer::new();
+    let clock = TestClock::new();
+    let timer = if hold_time {
+        TestTimer::holding(clock.clone())
+    } else {
+        TestTimer::advancing(clock.clone())
+    };
+    let runtime = Runtime::with_test_dispatch_environment(
+        replica.clone(),
+        platform.clone(),
+        server.clone(),
+        auth_config(),
+        clock.clone(),
+        timer.clone(),
+    );
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
+    store_session(&runtime, &account_id, FIRST_TOKEN).await;
+    Harness {
+        runtime,
+        account_id,
+        replica,
+        platform,
+        server,
+        clock,
+        timer,
+    }
+}
+
+pub(super) async fn store_session(runtime: &Runtime, account_id: &AccountId, token: &str) {
+    runtime
+        .platform_storage
+        .store_account_metadata(
+            &AccountMetadataDocument::new(
+                account_id.clone(),
+                Incarnation::from(INCARNATION),
+                USER.to_owned(),
+                "user-1@example.com".to_owned(),
+                "User One".to_owned(),
+                SERVER_URL.to_owned(),
+                None,
+                None,
+                "A3".to_owned(),
+                START_MS,
+                START_MS,
+                false,
+                false,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    runtime
+        .platform_storage
+        .store_current_session(
+            &CurrentSessionDocument::new(
+                account_id.clone(),
+                Incarnation::from(INCARNATION),
+                token.to_owned(),
+                Some("session-1".to_owned()),
+                START_MS + 3_600_000,
+                Some(START_MS + 3_600_000),
+                Vec::new(),
+                "encrypted-private-key".to_owned(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+}
+
+pub(super) fn draft() -> LoginItemDraft {
+    LoginItemDraft {
+        title: "Bank".into(),
+        url: Some("https://example.test".into()),
+        urls: Vec::new(),
+        username: Some("user".into()),
+        password: Some("secret".into()),
+        notes: None,
+        note: None,
+        custom_fields: Vec::new(),
+        tags: Vec::new(),
+    }
+}
+
+impl Harness {
+    pub(super) async fn accept_create(&self) -> (String, String) {
+        match self
+            .runtime
+            .request(
+                RuntimeRequest::CreateLoginItem {
+                    account_id: self.account_id.clone(),
+                    vault_id: TEST_VAULT_ID.to_owned(),
+                    draft: draft(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap()
+        {
+            RuntimeResponse::Accepted {
+                operation_id,
+                item_id,
+                ..
+            } => (operation_id, item_id),
+            other => panic!("expected Accepted, got {other:?}"),
+        }
+    }
+
+    pub(super) fn operation(&self) -> Option<OperationRecord> {
+        self.runtime
+            .replica()
+            .snapshot(&self.account_id)
+            .unwrap()
+            .operations
+            .first()
+            .cloned()
+    }
+
+    pub(super) fn waiting_reason(&self) -> Option<AccountWaitingReason> {
+        match self
+            .runtime
+            .projection(&ObservationRequest::RuntimeStatus {
+                account_id: Some(self.account_id.clone()),
+            })
+            .unwrap()
+            .projection
+        {
+            RuntimeProjection::RuntimeStatus(status) => status.accounts[0].waiting_reason,
+            other => panic!("expected a RuntimeStatus projection, got {other:?}"),
+        }
+    }
+}
+
+/// Lets every other task run until the condition holds, without any wall-clock waiting.
+pub(super) async fn until(label: &str, mut condition: impl FnMut() -> bool) {
+    for _ in 0..20_000 {
+        if condition() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("{label} never happened");
+}
+
+/// Gives every other task a generous run of the scheduler without asserting anything.
+pub(super) async fn settle() {
+    for _ in 0..2_000 {
+        tokio::task::yield_now().await;
+    }
+}

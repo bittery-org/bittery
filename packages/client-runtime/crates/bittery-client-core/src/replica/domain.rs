@@ -52,6 +52,94 @@ pub(crate) enum PlanMutation {
     RemoveOperation {
         operation_id: String,
     },
+    /// Completes one applied create in the single transaction the outcome slice owes.
+    ///
+    /// Authority, receipt, Operation removal, overlay removal, and a matching exact Cursor
+    /// advance are one mutation because they are one fact: the Server decided, and this Device
+    /// now agrees. There is deliberately no partial form of that.
+    ReconcileAppliedCreate {
+        outcome: ObservedOutcome,
+        /// Boxed only because an authoritative Item dwarfs every other mutation's payload.
+        item: Box<AuthorityItemRecord>,
+        cursor: Option<CursorAdvance>,
+    },
+    /// Retains one terminal rejection: retry stops, the receipt says why, the ciphertext stays.
+    RetainRejection {
+        outcome: ObservedOutcome,
+        cursor: Option<CursorAdvance>,
+    },
+    /// Fails the Account module after a fatal invariant violation.
+    ///
+    /// The Replica keeps every durable row. Failing is how the Runtime refuses to guess, not a
+    /// way to delete work or to reverse a Server effect.
+    FailAccount {
+        code: RuntimeErrorCode,
+    },
+}
+
+/// One Cursor step a reconciliation may take, and the exact Cursor it must start from.
+///
+/// A Sync event supplies both. When the Replica has moved on, the step is simply not taken: a
+/// Cursor that no longer matches exactly is never advanced past unread work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CursorAdvance {
+    pub expected: SyncCursor,
+    pub next: SyncCursor,
+}
+
+/// The closed set of terminal rejections the Server can answer for a create.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OperationRejectionCode {
+    InvalidCiphertext,
+    VaultAccessDenied,
+    VaultReadOnly,
+    ItemIdConflict,
+}
+
+/// What the Server decided about one Operation. Transport status is deliberately absent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum OperationOutcomeResult {
+    Applied { entity_id: String, version: i32 },
+    Rejected { code: OperationRejectionCode },
+}
+
+/// One observed semantic outcome, carrying the fingerprint it was answered for.
+///
+/// The fingerprint travels with the outcome because identity alone proves nothing: the same
+/// Operation ID answered for other request bytes is identity reuse, and only a comparison
+/// against the accepted fingerprint can see it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ObservedOutcome {
+    pub operation_id: String,
+    pub request_fingerprint: Sha256Fingerprint,
+    pub result: OperationOutcomeResult,
+}
+
+/// The compact Account-lifetime local receipt of one completed Operation.
+///
+/// It keeps identity, fingerprint, terminal result, entity version, and the revision that
+/// completed it, and never the request ciphertext. It is what stops a completed Operation ID
+/// from being reused, and it is distinct from the Server's own retained outcome.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationReceiptRecord {
+    pub operation_id: String,
+    pub kind: OperationKind,
+    pub item_id: String,
+    pub vault_id: String,
+    pub request_fingerprint: Sha256Fingerprint,
+    pub result: OperationOutcomeResult,
+    #[serde(with = "decimal_u64")]
+    pub completed_at_revision: u64,
 }
 
 /// The closed set of durable mutations this Runtime accepts.
@@ -574,6 +662,7 @@ pub(crate) struct ReplicaSnapshot {
     pub lock_epoch: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
+    pub receipts: Vec<OperationReceiptRecord>,
     pub failure: Option<RuntimeErrorCode>,
     #[serde(skip)]
     pub bootstrap: BootstrapAuthority,
@@ -605,6 +694,7 @@ pub(super) struct AccountReplica {
     pub(super) lock_epoch: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
+    pub(super) receipts: HashMap<String, OperationReceiptRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
     pub(super) bootstrap: BootstrapAuthority,
 }
@@ -626,6 +716,11 @@ impl AccountReplica {
                 .operations
                 .into_iter()
                 .map(|operation| (operation.operation_id.clone(), operation))
+                .collect(),
+            receipts: snapshot
+                .receipts
+                .into_iter()
+                .map(|receipt| (receipt.operation_id.clone(), receipt))
                 .collect(),
             failure: snapshot.failure,
             bootstrap: snapshot.bootstrap,
@@ -975,11 +1070,6 @@ impl AccountReplica {
             .items
             .insert((generation_id, item.id.clone()), item);
         self.bootstrap.active_cursor = next_cursor;
-        if let Some(active) = &self.bootstrap.active_generation {
-            if let Some(generation) = self.bootstrap.generations.get_mut(active) {
-                generation.pinned_watermark = self.bootstrap.active_cursor.clone();
-            }
-        }
         self.bootstrap.validate()?;
         self.revision = next_revision;
         Ok(PlanResult::Applied {
@@ -1023,6 +1113,11 @@ impl AccountReplica {
     }
 
     fn apply(&mut self, mutation: PlanMutation) -> Result<(), RuntimeError> {
+        // A failed Account module accepts nothing further. Failing is how the Runtime refuses to
+        // guess; letting durable work continue afterwards would be the guess.
+        if self.failure.is_some() && !matches!(mutation, PlanMutation::FailAccount { .. }) {
+            return Err(replica_invariant("the Account module has failed"));
+        }
         match mutation {
             PlanMutation::PutOptimisticItem(item) => {
                 self.check_item_scope(&item)?;
@@ -1035,6 +1130,11 @@ impl AccountReplica {
                         RuntimeErrorCode::InvariantViolation,
                         "operation identity was reused",
                     ));
+                }
+                // The compact receipt outlives the Operation precisely so a completed identity
+                // can never be accepted a second time.
+                if self.receipts.contains_key(&operation.operation_id) {
+                    return Err(replica_invariant("completed Operation identity was reused"));
                 }
                 check_immutable_request(&operation)?;
                 if self
@@ -1076,8 +1176,145 @@ impl AccountReplica {
                     ));
                 }
             }
+            PlanMutation::ReconcileAppliedCreate {
+                outcome,
+                item,
+                cursor,
+            } => {
+                let operation = self.operation_for(&outcome)?;
+                let OperationOutcomeResult::Applied { entity_id, version } = &outcome.result else {
+                    return Err(replica_invariant(
+                        "an applied reconciliation needs an applied outcome",
+                    ));
+                };
+                // The outcome, the fetched Item, and the accepted Operation must describe one
+                // entity at one version. Anything else is not this Operation's authority.
+                if entity_id != &operation.item_id
+                    || item.id != operation.item_id
+                    || item.vault_id != operation.vault_id
+                    || item.version != *version
+                {
+                    return Err(replica_invariant(
+                        "the authoritative Item does not match the Operation outcome",
+                    ));
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                self.write_authoritative_item(*item)?;
+                self.operations.remove(&operation.operation_id);
+                self.items
+                    .retain(|_, overlay| overlay.operation_id != operation.operation_id);
+                self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::RetainRejection { outcome, cursor } => {
+                let operation = self.operation_for(&outcome)?;
+                if !matches!(outcome.result, OperationOutcomeResult::Rejected { .. }) {
+                    return Err(replica_invariant(
+                        "a retained rejection needs a rejected outcome",
+                    ));
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                // Retry stops here. The encrypted optimistic Item stays exactly as the user
+                // created it: a rejection is not permission to destroy their ciphertext.
+                self.operations.remove(&operation.operation_id);
+                self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::FailAccount { code } => {
+                self.failure = Some(code);
+            }
         }
         Ok(())
+    }
+
+    /// Answers the accepted Operation this outcome belongs to, or refuses to guess.
+    ///
+    /// A result carrying a known Operation ID with another fingerprint is identity reuse. It is
+    /// neither a retry nor a replay, and no local state may move because of it.
+    fn operation_for(&self, outcome: &ObservedOutcome) -> Result<OperationRecord, RuntimeError> {
+        let operation = self
+            .operations
+            .get(&outcome.operation_id)
+            .ok_or_else(|| replica_invariant("cannot complete an unknown Operation"))?;
+        if operation.request_fingerprint != outcome.request_fingerprint {
+            return Err(replica_invariant(
+                "an Operation outcome carries another request fingerprint",
+            ));
+        }
+        Ok(operation.clone())
+    }
+
+    /// Inserts the compact receipt, and proves a recorded outcome never changes.
+    fn retain_receipt(
+        &mut self,
+        operation: &OperationRecord,
+        outcome: &ObservedOutcome,
+    ) -> Result<(), RuntimeError> {
+        let receipt = OperationReceiptRecord {
+            operation_id: operation.operation_id.clone(),
+            kind: operation.kind,
+            item_id: operation.item_id.clone(),
+            vault_id: operation.vault_id.clone(),
+            request_fingerprint: operation.request_fingerprint,
+            result: outcome.result.clone(),
+            completed_at_revision: increment_revision(self.revision)?,
+        };
+        if let Some(existing) = self.receipts.get(&operation.operation_id) {
+            if existing.request_fingerprint != receipt.request_fingerprint
+                || existing.result != receipt.result
+                || existing.item_id != receipt.item_id
+            {
+                return Err(replica_invariant(
+                    "a matching semantic outcome is immutable",
+                ));
+            }
+            return Ok(());
+        }
+        self.receipts.insert(receipt.operation_id.clone(), receipt);
+        Ok(())
+    }
+
+    /// Writes the authoritative encrypted Item into the active generation.
+    ///
+    /// A Server version this Device has already passed is not written: stale Server versions
+    /// cannot overwrite newer ciphertext, and refusing the write is not a reason to leave the
+    /// Operation owed forever.
+    fn write_authoritative_item(&mut self, item: AuthorityItemRecord) -> Result<(), RuntimeError> {
+        if self.bootstrap.state != ReplicaState::Ready {
+            return Err(replica_invariant(
+                "authority can only be written to a ready Replica",
+            ));
+        }
+        let generation_id =
+            self.bootstrap.active_generation.clone().ok_or_else(|| {
+                replica_invariant("ready Replica has no active Bootstrap generation")
+            })?;
+        validate_authority_page(&[], std::slice::from_ref(&item))?;
+        let key = (generation_id, item.id.clone());
+        if self
+            .bootstrap
+            .items
+            .get(&key)
+            .is_some_and(|existing| existing.version > item.version)
+        {
+            return Ok(());
+        }
+        self.bootstrap.items.insert(key, item);
+        self.bootstrap.validate()
+    }
+
+    /// Takes the Cursor step a Sync event supplied, and only from the exact Cursor it names.
+    fn advance_matching_cursor(
+        &mut self,
+        cursor: Option<CursorAdvance>,
+    ) -> Result<(), RuntimeError> {
+        let Some(cursor) = cursor else {
+            return Ok(());
+        };
+        if self.bootstrap.active_cursor != cursor.expected || cursor.next == cursor.expected {
+            return Ok(());
+        }
+        validate_captured_cursor(&cursor.next)?;
+        self.bootstrap.active_cursor = cursor.next;
+        self.bootstrap.validate()
     }
 
     fn check_item_scope(&self, item: &ReplicaItemRecord) -> Result<(), RuntimeError> {
@@ -1128,6 +1365,8 @@ impl AccountReplica {
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut operations: Vec<_> = self.operations.values().cloned().collect();
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+        let mut receipts: Vec<_> = self.receipts.values().cloned().collect();
+        receipts.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         ReplicaSnapshot {
             account_id: self.account_id.clone(),
             user_id: self.user_id.clone(),
@@ -1136,6 +1375,7 @@ impl AccountReplica {
             lock_epoch: self.lock_epoch,
             items,
             operations,
+            receipts,
             failure: self.failure,
             bootstrap: self.bootstrap.clone(),
         }
@@ -1204,11 +1444,17 @@ impl BootstrapAuthority {
                 .generations
                 .get(active)
                 .ok_or_else(|| replica_invariant("active Bootstrap generation is missing"))?;
-            if !generation.final_page_staged || generation.pinned_watermark != self.active_cursor {
+            // The pinned watermark is where this generation's pages were read, and the page
+            // receipts are evidence of exactly that. The active Cursor starts there and only
+            // moves forward as changes are applied, so the two are equal at promotion and may
+            // legitimately differ afterwards.
+            if !generation.final_page_staged {
                 return Err(replica_invariant(
-                    "active Bootstrap generation is not complete at its active Cursor",
+                    "active Bootstrap generation is not complete",
                 ));
             }
+            validate_captured_cursor(&generation.pinned_watermark)?;
+            validate_captured_cursor(&self.active_cursor)?;
         }
         for (generation_id, generation) in &self.generations {
             if generation_id != &generation.generation_id

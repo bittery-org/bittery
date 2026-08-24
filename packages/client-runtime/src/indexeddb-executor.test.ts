@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
@@ -59,6 +59,7 @@ async function rawDatabaseContents(): Promise<unknown[]> {
 		"heads",
 		"optimistic_items",
 		"operations",
+		"operation_receipts",
 		"replica_metadata",
 		"bootstrap_generations",
 		"bootstrap_pages",

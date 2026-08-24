@@ -21,8 +21,9 @@ pub(crate) use domain::{
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
     BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
     BootstrapPageCursor, BootstrapPageIdentity, CleanupBootstrapGenerationPlan,
-    CleanupBootstrapGenerationResult, GuardedCommitPlan, ImmutableHttpRequest,
-    MarkRefreshRequiredPlan, OperationKind, OperationRecord, OperationSchedulingState,
+    CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
+    MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
+    OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
     PlanMutation, PlanResult, PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord,
     ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
     StageBootstrapPageResult, SyncCursor,
@@ -1517,7 +1518,7 @@ impl Replica {
 
 fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) -> bool {
     let Some(current) = current else {
-        return next.items.is_empty() && next.operations.is_empty();
+        return next.items.is_empty() && next.operations.is_empty() && next.receipts.is_empty();
     };
     let current_items: HashMap<_, _> = current
         .items
@@ -1539,7 +1540,19 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .iter()
         .map(|operation| (&operation.operation_id, operation))
         .collect();
-    current_items == next_items && current_operations == next_operations
+    let current_receipts: HashMap<_, _> = current
+        .receipts
+        .iter()
+        .map(|receipt| (&receipt.operation_id, receipt))
+        .collect();
+    let next_receipts: HashMap<_, _> = next
+        .receipts
+        .iter()
+        .map(|receipt| (&receipt.operation_id, receipt))
+        .collect();
+    current_items == next_items
+        && current_operations == next_operations
+        && current_receipts == next_receipts
 }
 
 #[derive(Default)]
@@ -1577,6 +1590,7 @@ impl InMemoryReplica {
                 lock_epoch: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
+                receipts: HashMap::new(),
                 failure: None,
                 bootstrap: domain::BootstrapAuthority::default(),
             },
@@ -1869,6 +1883,7 @@ impl ReplicaPersistence for InMemoryReplica {
                                 lock_epoch: head.lock_epoch,
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
+                                receipts: HashMap::new(),
                                 failure: head.failure,
                                 bootstrap: domain::BootstrapAuthority::default(),
                             },
@@ -2319,6 +2334,7 @@ mod persistence_contract_tests {
                     lock_epoch: 0,
                     items: vec![item("account-1", "item-1", "operation-1")],
                     operations: vec![operation("operation-1", "item-1")],
+                    receipts: vec![],
                     failure: None,
                     bootstrap: BootstrapAuthority::default(),
                 },
@@ -2352,6 +2368,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![item("account-1", "item-1", "operation-1")],
                 operations: vec![operation("operation-1", "item-1")],
+                receipts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
             },
@@ -2541,7 +2558,7 @@ mod persistence_contract_tests {
             replica
                 .execute(GuardedCommitPlan::new(
                     account_id.clone(),
-                    incarnation,
+                    incarnation.clone(),
                     1,
                     0,
                     vec![PlanMutation::RemoveOperation {
@@ -2557,6 +2574,99 @@ mod persistence_contract_tests {
         assert_eq!(
             replica.load(&account_id).await.unwrap().unwrap().revision,
             2
+        );
+
+        // One completion is one transaction: the receipt appears, the Operation goes, and the
+        // rejected user's ciphertext stays.
+        let accepted = operation("operation-2", "item-2");
+        assert!(matches!(
+            replica
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    incarnation.clone(),
+                    2,
+                    0,
+                    vec![
+                        PlanMutation::AcceptOperation(accepted.clone()),
+                        PlanMutation::PutOptimisticItem(item("account-1", "item-2", "operation-2")),
+                    ],
+                ))
+                .await
+                .unwrap(),
+            PlanResult::Applied { .. }
+        ));
+        let rejected = ObservedOutcome {
+            operation_id: "operation-2".into(),
+            request_fingerprint: accepted.request_fingerprint,
+            result: OperationOutcomeResult::Rejected {
+                code: OperationRejectionCode::VaultReadOnly,
+            },
+        };
+
+        // The same Operation ID answered for other bytes is identity reuse, and it moves nothing.
+        let reused = replica
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                incarnation.clone(),
+                3,
+                0,
+                vec![PlanMutation::RetainRejection {
+                    outcome: ObservedOutcome {
+                        request_fingerprint: Sha256Fingerprint([3; 32]),
+                        ..rejected.clone()
+                    },
+                    cursor: None,
+                }],
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(reused.code, RuntimeErrorCode::InvariantViolation);
+        let untouched = replica.load(&account_id).await.unwrap().unwrap();
+        assert_eq!(untouched.revision, 3);
+        assert_eq!(untouched.operations.len(), 1);
+        assert!(untouched.receipts.is_empty());
+
+        assert!(matches!(
+            replica
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    incarnation.clone(),
+                    3,
+                    0,
+                    vec![PlanMutation::RetainRejection {
+                        outcome: rejected,
+                        cursor: None,
+                    }],
+                ))
+                .await
+                .unwrap(),
+            PlanResult::Applied { .. }
+        ));
+        let completed = replica.load(&account_id).await.unwrap().unwrap();
+        assert!(completed.operations.is_empty());
+        assert!(completed
+            .items
+            .iter()
+            .any(|overlay| overlay.item_id == "item-2"));
+        assert_eq!(completed.receipts.len(), 1);
+        assert_eq!(completed.receipts[0].operation_id, "operation-2");
+        assert_eq!(completed.receipts[0].completed_at_revision, 4);
+
+        // The compact receipt outlives the Operation, so its identity cannot be accepted again.
+        let replayed = replica
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                incarnation,
+                4,
+                0,
+                vec![PlanMutation::AcceptOperation(accepted)],
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(replayed.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(
+            replica.load(&account_id).await.unwrap().unwrap().revision,
+            4
         );
     }
 
@@ -2578,6 +2688,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
+                receipts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
             },
@@ -2689,6 +2800,7 @@ mod persistence_contract_tests {
             lock_epoch: 0,
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
+            receipts: vec![],
             failure: None,
             bootstrap: BootstrapAuthority::default(),
         };
@@ -2845,6 +2957,7 @@ mod persistence_contract_tests {
         let persistence: Arc<dyn ReplicaPersistence> =
             Arc::new(SerializedReplicaPersistence::new(executor.clone()));
         assert_replica_conformance(&Replica::new(persistence)).await;
-        assert_eq!(executor.commit_calls.load(Ordering::SeqCst), 2);
+        // Accept, remove, accept, and complete: four commits, and one round trip each.
+        assert_eq!(executor.commit_calls.load(Ordering::SeqCst), 4);
     }
 }

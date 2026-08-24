@@ -346,6 +346,47 @@ impl<'transport> AuthHttpClient<'transport> {
         }
     }
 
+    /// Reads the semantic outcome the Server already retained for one Operation ID.
+    ///
+    /// This is what makes a lost response recoverable without sending the mutation again. The
+    /// Server keeps the outcome for the Account's lifetime, so `404` is a real answer — nothing
+    /// was decided yet — and not a transport failure to retry blindly.
+    pub(crate) async fn fetch_operation_outcome(
+        &self,
+        token: &str,
+        operation_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Option<crate::server_contract::CreateItemOperationOutcome>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let url = self.endpoint(&["api", "v1", "operations", operation_id])?;
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                OPERATION_OUTCOME_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let outcome = serde_json::from_slice(&raw.body).map_err(|_| {
+                    authentication_failure("Operation outcome lookup returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(Some(outcome)))
+            }
+            404 => Ok(AuthenticatedOutcome::Ok(None)),
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
     /// Replays one accepted Operation's immutable bytes and attaches what is deliberately not
     /// durable: the Session credential, and the `Idempotency-Key` that carries the Operation ID.
     ///

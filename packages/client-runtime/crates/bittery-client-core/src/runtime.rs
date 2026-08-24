@@ -8,6 +8,11 @@ mod dispatch_tests;
 mod install;
 mod lock;
 mod open;
+#[cfg(test)]
+mod operation_fixtures;
+mod outcome;
+#[cfg(test)]
+mod outcome_tests;
 
 use dispatch::DispatchLeases;
 use lock::AccessRetirement;
@@ -401,14 +406,6 @@ pub struct Runtime {
     /// accepted, a Session arrived, or the Runtime is closing.
     dispatch_wake: tokio::sync::Notify,
     dispatch_leases: Arc<DispatchLeases>,
-    /// Operations whose last attempt already reached the Server's Operation table.
-    ///
-    /// Reaching it is not local completion, so the Operation stays durable and keeps its overlay.
-    /// This only stops one Runtime from re-sending bytes it already has an answer for while the
-    /// outcome and reconciliation slice is not there to consume that answer. It is in-memory on
-    /// purpose: after a restart the identical bytes replay and the Server returns the retained
-    /// outcome again.
-    awaiting_outcome: Mutex<HashSet<String>>,
 }
 
 impl Runtime {
@@ -597,7 +594,6 @@ impl Runtime {
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
             dispatch_leases: Arc::new(DispatchLeases::default()),
-            awaiting_outcome: Mutex::new(HashSet::new()),
         })
     }
 

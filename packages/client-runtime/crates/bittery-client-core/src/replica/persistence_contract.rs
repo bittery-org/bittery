@@ -1,8 +1,8 @@
 use super::domain::{
     apply_plan, AccountReplica, AuthorityItemRecord, AuthorityVaultRecord, BootstrapAuthority,
     BootstrapGenerationId, BootstrapGenerationRecord, BootstrapPageReceipt, GuardedCommitPlan,
-    OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
-    SyncCursor,
+    ObservedOutcome, OperationReceiptRecord, OperationRecord, PlanMutation, PlanResult,
+    ReplicaItemRecord, ReplicaSnapshot, ReplicaState, SyncCursor,
 };
 use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
@@ -27,6 +27,7 @@ mod required_option {
 pub(crate) enum ReplicaStore {
     OptimisticItems,
     Operations,
+    OperationReceipts,
     ReplicaMetadata,
     BootstrapGenerations,
     BootstrapPages,
@@ -351,8 +352,25 @@ pub(super) fn prepare_commit(
         ));
     }
 
+    let next = apply_plan(current.clone(), plan.clone())?;
     let mut writes = Vec::with_capacity(plan.mutations.len());
     for mutation in &plan.mutations {
+        // A completion touches several stores at once, so it contributes several writes.
+        if let PlanMutation::ReconcileAppliedCreate { outcome, .. }
+        | PlanMutation::RetainRejection { outcome, .. } = mutation
+        {
+            writes.extend(completion_writes(
+                &plan.account_id,
+                &current,
+                &next,
+                outcome,
+            )?);
+            continue;
+        }
+        if matches!(mutation, PlanMutation::FailAccount { .. }) {
+            // The failure lives in the head, and no row moves because of it.
+            continue;
+        }
         writes.push(match mutation {
             PlanMutation::PutOptimisticItem(item) => PreparedReplicaWrite::Put {
                 row: stored_row(
@@ -385,9 +403,20 @@ pub(super) fn prepare_commit(
                     record_id: operation_id.clone(),
                 },
             },
+            PlanMutation::ReconcileAppliedCreate { .. }
+            | PlanMutation::RetainRejection { .. }
+            | PlanMutation::FailAccount { .. } => {
+                unreachable!("completion and failure writes are collected above")
+            }
         });
     }
-    let next = apply_plan(current.clone(), plan)?;
+    // Authority and Cursor rows are a diff of what the model decided, so one completion stays
+    // one `Commit` request: nothing about it can be applied by halves.
+    writes.extend(bootstrap_write_diff(
+        &current.account_id,
+        &current.bootstrap,
+        &next.bootstrap,
+    )?);
     Ok(PreparedCommitOutcome {
         wire: PreparedReplicaCommit {
             expected: ExpectedReplicaHead {
@@ -411,6 +440,59 @@ pub(super) fn prepare_commit(
     })
 }
 
+/// Every row one completed Operation moves: its receipt appears, and both halves of the
+/// accepted work that the model decided to drop disappear.
+fn completion_writes(
+    account_id: &AccountId,
+    current: &ReplicaSnapshot,
+    next: &ReplicaSnapshot,
+    outcome: &ObservedOutcome,
+) -> Result<Vec<PreparedReplicaWrite>, RuntimeError> {
+    let receipt = next
+        .receipts
+        .iter()
+        .find(|receipt| receipt.operation_id == outcome.operation_id)
+        .ok_or_else(|| replica_invariant("a completed Operation kept no receipt"))?;
+    let mut writes = vec![PreparedReplicaWrite::Put {
+        row: stored_row(
+            ReplicaStore::OperationReceipts,
+            account_id,
+            &receipt.operation_id,
+            receipt,
+        )?,
+    }];
+    for operation in &current.operations {
+        if operation.operation_id == outcome.operation_id
+            && !next
+                .operations
+                .iter()
+                .any(|kept| kept.operation_id == operation.operation_id)
+        {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: ReplicaStore::Operations,
+                key: ReplicaRowKey {
+                    account_id: account_id.clone(),
+                    record_id: operation.operation_id.clone(),
+                },
+            });
+        }
+    }
+    for item in &current.items {
+        if item.operation_id == outcome.operation_id
+            && !next.items.iter().any(|kept| kept.item_id == item.item_id)
+        {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: ReplicaStore::OptimisticItems,
+                key: ReplicaRowKey {
+                    account_id: account_id.clone(),
+                    record_id: item.item_id.clone(),
+                },
+            });
+        }
+    }
+    Ok(writes)
+}
+
 fn stored_row<T: Serialize>(
     store: ReplicaStore,
     account_id: &AccountId,
@@ -432,7 +514,10 @@ pub(super) fn snapshot_rows(
     snapshot: ReplicaSnapshot,
 ) -> Result<Vec<StoredReplicaRow>, RuntimeError> {
     let mut rows = Vec::with_capacity(
-        snapshot.items.len() + snapshot.operations.len() + snapshot.bootstrap.row_count(),
+        snapshot.items.len()
+            + snapshot.operations.len()
+            + snapshot.receipts.len()
+            + snapshot.bootstrap.row_count(),
     );
     for item in snapshot.items {
         rows.push(stored_row(
@@ -448,6 +533,14 @@ pub(super) fn snapshot_rows(
             &snapshot.account_id,
             &operation.operation_id,
             &operation,
+        )?);
+    }
+    for receipt in snapshot.receipts {
+        rows.push(stored_row(
+            ReplicaStore::OperationReceipts,
+            &snapshot.account_id,
+            &receipt.operation_id,
+            &receipt,
         )?);
     }
     rows.extend(bootstrap_rows(&snapshot.account_id, &snapshot.bootstrap)?);
@@ -493,6 +586,7 @@ pub(super) fn reconstruct_snapshot(
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
+    let mut receipts = HashMap::new();
     let mut bootstrap = BootstrapAuthority::default();
     let mut saw_metadata = false;
     for row in rows {
@@ -527,6 +621,21 @@ pub(super) fn reconstruct_snapshot(
                     .is_some()
                 {
                     return Err(replica_invariant("Replica operation row key is duplicated"));
+                }
+            }
+            ReplicaStore::OperationReceipts => {
+                let receipt: OperationReceiptRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica receipt row payload is invalid"))?;
+                if receipt.operation_id != row.key.record_id {
+                    return Err(replica_invariant(
+                        "Replica receipt row key does not match its payload",
+                    ));
+                }
+                if receipts
+                    .insert(receipt.operation_id.clone(), receipt)
+                    .is_some()
+                {
+                    return Err(replica_invariant("Replica receipt row key is duplicated"));
                 }
             }
             ReplicaStore::ReplicaMetadata => {
@@ -653,6 +762,7 @@ pub(super) fn reconstruct_snapshot(
             lock_epoch: head.lock_epoch,
             items,
             operations,
+            receipts,
             failure: head.failure,
             bootstrap,
         }
@@ -798,6 +908,7 @@ pub(super) fn prepare_bootstrap_commit(
         || current.lock_epoch != next.lock_epoch
         || current.items != next.items
         || current.operations != next.operations
+        || current.receipts != next.receipts
         || current.failure != next.failure
     {
         return Err(replica_invariant(

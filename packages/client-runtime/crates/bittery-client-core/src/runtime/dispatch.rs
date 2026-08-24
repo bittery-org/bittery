@@ -1,9 +1,12 @@
 //! Sending accepted Operations, and surviving everything the network does to them.
 //!
-//! Nothing here may end an accepted Operation. A transport answer moves only two things: a
-//! diagnostic attempt count and the next time this Device may try again. There is deliberately no
-//! attempt limit, no discard, and no path that treats an HTTP status as a semantic result.
+//! Only an authoritative semantic outcome ends an accepted Operation. A transport answer moves
+//! two things and nothing else: a diagnostic attempt count and the next time this Device may try
+//! again. There is deliberately no attempt limit, no discard, and no path that treats an HTTP
+//! status as a semantic result — reading an answer is `outcome.rs`'s job, and completing on one
+//! is a single reconciliation plan.
 
+use super::outcome::{CompletionResult, SemanticAnswer};
 use super::*;
 use crate::{
     auth_http::AuthenticatedOutcome,
@@ -100,7 +103,7 @@ enum AttemptOutcome {
 
 impl Runtime {
     /// The Runtime's only background loop: it owns every accepted Operation until an authoritative
-    /// semantic outcome ends it, which is the next slice's work.
+    /// semantic outcome ends it.
     ///
     /// It is a plain future rather than a spawned task because the crate has no scheduler and must
     /// not acquire one: a Worker host drives it with the same `spawn_local` it already uses for
@@ -173,14 +176,6 @@ impl Runtime {
                 continue;
             }
             for operation in &snapshot.operations {
-                if self
-                    .awaiting_outcome
-                    .lock()
-                    .expect("awaiting outcome lock poisoned")
-                    .contains(&operation.operation_id)
-                {
-                    continue;
-                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {
@@ -280,9 +275,36 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
         http: &AuthHttpClient<'_>,
-        session: CurrentSessionDocument,
+        mut session: CurrentSessionDocument,
     ) -> AttemptOutcome {
         let account_id = &snapshot.account_id;
+
+        // A retry has already handed these exact bytes to the Server at least once, so the
+        // Server may already hold the answer this Device never saw. Asking creates no second
+        // effect; sending again would rely entirely on the Server's own deduplication.
+        if operation.scheduling.attempt_count > 0 {
+            match self
+                .lookup_operation_outcome(account_id, operation, http, &session)
+                .await
+            {
+                SemanticAnswer::Outcome(outcome) => {
+                    return self
+                        .finish_operation(snapshot, operation, outcome, http, &session)
+                        .await;
+                }
+                SemanticAnswer::IdentityReused => {
+                    self.fail_account_module(account_id).await;
+                    return AttemptOutcome::Parked;
+                }
+                // Nothing was decided yet, so the identical bytes still have to go.
+                SemanticAnswer::Undecided => {}
+                SemanticAnswer::Transient => {
+                    self.persist_backoff(snapshot, operation).await;
+                    return AttemptOutcome::Progressed;
+                }
+            }
+        }
+
         let cancellation = RequestCancellation::new();
         let mut answer = http
             .dispatch_operation(
@@ -301,9 +323,12 @@ impl Runtime {
                 .await
             {
                 Ok(renewed) => {
+                    // Everything after this point uses the Session that is current now, so one
+                    // renewal serves the send and the reconciliation that may follow it.
+                    session = renewed;
                     answer = http
                         .dispatch_operation(
-                            renewed.token.as_ref(),
+                            session.token.as_ref(),
                             &operation.operation_id,
                             &operation.request,
                             cancellation,
@@ -323,15 +348,23 @@ impl Runtime {
         }
 
         match answer {
-            // The Server holds an answer for these exact bytes. Reading it, verifying its
-            // fingerprint, and reconciling authority belongs to the outcome slice, so the
-            // Operation and its encrypted overlay stay exactly as they are.
-            Ok(AuthenticatedOutcome::Ok(_)) => {
-                self.awaiting_outcome
-                    .lock()
-                    .expect("awaiting outcome lock poisoned")
-                    .insert(operation.operation_id.clone());
-                AttemptOutcome::Progressed
+            // The Server answered these exact bytes. What it answered is a semantic question,
+            // and local completion only happens once a reconciliation plan commits.
+            Ok(AuthenticatedOutcome::Ok(response)) => {
+                match self.read_dispatch_answer(operation, response.status, &response.body) {
+                    SemanticAnswer::Outcome(outcome) => {
+                        self.finish_operation(snapshot, operation, outcome, http, &session)
+                            .await
+                    }
+                    SemanticAnswer::IdentityReused => {
+                        self.fail_account_module(account_id).await;
+                        AttemptOutcome::Parked
+                    }
+                    SemanticAnswer::Undecided | SemanticAnswer::Transient => {
+                        self.persist_backoff(snapshot, operation).await;
+                        AttemptOutcome::Progressed
+                    }
+                }
             }
             Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
                 self.persist_backoff(snapshot, operation).await;
@@ -342,6 +375,39 @@ impl Runtime {
                 self.persist_backoff(snapshot, operation).await;
                 AttemptOutcome::Progressed
             }
+        }
+    }
+
+    /// Completes one Operation on an authoritative outcome, or schedules another try.
+    ///
+    /// A reconciliation that cannot commit is exactly as durable as a failed send: the Operation,
+    /// its bytes, its overlay, and the Cursor are all still there, and backoff decides when this
+    /// Device looks again.
+    async fn finish_operation(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+        outcome: crate::replica::ObservedOutcome,
+        http: &AuthHttpClient<'_>,
+        session: &CurrentSessionDocument,
+    ) -> AttemptOutcome {
+        match self
+            .complete_operation(
+                &snapshot.account_id,
+                operation,
+                outcome,
+                http,
+                session,
+                None,
+            )
+            .await
+        {
+            CompletionResult::Completed => AttemptOutcome::Progressed,
+            CompletionResult::Retry => {
+                self.persist_backoff(snapshot, operation).await;
+                AttemptOutcome::Progressed
+            }
+            CompletionResult::Reauthenticate | CompletionResult::Failed => AttemptOutcome::Parked,
         }
     }
 
@@ -378,6 +444,17 @@ impl Runtime {
             drop(publication);
             self.publish_all_unless_closed();
         }
+    }
+
+    /// Sends a record a test captured earlier, which is what a second Runtime holding the same
+    /// accepted work would send: identical bytes, identical identity, no shared local state.
+    #[cfg(test)]
+    pub(crate) async fn dispatch_captured_ignoring_lease(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) {
+        let _ = self.attempt_dispatch(snapshot, operation).await;
     }
 
     /// Sends one Operation as if this Runtime held its lease, so a test can put two senders on the

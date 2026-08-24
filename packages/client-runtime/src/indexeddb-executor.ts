@@ -14,13 +14,14 @@ import {
 } from "../generated/persistence/validator.js";
 
 const DATABASE_NAME = "bittery_replica";
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
 const STORE_NAMES = [
 	"heads",
 	"optimistic_items",
 	"operations",
+	"operation_receipts",
 	"replica_metadata",
 	"bootstrap_generations",
 	"bootstrap_pages",
@@ -136,6 +137,7 @@ async function load(
 		const stores: ReplicaStore[] = [
 			"optimisticItems",
 			"operations",
+			"operationReceipts",
 			"replicaMetadata",
 			"bootstrapGenerations",
 			"bootstrapPages",
@@ -427,6 +429,8 @@ function mapStore(store: ReplicaStore): DatabaseStore {
 			return "optimistic_items";
 		case "operations":
 			return "operations";
+		case "operationReceipts":
+			return "operation_receipts";
 		case "replicaMetadata":
 			return "replica_metadata";
 		case "bootstrapGenerations":

@@ -1,3 +1,4 @@
+use super::outcome::CompletionResult;
 use crate::{
     auth_http::{AuthHttpClient, AuthenticatedOutcome},
     authentication_installation::parse_session_expiry_ms,
@@ -355,6 +356,32 @@ impl Runtime {
                 return Ok(session);
             }
             for event in &changes.events {
+                // An Operation event names work this Device may still own. Reconciling it here
+                // keeps one Sync feed and one Cursor rather than a second parallel path.
+                if event.entity_type == SyncEntityType::Operation {
+                    match self
+                        .reconcile_resolved_operation(
+                            account_id,
+                            &event.entity_id,
+                            http,
+                            &session,
+                            changes
+                                .cursor
+                                .as_ref()
+                                .map(captured_watermark_from_response),
+                        )
+                        .await
+                    {
+                        CompletionResult::Completed => continue,
+                        CompletionResult::Retry | CompletionResult::Failed => return Ok(session),
+                        CompletionResult::Reauthenticate => {
+                            return Err(RuntimeError::new(
+                                RuntimeErrorCode::AuthenticationRequired,
+                                "Session is missing or expired",
+                            ));
+                        }
+                    }
+                }
                 if event.entity_type != SyncEntityType::Item {
                     continue;
                 }
@@ -467,7 +494,7 @@ impl Runtime {
         }
     }
 
-    fn decrypt_visible_items(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+    pub(super) fn decrypt_visible_items(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let snapshot = self.require_snapshot(account_id)?;
         let access = self
             .account_access
@@ -508,7 +535,12 @@ impl Runtime {
             else {
                 continue;
             };
-            match decrypt_login_item(&muk, &snapshot.user_id, vault, item) {
+            match decrypt_login_item(
+                &muk,
+                &snapshot.user_id,
+                vault,
+                &SealedLoginItem::from_authority(item),
+            ) {
                 Ok(projection) => projections.push(LoginItemProjection {
                     account_id: account_id.clone(),
                     item_id: item.id.clone(),
@@ -529,6 +561,55 @@ impl Runtime {
                 }),
                 Err(_) => continue,
             }
+        }
+        // The encrypted optimistic overlays are Items too. A create the Server has not answered
+        // yet is Pending, and one it terminally rejected is Failed with its ciphertext intact.
+        for overlay in &snapshot.items {
+            let Some(vault) = snapshot
+                .bootstrap
+                .vaults
+                .get(&(generation_id.clone(), overlay.vault_id.clone()))
+            else {
+                continue;
+            };
+            let status = if snapshot
+                .operations
+                .iter()
+                .any(|operation| operation.operation_id == overlay.operation_id)
+            {
+                ItemProjectionStatus::Pending
+            } else {
+                ItemProjectionStatus::Failed
+            };
+            let Ok(projection) = decrypt_login_item(
+                &muk,
+                &snapshot.user_id,
+                vault,
+                &SealedLoginItem::from_overlay(overlay),
+            ) else {
+                continue;
+            };
+            // An overlay is this Device's own newer truth, so it replaces any authority row for
+            // the same Item until reconciliation removes it.
+            projections.retain(|existing| existing.item_id != overlay.item_id);
+            projections.push(LoginItemProjection {
+                account_id: account_id.clone(),
+                item_id: overlay.item_id.clone(),
+                vault_id: overlay.vault_id.clone(),
+                title: projection.title,
+                url: projection.url,
+                urls: projection.urls,
+                username: projection.username,
+                password: projection.password,
+                notes: projection.notes,
+                note: projection.note,
+                custom_fields: projection.custom_fields,
+                tags: projection.tags,
+                favorite: false,
+                created_at: String::new(),
+                updated_at: String::new(),
+                status,
+            });
         }
         projections.sort_by(|left, right| left.item_id.cmp(&right.item_id));
         let current_epoch = *self
@@ -682,7 +763,9 @@ fn authority_item_from_bootstrap(
     })
 }
 
-fn authority_item_from_dto(item: ItemResponseDto) -> Result<AuthorityItemRecord, RuntimeError> {
+pub(super) fn authority_item_from_dto(
+    item: ItemResponseDto,
+) -> Result<AuthorityItemRecord, RuntimeError> {
     Ok(AuthorityItemRecord {
         id: item.id,
         vault_id: item.vault_id,
@@ -755,11 +838,53 @@ struct DecryptedLogin {
     tags: Vec<String>,
 }
 
+/// One sealed Login and the exact AAD binding it was sealed under.
+///
+/// Authority rows and encrypted optimistic overlays are both this, which is why one reader opens
+/// both without either of them pretending to be the other.
+struct SealedLoginItem<'a> {
+    item_id: &'a str,
+    vault_id: &'a str,
+    encryption_version: i32,
+    encrypted_by_user_id: &'a str,
+    data: EncryptedData,
+}
+
+impl<'a> SealedLoginItem<'a> {
+    fn from_authority(item: &'a AuthorityItemRecord) -> Self {
+        Self {
+            item_id: &item.id,
+            vault_id: &item.vault_id,
+            encryption_version: item.encryption_version,
+            encrypted_by_user_id: &item.encrypted_by_user_id,
+            data: EncryptedData {
+                ciphertext: item.encrypted_data.clone(),
+                iv: item.encryption_iv.clone(),
+                algorithm: item.encryption_algorithm.clone(),
+            },
+        }
+    }
+
+    fn from_overlay(overlay: &'a crate::replica::ReplicaItemRecord) -> Self {
+        Self {
+            item_id: &overlay.item_id,
+            vault_id: &overlay.vault_id,
+            encryption_version: overlay.encryption_version,
+            encrypted_by_user_id: &overlay.encrypted_by_user_id,
+            data: EncryptedData {
+                ciphertext: overlay.encrypted_data.clone(),
+                iv: overlay.encryption_iv.clone(),
+                algorithm: overlay.encryption_algorithm.clone(),
+            },
+        }
+    }
+}
+
 fn decrypt_login_item(
     muk: &[u8; 32],
     user_id: &str,
     vault: &AuthorityVaultRecord,
-    item: &AuthorityItemRecord,
+    item: &SealedLoginItem<'_>,
 ) -> Result<DecryptedLogin, RuntimeError> {
     let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
         .map_err(|_| sync_failure("wrapped Vault key is invalid"))?;
@@ -769,19 +894,15 @@ fn decrypt_login_item(
     let vault_key = decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk, &wrapped.context)
         .map_err(|_| sync_failure("Vault key could not be unwrapped"))?;
     let plaintext = decrypt_with_aad(
-        &EncryptedData {
-            ciphertext: item.encrypted_data.clone(),
-            iv: item.encryption_iv.clone(),
-            algorithm: item.encryption_algorithm.clone(),
-        },
+        &item.data,
         &vault_key,
         &AadContext {
-            vault_id: item.vault_id.clone(),
-            entity_id: item.id.clone(),
+            vault_id: item.vault_id.to_owned(),
+            entity_id: item.item_id.to_owned(),
             entity_type: "item".into(),
             version: u64::try_from(item.encryption_version)
                 .map_err(|_| sync_failure("Item encryption version is invalid"))?,
-            user_id: item.encrypted_by_user_id.clone(),
+            user_id: item.encrypted_by_user_id.to_owned(),
         },
     )
     .map_err(|_| sync_failure("Item ciphertext could not be decrypted"))?;
