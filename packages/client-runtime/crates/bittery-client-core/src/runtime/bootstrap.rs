@@ -3,26 +3,30 @@ use crate::{
     auth_http::{AuthHttpClient, AuthenticatedOutcome},
     authentication_installation::parse_session_expiry_ms,
     platform_storage::CurrentSessionDocument,
-    protocol::{LoginCustomField, LoginItemProjection},
+    protocol::{AttachmentProjection, LoginCustomField, LoginItemProjection},
     replica::{
-        AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
-        AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapContinuation,
-        BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPhase,
-        MarkRefreshRequiredPlan, PlanResult, PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState,
-        Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+        AbandonBootstrapPlan, AuthorityAttachmentRecord, AuthorityItemCategory,
+        AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
+        BeginBootstrapPlan, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
+        BootstrapPageCursor, BootstrapPhase, MarkRefreshRequiredPlan, PlanResult,
+        PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState, Sha256Fingerprint,
+        StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
     },
     server_contract::{
-        BootstrapItemResponse, BootstrapItemsResponse, BootstrapVaultSummary, ItemCategory,
-        ItemResponseDto, SyncCursorResponse, SyncEntityType, VaultRole, VaultType,
+        BootstrapAttachmentResponse, BootstrapItemResponse, BootstrapItemsResponse,
+        BootstrapVaultSummary, ItemCategory, ItemResponseDto, SyncCursorResponse, SyncEntityType,
+        VaultRole, VaultType,
     },
     AccountAccessState, AccountId, AccountWaitingReason, CustomFieldKind, ItemProjectionStatus,
     RequestCancellation, Runtime, RuntimeError, RuntimeErrorCode,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{
     decrypt_vault_key_with_muk, decrypt_with_aad, AadContext, EncryptedData, WrappedVaultKeyData,
 };
 use serde::Deserialize;
 use std::sync::atomic::Ordering;
+use zeroize::{Zeroize, Zeroizing};
 
 const MAX_BOOTSTRAP_PAGES: usize = 4_096;
 
@@ -531,7 +535,7 @@ impl Runtime {
         };
         let mut projections = Vec::new();
         for ((item_generation, _), item) in &snapshot.bootstrap.items {
-            if item_generation != &generation_id || item.deleted_at.is_some() {
+            if item_generation != &generation_id {
                 continue;
             }
             if item.category != AuthorityItemCategory::Login {
@@ -564,6 +568,14 @@ impl Runtime {
                     custom_fields: projection.custom_fields,
                     tags: projection.tags,
                     favorite: item.favorite,
+                    deleted_at: item.deleted_at.clone(),
+                    attachments: decrypt_attachment_projections(
+                        account_id,
+                        &muk,
+                        &snapshot.user_id,
+                        vault,
+                        &item.attachments,
+                    ),
                     created_at: item.created_at.clone(),
                     updated_at: item.updated_at.clone(),
                     status: ItemProjectionStatus::Authoritative,
@@ -574,6 +586,10 @@ impl Runtime {
         // The encrypted optimistic overlays are Items too. A create the Server has not answered
         // yet is Pending, and one it terminally rejected is Failed with its ciphertext intact.
         for overlay in &snapshot.items {
+            if overlay.permanently_deleted {
+                projections.retain(|existing| existing.item_id != overlay.item_id);
+                continue;
+            }
             let Some(vault) = snapshot
                 .bootstrap
                 .vaults
@@ -614,11 +630,19 @@ impl Runtime {
                 note: projection.note,
                 custom_fields: projection.custom_fields,
                 tags: projection.tags,
-                favorite: false,
+                favorite: overlay.favorite,
+                deleted_at: overlay.deleted_at.clone(),
+                attachments: decrypt_attachment_projections(
+                    account_id,
+                    &muk,
+                    &snapshot.user_id,
+                    vault,
+                    &overlay.attachments,
+                ),
                 // The instant this Device accepted the create, kept durable with the overlay so
                 // a restart cannot reshuffle a list that sorts by it.
                 created_at: overlay.created_at.clone(),
-                updated_at: overlay.created_at.clone(),
+                updated_at: overlay.updated_at.clone(),
                 status,
             });
         }
@@ -857,8 +881,35 @@ fn authority_item_from_bootstrap(
         created_at: item.created_at.clone(),
         updated_at: item.updated_at.clone(),
         deleted_at: item.deleted_at.clone(),
-        attachments: Vec::new(),
+        attachments: item
+            .attachments
+            .iter()
+            .map(authority_attachment_from_bootstrap)
+            .collect(),
     })
+}
+
+fn authority_attachment_from_bootstrap(
+    attachment: &BootstrapAttachmentResponse,
+) -> AuthorityAttachmentRecord {
+    AuthorityAttachmentRecord {
+        id: attachment.id.clone(),
+        item_id: attachment.item_id.clone(),
+        vault_id: attachment.vault_id.clone(),
+        storage_key: attachment.storage_key.clone(),
+        encrypted_name: attachment.encrypted_name.clone(),
+        encryption_iv: attachment.encryption_iv.clone(),
+        encryption_algorithm: attachment.encryption_algorithm.clone(),
+        encrypted_attachment_key: attachment.encrypted_attachment_key.clone(),
+        attachment_key_iv: attachment.attachment_key_iv.clone(),
+        attachment_key_algorithm: attachment.attachment_key_algorithm.clone(),
+        encrypted_content_type: attachment.encrypted_content_type.clone(),
+        encrypted_content_type_iv: attachment.encrypted_content_type_iv.clone(),
+        envelope_version: attachment.envelope_version,
+        file_size: attachment.file_size,
+        uploaded_by: attachment.uploaded_by.clone(),
+        created_at: attachment.created_at.clone(),
+    }
 }
 
 pub(super) fn authority_item_from_dto(
@@ -1026,6 +1077,91 @@ fn decrypt_login_item(
             .collect(),
         tags: payload.tags,
     })
+}
+
+fn decrypt_attachment_projections(
+    account_id: &AccountId,
+    muk: &[u8; 32],
+    user_id: &str,
+    vault: &AuthorityVaultRecord,
+    attachments: &[AuthorityAttachmentRecord],
+) -> Vec<AttachmentProjection> {
+    let Ok(wrapped) = serde_json::from_str::<WrappedVaultKeyData>(&vault.encrypted_vault_key)
+    else {
+        return Vec::new();
+    };
+    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
+        return Vec::new();
+    }
+    let Ok(vault_key) =
+        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk, &wrapped.context)
+    else {
+        return Vec::new();
+    };
+    let vault_key = Zeroizing::new(vault_key);
+    attachments
+        .iter()
+        .filter_map(|attachment| {
+            if attachment.vault_id != vault.id || attachment.envelope_version <= 0 {
+                return None;
+            }
+            let scope = |entity_type: &str, version: u64| AadContext {
+                vault_id: attachment.vault_id.clone(),
+                entity_id: attachment.id.clone(),
+                entity_type: entity_type.to_owned(),
+                version,
+                user_id: attachment.uploaded_by.clone(),
+            };
+            let mut encoded_key = decrypt_with_aad(
+                &EncryptedData {
+                    ciphertext: attachment.encrypted_attachment_key.clone(),
+                    iv: attachment.attachment_key_iv.clone(),
+                    algorithm: attachment.attachment_key_algorithm.clone(),
+                },
+                &vault_key,
+                &scope("attachment_key", attachment.envelope_version as u64),
+            )
+            .ok()?;
+            let decoded_key = BASE64.decode(encoded_key.as_bytes()).ok();
+            encoded_key.zeroize();
+            let attachment_key = Zeroizing::new(decoded_key?);
+            if attachment_key.len() != 32 {
+                return None;
+            }
+            let name = decrypt_with_aad(
+                &EncryptedData {
+                    ciphertext: attachment.encrypted_name.clone(),
+                    iv: attachment.encryption_iv.clone(),
+                    algorithm: attachment.encryption_algorithm.clone(),
+                },
+                &attachment_key,
+                &scope("attachment_name", 1),
+            )
+            .ok()?;
+            let content_type = decrypt_with_aad(
+                &EncryptedData {
+                    ciphertext: attachment.encrypted_content_type.clone(),
+                    iv: attachment.encrypted_content_type_iv.clone(),
+                    algorithm: attachment.encryption_algorithm.clone(),
+                },
+                &attachment_key,
+                &scope("attachment_content_type", 1),
+            )
+            .ok()?;
+            Some(AttachmentProjection {
+                account_id: account_id.clone(),
+                attachment_id: attachment.id.clone(),
+                item_id: attachment.item_id.clone(),
+                vault_id: attachment.vault_id.clone(),
+                storage_key: attachment.storage_key.clone(),
+                name,
+                content_type,
+                file_size: attachment.file_size,
+                uploaded_by: attachment.uploaded_by.clone(),
+                created_at: attachment.created_at.clone(),
+            })
+        })
+        .collect()
 }
 
 fn replica_busy() -> RuntimeError {

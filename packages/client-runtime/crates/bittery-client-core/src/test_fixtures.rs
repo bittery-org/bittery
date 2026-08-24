@@ -88,6 +88,12 @@ pub(crate) fn test_overlay(
         encryption_algorithm: "AES-GCM-AAD-V1".to_owned(),
         encryption_version: 1,
         encrypted_by_user_id: "user-1".to_owned(),
+        favorite: false,
+        version: 1,
         created_at: "2026-08-23T00:00:00Z".to_owned(),
+        updated_at: "2026-08-23T00:00:00Z".to_owned(),
+        deleted_at: None,
+        attachments: Vec::new(),
+        permanently_deleted: false,
     }
 }

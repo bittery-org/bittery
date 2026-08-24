@@ -158,6 +158,12 @@ pub(crate) struct OperationReceiptRecord {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     CreateItem,
+    UpdateItem,
+    SetItemFavorite,
+    TrashItem,
+    RestoreItem,
+    MoveItem,
+    PermanentlyDeleteItem,
 }
 
 /// The exact bytes an accepted Operation will send, forever.
@@ -216,6 +222,10 @@ pub(crate) struct ReplicaItemRecord {
     pub encryption_algorithm: String,
     pub encryption_version: i32,
     pub encrypted_by_user_id: String,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default = "initial_item_version")]
+    pub version: i32,
     /// When this Device accepted the create, in the same RFC 3339 spelling the Server uses.
     ///
     /// It is this Device's own truth until authority replaces it, and it is durable because a
@@ -223,6 +233,18 @@ pub(crate) struct ReplicaItemRecord {
     /// written before this field existed loadable rather than bricking the Account.
     #[serde(default)]
     pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
+    pub deleted_at: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<AuthorityAttachmentRecord>,
+    #[serde(default)]
+    pub permanently_deleted: bool,
+}
+
+fn initial_item_version() -> i32 {
+    1
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1490,7 +1512,14 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
     if !operation.request.path.starts_with('/') {
         return Err(replica_invariant("Operation route path is not absolute"));
     }
-    if operation.request.body.is_empty() {
+    if operation.request.body.is_empty()
+        && !matches!(
+            operation.kind,
+            OperationKind::TrashItem
+                | OperationKind::RestoreItem
+                | OperationKind::PermanentlyDeleteItem
+        )
+    {
         return Err(replica_invariant("Operation request body is empty"));
     }
     for header in &operation.request.headers {

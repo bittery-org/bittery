@@ -234,6 +234,12 @@ pub enum ErrorCode {
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct FavoriteBody {
+    pub favorite: bool,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FinishLoginRequest {
     #[serde(rename = "clientPublicKey")]
     pub client_public_key: String,
@@ -352,6 +358,21 @@ pub struct LoginUserResponse {
     pub team_avatar_url: Option<String>,
     #[serde(rename = "teamName")]
     pub team_name: Option<String>,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveItemBody {
+    #[serde(rename = "encryptedData")]
+    pub encrypted_data: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    pub encryption_algorithm: String,
+    #[serde(rename = "encryptionIv")]
+    pub encryption_iv: String,
+    #[serde(rename = "sourceVaultId")]
+    pub source_vault_id: String,
+    #[serde(rename = "targetVaultId")]
+    pub target_vault_id: String,
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -566,6 +587,17 @@ pub struct TravelModeResponse {
     pub hidden_vault_ids: Vec<String>,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateItemBody {
+    #[serde(rename = "encryptedData")]
+    pub encrypted_data: Option<String>,
+    #[serde(rename = "encryptionAlgorithm")]
+    pub encryption_algorithm: Option<String>,
+    #[serde(rename = "encryptionIv")]
+    pub encryption_iv: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

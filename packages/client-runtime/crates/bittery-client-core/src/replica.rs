@@ -29,16 +29,16 @@ use domain::AccountReplica;
     reason = "closed Replica types are re-exported for Runtime"
 )]
 pub(crate) use domain::{
-    AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
-    AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
-    BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
-    BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase, CleanupBootstrapGenerationPlan,
-    CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
-    MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
-    OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
-    PlanMutation, PlanResult, PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord,
-    ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
-    StageBootstrapPageResult, SyncCursor,
+    AbandonBootstrapPlan, AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord,
+    AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan,
+    BootstrapAuthority, BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId,
+    BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase,
+    CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult, CursorAdvance,
+    GuardedCommitPlan, ImmutableHttpRequest, MarkRefreshRequiredPlan, ObservedOutcome,
+    OperationKind, OperationOutcomeResult, OperationReceiptRecord, OperationRecord,
+    OperationRejectionCode, OperationSchedulingState, PlanMutation, PlanResult,
+    PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
+    Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -1946,6 +1946,16 @@ impl InMemoryReplica {
         account_id: &AccountId,
         vault: AuthorityVaultRecord,
     ) -> Result<(), RuntimeError> {
+        self.seed_ready_authority(account_id, vec![vault], Vec::new())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_ready_authority(
+        &self,
+        account_id: &AccountId,
+        vaults: Vec<AuthorityVaultRecord>,
+        items: Vec<AuthorityItemRecord>,
+    ) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("replica lock poisoned");
         let account = state.accounts.get_mut(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
@@ -1971,7 +1981,7 @@ impl InMemoryReplica {
             raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-vault-page"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
-            vaults: vec![vault],
+            vaults,
             items: Vec::new(),
         })?;
         account.stage_bootstrap_page(StageBootstrapPagePlan {
@@ -1983,7 +1993,7 @@ impl InMemoryReplica {
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
             vaults: Vec::new(),
-            items: Vec::new(),
+            items,
         })?;
         account.promote_bootstrap(PromoteBootstrapPlan {
             guard: guard(account),

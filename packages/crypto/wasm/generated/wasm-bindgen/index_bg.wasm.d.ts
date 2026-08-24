@@ -1019,13 +1019,25 @@ export const ffi_bittery_client_bindings_uniffi_contract_version: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_created_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
@@ -1039,7 +1051,7 @@ export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
-export const uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
   a: bigint,
   b: number,
 ) => bigint;
@@ -1066,6 +1078,10 @@ export const uniffi_bittery_client_bindings_fn_constructor_secretstring_new: (
   a: number,
   b: number,
 ) => bigint;
+export const uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
+  a: bigint,
+  b: number,
+) => void;
 export const uniffi_bittery_client_bindings_fn_free_logincustomfield: (
   a: bigint,
   b: number,
@@ -1081,6 +1097,55 @@ export const uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
 export const uniffi_bittery_client_bindings_fn_free_secretstring: (
   a: bigint,
   b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_attachment_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_content_type: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_created_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_size: (
+  a: bigint,
+  b: number,
+) => number;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault_id: (
+  a: number,
+  b: bigint,
+  c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type: (
   a: number,
@@ -1107,12 +1172,22 @@ export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_accoun
   b: bigint,
   c: number,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
 export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at: (
   a: number,
   b: bigint,
   c: number,
@@ -1224,6 +1299,10 @@ export const webclientruntime_withExecutors: (
   d: any,
 ) => number;
 export const webclientruntime_withReplicaExecutor: (a: any) => number;
+export const uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+  a: bigint,
+  b: number,
+) => bigint;
 export const uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
   a: bigint,
   b: number,

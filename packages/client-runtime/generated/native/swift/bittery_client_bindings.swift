@@ -425,6 +425,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -507,6 +523,212 @@ fileprivate struct FfiConverterString: FfiConverter {
         writeBytes(&buf, value.utf8)
     }
 }
+
+
+
+
+public protocol AttachmentProjectionProtocol: AnyObject, Sendable {
+
+    func accountId()  -> String
+
+    func attachmentId()  -> String
+
+    func contentType()  -> String
+
+    func createdAt()  -> String
+
+    func fileSize()  -> Int32
+
+    func itemId()  -> String
+
+    func name()  -> String
+
+    func storageKey()  -> String
+
+    func uploadedBy()  -> String
+
+    func vaultId()  -> String
+
+}
+open class AttachmentProjection: AttachmentProjectionProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_attachmentprojection(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_attachmentprojection(handle, $0) }
+    }
+
+
+
+
+open func accountId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func attachmentId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_attachment_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func contentType() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_content_type(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func createdAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_created_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func fileSize() -> Int32  {
+    return try!  FfiConverterInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_size(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func itemId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func name() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func storageKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func uploadedBy() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func vaultId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAttachmentProjection: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = AttachmentProjection
+
+    public static func lift(_ handle: UInt64) throws -> AttachmentProjection {
+        return AttachmentProjection(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: AttachmentProjection) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AttachmentProjection {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: AttachmentProjection, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentProjection_lift(_ handle: UInt64) throws -> AttachmentProjection {
+    return try FfiConverterTypeAttachmentProjection.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentProjection_lower(_ value: AttachmentProjection) -> UInt64 {
+    return FfiConverterTypeAttachmentProjection.lower(value)
+}
+
+
 
 
 
@@ -958,9 +1180,13 @@ public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
 
     func accountId()  -> String
 
+    func attachments()  -> [AttachmentProjection]
+
     func createdAt()  -> String
 
     func customFields()  -> [LoginCustomField]
+
+    func deletedAt()  -> String?
 
     func favorite()  -> Bool
 
@@ -1050,6 +1276,14 @@ open func accountId() -> String  {
 })
 }
 
+open func attachments() -> [AttachmentProjection]  {
+    return try!  FfiConverterSequenceTypeAttachmentProjection.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
 open func createdAt() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(
@@ -1061,6 +1295,14 @@ open func createdAt() -> String  {
 open func customFields() -> [LoginCustomField]  {
     return try!  FfiConverterSequenceTypeLoginCustomField.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func deletedAt() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -2547,6 +2789,18 @@ public enum RuntimeRequest {
     )
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
+    case updateLoginItem(accountId: String, itemId: String, draft: LoginItemDraft
+    )
+    case setItemFavorite(accountId: String, itemId: String, favorite: Bool
+    )
+    case trashItem(accountId: String, itemId: String
+    )
+    case restoreItem(accountId: String, itemId: String
+    )
+    case moveItem(accountId: String, itemId: String, targetVaultId: String
+    )
+    case permanentlyDeleteItem(accountId: String, itemId: String
+    )
 
 
 
@@ -2581,6 +2835,24 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 5: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        )
+
+        case 6: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        )
+
+        case 7: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
+        )
+
+        case 8: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 9: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 10: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 11: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2621,6 +2893,45 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
+
+
+        case let .updateLoginItem(accountId,itemId,draft):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
+
+
+        case let .setItemFavorite(accountId,itemId,favorite):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterBool.write(favorite, into: &buf)
+
+
+        case let .trashItem(accountId,itemId):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .restoreItem(accountId,itemId):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .moveItem(accountId,itemId,targetVaultId):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterString.write(targetVaultId, into: &buf)
+
+
+        case let .permanentlyDeleteItem(accountId,itemId):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
 
         }
     }
@@ -2980,6 +3291,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAttachmentProjection: FfiConverterRustBuffer {
+    typealias SwiftType = [AttachmentProjection]
+
+    public static func write(_ value: [AttachmentProjection], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAttachmentProjection.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AttachmentProjection] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AttachmentProjection]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAttachmentProjection.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeLoginCustomField: FfiConverterRustBuffer {
     typealias SwiftType = [LoginCustomField]
 
@@ -3140,6 +3476,36 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id() != 40485) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id() != 38129) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type() != 39025) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_created_at() != 30517) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size() != 62775) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id() != 60577) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name() != 42427) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key() != 4414) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by() != 3091) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id() != 16604) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_observe() != 8781) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3164,10 +3530,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments() != 62974) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at() != 48453) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at() != 51974) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite() != 21525) {

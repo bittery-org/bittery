@@ -9,16 +9,20 @@ use crate::{
     http_transport::{HttpHeader, HttpMethod},
     protocol::Incarnation,
     replica::{
-        AuthorityVaultRole, AuthorityVaultType, InMemoryReplica, OperationKind, OperationRecord,
-        ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+        AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRole,
+        AuthorityVaultType, InMemoryReplica, OperationKind, OperationRecord, ReplicaPersistence,
+        ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
     server_contract::{CreateItemBody, ItemCategory},
     test_fixtures::{personal_vault, seed_ready_personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
     CustomFieldKind, LoginCustomField, LoginItemDraft,
 };
 use async_trait::async_trait;
-use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use bittery_crypto_core::{decrypt_with_aad, encrypt_with_aad, AadContext, EncryptedData};
 use create::{create_item_fingerprint, create_item_path};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::AtomicBool;
 
 const ACCOUNT: &str = "account-1";
@@ -30,6 +34,8 @@ struct RecordingExecutor {
     state: InMemoryReplica,
     requests: Mutex<Vec<String>>,
     fail_commits: AtomicBool,
+    fence_before_commit: AtomicBool,
+    cancel_after_commit: Mutex<Option<RequestCancellation>>,
 }
 
 impl RecordingExecutor {
@@ -48,6 +54,73 @@ impl RecordingExecutor {
             state,
             requests: Mutex::new(Vec::new()),
             fail_commits: AtomicBool::new(false),
+            fence_before_commit: AtomicBool::new(false),
+            cancel_after_commit: Mutex::new(None),
+        })
+    }
+
+    fn seeded_with_item(deleted: bool) -> Arc<Self> {
+        Self::seeded_item(deleted, true)
+    }
+
+    fn seeded_attachment_free_item(deleted: bool) -> Arc<Self> {
+        Self::seeded_item(deleted, false)
+    }
+
+    fn seeded_item(deleted: bool, with_attachment: bool) -> Arc<Self> {
+        let state = InMemoryReplica::default();
+        let account_id = AccountId::from(ACCOUNT);
+        state
+            .install(
+                account_id.clone(),
+                USER.to_owned(),
+                Incarnation::from(INCARNATION),
+            )
+            .unwrap();
+        let sealed = encrypt_with_aad(
+            &serde_json::to_string(&draft()).unwrap(),
+            &TEST_VAULT_KEY,
+            &AadContext {
+                vault_id: TEST_VAULT_ID.into(),
+                entity_id: "item-existing".into(),
+                entity_type: "item".into(),
+                version: 1,
+                user_id: USER.into(),
+            },
+        )
+        .unwrap();
+        state
+            .seed_ready_authority(
+                &account_id,
+                vec![
+                    personal_vault(TEST_VAULT_ID, USER),
+                    personal_vault("vault-2", USER),
+                ],
+                vec![AuthorityItemRecord {
+                    id: "item-existing".into(),
+                    vault_id: TEST_VAULT_ID.into(),
+                    category: AuthorityItemCategory::Login,
+                    favorite: false,
+                    encrypted_data: sealed.ciphertext,
+                    encryption_iv: sealed.iv,
+                    encryption_algorithm: sealed.algorithm,
+                    version: 1,
+                    encryption_version: 1,
+                    encrypted_by_user_id: USER.into(),
+                    last_modified_by: USER.into(),
+                    created_at: "2026-08-23T00:00:00Z".into(),
+                    updated_at: "2026-08-23T00:00:00Z".into(),
+                    deleted_at: deleted.then(|| "2026-08-24T00:00:00Z".into()),
+                    attachments: with_attachment.then(attachment).into_iter().collect(),
+                }],
+            )
+            .unwrap();
+        Arc::new(Self {
+            state,
+            requests: Mutex::new(Vec::new()),
+            fail_commits: AtomicBool::new(false),
+            fence_before_commit: AtomicBool::new(false),
+            cancel_after_commit: Mutex::new(None),
         })
     }
 
@@ -61,6 +134,7 @@ impl SerializedReplicaExecutor for RecordingExecutor {
     async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
         self.requests.lock().unwrap().push(request_json.clone());
         let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        let is_commit = matches!(request, ReplicaPersistenceRequest::Commit { .. });
         if matches!(request, ReplicaPersistenceRequest::Commit { .. })
             && self.fail_commits.load(Ordering::SeqCst)
         {
@@ -69,7 +143,23 @@ impl SerializedReplicaExecutor for RecordingExecutor {
                 "injected commit failure",
             ));
         }
-        serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
+        if let ReplicaPersistenceRequest::Commit { prepared } = &request {
+            if self.fence_before_commit.swap(false, Ordering::SeqCst) {
+                self.state
+                    .set_lock_epoch(
+                        &prepared.expected.account_id,
+                        prepared.expected.lock_epoch + 1,
+                    )
+                    .unwrap();
+            }
+        }
+        let response = self.state.invoke(request).await?;
+        if is_commit {
+            if let Some(cancellation) = self.cancel_after_commit.lock().unwrap().take() {
+                cancellation.cancel();
+            }
+        }
+        serde_json::to_string(&response).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "recording fake response could not be serialized",
@@ -92,6 +182,56 @@ const PASSWORD: &str = "Zzz-Password-Marker";
 const NOTES: &str = "Zzz-Notes-Marker";
 const FIELD_VALUE: &str = "Zzz-Custom-Field-Marker";
 const TAG: &str = "Zzz-Tag-Marker";
+const ATTACHMENT_NAME: &str = "Zzz-Attachment-Name.txt";
+const ATTACHMENT_CONTENT_TYPE: &str = "text/x-z-marker";
+
+fn attachment() -> AuthorityAttachmentRecord {
+    let attachment_id = "attachment-1";
+    let attachment_key = [13u8; 32];
+    let context = |entity_type: &str| AadContext {
+        vault_id: TEST_VAULT_ID.into(),
+        entity_id: attachment_id.into(),
+        entity_type: entity_type.into(),
+        version: 1,
+        user_id: USER.into(),
+    };
+    let wrapped_key = encrypt_with_aad(
+        &BASE64.encode(attachment_key),
+        &TEST_VAULT_KEY,
+        &context("attachment_key"),
+    )
+    .unwrap();
+    let encrypted_name = encrypt_with_aad(
+        ATTACHMENT_NAME,
+        &attachment_key,
+        &context("attachment_name"),
+    )
+    .unwrap();
+    let encrypted_content_type = encrypt_with_aad(
+        ATTACHMENT_CONTENT_TYPE,
+        &attachment_key,
+        &context("attachment_content_type"),
+    )
+    .unwrap();
+    AuthorityAttachmentRecord {
+        id: attachment_id.into(),
+        item_id: "item-existing".into(),
+        vault_id: TEST_VAULT_ID.into(),
+        storage_key: "attachments/item-existing/file.enc".into(),
+        encrypted_name: encrypted_name.ciphertext,
+        encryption_iv: encrypted_name.iv,
+        encryption_algorithm: encrypted_name.algorithm,
+        encrypted_attachment_key: wrapped_key.ciphertext,
+        attachment_key_iv: wrapped_key.iv,
+        attachment_key_algorithm: wrapped_key.algorithm,
+        encrypted_content_type: encrypted_content_type.ciphertext,
+        encrypted_content_type_iv: encrypted_content_type.iv,
+        envelope_version: 1,
+        file_size: 42,
+        uploaded_by: USER.into(),
+        created_at: "2026-08-23T00:00:00Z".into(),
+    }
+}
 
 fn draft() -> LoginItemDraft {
     LoginItemDraft {
@@ -689,4 +829,524 @@ async fn a_read_only_vault_is_projected_as_one() {
         VaultProjectionRole::ReadOnly,
         "the same refusal the create path makes, before the user tries"
     );
+}
+
+#[derive(Clone, Copy)]
+enum RemainingKindCase {
+    Update,
+    Favorite,
+    Trash,
+    Restore,
+    Move,
+    PermanentlyDelete,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExpectedUpdateBody<'a> {
+    encrypted_data: &'a str,
+    encryption_algorithm: &'a str,
+    encryption_iv: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExpectedMoveBody<'a> {
+    encrypted_data: &'a str,
+    encryption_algorithm: &'a str,
+    encryption_iv: &'a str,
+    source_vault_id: &'a str,
+    target_vault_id: &'a str,
+}
+
+impl RemainingKindCase {
+    fn operation_kind(self) -> OperationKind {
+        match self {
+            Self::Update => OperationKind::UpdateItem,
+            Self::Favorite => OperationKind::SetItemFavorite,
+            Self::Trash => OperationKind::TrashItem,
+            Self::Restore => OperationKind::RestoreItem,
+            Self::Move => OperationKind::MoveItem,
+            Self::PermanentlyDelete => OperationKind::PermanentlyDeleteItem,
+        }
+    }
+
+    fn needs_deleted_authority(self) -> bool {
+        matches!(self, Self::Restore | Self::PermanentlyDelete)
+    }
+
+    fn request(self, account_id: AccountId) -> RuntimeRequest {
+        match self {
+            Self::Update => RuntimeRequest::UpdateLoginItem {
+                account_id,
+                item_id: "item-existing".into(),
+                draft: draft(),
+            },
+            Self::Favorite => RuntimeRequest::SetItemFavorite {
+                account_id,
+                item_id: "item-existing".into(),
+                favorite: true,
+            },
+            Self::Trash => RuntimeRequest::TrashItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+            Self::Restore => RuntimeRequest::RestoreItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+            Self::Move => RuntimeRequest::MoveItem {
+                account_id,
+                item_id: "item-existing".into(),
+                target_vault_id: "vault-2".into(),
+            },
+            Self::PermanentlyDelete => RuntimeRequest::PermanentlyDeleteItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+        }
+    }
+
+    fn method(self) -> HttpMethod {
+        match self {
+            Self::Update | Self::Favorite => HttpMethod::Patch,
+            Self::Trash | Self::PermanentlyDelete => HttpMethod::Delete,
+            Self::Restore | Self::Move => HttpMethod::Post,
+        }
+    }
+
+    fn route(self) -> &'static str {
+        match self {
+            Self::Update => "PATCH /api/v1/items/{itemId}",
+            Self::Favorite => "PATCH /api/v1/items/{itemId}/favorite",
+            Self::Trash => "DELETE /api/v1/items/{itemId}",
+            Self::Restore => "POST /api/v1/items/{itemId}/restore",
+            Self::Move => "POST /api/v1/items/{itemId}/moves",
+            Self::PermanentlyDelete => "DELETE /api/v1/items/{itemId}/permanent",
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::Update | Self::Trash => "/api/v1/items/item-existing",
+            Self::Favorite => "/api/v1/items/item-existing/favorite",
+            Self::Restore => "/api/v1/items/item-existing/restore",
+            Self::Move => "/api/v1/items/item-existing/moves",
+            Self::PermanentlyDelete => "/api/v1/items/item-existing/permanent",
+        }
+    }
+}
+
+fn server_fingerprint_oracle(case: RemainingKindCase, body: &[u8]) -> [u8; 32] {
+    let kind = match case {
+        RemainingKindCase::Update => "update_item",
+        RemainingKindCase::Favorite => "set_item_favorite",
+        RemainingKindCase::Trash => "trash_item",
+        RemainingKindCase::Restore => "restore_item",
+        RemainingKindCase::Move => "move_item",
+        RemainingKindCase::PermanentlyDelete => "permanently_delete_item",
+    };
+    let mut hasher = Sha256::new();
+    for part in [
+        b"bittery.operation.v1".as_slice(),
+        kind.as_bytes(),
+        case.route().as_bytes(),
+        b"item-existing".as_slice(),
+        body,
+        b"1".as_slice(),
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    hasher.finalize().into()
+}
+
+#[test]
+fn each_existing_kind_fingerprint_matches_a_hard_coded_server_golden() {
+    let vectors = [
+        (
+            OperationKind::UpdateItem,
+            "PATCH /api/v1/items/{itemId}",
+            br#"{"encryptedData":"ciphertext","encryptionAlgorithm":"AES-GCM-AAD-V1","encryptionIv":"iv"}"#.as_slice(),
+            "1f2ae15b71f2da0ed484842fad92dbf6e4627932ad6a2e35761828a711bb7182",
+        ),
+        (
+            OperationKind::SetItemFavorite,
+            "PATCH /api/v1/items/{itemId}/favorite",
+            br#"{"favorite":true}"#.as_slice(),
+            "af3caea85a9c7abb2ad3d9fc5daa3a903e4d894a405676c99dad20c559bed7a2",
+        ),
+        (
+            OperationKind::TrashItem,
+            "DELETE /api/v1/items/{itemId}",
+            b"".as_slice(),
+            "d80c08c437b26fea3c0daa5392f301b78b1978c9706dd984a5f4bcc404ece05f",
+        ),
+        (
+            OperationKind::RestoreItem,
+            "POST /api/v1/items/{itemId}/restore",
+            b"".as_slice(),
+            "0847e9d09821b6ae91213f82b5c7adaca632c37718c16e3d32eb3eba9278a60a",
+        ),
+        (
+            OperationKind::MoveItem,
+            "POST /api/v1/items/{itemId}/moves",
+            br#"{"encryptedData":"ciphertext","encryptionAlgorithm":"AES-GCM-AAD-V1","encryptionIv":"iv","sourceVaultId":"vault-1","targetVaultId":"vault-2"}"#.as_slice(),
+            "1cce9553bfbed1b25663b564f56ecfe9f2334e5117f02d4ffc780e249a942006",
+        ),
+        (
+            OperationKind::PermanentlyDeleteItem,
+            "DELETE /api/v1/items/{itemId}/permanent",
+            b"".as_slice(),
+            "a3294061261daa2636c44ef675eab7cfbc3589d90e0876b71c9d3fbe984649ac",
+        ),
+    ];
+    for (kind, route, body, expected) in vectors {
+        assert_eq!(
+            hex(create::item_operation_fingerprint(
+                kind,
+                route,
+                "item-golden",
+                body,
+                7,
+            )),
+            expected,
+        );
+    }
+}
+
+fn assert_remaining_projection(case: RemainingKindCase, projection: &ItemsProjection) {
+    match case {
+        RemainingKindCase::Favorite => assert!(projection.items[0].favorite),
+        RemainingKindCase::Trash => assert!(projection.items[0].deleted_at.is_some()),
+        RemainingKindCase::Restore => assert!(projection.items[0].deleted_at.is_none()),
+        RemainingKindCase::Move => assert_eq!(projection.items[0].vault_id, "vault-2"),
+        RemainingKindCase::PermanentlyDelete => assert!(projection.items.is_empty()),
+        RemainingKindCase::Update => assert_eq!(projection.items[0].title, TITLE),
+    }
+}
+
+#[tokio::test]
+async fn remaining_item_kinds_are_durably_accepted_under_explicit_account_scope() {
+    let cases = [
+        RemainingKindCase::Update,
+        RemainingKindCase::Favorite,
+        RemainingKindCase::Trash,
+        RemainingKindCase::Restore,
+        RemainingKindCase::Move,
+        RemainingKindCase::PermanentlyDelete,
+    ];
+    for case in cases {
+        let fixture = |deleted| match case {
+            RemainingKindCase::Move => RecordingExecutor::seeded_attachment_free_item(deleted),
+            _ => RecordingExecutor::seeded_with_item(deleted),
+        };
+        let failed_executor = fixture(case.needs_deleted_authority());
+        let (failed_runtime, failed_account_id) = unlocked_runtime(failed_executor.clone()).await;
+        failed_executor.fail_commits.store(true, Ordering::SeqCst);
+        assert!(failed_runtime
+            .request(
+                case.request(failed_account_id.clone()),
+                RequestCancellation::new(),
+            )
+            .await
+            .is_err());
+        let failed_snapshot = failed_runtime
+            .replica()
+            .snapshot(&failed_account_id)
+            .unwrap();
+        assert!(failed_snapshot.operations.is_empty());
+        assert!(failed_snapshot.items.is_empty());
+
+        let executor = fixture(case.needs_deleted_authority());
+        let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+        let (_, item_id, revision) = accepted(
+            runtime
+                .request(case.request(account_id.clone()), RequestCancellation::new())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(item_id, "item-existing");
+        let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+        assert_eq!(snapshot.revision, revision);
+        assert_eq!(snapshot.operations.len(), 1);
+        assert_eq!(snapshot.items.len(), 1);
+        let operation = snapshot.operations[0].clone();
+        let overlay = snapshot.items[0].clone();
+        assert_eq!(operation.kind, case.operation_kind());
+        assert_eq!(operation.item_id, "item-existing");
+        assert_eq!(operation.request.method, case.method());
+        assert_eq!(operation.request.path, case.path());
+        assert_eq!(overlay.version, 2);
+        assert!(operation
+            .request
+            .headers
+            .iter()
+            .any(|header| header.name == "If-Match" && header.value == "\"1\""));
+        assert_eq!(
+            operation.request_fingerprint.0,
+            server_fingerprint_oracle(case, &operation.request.body),
+        );
+        match case {
+            RemainingKindCase::Update => {
+                assert_eq!(operation.request.headers.len(), 2);
+                assert_eq!(operation.request.headers[0].name, "Content-Type");
+                assert_eq!(
+                    operation.request.headers[0].value,
+                    "application/merge-patch+json"
+                );
+                assert_eq!(
+                    operation.request.body,
+                    serde_json::to_vec(&ExpectedUpdateBody {
+                        encrypted_data: &overlay.encrypted_data,
+                        encryption_algorithm: &overlay.encryption_algorithm,
+                        encryption_iv: &overlay.encryption_iv,
+                    })
+                    .unwrap()
+                );
+            }
+            RemainingKindCase::Favorite => {
+                assert_eq!(operation.request.headers.len(), 2);
+                assert_eq!(operation.request.headers[0].name, "Content-Type");
+                assert_eq!(
+                    operation.request.headers[0].value,
+                    "application/merge-patch+json"
+                );
+                assert_eq!(operation.request.body, br#"{"favorite":true}"#);
+            }
+            RemainingKindCase::Move => {
+                assert_eq!(operation.request.headers.len(), 2);
+                assert_eq!(operation.request.headers[0].name, "Content-Type");
+                assert_eq!(operation.request.headers[0].value, "application/json");
+                assert_eq!(
+                    operation.request.body,
+                    serde_json::to_vec(&ExpectedMoveBody {
+                        encrypted_data: &overlay.encrypted_data,
+                        encryption_algorithm: &overlay.encryption_algorithm,
+                        encryption_iv: &overlay.encryption_iv,
+                        source_vault_id: TEST_VAULT_ID,
+                        target_vault_id: "vault-2",
+                    })
+                    .unwrap()
+                );
+            }
+            RemainingKindCase::Trash
+            | RemainingKindCase::Restore
+            | RemainingKindCase::PermanentlyDelete => {
+                assert!(operation.request.body.is_empty());
+                assert_eq!(operation.request.headers.len(), 1);
+            }
+        }
+
+        for request in executor.recorded() {
+            for marker in plaintext_markers() {
+                assert!(
+                    !request.contains(marker),
+                    "durable {:?} plan leaked {marker}",
+                    case.operation_kind()
+                );
+            }
+        }
+
+        assert_remaining_projection(case, &visible(&runtime, &account_id));
+
+        drop(runtime);
+        let restarted = Runtime::with_serialized_replica_executor(executor);
+        restarted
+            .replica()
+            .load(&account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        restarted.unlock_account(&account_id).await.unwrap();
+        let restored = restarted.replica().snapshot(&account_id).unwrap();
+        assert_eq!(restored.operations, vec![operation]);
+        assert_eq!(restored.items, vec![overlay]);
+        assert_remaining_projection(case, &visible(&restarted, &account_id));
+    }
+}
+
+#[tokio::test]
+async fn remaining_item_acceptance_never_infers_an_active_account() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let error = runtime
+        .request(
+            RuntimeRequest::TrashItem {
+                account_id: AccountId::from("another-account"),
+                item_id: "item-existing".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AccountMissing);
+    assert!(runtime
+        .replica()
+        .snapshot(&account_id)
+        .unwrap()
+        .operations
+        .is_empty());
+}
+
+#[tokio::test]
+async fn existing_item_acceptance_refuses_an_exhausted_lock_epoch_without_writing() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    executor
+        .state
+        .set_lock_epoch(&account_id, u64::MAX)
+        .unwrap();
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+
+    let error = runtime
+        .request(
+            RuntimeRequest::TrashItem {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.items.is_empty());
+}
+
+#[tokio::test]
+async fn existing_item_cancellation_has_one_durable_acceptance_boundary() {
+    let pre_executor = RecordingExecutor::seeded_with_item(false);
+    let (pre_runtime, account_id) = unlocked_runtime(pre_executor).await;
+    let pre_cancelled = RequestCancellation::new();
+    pre_cancelled.cancel();
+    let error = pre_runtime
+        .request(
+            RemainingKindCase::Trash.request(account_id.clone()),
+            pre_cancelled,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    assert!(pre_runtime
+        .replica()
+        .snapshot(&account_id)
+        .unwrap()
+        .operations
+        .is_empty());
+
+    let post_executor = RecordingExecutor::seeded_with_item(false);
+    let (post_runtime, account_id) = unlocked_runtime(post_executor.clone()).await;
+    let post_cancelled = RequestCancellation::new();
+    *post_executor.cancel_after_commit.lock().unwrap() = Some(post_cancelled.clone());
+    let error = post_runtime
+        .request(
+            RemainingKindCase::Trash.request(account_id.clone()),
+            post_cancelled,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    let snapshot = post_runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.operations.len(), 1);
+    assert_eq!(snapshot.items.len(), 1);
+}
+
+#[tokio::test]
+async fn a_lock_racing_the_existing_item_commit_fences_without_accepting_work() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    executor.fence_before_commit.store(true, Ordering::SeqCst);
+
+    let error = runtime
+        .request(
+            RemainingKindCase::Trash.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    let snapshot = executor.state.snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.lock_epoch, 1);
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.items.is_empty());
+}
+
+#[tokio::test]
+async fn a_second_pending_operation_for_one_item_is_refused_without_changing_state() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    runtime
+        .request(
+            RemainingKindCase::Favorite.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let before = runtime.replica().snapshot(&account_id).unwrap();
+
+    let error = runtime
+        .request(
+            RemainingKindCase::Trash.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(runtime.replica().snapshot(&account_id).unwrap(), before);
+}
+
+#[tokio::test]
+async fn attachment_bearing_move_refuses_before_writing_and_preserves_authority() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let before_snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    let before_projection = visible(&runtime, &account_id);
+
+    let error = runtime
+        .request(
+            RemainingKindCase::Move.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(
+        runtime.replica().snapshot(&account_id).unwrap(),
+        before_snapshot
+    );
+    assert_eq!(visible(&runtime, &account_id), before_projection);
+    assert_eq!(before_projection.items[0].attachments.len(), 1);
+    assert_eq!(
+        before_projection.items[0].attachments[0].name,
+        ATTACHMENT_NAME
+    );
+    assert!(!executor
+        .recorded()
+        .iter()
+        .any(|request| request.contains("\"type\":\"commit\"")));
+}
+
+#[tokio::test]
+async fn items_projection_includes_deleted_items_and_decrypted_attachment_authority() {
+    let executor = RecordingExecutor::seeded_with_item(true);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let projection = visible(&runtime, &account_id);
+
+    assert_eq!(projection.account_id, account_id);
+    assert_eq!(projection.items.len(), 1);
+    let item = &projection.items[0];
+    assert_eq!(item.item_id, "item-existing");
+    assert_eq!(item.deleted_at.as_deref(), Some("2026-08-24T00:00:00Z"));
+    assert_eq!(item.attachments.len(), 1);
+    let attachment = &item.attachments[0];
+    assert_eq!(attachment.account_id, account_id);
+    assert_eq!(attachment.name, ATTACHMENT_NAME);
+    assert_eq!(attachment.content_type, ATTACHMENT_CONTENT_TYPE);
+    assert_eq!(attachment.file_size, 42);
+    for request in executor.recorded() {
+        assert!(!request.contains(ATTACHMENT_NAME));
+        assert!(!request.contains(ATTACHMENT_CONTENT_TYPE));
+    }
 }

@@ -188,6 +188,33 @@ pub enum RuntimeRequest {
         vault_id: String,
         draft: Arc<LoginItemDraft>,
     },
+    UpdateLoginItem {
+        account_id: String,
+        item_id: String,
+        draft: Arc<LoginItemDraft>,
+    },
+    SetItemFavorite {
+        account_id: String,
+        item_id: String,
+        favorite: bool,
+    },
+    TrashItem {
+        account_id: String,
+        item_id: String,
+    },
+    RestoreItem {
+        account_id: String,
+        item_id: String,
+    },
+    MoveItem {
+        account_id: String,
+        item_id: String,
+        target_vault_id: String,
+    },
+    PermanentlyDeleteItem {
+        account_id: String,
+        item_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -223,6 +250,60 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("vault_id", vault_id)
                 .field("draft", draft)
+                .finish(),
+            Self::UpdateLoginItem {
+                account_id,
+                item_id,
+                draft,
+            } => formatter
+                .debug_struct("UpdateLoginItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("draft", draft)
+                .finish(),
+            Self::SetItemFavorite {
+                account_id,
+                item_id,
+                favorite,
+            } => formatter
+                .debug_struct("SetItemFavorite")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("favorite", favorite)
+                .finish(),
+            Self::TrashItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("TrashItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::RestoreItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("RestoreItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::MoveItem {
+                account_id,
+                item_id,
+                target_vault_id,
+            } => formatter
+                .debug_struct("MoveItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("target_vault_id", target_vault_id)
+                .finish(),
+            Self::PermanentlyDeleteItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("PermanentlyDeleteItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
                 .finish(),
         }
     }
@@ -273,6 +354,8 @@ pub struct LoginItemProjection {
     custom_fields: Vec<Arc<LoginCustomField>>,
     tags: Vec<String>,
     favorite: bool,
+    deleted_at: Option<String>,
+    attachments: Vec<Arc<AttachmentProjection>>,
     created_at: String,
     updated_at: String,
     status: ItemProjectionStatus,
@@ -345,6 +428,14 @@ impl LoginItemProjection {
         self.favorite
     }
 
+    pub fn deleted_at(&self) -> Option<String> {
+        self.deleted_at.clone()
+    }
+
+    pub fn attachments(&self) -> Vec<Arc<AttachmentProjection>> {
+        self.attachments.clone()
+    }
+
     pub fn created_at(&self) -> String {
         self.created_at.clone()
     }
@@ -355,6 +446,65 @@ impl LoginItemProjection {
 
     pub fn status(&self) -> ItemProjectionStatus {
         self.status
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct AttachmentProjection {
+    account_id: String,
+    attachment_id: String,
+    item_id: String,
+    vault_id: String,
+    storage_key: String,
+    name: String,
+    content_type: String,
+    file_size: i32,
+    uploaded_by: String,
+    created_at: String,
+}
+
+impl fmt::Debug for AttachmentProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AttachmentProjection")
+            .field("account_id", &self.account_id)
+            .field("attachment_id", &self.attachment_id)
+            .field("plaintext", &"[redacted]")
+            .finish()
+    }
+}
+
+#[uniffi::export]
+impl AttachmentProjection {
+    pub fn account_id(&self) -> String {
+        self.account_id.clone()
+    }
+    pub fn attachment_id(&self) -> String {
+        self.attachment_id.clone()
+    }
+    pub fn item_id(&self) -> String {
+        self.item_id.clone()
+    }
+    pub fn vault_id(&self) -> String {
+        self.vault_id.clone()
+    }
+    pub fn storage_key(&self) -> String {
+        self.storage_key.clone()
+    }
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+    pub fn content_type(&self) -> String {
+        self.content_type.clone()
+    }
+    pub fn file_size(&self) -> i32 {
+        self.file_size
+    }
+    pub fn uploaded_by(&self) -> String {
+        self.uploaded_by.clone()
+    }
+    pub fn created_at(&self) -> String {
+        self.created_at.clone()
     }
 }
 
@@ -595,6 +745,54 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 vault_id,
                 draft: draft.to_core(),
             },
+            RuntimeRequest::UpdateLoginItem {
+                account_id,
+                item_id,
+                draft,
+            } => Self::UpdateLoginItem {
+                account_id: account_id.into(),
+                item_id,
+                draft: draft.to_core(),
+            },
+            RuntimeRequest::SetItemFavorite {
+                account_id,
+                item_id,
+                favorite,
+            } => Self::SetItemFavorite {
+                account_id: account_id.into(),
+                item_id,
+                favorite,
+            },
+            RuntimeRequest::TrashItem {
+                account_id,
+                item_id,
+            } => Self::TrashItem {
+                account_id: account_id.into(),
+                item_id,
+            },
+            RuntimeRequest::RestoreItem {
+                account_id,
+                item_id,
+            } => Self::RestoreItem {
+                account_id: account_id.into(),
+                item_id,
+            },
+            RuntimeRequest::MoveItem {
+                account_id,
+                item_id,
+                target_vault_id,
+            } => Self::MoveItem {
+                account_id: account_id.into(),
+                item_id,
+                target_vault_id,
+            },
+            RuntimeRequest::PermanentlyDeleteItem {
+                account_id,
+                item_id,
+            } => Self::PermanentlyDeleteItem {
+                account_id: account_id.into(),
+                item_id,
+            },
         }
     }
 }
@@ -699,6 +897,8 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
             custom_fields,
             tags,
             favorite,
+            deleted_at,
+            attachments,
             created_at,
             updated_at,
             status,
@@ -720,9 +920,43 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
                 .collect(),
             tags,
             favorite,
+            deleted_at,
+            attachments: attachments
+                .into_iter()
+                .map(|attachment| Arc::new(AttachmentProjection::from(attachment)))
+                .collect(),
             created_at,
             updated_at,
             status: status.into(),
+        }
+    }
+}
+
+impl From<core::AttachmentProjection> for AttachmentProjection {
+    fn from(value: core::AttachmentProjection) -> Self {
+        let core::AttachmentProjection {
+            account_id,
+            attachment_id,
+            item_id,
+            vault_id,
+            storage_key,
+            name,
+            content_type,
+            file_size,
+            uploaded_by,
+            created_at,
+        } = value;
+        Self {
+            account_id: account_id.into(),
+            attachment_id,
+            item_id,
+            vault_id,
+            storage_key,
+            name,
+            content_type,
+            file_size,
+            uploaded_by,
+            created_at,
         }
     }
 }
@@ -950,6 +1184,8 @@ mod tests {
                     custom_fields: vec![],
                     tags: vec![],
                     favorite: true,
+                    deleted_at: None,
+                    attachments: vec![],
                     created_at: "2026-08-23T00:00:00Z".into(),
                     updated_at: "2026-08-23T00:00:00Z".into(),
                     status: ItemProjectionStatus::Pending,

@@ -78,6 +78,55 @@
         "reauthenticationRequired"
       ]
     },
+    "AttachmentProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "fileSize": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "storageKey": {
+          "type": "string"
+        },
+        "uploadedBy": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "attachmentId",
+        "itemId",
+        "vaultId",
+        "storageKey",
+        "name",
+        "contentType",
+        "fileSize",
+        "uploadedBy",
+        "createdAt"
+      ]
+    },
     "CustomFieldKind": {
       "type": "string",
       "enum": [
@@ -214,6 +263,12 @@
         "accountId": {
           "type": "string"
         },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttachmentProjection"
+          }
+        },
         "createdAt": {
           "type": "string"
         },
@@ -222,6 +277,12 @@
           "items": {
             "$ref": "#/$defs/LoginCustomField"
           }
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "favorite": {
           "type": "boolean"
@@ -545,6 +606,138 @@
             "accountId",
             "vaultId",
             "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/LoginItemDraft"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "updateLoginItem"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "favorite": {
+              "type": "boolean"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "setItemFavorite"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "favorite"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "trashItem"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "restoreItem"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "targetVaultId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "moveItem"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "targetVaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "permanentlyDeleteItem"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
           ]
         }
       ]

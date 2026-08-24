@@ -665,6 +665,26 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_created_at(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_clientruntime_observe(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_clientruntime_request(
@@ -681,9 +701,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id(
     ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields(
+    ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite(
     ): Int
@@ -742,7 +766,31 @@ internal object UniffiLib {
         uniffiCallbackInterfaceObservationSink.register(this)
 
     }
-    external fun uniffi_bittery_client_bindings_fn_clone_clientruntime(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    external fun uniffi_bittery_client_bindings_fn_clone_attachmentprojection(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_attachmentprojection(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_attachment_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_content_type(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_created_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_size(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Int
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_clone_clientruntime(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_clientruntime(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
@@ -780,9 +828,13 @@ external fun uniffi_bittery_client_bindings_fn_free_loginitemprojection(`handle`
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
@@ -949,6 +1001,36 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id() != 40485) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id() != 38129) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type() != 39025) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_created_at() != 30517) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size() != 62775) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id() != 60577) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name() != 42427) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key() != 4414) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by() != 3091) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id() != 16604) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_clientruntime_observe() != 8781) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -973,10 +1055,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments() != 62974) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at() != 48453) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at() != 51974) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite() != 21525) {
@@ -1267,6 +1355,29 @@ private class JavaLangRefCleanable(
 /**
  * @suppress
  */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterULong: FfiConverter<ULong, Long> {
     override fun lift(value: Long): ULong {
         return value.toULong()
@@ -1364,6 +1475,391 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteBuf = toUtf8(value)
         buf.putInt(byteBuf.limit())
         buf.put(byteBuf)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface AttachmentProjectionInterface {
+
+    fun `accountId`(): kotlin.String
+
+    fun `attachmentId`(): kotlin.String
+
+    fun `contentType`(): kotlin.String
+
+    fun `createdAt`(): kotlin.String
+
+    fun `fileSize`(): kotlin.Int
+
+    fun `itemId`(): kotlin.String
+
+    fun `name`(): kotlin.String
+
+    fun `storageKey`(): kotlin.String
+
+    fun `uploadedBy`(): kotlin.String
+
+    fun `vaultId`(): kotlin.String
+
+    companion object
+}
+
+open class AttachmentProjection: Disposable, AutoCloseable, AttachmentProjectionInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_attachmentprojection(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_attachmentprojection(handle, status)
+        }
+    }
+
+    override fun `accountId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `attachmentId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_attachment_id(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `contentType`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_content_type(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `createdAt`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_created_at(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `fileSize`(): kotlin.Int {
+            return FfiConverterInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_size(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `itemId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `name`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `storageKey`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `uploadedBy`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `vaultId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault_id(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAttachmentProjection: FfiConverter<AttachmentProjection, Long> {
+    override fun lower(value: AttachmentProjection): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): AttachmentProjection {
+        return AttachmentProjection(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): AttachmentProjection {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: AttachmentProjection) = 8UL
+
+    override fun write(value: AttachmentProjection, buf: ByteBuffer) {
+        buf.putLong(lower(value))
     }
 }
 
@@ -2318,9 +2814,13 @@ public interface LoginItemProjectionInterface {
 
     fun `accountId`(): kotlin.String
 
+    fun `attachments`(): List<AttachmentProjection>
+
     fun `createdAt`(): kotlin.String
 
     fun `customFields`(): List<LoginCustomField>
+
+    fun `deletedAt`(): kotlin.String?
 
     fun `favorite`(): kotlin.Boolean
 
@@ -2460,6 +2960,19 @@ open class LoginItemProjection: Disposable, AutoCloseable, LoginItemProjectionIn
     }
 
 
+    override fun `attachments`(): List<AttachmentProjection> {
+            return FfiConverterSequenceTypeAttachmentProjection.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
     override fun `createdAt`(): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
@@ -2478,6 +2991,19 @@ open class LoginItemProjection: Disposable, AutoCloseable, LoginItemProjectionIn
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `deletedAt`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at(
         it,
         _status)
 }
@@ -4202,6 +4728,69 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class UpdateLoginItem(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `draft`: uniffi.bittery_client_bindings.LoginItemDraft) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SetItemFavorite(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `favorite`: kotlin.Boolean) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class TrashItem(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RestoreItem(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class MoveItem(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `targetVaultId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class PermanentlyDeleteItem(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
 
 
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
@@ -4249,6 +4838,57 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.UpdateLoginItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`draft`
+    )
+
+            }
+            is RuntimeRequest.SetItemFavorite -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`favorite`
+    )
+
+            }
+            is RuntimeRequest.TrashItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`
+    )
+
+            }
+            is RuntimeRequest.RestoreItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`
+    )
+
+            }
+            is RuntimeRequest.MoveItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`targetVaultId`
+    )
+
+            }
+            is RuntimeRequest.PermanentlyDeleteItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`
+    )
+
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -4287,6 +4927,33 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
+                )
+            6 -> RuntimeRequest.UpdateLoginItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeLoginItemDraft.read(buf),
+                )
+            7 -> RuntimeRequest.SetItemFavorite(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterBoolean.read(buf),
+                )
+            8 -> RuntimeRequest.TrashItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> RuntimeRequest.RestoreItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            10 -> RuntimeRequest.MoveItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            11 -> RuntimeRequest.PermanentlyDeleteItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -4335,6 +5002,57 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterTypeLoginItemDraft.allocationSize(value.`draft`)
             )
         }
+        is RuntimeRequest.UpdateLoginItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterTypeLoginItemDraft.allocationSize(value.`draft`)
+            )
+        }
+        is RuntimeRequest.SetItemFavorite -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterBoolean.allocationSize(value.`favorite`)
+            )
+        }
+        is RuntimeRequest.TrashItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+            )
+        }
+        is RuntimeRequest.RestoreItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+            )
+        }
+        is RuntimeRequest.MoveItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterString.allocationSize(value.`targetVaultId`)
+            )
+        }
+        is RuntimeRequest.PermanentlyDeleteItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+            )
+        }
     }
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
@@ -4369,6 +5087,45 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
+                Unit
+            }
+            is RuntimeRequest.UpdateLoginItem -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
+                Unit
+            }
+            is RuntimeRequest.SetItemFavorite -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterBoolean.write(value.`favorite`, buf)
+                Unit
+            }
+            is RuntimeRequest.TrashItem -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.RestoreItem -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.MoveItem -> {
+                buf.putInt(10)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterString.write(value.`targetVaultId`, buf)
+                Unit
+            }
+            is RuntimeRequest.PermanentlyDeleteItem -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -4693,6 +5450,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeAttachmentProjection: FfiConverterRustBuffer<List<AttachmentProjection>> {
+    override fun read(buf: ByteBuffer): List<AttachmentProjection> {
+        val len = buf.getInt()
+        return List<AttachmentProjection>(len) {
+            FfiConverterTypeAttachmentProjection.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<AttachmentProjection>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeAttachmentProjection.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<AttachmentProjection>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeAttachmentProjection.write(it, buf)
         }
     }
 }

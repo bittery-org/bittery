@@ -95,6 +95,57 @@ pub enum RuntimeRequest {
         vault_id: String,
         draft: LoginItemDraft,
     },
+    UpdateLoginItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        draft: LoginItemDraft,
+    },
+    SetItemFavorite {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        favorite: bool,
+    },
+    TrashItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+    },
+    RestoreItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+    },
+    MoveItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        target_vault_id: String,
+    },
+    PermanentlyDeleteItem {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -131,6 +182,60 @@ impl fmt::Debug for RuntimeRequest {
                 .field("vault_id", vault_id)
                 .field("draft", draft)
                 .finish(),
+            Self::UpdateLoginItem {
+                account_id,
+                item_id,
+                draft,
+            } => formatter
+                .debug_struct("UpdateLoginItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("draft", draft)
+                .finish(),
+            Self::SetItemFavorite {
+                account_id,
+                item_id,
+                favorite,
+            } => formatter
+                .debug_struct("SetItemFavorite")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("favorite", favorite)
+                .finish(),
+            Self::TrashItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("TrashItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::RestoreItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("RestoreItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::MoveItem {
+                account_id,
+                item_id,
+                target_vault_id,
+            } => formatter
+                .debug_struct("MoveItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("target_vault_id", target_vault_id)
+                .finish(),
+            Self::PermanentlyDeleteItem {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("PermanentlyDeleteItem")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
         }
     }
 }
@@ -141,7 +246,13 @@ impl RuntimeRequest {
             Self::SignIn { .. } => None,
             Self::QuickUnlock { account_id, .. } => Some(account_id),
             Self::Lock { account_id } | Self::SignOut { account_id } => Some(account_id),
-            Self::CreateLoginItem { account_id, .. } => Some(account_id),
+            Self::CreateLoginItem { account_id, .. }
+            | Self::UpdateLoginItem { account_id, .. }
+            | Self::SetItemFavorite { account_id, .. }
+            | Self::TrashItem { account_id, .. }
+            | Self::RestoreItem { account_id, .. }
+            | Self::MoveItem { account_id, .. }
+            | Self::PermanentlyDeleteItem { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -458,9 +569,62 @@ pub struct LoginItemProjection {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     pub favorite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentProjection>,
     pub created_at: String,
     pub updated_at: String,
     pub status: ItemProjectionStatus,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
+    pub account_id: AccountId,
+    pub attachment_id: String,
+    pub item_id: String,
+    pub vault_id: String,
+    pub storage_key: String,
+    pub name: String,
+    pub content_type: String,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "plain_i32_schema")
+    )]
+    pub file_size: i32,
+    pub uploaded_by: String,
+    pub created_at: String,
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+fn plain_i32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "minimum": i32::MIN,
+        "maximum": i32::MAX
+    })
+}
+
+impl fmt::Debug for AttachmentProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AttachmentProjection")
+            .field("account_id", &self.account_id)
+            .field("attachment_id", &self.attachment_id)
+            .field("item_id", &self.item_id)
+            .field("vault_id", &self.vault_id)
+            .field("plaintext", &"[redacted]")
+            .finish()
+    }
 }
 
 impl fmt::Debug for LoginItemProjection {

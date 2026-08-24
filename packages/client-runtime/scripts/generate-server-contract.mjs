@@ -20,7 +20,9 @@ const outputPath = path.join(
 export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
 	"CreateItemBody",
+	"FavoriteBody",
 	"ItemResponseDto",
+	"MoveItemBody",
 	"OperationOutcome",
 	"FinishLoginRequest",
 	"FinishLoginResponse",
@@ -30,6 +32,7 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"StartLoginRequest",
 	"SyncChangesResponse",
 	"TravelModeResponse",
+	"UpdateItemBody",
 ]);
 
 // These fields are intentionally unconstrained JSON in the Server contract. Every other schema in

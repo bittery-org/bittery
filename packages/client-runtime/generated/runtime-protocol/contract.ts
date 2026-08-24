@@ -72,6 +72,33 @@ accountId: string
 draft: LoginItemDraft
 type: "createLoginItem"
 vaultId: string
+} | {
+accountId: string
+draft: LoginItemDraft
+itemId: string
+type: "updateLoginItem"
+} | {
+accountId: string
+favorite: boolean
+itemId: string
+type: "setItemFavorite"
+} | {
+accountId: string
+itemId: string
+type: "trashItem"
+} | {
+accountId: string
+itemId: string
+type: "restoreItem"
+} | {
+accountId: string
+itemId: string
+targetVaultId: string
+type: "moveItem"
+} | {
+accountId: string
+itemId: string
+type: "permanentlyDeleteItem"
 })
 
 export interface RuntimeProtocolContract {
@@ -97,8 +124,10 @@ vaults: VaultProjection[]
 }
 export interface LoginItemProjection {
 accountId: string
+attachments?: AttachmentProjection[]
 createdAt: string
 customFields?: LoginCustomField[]
+deletedAt?: (string | null)
 favorite: boolean
 itemId: string
 note?: (string | null)
@@ -111,6 +140,18 @@ updatedAt: string
 url?: (string | null)
 urls?: string[]
 username?: (string | null)
+vaultId: string
+}
+export interface AttachmentProjection {
+accountId: string
+attachmentId: string
+contentType: string
+createdAt: string
+fileSize: number
+itemId: string
+name: string
+storageKey: string
+uploadedBy: string
 vaultId: string
 }
 export interface LoginCustomField {

@@ -1627,13 +1627,25 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_created_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
@@ -1647,7 +1659,7 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
-  readonly uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+  readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
     a: bigint,
     b: number,
   ) => bigint;
@@ -1674,6 +1686,10 @@ export interface InitOutput {
     a: number,
     b: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
+    a: bigint,
+    b: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_logincustomfield: (
     a: bigint,
     b: number,
@@ -1689,6 +1705,55 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
     a: bigint,
     b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_attachment_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_content_type: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_created_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_size: (
+    a: bigint,
+    b: number,
+  ) => number;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault_id: (
+    a: number,
+    b: bigint,
+    c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type: (
     a: number,
@@ -1715,12 +1780,22 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at: (
     a: number,
     b: bigint,
     c: number,
@@ -1832,6 +1907,10 @@ export interface InitOutput {
     d: any,
   ) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
+  readonly uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+    a: bigint,
+    b: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
     a: bigint,
     b: number,

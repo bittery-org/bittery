@@ -885,6 +885,87 @@ impl Runtime {
                 self.accept_create_login_item(account_id, vault_id, draft, cancellation, accepted)
                     .await
             }
+            RuntimeRequest::UpdateLoginItem {
+                account_id,
+                item_id,
+                draft,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::Update(draft),
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::SetItemFavorite {
+                account_id,
+                item_id,
+                favorite,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::SetFavorite(favorite),
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::TrashItem {
+                account_id,
+                item_id,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::Trash,
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::RestoreItem {
+                account_id,
+                item_id,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::Restore,
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::MoveItem {
+                account_id,
+                item_id,
+                target_vault_id,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::Move { target_vault_id },
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::PermanentlyDeleteItem {
+                account_id,
+                item_id,
+            } => {
+                self.accept_existing_item_operation(
+                    account_id,
+                    item_id,
+                    create::ExistingItemIntent::PermanentlyDelete,
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
         }
     }
 
