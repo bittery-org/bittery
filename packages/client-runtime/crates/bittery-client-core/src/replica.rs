@@ -8,6 +8,13 @@ use std::{
 
 mod domain;
 mod persistence_contract;
+#[cfg(not(target_arch = "wasm32"))]
+mod sqlite;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod sqlite_tests;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use sqlite::SqliteReplica;
 
 #[cfg(test)]
 use domain::apply_plan;

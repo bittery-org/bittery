@@ -62,4 +62,7 @@ pub use protocol::{
 pub use replica::persistence_contract_schema;
 #[doc(hidden)]
 pub use replica::SerializedReplicaExecutor;
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use replica::SqliteReplica;
 pub use runtime::{ObservationHandle, Runtime};
