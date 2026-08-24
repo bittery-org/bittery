@@ -38,3 +38,23 @@ Start with a failing cross-adapter history test that cannot run against SQLite a
 in the implementation report. The completed suite proves equivalent visible state for every history
 and failure point across all three adapters. Targeted Rust, IndexedDB, generated-contract, and
 architecture checks pass, followed by `pnpm check:ci` and `pnpm check:ci:rust` from a clean tree.
+
+## Comments
+
+### 2026-08-24 — split into three independently green slices
+
+The missing adapter, the shared history contract, and its browser execution cross different build
+systems and cannot be implemented and verified honestly in one pass. They land sequentially:
+
+- **A, Rust SQLite adapter.** Add the native-only SQLite implementation behind the existing closed
+  persistence contract and compare representative install, load, guarded commit, lock-epoch, replay,
+  and failure behavior with `InMemoryReplica`. This slice changes Rust paths only.
+- **B, Rust-owned history corpus.** Generate and check in an adapter-neutral corpus from Rust logical
+  plans, including expected responses and visible state for the full invariant set. Prove both Rust
+  adapters consume it identically. This slice owns the generator and generated corpus.
+- **C, IndexedDB conformance.** Consume that exact corpus in the TypeScript IndexedDB executor, add
+  failure injection at its transaction boundaries, and compare its responses and visible durable
+  state with the recorded Rust expectations. This slice changes TypeScript adapter/test paths only.
+
+Each slice begins with its own failing targeted test and reports that output. Ticket 31 resolves only
+after C and both full gates pass from a clean tree.
