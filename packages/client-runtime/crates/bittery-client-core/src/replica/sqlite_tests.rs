@@ -2,11 +2,19 @@ use super::{
     persistence_contract::{
         prepare_commit, prepare_install, PreparedReplicaWrite, ReplicaRowKey, ReplicaStore,
     },
-    GuardedCommitPlan, InMemoryReplica, PlanMutation, PlanResult, Replica, ReplicaPersistence,
-    ReplicaPersistenceRequest, ReplicaPersistenceResponse, SqliteReplica,
+    AuthorityItemCategory, AuthorityItemRecord, BeginBootstrapPlan, BootstrapContinuation,
+    BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity,
+    GuardedCommitPlan, InMemoryReplica, ObservedOutcome, OperationOutcomeResult, PlanMutation,
+    PlanResult, PromoteBootstrapPlan, Replica, ReplicaPersistence, ReplicaPersistenceRequest,
+    ReplicaPersistenceResponse, Sha256Fingerprint, SqliteReplica, StageBootstrapPagePlan,
+    StageBootstrapPageResult, SyncCursor,
 };
 use crate::{protocol::Incarnation, AccountId, RuntimeError};
-use std::{path::PathBuf, sync::Arc};
+use async_trait::async_trait;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 struct TestDatabase {
     path: PathBuf,
@@ -215,6 +223,340 @@ async fn sqlite_rolls_back_every_write_when_a_commit_boundary_fails() {
             sqlite.load(&AccountId::from("account-1")).await.unwrap(),
             expected
         );
+    }
+}
+
+struct RecordingPersistence {
+    inner: InMemoryReplica,
+    writes: Mutex<Vec<ReplicaPersistenceRequest>>,
+}
+
+impl RecordingPersistence {
+    fn new() -> Self {
+        Self {
+            inner: InMemoryReplica::default(),
+            writes: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn recorded(&self) -> Vec<ReplicaPersistenceRequest> {
+        self.writes.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl ReplicaPersistence for RecordingPersistence {
+    async fn invoke(
+        &self,
+        request: ReplicaPersistenceRequest,
+    ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+        if !matches!(request, ReplicaPersistenceRequest::Load { .. }) {
+            self.writes.lock().unwrap().push(request.clone());
+        }
+        self.inner.invoke(request).await
+    }
+}
+
+struct FailureScenario {
+    name: &'static str,
+    setup: Vec<ReplicaPersistenceRequest>,
+    request: ReplicaPersistenceRequest,
+    before: Vec<u8>,
+    after: Vec<u8>,
+}
+
+async fn canonical_account_bytes(
+    persistence: &dyn ReplicaPersistence,
+    account_id: &AccountId,
+) -> Vec<u8> {
+    let response = persistence
+        .invoke(ReplicaPersistenceRequest::Load {
+            account_id: account_id.clone(),
+        })
+        .await
+        .unwrap();
+    let ReplicaPersistenceResponse::Loaded { head, mut rows } = response else {
+        panic!("load returned a write response");
+    };
+    rows.sort_by(|left, right| {
+        serde_json::to_vec(left)
+            .unwrap()
+            .cmp(&serde_json::to_vec(right).unwrap())
+    });
+    serde_json::to_vec(&ReplicaPersistenceResponse::Loaded { head, rows }).unwrap()
+}
+
+fn authority_item(account_id: &str, item_id: &str, version: i32) -> AuthorityItemRecord {
+    AuthorityItemRecord {
+        id: item_id.to_owned(),
+        vault_id: "vault-1".to_owned(),
+        category: AuthorityItemCategory::Login,
+        favorite: false,
+        encrypted_data: format!("authoritative-sealed-{item_id}"),
+        encryption_iv: "BBBBBBBBBBBBBBBB".to_owned(),
+        encryption_algorithm: "AES-GCM-AAD-V1".to_owned(),
+        version,
+        encryption_version: 1,
+        encrypted_by_user_id: format!("user-{account_id}"),
+        last_modified_by: format!("user-{account_id}"),
+        created_at: "2026-08-24T00:00:00Z".to_owned(),
+        updated_at: "2026-08-24T00:01:00Z".to_owned(),
+        deleted_at: None,
+        attachments: Vec::new(),
+    }
+}
+
+fn bootstrap_guard(account_id: &str, revision: u64) -> BootstrapGuard {
+    BootstrapGuard {
+        account_id: AccountId::from(account_id),
+        user_id: format!("user-{account_id}"),
+        incarnation: Incarnation::from(format!("incarnation-{account_id}")),
+        expected_replica_revision: revision,
+        expected_lock_epoch: 0,
+    }
+}
+
+async fn ready_recording_replica() -> (Arc<RecordingPersistence>, Replica, AccountId) {
+    let account_id = AccountId::from("account-matrix");
+    let persistence = Arc::new(RecordingPersistence::new());
+    let replica = Replica::new(persistence.clone());
+    install(&replica, account_id.as_str()).await;
+    assert_eq!(
+        replica
+            .begin_bootstrap(BeginBootstrapPlan {
+                guard: bootstrap_guard(account_id.as_str(), 0),
+                generation_id: BootstrapGenerationId("generation-matrix".to_owned()),
+            })
+            .await
+            .unwrap(),
+        PlanResult::Applied {
+            replica_revision: 1
+        }
+    );
+    let watermark = SyncCursor::CapturedValue {
+        id: "cursor-matrix".to_owned(),
+    };
+    assert_eq!(
+        replica
+            .stage_bootstrap_page(StageBootstrapPagePlan {
+                guard: bootstrap_guard(account_id.as_str(), 1),
+                generation_id: BootstrapGenerationId("generation-matrix".to_owned()),
+                page_identity: BootstrapPageIdentity::vaults(0),
+                request_cursor: BootstrapPageCursor::VaultsInitial,
+                raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"vault-page"),
+                pinned_watermark: watermark.clone(),
+                continuation: BootstrapContinuation::Final,
+                vaults: vec![crate::test_fixtures::personal_vault(
+                    "vault-1",
+                    "user-account-matrix",
+                )],
+                items: Vec::new(),
+            })
+            .await
+            .unwrap(),
+        StageBootstrapPageResult::Applied
+    );
+    assert_eq!(
+        replica
+            .stage_bootstrap_page(StageBootstrapPagePlan {
+                guard: bootstrap_guard(account_id.as_str(), 1),
+                generation_id: BootstrapGenerationId("generation-matrix".to_owned()),
+                page_identity: BootstrapPageIdentity::items(0),
+                request_cursor: BootstrapPageCursor::ItemsInitial,
+                raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"item-page"),
+                pinned_watermark: watermark,
+                continuation: BootstrapContinuation::Final,
+                vaults: Vec::new(),
+                items: vec![authority_item(account_id.as_str(), "item-existing", 1)],
+            })
+            .await
+            .unwrap(),
+        StageBootstrapPageResult::Applied
+    );
+    assert_eq!(
+        replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                guard: bootstrap_guard(account_id.as_str(), 1),
+                generation_id: BootstrapGenerationId("generation-matrix".to_owned()),
+            })
+            .await
+            .unwrap(),
+        PlanResult::Applied {
+            replica_revision: 2
+        }
+    );
+    (persistence, replica, account_id)
+}
+
+async fn finish_scenario(
+    name: &'static str,
+    persistence: Arc<RecordingPersistence>,
+    account_id: &AccountId,
+    before: Vec<u8>,
+) -> FailureScenario {
+    let after = canonical_account_bytes(&persistence.inner, account_id).await;
+    let mut requests = persistence.recorded();
+    let request = requests.pop().expect("scenario records its target request");
+    FailureScenario {
+        name,
+        setup: requests,
+        request,
+        before,
+        after,
+    }
+}
+
+async fn failure_scenarios() -> [FailureScenario; 4] {
+    let (persistence, replica, account_id) = ready_recording_replica().await;
+    let before = canonical_account_bytes(&persistence.inner, &account_id).await;
+    replica
+        .install_or_replace(
+            account_id.clone(),
+            "user-account-matrix".to_owned(),
+            Incarnation::from("replacement-account-matrix"),
+        )
+        .await
+        .unwrap();
+    let replacement =
+        finish_scenario("replacement Install", persistence, &account_id, before).await;
+
+    let (persistence, replica, account_id) = ready_recording_replica().await;
+    let before = canonical_account_bytes(&persistence.inner, &account_id).await;
+    assert_eq!(
+        replica
+            .execute(plan(account_id.as_str(), 2, "operation-accepted"))
+            .await
+            .unwrap(),
+        PlanResult::Applied {
+            replica_revision: 3
+        }
+    );
+    let accepted = finish_scenario(
+        "accepted Operation Commit",
+        persistence,
+        &account_id,
+        before,
+    )
+    .await;
+
+    let (persistence, replica, account_id) = ready_recording_replica().await;
+    assert_eq!(
+        replica
+            .execute(plan(account_id.as_str(), 2, "operation-reconciled"))
+            .await
+            .unwrap(),
+        PlanResult::Applied {
+            replica_revision: 3
+        }
+    );
+    let before = canonical_account_bytes(&persistence.inner, &account_id).await;
+    let accepted_operation = operation("operation-reconciled", "item-1");
+    assert_eq!(
+        replica
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                Incarnation::from("incarnation-account-matrix"),
+                3,
+                0,
+                vec![PlanMutation::ReconcileAppliedCreate {
+                    outcome: ObservedOutcome {
+                        operation_id: accepted_operation.operation_id.clone(),
+                        request_fingerprint: accepted_operation.request_fingerprint,
+                        result: OperationOutcomeResult::Applied {
+                            entity_id: accepted_operation.item_id.clone(),
+                            version: 1,
+                        },
+                    },
+                    item: Box::new(authority_item(account_id.as_str(), "item-1", 1)),
+                    cursor: None,
+                }],
+            ))
+            .await
+            .unwrap(),
+        PlanResult::Applied {
+            replica_revision: 4
+        }
+    );
+    let reconciliation = finish_scenario(
+        "authoritative reconciliation Commit",
+        persistence,
+        &account_id,
+        before,
+    )
+    .await;
+
+    let (persistence, replica, account_id) = ready_recording_replica().await;
+    let before = canonical_account_bytes(&persistence.inner, &account_id).await;
+    replica
+        .advance_lock_epoch(
+            &account_id,
+            "user-account-matrix",
+            &Incarnation::from("incarnation-account-matrix"),
+            1,
+        )
+        .await
+        .unwrap();
+    let lock = finish_scenario("Lock", persistence, &account_id, before).await;
+
+    [replacement, accepted, reconciliation, lock]
+}
+
+fn sqlite_write_boundaries(request: &ReplicaPersistenceRequest) -> usize {
+    match request {
+        ReplicaPersistenceRequest::Install { prepared } => 1 + prepared.writes.len(),
+        ReplicaPersistenceRequest::Commit { prepared } => 1 + prepared.writes.len(),
+        ReplicaPersistenceRequest::AdvanceLockEpoch { .. } => 1,
+        ReplicaPersistenceRequest::Load { .. } => panic!("a load has no SQLite write boundary"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_failure_matrix_covers_every_replica_write_boundary() {
+    let scenarios = failure_scenarios().await;
+    for scenario in scenarios {
+        let account_id = AccountId::from("account-matrix");
+        for boundary in 1..=sqlite_write_boundaries(&scenario.request) {
+            let database = TestDatabase::new(&format!(
+                "complete-failure-{}-{boundary}",
+                scenario.name.replace(' ', "-")
+            ));
+            let initial = SqliteReplica::open(&database.path).unwrap();
+            for request in &scenario.setup {
+                initial.invoke(request.clone()).await.unwrap();
+            }
+            assert_eq!(
+                canonical_account_bytes(&initial, &account_id).await,
+                scenario.before,
+                "{} boundary {boundary} did not start from the Domain pre-state",
+                scenario.name
+            );
+            drop(initial);
+
+            let failing = SqliteReplica::open_failing_after(&database.path, boundary).unwrap();
+            let error = failing.invoke(scenario.request.clone()).await.unwrap_err();
+            assert!(error
+                .message
+                .contains("injected SQLite Replica write failure"));
+            drop(failing);
+
+            let reopened = SqliteReplica::open(&database.path).unwrap();
+            assert_eq!(
+                canonical_account_bytes(&reopened, &account_id).await,
+                scenario.before,
+                "{} boundary {boundary} exposed a partial Account",
+                scenario.name
+            );
+            reopened.invoke(scenario.request.clone()).await.unwrap();
+            drop(reopened);
+
+            let completed = SqliteReplica::open(&database.path).unwrap();
+            assert_eq!(
+                canonical_account_bytes(&completed, &account_id).await,
+                scenario.after,
+                "{} boundary {boundary} did not reach the complete Domain post-state",
+                scenario.name
+            );
+        }
     }
 }
 
