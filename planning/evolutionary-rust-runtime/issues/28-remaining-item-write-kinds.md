@@ -171,3 +171,37 @@ Server retains the terminal `attachment_state_conflict` rejection. It is distinc
 `item_version_conflict`: the Item validator may still match while an Attachment changed. Runtime
 reconciles current authority; a later user command may accept a new Move with new immutable bytes.
 An accepted Operation's bytes are never rewritten internally.
+
+### 2026-08-24 — Attachment Move uses durable blob staging
+
+The rewrap-only Move design above is superseded for Attachment payloads because the existing
+Attachment name, content-type, and blob AAD all bind the Vault ID. Moving only authority and the key
+envelope would make the existing ciphertext undecryptable. The maintainer chose full blob
+re-encryption under the target-Vault AAD.
+
+An Attachment-bearing Move is therefore a durable multi-stage Runtime workflow, not an ordinary
+final-request-at-accept Operation. Offline acceptance commits one immutable Move intent, source
+Attachment authority, target Vault, and stable per-Attachment staging identities. When transport is
+available, Rust downloads each encrypted blob, decrypts and re-encrypts blob and metadata for the
+target scope, uploads to deterministic Operation-scoped staging locations, and durably checkpoints
+progress. Retries may renew transport credentials but never change the intent or staged object
+identity. Only after every Attachment is staged does Runtime freeze and dispatch the final mutation
+request.
+
+The Server final transaction verifies the accepted Item and complete Attachment set/envelope
+versions, then atomically switches the Item, Attachment metadata, Vault scopes, and storage keys with
+the retained outcome and Sync/audit records. `attachment_state_conflict` remains the terminal stale
+set/version result. Durable cleanup work deletes old blobs after an applied commit and deletes
+staged blobs after rejection; deterministic object identities make crash/retry cleanup idempotent.
+
+This is an explicit exception to final HTTP bytes existing at initial acceptance: the immutable
+durable fact at that boundary is the closed Move intent, while the final request becomes immutable
+after durable preparation. Until the dedicated staging slice lands, the first acceptance slice must
+reject an Attachment-bearing Move before any durable write and prove that Item and Attachment
+authority remain unchanged; it must not simulate success by hiding or retaining source-scoped
+Attachments under moved Item authority.
+
+The delivery order gains a dedicated **Attachment Move staging** slice immediately after the current
+durable-acceptance slice. The later general dispatch slice only receives already-prepared immutable
+requests. All subsequent slice numbers shift by one; the Attachment Runtime service still owns
+ordinary upload/download/rename/delete behavior separately.
