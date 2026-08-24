@@ -27,7 +27,7 @@
 		"@bittery/ui": "workspace:*",
 		"@tanstack/react-form": "^1.33.4",
 		"@tanstack/react-query": "^5.101.4",
-		"@tanstack/react-router": "^1.170.24",
+		"@tanstack/react-router": "^1.170.31",
 		"jsqr": "^1.4.0",
 		"react": "catalog:",
 		"react-dom": "catalog:",
