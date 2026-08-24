@@ -75,12 +75,11 @@ function makeAccountInfo(
 		serverUrl,
 		apiClient: {
 			sync: {
-				bootstrap: mock(async () => ({
-					data: {
-						items: [],
-						hasMore: false,
-						nextCursor: null,
-					},
+				bootstrap: mock(async ({ phase }) => ({
+					data:
+						phase === "vaults"
+							? { phase, vaults: [], hasMore: false, nextCursor: null }
+							: { phase, items: [], hasMore: false, nextCursor: null },
 				})),
 			},
 			vaults: { list: mock(async () => ({ data: [] })) },
@@ -214,15 +213,18 @@ describe("VaultRepository", () => {
 			"a@example.com",
 			"https://a.example.com",
 		);
-		account.apiClient.sync.bootstrap = mock(async () => {
-			bootstrapCalls += 1;
-			if (bootstrapCalls === 1) {
+		account.apiClient.sync.bootstrap = mock(async ({ phase }) => {
+			if (phase === "vaults") bootstrapCalls += 1;
+			if (phase === "vaults" && bootstrapCalls === 1) {
 				await new Promise<void>((resolve) => {
 					releaseFirst = resolve;
 				});
 			}
 			return {
-				data: { items: [], hasMore: false, nextCursor: null },
+				data:
+					phase === "vaults"
+						? { phase, vaults: [], hasMore: false, nextCursor: null }
+						: { phase, items: [], hasMore: false, nextCursor: null },
 			};
 		}) as never;
 		const repository = new VaultRepository(
@@ -288,10 +290,13 @@ describe("VaultRepository", () => {
 			"a@example.com",
 			"https://a.example.com",
 		);
-		account.apiClient.sync.bootstrap = mock(async () => {
-			order.push("remote");
+		account.apiClient.sync.bootstrap = mock(async ({ phase }) => {
+			if (phase === "vaults") order.push("remote");
 			return {
-				data: { items: [], hasMore: false, nextCursor: null },
+				data:
+					phase === "vaults"
+						? { phase, vaults: [], hasMore: false, nextCursor: null }
+						: { phase, items: [], hasMore: false, nextCursor: null },
 			};
 		}) as never;
 		const repository = new VaultRepository(
@@ -325,10 +330,13 @@ describe("VaultRepository", () => {
 			"https://a.example.com",
 		);
 		let attempts = 0;
-		account.apiClient.vaults.list = mock(async () => {
-			attempts += 1;
-			if (attempts === 1) throw new Error("temporary network failure");
-			return { data: [] };
+		account.apiClient.sync.bootstrap = mock(async ({ phase }) => {
+			if (phase === "vaults") {
+				attempts += 1;
+				if (attempts === 1) throw new Error("temporary network failure");
+				return { data: { phase, vaults: [], hasMore: false } };
+			}
+			return { data: { phase, items: [], hasMore: false } };
 		}) as never;
 		const repository = new VaultRepository(
 			crypto,
@@ -556,13 +564,23 @@ describe("VaultRepository", () => {
 				"https://cold.example.com/",
 				travelMode,
 			);
-			account.apiClient.sync.bootstrap = mock(async () => ({
-				data: {
-					items: [],
-					hasMore: false,
-					nextCursor: null,
-					syncCursor: { id: "evt_bootstrap" },
-				},
+			account.apiClient.sync.bootstrap = mock(async ({ phase }) => ({
+				data:
+					phase === "vaults"
+						? {
+								phase,
+								vaults: [],
+								hasMore: false,
+								nextCursor: null,
+								syncCursor: { id: "evt_bootstrap" },
+							}
+						: {
+								phase,
+								items: [],
+								hasMore: false,
+								nextCursor: null,
+								syncCursor: { id: "evt_bootstrap" },
+							},
 			})) as never;
 
 			const [, baseline] = await Promise.all([
@@ -570,7 +588,7 @@ describe("VaultRepository", () => {
 				repository.initializeSyncBaseline([account], account.accountId),
 			]);
 
-			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(1);
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(2);
 			expect(baseline).toEqual({ id: "evt_bootstrap" });
 			expect(
 				(await itemCache.getItemCacheMetadata(account.accountId))?.syncBaseline,
@@ -596,13 +614,23 @@ describe("VaultRepository", () => {
 				makeTravelModeClient(),
 			);
 			let bootstrapCursor = "evt_bootstrap";
-			account.apiClient.sync.bootstrap = mock(async () => ({
-				data: {
-					items: [],
-					hasMore: false,
-					nextCursor: null,
-					syncCursor: { id: bootstrapCursor },
-				},
+			account.apiClient.sync.bootstrap = mock(async ({ phase }) => ({
+				data:
+					phase === "vaults"
+						? {
+								phase,
+								vaults: [],
+								hasMore: false,
+								nextCursor: null,
+								syncCursor: { id: bootstrapCursor },
+							}
+						: {
+								phase,
+								items: [],
+								hasMore: false,
+								nextCursor: null,
+								syncCursor: { id: bootstrapCursor },
+							},
 			})) as never;
 
 			expect(
@@ -613,7 +641,7 @@ describe("VaultRepository", () => {
 					id: "evt_later",
 				}),
 			).toEqual({ id: "evt_later" });
-			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(1);
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(2);
 
 			await itemCache.clearItemCache(account.accountId);
 			bootstrapCursor = "evt_after_fresh_login";
@@ -622,7 +650,7 @@ describe("VaultRepository", () => {
 					id: "evt_later",
 				}),
 			).toEqual({ id: "evt_after_fresh_login" });
-			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(2);
+			expect(account.apiClient.sync.bootstrap).toHaveBeenCalledTimes(4);
 		});
 
 		it("does not initialize a cursor before a locked account commits bootstrap", async () => {

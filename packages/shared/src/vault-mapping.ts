@@ -1,6 +1,6 @@
 import type {
 	AuthVaultKey,
-	SyncBootstrapItem,
+	SyncBootstrapPage,
 	Vault,
 	VaultDetails,
 	VaultRole,
@@ -102,8 +102,12 @@ export function toAuthVaultKeyEntry(
 // The vault-list entry and the auth vault key are no longer restated — the shapes above
 // derive from them — so only the endpoints that carry a vault *without* being one need a
 // guard: drift there fails type checks rather than silently corrupting a cache write.
+type BootstrapVaultSummary = Extract<
+	SyncBootstrapPage,
+	{ phase: "vaults" }
+>["vaults"][number];
 const _bootstrapSummaryMatchesServer = (
-	summary: NonNullable<SyncBootstrapItem["vault"]>,
+	summary: BootstrapVaultSummary,
 ): ServerVaultListEntry => summary;
 const _detailsMatchServer = (details: VaultDetails): ServerVaultSummary =>
 	details;

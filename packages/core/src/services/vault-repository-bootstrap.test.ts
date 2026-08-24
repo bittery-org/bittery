@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type {
+	SyncBootstrapPage,
+	SyncBootstrapRequest,
+} from "@bittery/api-contract";
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import {
@@ -84,55 +88,59 @@ async function createLayers(): Promise<{
 
 /**
  * A bootstrap client shaped exactly like the server's camelCased responses:
- * both `sync.bootstrap` and `vaults.list` carry `vaultType`, never `type`.
+ * the standalone Vault phase carries `vaultType`, never `type`.
  */
 function createClient(): BootstrapItemsClient {
+	const vault = {
+		id: "vault_1",
+		name: "Team Vault",
+		vaultType: "team" as const,
+		icon: "lock",
+		imageUrl: null,
+		encryptedVaultKey: "ZW5jcnlwdGVk",
+		role: "owner" as const,
+	};
+	const item = serverEncryptedItem({
+		id: "item_1",
+		vaultId: "vault_1",
+		encryptedData: "ZGF0YQ==",
+		encryptionIv: "aXY=",
+		encryptionAlgorithm: "AES-GCM",
+		lastModifiedBy: USER_ID,
+		encryptedByUserId: USER_ID,
+		createdAt: "2026-08-01T00:00:00.000Z",
+		updatedAt: "2026-08-01T00:00:00.000Z",
+	});
 	return {
 		sync: {
-			bootstrap: mock(async () => ({
-				data: {
-					items: [
-						{
-							...serverEncryptedItem({
-								id: "item_1",
-								vaultId: "vault_1",
-								encryptedData: "ZGF0YQ==",
-								encryptionIv: "aXY=",
-								encryptionAlgorithm: "AES-GCM",
-								lastModifiedBy: USER_ID,
-								encryptedByUserId: USER_ID,
-								createdAt: "2026-08-01T00:00:00.000Z",
-								updatedAt: "2026-08-01T00:00:00.000Z",
-							}),
-							vault: {
-								id: "vault_1",
-								name: "Team Vault",
-								vaultType: "team" as const,
-								icon: "lock",
-								imageUrl: null,
+			bootstrap: mock(async (input: SyncBootstrapRequest) => ({
+				data:
+					input.phase === "vaults"
+						? { phase: input.phase, vaults: [vault], hasMore: false }
+						: {
+								phase: input.phase,
+								items: [{ ...item, attachments: item.attachments ?? [] }],
+								hasMore: false,
 							},
-						},
-					],
-					hasMore: false,
-				},
-			})),
-		},
-		vaults: {
-			list: mock(async () => ({
-				data: [
-					{
-						id: "vault_1",
-						name: "Team Vault",
-						vaultType: "team" as const,
-						icon: "lock",
-						imageUrl: null,
-						encryptedVaultKey: "ZW5jcnlwdGVk",
-						role: "owner" as const,
-					},
-				],
 			})),
 		},
 	};
+}
+
+async function firstBootstrapItem(client: BootstrapItemsClient) {
+	const { data } = await client.sync.bootstrap({ phase: "items", limit: 500 });
+	if (data.phase !== "items" || !data.items[0]) {
+		throw new Error("Missing bootstrap fixture Item");
+	}
+	return data.items[0];
+}
+
+async function firstBootstrapVault(client: BootstrapItemsClient) {
+	const { data } = await client.sync.bootstrap({ phase: "vaults", limit: 500 });
+	if (data.phase !== "vaults" || !data.vaults[0]) {
+		throw new Error("Missing bootstrap fixture Vault");
+	}
+	return data.vaults[0];
 }
 
 async function setup() {
@@ -197,6 +205,139 @@ describe("VaultRepository.hydrateFromServer", () => {
 		resetTravelModeEnforcerForTests();
 	});
 
+	it("consumes paginated Vault authority before paginated Items with one pinned watermark", async () => {
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("server_item", crypto, vaultCrypto);
+		const encryptedVaultKey = (await storage.getVaultKeys(ACCOUNT_ID))?.[0]
+			?.encryptedVaultKey;
+		if (!encryptedVaultKey) throw new Error("Missing test Vault key");
+		const masterUnlockKey = await storage.getMasterUnlockKey(ACCOUNT_ID);
+		if (!masterUnlockKey) throw new Error("Missing test master unlock key");
+		const emptyVaultKey = await crypto.importKey(
+			new TextEncoder().encode("empty-vault-key"),
+		);
+		const emptyEncryptedVaultKey = await vaultCrypto.wrapVaultKeyForOwner({
+			vaultKey: emptyVaultKey,
+			masterUnlockKey,
+			vaultId: "vault_empty",
+			userId: USER_ID,
+			keyVersion: 1,
+		});
+		await crypto.destroyKey(emptyVaultKey);
+		const requests: SyncBootstrapRequest[] = [];
+		const pages: SyncBootstrapPage[] = [
+			{
+				phase: "vaults",
+				vaults: [
+					{
+						id: "vault_empty",
+						name: "Empty Personal Vault",
+						vaultType: "personal",
+						icon: null,
+						imageUrl: null,
+						encryptedVaultKey: emptyEncryptedVaultKey,
+						role: "owner",
+					},
+				],
+				hasMore: true,
+				nextCursor: "vault-page-2",
+				syncCursor: { id: "evt_pinned" },
+			},
+			{
+				phase: "vaults",
+				vaults: [
+					{
+						id: "vault_1",
+						name: "Team Vault",
+						vaultType: "team",
+						icon: "lock",
+						imageUrl: null,
+						encryptedVaultKey,
+						role: "owner",
+					},
+				],
+				hasMore: false,
+				syncCursor: { id: "evt_pinned" },
+			},
+			{
+				phase: "items",
+				items: [{ ...item, attachments: item.attachments ?? [] }],
+				hasMore: true,
+				nextCursor: "item-page-2",
+				syncCursor: { id: "evt_pinned" },
+			},
+			{
+				phase: "items",
+				items: [],
+				hasMore: false,
+				syncCursor: { id: "evt_pinned" },
+			},
+		];
+		const client: BootstrapItemsClient = {
+			sync: {
+				bootstrap: mock(async (input: SyncBootstrapRequest) => {
+					requests.push(input);
+					const page = pages[requests.length - 1];
+					if (!page) throw new Error("Unexpected Bootstrap request");
+					return { data: page };
+				}),
+			},
+		};
+
+		const baseline = await repo.hydrateFromServer(client);
+
+		expect(requests).toEqual([
+			{
+				phase: "vaults",
+				cursor: undefined,
+				limit: 500,
+				syncCursor: undefined,
+				syncCursorCaptured: false,
+			},
+			{
+				phase: "vaults",
+				cursor: "vault-page-2",
+				limit: 500,
+				syncCursor: "evt_pinned",
+				syncCursorCaptured: true,
+			},
+			{
+				phase: "items",
+				cursor: undefined,
+				limit: 500,
+				syncCursor: "evt_pinned",
+				syncCursorCaptured: true,
+			},
+			{
+				phase: "items",
+				cursor: "item-page-2",
+				limit: 500,
+				syncCursor: "evt_pinned",
+				syncCursorCaptured: true,
+			},
+		]);
+		expect(baseline).toEqual({ id: "evt_pinned" });
+		expect(repo.getVaultById("vault_empty")).toMatchObject({
+			id: "vault_empty",
+			name: "Empty Personal Vault",
+			type: "personal",
+		});
+		expect(
+			repo.getVaultKeys().find(({ vaultId }) => vaultId === "vault_empty"),
+		).toMatchObject({
+			encryptedVaultKey: emptyEncryptedVaultKey,
+			role: "owner",
+		});
+		expect(repo.getById("server_item")?.vault).toMatchObject({
+			id: "vault_1",
+			name: "Team Vault",
+			type: "team",
+		});
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["server_item"]);
+	});
+
 	it("builds locally hydrated items with their cached Vault metadata", async () => {
 		const { repo, itemCache, crypto, vaultCrypto } = await setup();
 		const item = await cachedItem("local_item", crypto, vaultCrypto);
@@ -226,26 +367,36 @@ describe("VaultRepository.hydrateFromServer", () => {
 	});
 
 	it("builds server-hydrated items with promoted Vault metadata", async () => {
-		const { repo, crypto, vaultCrypto } = await setup();
+		const { repo, storage, crypto, vaultCrypto } = await setup();
 		const item = await cachedItem("server_item", crypto, vaultCrypto);
+		const encryptedVaultKey = (await storage.getVaultKeys(ACCOUNT_ID))?.[0]
+			?.encryptedVaultKey;
+		if (!encryptedVaultKey) throw new Error("Missing test Vault key");
 		const client: BootstrapItemsClient = {
 			sync: {
-				bootstrap: mock(async () => ({
-					data: {
-						items: [
-							{
-								...item,
-								vault: {
-									id: "vault_1",
-									name: "Promoted Team Vault",
-									vaultType: "team" as const,
-									icon: "lock",
-									imageUrl: null,
+				bootstrap: mock(async ({ phase }) => ({
+					data:
+						phase === "vaults"
+							? {
+									phase,
+									vaults: [
+										{
+											id: "vault_1",
+											name: "Promoted Team Vault",
+											vaultType: "team" as const,
+											icon: "lock",
+											imageUrl: null,
+											encryptedVaultKey,
+											role: "owner" as const,
+										},
+									],
+									hasMore: false,
+								}
+							: {
+									phase,
+									items: [{ ...item, attachments: item.attachments ?? [] }],
+									hasMore: false,
 								},
-							},
-						],
-						hasMore: false,
-					},
 				})),
 			},
 		};
@@ -278,11 +429,10 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(keys[0]?.role).toBe("owner");
 	});
 
-	it("fails an authoritative bootstrap when refreshed Vault keys are unavailable", async () => {
+	it("fails an authoritative bootstrap when the Vault phase is unavailable", async () => {
 		const { repo } = await setup();
 		const client = createClient();
-		if (!client.vaults) throw new Error("Missing Vault client fixture.");
-		client.vaults.list = mock(async () => {
+		client.sync.bootstrap = mock(async () => {
 			throw new Error("network unavailable");
 		});
 
@@ -317,10 +467,10 @@ describe("VaultRepository.hydrateFromServer", () => {
 	it("pins the first bootstrap sync cursor through promotion", async () => {
 		const { repo, itemCache } = await setup();
 		const client = createClient();
-		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
-			.items[0];
-		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		const firstItem = await firstBootstrapItem(client);
+		const firstVault = await firstBootstrapVault(client);
 		const requests: Array<{
+			phase?: "vaults" | "items";
 			cursor?: string;
 			limit?: number;
 			syncCursor?: string;
@@ -328,14 +478,26 @@ describe("VaultRepository.hydrateFromServer", () => {
 		}> = [];
 		client.sync.bootstrap = mock(async (input: any) => {
 			requests.push(input);
+			if (input.phase === "vaults") {
+				return {
+					data: {
+						phase: "vaults",
+						vaults: [firstVault],
+						hasMore: false,
+						syncCursor: { id: "evt_bootstrap" },
+					},
+				} as any;
+			}
 			return {
 				data: input.cursor
 					? {
+							phase: "items",
 							items: [],
 							hasMore: false,
 							syncCursor: { id: "evt_bootstrap" },
 						}
 					: {
+							phase: "items",
 							items: [firstItem],
 							hasMore: true,
 							nextCursor: "page-2",
@@ -348,12 +510,21 @@ describe("VaultRepository.hydrateFromServer", () => {
 
 		expect(requests).toEqual([
 			{
+				phase: "vaults",
 				cursor: undefined,
 				limit: 500,
 				syncCursor: undefined,
 				syncCursorCaptured: false,
 			},
 			{
+				phase: "items",
+				cursor: undefined,
+				limit: 500,
+				syncCursor: "evt_bootstrap",
+				syncCursorCaptured: true,
+			},
+			{
+				phase: "items",
 				cursor: "page-2",
 				limit: 500,
 				syncCursor: "evt_bootstrap",
@@ -372,9 +543,8 @@ describe("VaultRepository.hydrateFromServer", () => {
 	it("pins an explicit empty sync cursor through every bootstrap page", async () => {
 		const { repo, itemCache } = await setup();
 		const client = createClient();
-		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
-			.items[0];
-		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		const firstItem = await firstBootstrapItem(client);
+		const firstVault = await firstBootstrapVault(client);
 		const requests: Array<{
 			cursor?: string;
 			syncCursor?: string;
@@ -382,10 +552,21 @@ describe("VaultRepository.hydrateFromServer", () => {
 		}> = [];
 		client.sync.bootstrap = mock(async (input: any) => {
 			requests.push(input);
+			if (input.phase === "vaults") {
+				return {
+					data: {
+						phase: "vaults",
+						vaults: [firstVault],
+						hasMore: false,
+						syncCursor: null,
+					},
+				} as any;
+			}
 			return {
 				data: input.cursor
-					? { items: [], hasMore: false, syncCursor: null }
+					? { phase: "items", items: [], hasMore: false, syncCursor: null }
 					: {
+							phase: "items",
 							items: [firstItem],
 							hasMore: true,
 							nextCursor: "page-2",
@@ -396,7 +577,8 @@ describe("VaultRepository.hydrateFromServer", () => {
 
 		const baseline = await repo.hydrateFromServer(client);
 
-		expect(requests[1]).toMatchObject({
+		expect(requests[2]).toMatchObject({
+			phase: "items",
 			cursor: "page-2",
 			syncCursor: undefined,
 			syncCursorCaptured: true,
@@ -417,22 +599,23 @@ describe("VaultRepository.hydrateFromServer", () => {
 			ACCOUNT_ID,
 		);
 		const client = createClient();
-		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
-			.items[0];
-		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		const firstItem = await firstBootstrapItem(client);
+		const firstVault = await firstBootstrapVault(client);
 		client.sync.bootstrap = mock(async (input: any) => ({
-			data: input.cursor
-				? {
-						items: [],
-						hasMore: false,
-						syncCursor: { id: "evt_changed" },
-					}
-				: {
-						items: [firstItem],
-						hasMore: true,
-						nextCursor: "page-2",
-						syncCursor: { id: "evt_bootstrap" },
-					},
+			data:
+				input.phase === "vaults"
+					? {
+							phase: "vaults",
+							vaults: [firstVault],
+							hasMore: false,
+							syncCursor: { id: "evt_bootstrap" },
+						}
+					: {
+							phase: "items",
+							items: [firstItem],
+							hasMore: false,
+							syncCursor: { id: "evt_changed" },
+						},
 		})) as BootstrapItemsClient["sync"]["bootstrap"];
 
 		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
@@ -444,6 +627,63 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(
 			(await itemCache.getItemCacheMetadata(ACCOUNT_ID))?.syncBaseline,
 		).toBeUndefined();
+	});
+
+	it("rejects a malformed Vault continuation without replacing the promoted generation", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const previous = await cachedItem("previous", crypto, vaultCrypto);
+		await itemCache.setCachedItems([previous], ACCOUNT_ID);
+		const client: BootstrapItemsClient = {
+			sync: {
+				bootstrap: mock(async ({ phase }) => ({
+					data:
+						phase === "vaults"
+							? {
+									phase,
+									vaults: [],
+									hasMore: true,
+									nextCursor: null,
+								}
+							: { phase, items: [], hasMore: false },
+				})),
+			},
+		};
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"Bootstrap Vault page promised a continuation without a cursor.",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["previous"]);
+	});
+
+	it("rejects a malformed Item continuation without replacing the promoted generation", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const previous = await cachedItem("previous", crypto, vaultCrypto);
+		await itemCache.setCachedItems([previous], ACCOUNT_ID);
+		const vault = await firstBootstrapVault(createClient());
+		const client: BootstrapItemsClient = {
+			sync: {
+				bootstrap: mock(async ({ phase }) => ({
+					data:
+						phase === "vaults"
+							? { phase, vaults: [vault], hasMore: false }
+							: {
+									phase,
+									items: [],
+									hasMore: true,
+									nextCursor: null,
+								},
+				})),
+			},
+		};
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"Bootstrap Item page promised a continuation without a cursor.",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["previous"]);
 	});
 
 	it("keeps hidden vaults out of every promoted bootstrap layer", async () => {
@@ -501,48 +741,42 @@ describe("VaultRepository.hydrateFromServer", () => {
 		);
 
 		const client = createClient();
-		const visibleItem = (await client.sync.bootstrap({ limit: 500 })).data
-			.items[0];
-		if (!visibleItem) throw new Error("Missing visible bootstrap item");
+		const visibleItem = await firstBootstrapItem(client);
+		const visibleVault = await firstBootstrapVault(client);
 		const hiddenItem = {
 			...visibleItem,
 			id: "hidden_item_1",
 			vaultId: "vault_hidden",
-			vault: {
-				...visibleItem.vault,
-				id: "vault_hidden",
-				name: "Hidden Vault",
-				vaultType: "personal" as const,
-			},
 		};
-		client.sync.bootstrap = mock(async ({ cursor }) => ({
+		client.sync.bootstrap = mock(async ({ phase, cursor }) => ({
 			data:
-				cursor === "page-2"
+				phase === "vaults"
 					? {
-							items: [{ ...hiddenItem, id: "hidden_item_2" }],
+							phase,
+							vaults: [
+								visibleVault,
+								{
+									...visibleVault,
+									id: "vault_hidden",
+									name: "Hidden Vault",
+									vaultType: "personal" as const,
+									encryptedVaultKey: "hidden-key",
+								},
+							],
 							hasMore: false,
 						}
-					: {
-							items: [visibleItem, hiddenItem],
-							hasMore: true,
-							nextCursor: "page-2",
-						},
-		}));
-		const visibleVault = (await client.vaults?.list?.())?.data[0];
-		if (!client.vaults || !visibleVault) {
-			throw new Error("Missing visible vault client fixture");
-		}
-		client.vaults.list = mock(async () => ({
-			data: [
-				visibleVault,
-				{
-					...visibleVault,
-					id: "vault_hidden",
-					name: "Hidden Vault",
-					vaultType: "personal" as const,
-					encryptedVaultKey: "hidden-key",
-				},
-			],
+					: cursor === "page-2"
+						? {
+								phase,
+								items: [{ ...hiddenItem, id: "hidden_item_2" }],
+								hasMore: false,
+							}
+						: {
+								phase,
+								items: [visibleItem, hiddenItem],
+								hasMore: true,
+								nextCursor: "page-2",
+							},
 		}));
 
 		await repo.hydrateFromServer(client);
@@ -558,26 +792,51 @@ describe("VaultRepository.hydrateFromServer", () => {
 		).toEqual(["vault_1"]);
 	});
 
-	it.each([0, 1])(
+	it.each([0, 1, 2])(
 		"keeps the previous cache when bootstrap fails at page boundary %i",
 		async (failureAt) => {
-			const { repo, itemCache, crypto, vaultCrypto } = await setup();
+			const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
 			await itemCache.setCachedItems(
 				[await cachedItem("previous", crypto, vaultCrypto)],
 				ACCOUNT_ID,
 			);
+			await itemCache.setCachedVaults(
+				[
+					{
+						id: "vault_1",
+						name: "Previous Team Vault",
+						type: "team",
+						icon: "previous-icon",
+						imageUrl: null,
+						accountId: ACCOUNT_ID,
+					},
+				],
+				ACCOUNT_ID,
+			);
+			const storedVaultKeys = await storage.getVaultKeys(ACCOUNT_ID);
 			const client = createClient();
+			const replacementVault = await firstBootstrapVault(client);
 			let request = 0;
-			client.sync.bootstrap = mock(async () => {
-				if (request++ === failureAt) {
+			client.sync.bootstrap = mock(async ({ phase }) => {
+				const requestIndex = request++;
+				if (requestIndex === failureAt) {
 					throw new Error("network interrupted bootstrap");
 				}
 				return {
-					data: {
-						items: [],
-						hasMore: true,
-						nextCursor: "next-page",
-					},
+					data:
+						phase === "vaults"
+							? {
+									phase,
+									vaults: requestIndex === 0 ? [replacementVault] : [],
+									hasMore: requestIndex === 0,
+									nextCursor: requestIndex === 0 ? "next-vault-page" : null,
+								}
+							: {
+									phase,
+									items: [],
+									hasMore: false,
+									nextCursor: null,
+								},
 				};
 			});
 
@@ -587,6 +846,13 @@ describe("VaultRepository.hydrateFromServer", () => {
 			expect(
 				(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
 			).toEqual(["previous"]);
+			expect(
+				(await itemCache.getCachedVaults(ACCOUNT_ID))?.map(({ id, name }) => ({
+					id,
+					name,
+				})),
+			).toEqual([{ id: "vault_1", name: "Previous Team Vault" }]);
+			expect(await storage.getVaultKeys(ACCOUNT_ID)).toEqual(storedVaultKeys);
 		},
 	);
 
@@ -1379,25 +1645,29 @@ describe("VaultRepository Item sync projections", () => {
 			retryCount: 0,
 		});
 		const client = createClient();
-		client.sync.bootstrap = mock(async () => ({
-			data: { items: [], hasMore: false },
-		}));
 		const storedVaultKey = (await storage.getVaultKeys(ACCOUNT_ID))?.[0];
-		if (!storedVaultKey || !client.vaults) {
+		if (!storedVaultKey) {
 			throw new Error("Missing stored Vault key fixture");
 		}
-		client.vaults.list = mock(async () => ({
-			data: [
-				{
-					id: storedVaultKey.vaultId,
-					name: storedVaultKey.vaultName,
-					vaultType: storedVaultKey.vaultType,
-					icon: storedVaultKey.vaultIcon,
-					imageUrl: storedVaultKey.vaultImageUrl,
-					encryptedVaultKey: storedVaultKey.encryptedVaultKey,
-					role: storedVaultKey.role,
-				},
-			],
+		client.sync.bootstrap = mock(async ({ phase }) => ({
+			data:
+				phase === "vaults"
+					? {
+							phase,
+							vaults: [
+								{
+									id: storedVaultKey.vaultId,
+									name: storedVaultKey.vaultName,
+									vaultType: storedVaultKey.vaultType,
+									icon: storedVaultKey.vaultIcon,
+									imageUrl: storedVaultKey.vaultImageUrl,
+									encryptedVaultKey: storedVaultKey.encryptedVaultKey,
+									role: storedVaultKey.role,
+								},
+							],
+							hasMore: false,
+						}
+					: { phase, items: [], hasMore: false },
 		}));
 
 		await repo.hydrateFromServer(client);
