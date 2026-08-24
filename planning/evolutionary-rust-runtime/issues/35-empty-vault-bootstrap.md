@@ -76,3 +76,21 @@ material on every Item page, and a second independently orchestrated route.
 
 Each slice receives an independent review. Ticket 32 resumes only after B; ticket 35 resolves only
 after the restored browser path and both full gates prove the complete boundary.
+
+### 2026-08-24 — contract propagation adds slice C
+
+The first Web acceptance path became green after B, but the dependent Web typecheck exposed three
+handwritten transitional consumers of the changed in-place Server contract: the Account Vault
+Replica omits the required phase, the Vault repository assumes every response is an Item page, and
+shared Vault mapping still reads the removed Item-embedded summary. These are compile-time evidence
+of the same contract propagation, not permission to restore a compatibility default or a parallel
+protocol.
+
+- **C, transitional TypeScript consumers.** Update the still-compiled non-Runtime Bootstrap callers
+  to request the closed Vault phase then Item phase, carry the pinned watermark across both, and map
+  standalone Vault authority rather than reading `item.vault`. Add behavioral tests for an empty
+  Vault and both-phase pagination. This slice owns only the affected `packages/core`, `packages/sync`,
+  and `packages/shared` paths and must leave Web/dependent typechecks green.
+
+Ticket 32's green E2E diff remains independent and uncommitted until its final review. Ticket 35
+still resolves only after C, that E2E path, and both clean-tree full gates.
