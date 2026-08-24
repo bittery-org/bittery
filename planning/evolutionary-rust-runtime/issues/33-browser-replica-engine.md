@@ -44,3 +44,15 @@ prototype does not answer the Extension question.
 The question was asked in German with the recommendation to retain IndexedDB now and prototype
 SQLite/OPFS later. The maintainer selected that recommendation. The current delivery order and tickets
 28 through 32 remain unchanged; ticket 34 records the later Web-only prototype.
+
+### 2026-08-25 — adversarial recheck and planning follow-up
+
+A fresh review against the delivered adapters and current platform documentation upheld this
+decision. The reported engine objections were not product defects: the closed Rust persistence
+contract remains the deep shared seam, while OPFS multi-tab ownership and MV3 placement remain real
+platform constraints.
+
+The review did find two genuine planning defects. No ticket owned the destructive IndexedDB upgrade
+gate together with versioned native SQLite migrations, and four follow-ups named by the research had
+not been created. Tickets 38 through 42 now own those gaps. They do not reopen this decision or block
+tickets 28 through 30.

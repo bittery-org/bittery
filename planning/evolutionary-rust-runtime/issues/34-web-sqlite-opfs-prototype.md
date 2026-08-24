@@ -20,7 +20,10 @@ the first-slice acceptance path?
   offline restart, additive migration, quota/persistence denial, private browsing, and export/import.
 - Measure checked-in artifact size, startup time, memory, and build/toolchain complexity for both
   shapes.
-- Test Chromium, Firefox, and WebKit coverage. Audit the COOP/COEP effect on auth, share links,
+- Test Chromium and Firefox plus real supported Safari/macOS and Safari/iOS versions on devices or
+  representative hosted devices; a generic WebKit runner is not acceptance evidence for Safari's
+  OPFS and sub-worker behavior. If device coverage is unavailable, record Safari/iOS as unproved
+  rather than treating WebKit as a substitute. Audit the COOP/COEP effect on auth, share links,
   cross-origin assets, iframes, development, self-hosting, and production deployment.
 - Run ticket 31's exact history corpus and ticket 32's browser acceptance scenario against the
   candidate. Do not change either test's semantics to accommodate SQLite.

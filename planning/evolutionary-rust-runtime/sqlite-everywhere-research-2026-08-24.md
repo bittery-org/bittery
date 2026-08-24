@@ -319,10 +319,10 @@ messages remain explicit Account-scoped protocol values. The service worker/even
 not a second Runtime or writer. This is feasible, but it is more machinery than an IndexedDB executor
 inside the existing background owner and must earn its complexity with measured benefits.
 
-## No-go and fallback boundaries
+## No-go and deployment-choice boundaries
 
-SQLite/OPFS must fall back to the IndexedDB executor—or the affected platform must be declared
-unsupported—when any of these holds:
+SQLite/OPFS must remain unselected for that product/deployment—or the affected platform must be
+declared unsupported—when any of these holds:
 
 - no dedicated Worker `FileSystemSyncAccessHandle` support;
 - private/guest browsing makes OPFS unavailable or ephemeral and the product has not explicitly
@@ -342,7 +342,9 @@ unsupported—when any of these holds:
 Never choose a VFS dynamically for an existing database and quietly create an empty database under a
 different VFS. The official `opfs` and SAH-pool VFSes use different underlying files even for the same
 client filename. Capability loss must be a loud storage-unavailable state with an explicit migration
-or fallback database.
+or an explicit product-level choice of database. IndexedDB is the production fallback in the sense
+that it remains the proven deployment choice, not a runtime failover after an OPFS Replica has been
+created.
 
 ## Ticket and plan implications
 
@@ -359,29 +361,35 @@ No current delivery ticket needs to be rewritten for SQLite everywhere.
 - **Ticket 32:** keep the first-slice end-to-end acceptance on IndexedDB. A Web SQLite prototype must
   not erase the known-good acceptance baseline.
 
-After the current acceptance slice, add these decision/prototype tickets in dependency order:
+After the current acceptance slice, the following decision/prototype tickets are recorded in
+dependency order:
 
-1. **Web SQLite/OPFS feasibility prototype.** Compare official SQLite JS/WASM and Rust
+1. **[Web SQLite/OPFS feasibility prototype](issues/34-web-sqlite-opfs-prototype.md).** Compare official SQLite JS/WASM and Rust
    `rusqlite`/`sqlite-wasm-rs` in the existing combined Worker. Record bundle/startup size and run
    two-tab read/write contention, `SQLITE_BUSY` recovery, crash-at-each-write, offline restart,
    migration, quota, persistent-storage denial, private mode, Safari/iOS, Firefox, Chrome, and
    export/import tests. Delete the spike code after recording the verdict.
-2. **Web deployment decision (German maintainer decision).** Recommend retaining IndexedDB unless
+2. **[Web deployment decision](issues/39-web-sqlite-deployment-decision.md) (German maintainer decision).** Recommend retaining IndexedDB unless
    the prototype proves a supported multi-tab VFS and the maintainer explicitly accepts the minimum
    browser versions plus COOP/COEP effects. Record whether Web may ever reject a second tab.
-3. **Web SQLite implementation, conditional.** Swap only the executor behind the unchanged closed
+3. **[Web SQLite implementation](issues/40-conditional-web-sqlite-implementation.md), conditional.** Swap only the executor behind the unchanged closed
    contract. Run the exact ticket-31 corpus against IndexedDB and SQLite during rollout; remove
    IndexedDB only after a separate release/rollback decision.
-4. **Extension Runtime placement decision (German maintainer decision).** Decide Chrome offscreen
+4. **[Extension Runtime placement decision](issues/41-extension-runtime-placement-decision.md) (German maintainer decision).** Decide Chrome offscreen
    document + Worker versus keeping IndexedDB in the MV3 owner, and separately decide the
    Firefox/Safari background-document compositions. Recommend IndexedDB unless all supported browser
    builds prove one restorable Runtime writer.
-5. **Browser backup/corruption recovery.** Specify quarantine, active-Operation preservation,
+5. **[Browser backup/corruption recovery](issues/42-browser-replica-recovery.md).** Specify quarantine, active-Operation preservation,
    authoritative re-Bootstrap, diagnostics, export/import, and the UI-visible storage-unavailable
    state for either browser engine.
 
 The Web prototype and extension decision are separate frontiers. Success in a normal Web page is not
 evidence that SQLite/OPFS is suitable for MV3.
+
+[Replica persistence evolution](issues/38-replica-persistence-evolution.md) separately owns the
+already-recorded release gate: additive IndexedDB upgrades and versioned native SQLite migrations.
+Physical migrations remain engine-specific even though Rust owns the logical evolution and shared
+conformance histories.
 
 ## Bottom line
 

@@ -125,6 +125,12 @@ or rollout order.
   Worker after the current Web acceptance work. Extension placement remains a separate frontier:
   Chrome MV3 needs an offscreen document plus a dedicated Worker, while Firefox/Safari use different
   background ownership models; a successful Web prototype does not decide it.
+- Physical Replica evolution is tracked separately in
+  [ticket 38](issues/38-replica-persistence-evolution.md): logical histories stay shared, while
+  additive IndexedDB upgrades and versioned native SQLite migrations remain engine-specific. The
+  optional browser-SQLite path then proceeds through the Web deployment decision, conditional
+  implementation, Extension placement decision, and recovery work in
+  [tickets 39 through 42](issues/39-web-sqlite-deployment-decision.md).
 - Web host integration, followed by Extension and Desktop host integration.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
