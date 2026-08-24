@@ -1,7 +1,7 @@
 # Empty Vault Bootstrap authority
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 22
 Spec: ../spec.md#bootstrap
 
@@ -62,3 +62,17 @@ Item pages carry Items and no longer need an embedded Vault summary as the autho
 phase obeys the response byte budget, exact replay is phase-and-cursor scoped, and promotion requires
 terminal completion of both phases. This avoids an unbounded all-Vault side list, repeated key
 material on every Item page, and a second independently orchestrated route.
+
+### 2026-08-24 — split into two independently green slices
+
+- **A, Server and generated wire contract.** Add the empty-Vault red Server test, implement bounded
+  phase-tagged Vault-then-Item pages, regenerate OpenAPI, TypeScript API contract, and Rust Server
+  wire types, and leave all Server/generated checks green. This slice owns Server and generated
+  contract paths only.
+- **B, Runtime Bootstrap consumption.** Begin with a Rust test that cannot stage the new Vault phase,
+  then consume phase-tagged pages, bind phase into page identity/fingerprint and resume, require both
+  terminal phases before promotion, and verify standalone empty-Vault authority. This slice owns
+  client-core implementation and tests only.
+
+Each slice receives an independent review. Ticket 32 resumes only after B; ticket 35 resolves only
+after the restored browser path and both full gates prove the complete boundary.
