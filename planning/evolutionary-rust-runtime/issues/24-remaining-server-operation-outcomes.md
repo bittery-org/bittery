@@ -1,7 +1,7 @@
-# Remaining Server Operation outcomes
+# Remaining Server Operation outcomes: Item routes
 
 Type: task
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 17
 Spec: ../spec.md#server-operation-contract
 
@@ -94,3 +94,30 @@ specification. They must not introduce parallel routes or a second protocol vers
 - This ticket is intentionally `needs-info`: the create-Item-only persisted/result/lookup model does
   not determine safe closed results and semantic rejection sets for the eleven remaining call sites.
   Implementation must not infer those product protocol choices.
+
+### 2026-08-24 — frontier resolved, and the ticket narrows to the Item routes
+
+Three decisions close the contract frontier. They govern every kind, including the Rotation routes
+that ticket 29 now carries.
+
+**Lookup returns one union tagged on `kind`.** `GET /api/v1/operations/{operationId}` answers a
+single `OperationOutcome` discriminated by the `kind` field the outcome already carries, not one
+route per kind and not a shared shape with a free JSON payload. Response-loss recovery is precisely
+the caller that does not yet know what happened, so it cannot choose a per-kind route; and the
+specification requires closed types and forbids retaining arbitrary response bytes. A client reads
+`kind`, checks it against its own durable record, and only then reads the result. An unknown `kind`
+is therefore detectable rather than silently misread.
+
+**Rejections share a core and add only what is genuinely new.** `access_denied`, `read_only`, and
+`invalid_ciphertext` are common to every kind and are shared. Each kind adds only its own real
+failures: a stale version on update, a missing Item on delete, restore, move, and permanent delete,
+and a non-writable destination on move. One fact keeps one name, so the interface translates it
+once. A single generic rejection code was rejected: the client could no longer tell whether to
+re-authenticate, reload, or stop, and that distinction is the whole reason semantic outcomes exist.
+
+**Items convert first; Rotation follows in ticket 29.** The six Item routes are what block the Web
+host — update, delete, and favorite currently write where nothing reads. The five Rotation routes are
+multi-stage plans carrying key material and are the harder half. `idempotency_record` therefore
+survives this ticket, used only by Rotation, and ticket 29 removes it. The zero-call-site assertion
+and the migration dropping the table move to ticket 29 with it; this ticket asserts only that no
+Item route reaches `idempotency::execute`.

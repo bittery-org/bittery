@@ -105,9 +105,11 @@ or rollout order.
   The remaining Item write kinds follow in
   [ticket 28](issues/28-remaining-item-write-kinds.md), which ends the Web cutover.
 - The eleven remaining response-cache call sites are inventoried in
-  [ticket 24](issues/24-remaining-server-operation-outcomes.md). Its cross-kind outcome and rejection
-  contract remains a maintainer frontier, so the ticket is `needs-info`; old idempotency cleanup is
-  gated on an executable zero-call-site inventory.
+  [ticket 24](issues/24-remaining-server-operation-outcomes.md), now resolved and narrowed to the six
+  Item routes, and [ticket 29](issues/29-rotation-operation-outcomes.md) for the five Rotation
+  routes. Lookup answers one outcome union tagged on `kind`; rejections share a common core and add
+  only genuinely new per-kind failures. Old idempotency cleanup is gated on an executable
+  zero-call-site inventory in ticket 29.
 - Web host integration, followed by Extension and Desktop host integration.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
