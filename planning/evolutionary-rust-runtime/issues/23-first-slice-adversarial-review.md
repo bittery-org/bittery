@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: 22, 31, 32
+Blocked by: 22, 31, 32, 36, 37
 Spec: ../spec.md#verification
 
 ## Outcome
@@ -55,3 +55,25 @@ the five Rotation call sites already assigned to ticket 29.
 
 Both `pnpm check:ci` and `pnpm check:ci:rust` passed from a clean tree with the documented database
 environment. Ticket 23 stays open until tickets 31 and 32 land and this review is rerun over them.
+
+### 2026-08-24 — blocker rerun filed two remaining proof gaps
+
+The rerun over `704ec422..HEAD` confirmed that tickets 31, 32, and their empty-Vault blocker landed
+without a new ownership, retry, Account-scope, plaintext, or generated-contract defect. The primary
+agent reran the Web reachability audit (11 passing tests), the complete browser scenario, and both
+full gates from a clean tree.
+
+Two Spec-review claims are real blockers and are filed rather than fixed under this review:
+
+- [Ticket 36](36-web-offline-authority-read.md) records the missing behavioral Web proof that a
+  previously bootstrapped authoritative Login Item renders from the encrypted local Replica after
+  Worker restart, online unlock, and subsequent transport disconnection. Ticket 32 proves durable
+  Operation restoration and reconciliation, but its fresh Vault contains no prior authoritative
+  Item and raw IndexedDB inspection is not the specified offline read.
+- [Ticket 37](37-sqlite-complete-failure-matrix.md) records the incomplete SQLite failure matrix.
+  SQLite rollback is proved for the three writes of one accept Commit, while the resolved ticket 31
+  claims injected boundaries for Install, reconciliation Commit, and Lock as well.
+
+A stale Server comment and one JSON-token corpus assertion were non-blocking documentation/test-style
+observations; neither substitutes for behavior or demonstrates a correctness/security discrepancy.
+Ticket 23 remains open until tickets 36 and 37 land and their delta receives a final rerun.
