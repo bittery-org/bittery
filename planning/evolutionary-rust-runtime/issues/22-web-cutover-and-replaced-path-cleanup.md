@@ -46,3 +46,15 @@ must move to Runtime projections in this ticket, not only the Item list.
 The `not.toMatch(/\buseItems\b/)` assertion added alongside the swap greps five hand-picked files, so
 it reports the migration complete while three transitional consumers remain. Replace it with a
 reachability audit over the whole Web entry graph, which this ticket's verification already requires.
+
+### 2026-08-24 — release gate: the Replica schema upgrade is destructive
+
+`packages/client-runtime/src/indexeddb-executor.ts` deletes every object store on any
+`DATABASE_VERSION` bump and rebuilds the schema. Since ticket 21 that also destroys accepted
+Operations and their compact receipts, not just cached authority.
+
+It is tolerable now only because this branch has no users, so a bump costs a developer their own
+pending offline work. It contradicts the standing rule that an accepted Operation stays durable
+until an authoritative semantic outcome, and it deletes the receipts that refuse a completed
+Operation ID a second time. Replace it with an additive migration before release; a destructive
+upgrade must not survive the cutover this ticket performs.

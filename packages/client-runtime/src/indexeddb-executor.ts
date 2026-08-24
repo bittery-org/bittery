@@ -14,6 +14,16 @@ import {
 } from "../generated/persistence/validator.js";
 
 const DATABASE_NAME = "bittery_replica";
+/**
+ * Raising this drops every store and rebuilds the schema, which destroys accepted
+ * Operations and their receipts along with the cached authority.
+ *
+ * That is only acceptable because this branch has no users and no migration window, so a
+ * developer loses at most their own pending offline work. It stops being acceptable the
+ * moment anyone real holds an accepted Operation: the Runtime promises to keep one durable
+ * until an authoritative outcome, and a receipt is what refuses a completed Operation ID a
+ * second time. Ticket 22 gates release on replacing this with an additive migration.
+ */
 const DATABASE_VERSION = 5;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
