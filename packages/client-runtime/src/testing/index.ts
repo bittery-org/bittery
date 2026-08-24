@@ -1,7 +1,4 @@
-/**
- * Test doubles for the host binding. A test that uses them touches no Worker, no WASM, and
- * no IndexedDB, so it runs in milliseconds and fails for one reason only.
- */
+/** Test doubles and package-internal storage fault seams for the host binding. */
 
 import type {
 	ObservationRequest,
@@ -12,6 +9,20 @@ import type {
 } from "../../generated/runtime-protocol/contract";
 import type { RuntimeTransport, Schedule } from "../client";
 import { RuntimeRequestError } from "../client";
+import {
+	ConfigurableIndexedDbReplicaExecutor,
+	type IndexedDbReplicaExecutorTestOptions,
+} from "../indexeddb-executor-internal.ts";
+
+export interface TestIndexedDbReplicaExecutor {
+	invoke(requestJson: string): Promise<string>;
+}
+
+export function createTestIndexedDbReplicaExecutor(
+	options: IndexedDbReplicaExecutorTestOptions,
+): TestIndexedDbReplicaExecutor {
+	return new ConfigurableIndexedDbReplicaExecutor(options);
+}
 
 export type FakeTransportCall =
 	| {

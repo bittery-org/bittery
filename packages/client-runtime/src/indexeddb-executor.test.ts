@@ -296,6 +296,136 @@ describe("IndexedDbReplicaExecutor", () => {
 		});
 	});
 
+	test("returns missing before validating unreachable Commit and lock transitions", async () => {
+		const invalidCommit = prepared([
+			put("operations", "", "opaque", "account-b"),
+		]);
+		invalidCommit.expected.accountId = "missing";
+		invalidCommit.nextHead.accountId = "another-account";
+		invalidCommit.nextHead.replicaRevision = "7";
+		expect(await invoke(commit(invalidCommit))).toEqual({
+			type: "committed",
+			result: { type: "missing" },
+		});
+
+		const validLock = advanceLockEpoch();
+		const invalidLock = {
+			...validLock,
+			prepared: {
+				...validLock.prepared,
+				expected: { ...validLock.prepared.expected, accountId: "missing" },
+				nextHead: {
+					...validLock.prepared.nextHead,
+					accountId: "another-account",
+					lockEpoch: "7",
+				},
+			},
+		};
+		expect(await invoke(invalidLock)).toEqual({
+			type: "lockEpochAdvanced",
+			result: { type: "missing" },
+		});
+	});
+
+	test("returns stale before validating unreachable Install, Commit, and lock transitions", async () => {
+		await invoke(install());
+
+		const staleInstall = install("incarnation-b");
+		const invalidInstall = {
+			...staleInstall,
+			prepared: {
+				...staleInstall.prepared,
+				nextHead: { ...staleInstall.prepared.nextHead, userId: "" },
+				writes: [put("operations", "", "opaque", "account-b")],
+			},
+		};
+		expect(await invoke(invalidInstall)).toEqual({
+			type: "installed",
+			result: { type: "stale" },
+		});
+
+		const invalidCommit = prepared([
+			put("operations", "", "opaque", "account-b"),
+		]);
+		invalidCommit.expected.replicaRevision = "9";
+		invalidCommit.nextHead.userId = "wrong-user";
+		invalidCommit.nextHead.replicaRevision = "12";
+		expect(await invoke(commit(invalidCommit))).toEqual({
+			type: "committed",
+			result: { type: "stale", actualRevision: "0" },
+		});
+
+		const staleLock = advanceLockEpoch("9");
+		const invalidLock = {
+			...staleLock,
+			prepared: {
+				...staleLock.prepared,
+				nextHead: {
+					...staleLock.prepared.nextHead,
+					userId: "wrong-user",
+					lockEpoch: "7",
+				},
+			},
+		};
+		expect(await invoke(invalidLock)).toEqual({
+			type: "lockEpochAdvanced",
+			result: { type: "stale" },
+		});
+	});
+
+	test("validates matching Install and Commit transitions before writing", async () => {
+		await invoke(install());
+		const before = await invoke({ type: "load", accountId: "account-a" });
+
+		const invalidInstall = install(
+			"incarnation-b",
+			"user-a",
+			{
+				type: "present",
+				accountId: "account-a",
+				userId: "user-a",
+				incarnation: "incarnation-a",
+				replicaRevision: "0",
+				lockEpoch: "0",
+			},
+			"4",
+		);
+		await expect(invoke(invalidInstall)).rejects.toThrow(
+			"install transition is invalid",
+		);
+
+		const validInstall = install(
+			"incarnation-b",
+			"user-a",
+			{
+				type: "present",
+				accountId: "account-a",
+				userId: "user-a",
+				incarnation: "incarnation-a",
+				replicaRevision: "0",
+				lockEpoch: "0",
+			},
+			"1",
+		);
+		const emptyInstallKey = {
+			...validInstall,
+			prepared: {
+				...validInstall.prepared,
+				writes: [put("operations", "", "opaque")],
+			},
+		};
+		await expect(invoke(emptyInstallKey)).rejects.toThrow(
+			"prepared row key must not be empty",
+		);
+
+		await expect(
+			invoke(commit(prepared([put("operations", "", "opaque")]))),
+		).rejects.toThrow("prepared row key must not be empty");
+		expect(await invoke({ type: "load", accountId: "account-a" })).toEqual(
+			before,
+		);
+	});
+
 	test("rejects a stored head with an empty User identity", async () => {
 		await seedHead({
 			accountId: "account-a",
@@ -324,7 +454,7 @@ describe("IndexedDbReplicaExecutor", () => {
 		).rejects.toThrow("stored head does not match the generated contract");
 	});
 
-	test("rejects malformed lock epoch advance identities before opening storage", async () => {
+	test("returns missing before validating unreachable lock guard identities", async () => {
 		for (const field of ["accountId", "userId", "incarnation"] as const) {
 			const valid = advanceLockEpoch();
 			const request = {
@@ -334,7 +464,10 @@ describe("IndexedDbReplicaExecutor", () => {
 					expected: { ...valid.prepared.expected, [field]: "" },
 				},
 			};
-			await expect(invoke(request)).rejects.toThrow("must not be empty");
+			expect(await invoke(request)).toEqual({
+				type: "lockEpochAdvanced",
+				result: { type: "missing" },
+			});
 		}
 	});
 
