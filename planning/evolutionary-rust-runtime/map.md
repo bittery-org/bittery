@@ -96,6 +96,10 @@ or rollout order.
 - [Binding compile spike](issues/15-binding-compile-spike.md): native Kotlin/Swift retain UniFFI
   0.31.2, while Web uses a thin explicit `wasm-bindgen` adapter because UniFFI's experimental
   single-threaded WASM async foreign callback has a concrete `Send`-future mismatch.
+- [Browser Replica engine](issues/33-browser-replica-engine.md): keep IndexedDB for Web and the
+  Extension during the current migration, use Rust SQLite on native hosts, and preserve SQLite/OPFS
+  as a later Web prototype plus a separate Extension-placement frontier rather than a universal
+  requirement.
 
 ## Not yet specified
 
@@ -113,6 +117,11 @@ or rollout order.
 - Live Sync ownership is [ticket 30](issues/30-runtime-owned-live-sync.md). Rust owns every part of
   Sync, but catch-up and the SSE hint run only inside a Sign-in or Quick Unlock, so the Web host has
   no live Sync between unlocks.
+- Browser SQLite remains optional future work. [Ticket 34](issues/34-web-sqlite-opfs-prototype.md)
+  compares the official SQLite WASM and Rust-compiled SQLite shapes in the existing Web Runtime
+  Worker after the current Web acceptance work. Extension placement remains a separate frontier:
+  Chrome MV3 needs an offscreen document plus a dedicated Worker, while Firefox/Safari use different
+  background ownership models; a successful Web prototype does not decide it.
 - Web host integration, followed by Extension and Desktop host integration.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.

@@ -58,3 +58,11 @@ systems and cannot be implemented and verified honestly in one pass. They land s
 
 Each slice begins with its own failing targeted test and reports that output. Ticket 31 resolves only
 after C and both full gates pass from a clean tree.
+
+### 2026-08-24 — browser engine decision leaves this split unchanged
+
+[Ticket 33](33-browser-replica-engine.md) keeps IndexedDB as the Web and Extension adapter for the
+current migration and Rust SQLite as the native adapter. This ticket's closed logical plans and
+shared history corpus are the durable cross-host seam: common SQL files would not by themselves prove
+common semantics. Slice C therefore proceeds on IndexedDB after A and B; a later SQLite/OPFS Web
+prototype in ticket 34 consumes the same corpus without changing Runtime policy.
