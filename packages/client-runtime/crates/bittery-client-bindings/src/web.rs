@@ -240,6 +240,11 @@ impl WebClientRuntime {
             Rc::downgrade(&observations),
             Arc::clone(&wake),
         ));
+        // The Runtime owns every accepted Operation until an authoritative outcome, and it has no
+        // scheduler of its own. This is the Worker's executor lending it one: the loop is not tied
+        // to any host call, so an Operation accepted offline keeps being retried while the page
+        // does nothing at all. It returns when the Runtime closes.
+        spawn_local(Arc::clone(&inner).run_operation_dispatch());
         Self {
             inner,
             cancellations: Mutex::new(HashMap::new()),

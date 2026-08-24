@@ -1714,13 +1714,15 @@ public struct ItemsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
     public var items: [LoginItemProjection]
+    public var vaults: [VaultProjection]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(accountId: String, replicaRevision: UInt64, items: [LoginItemProjection]) {
+    public init(accountId: String, replicaRevision: UInt64, items: [LoginItemProjection], vaults: [VaultProjection]) {
         self.accountId = accountId
         self.replicaRevision = replicaRevision
         self.items = items
+        self.vaults = vaults
     }
 
 
@@ -1741,7 +1743,8 @@ public struct FfiConverterTypeItemsProjection: FfiConverterRustBuffer {
             try ItemsProjection(
                 accountId: FfiConverterString.read(from: &buf),
                 replicaRevision: FfiConverterUInt64.read(from: &buf),
-                items: FfiConverterSequenceTypeLoginItemProjection.read(from: &buf)
+                items: FfiConverterSequenceTypeLoginItemProjection.read(from: &buf),
+                vaults: FfiConverterSequenceTypeVaultProjection.read(from: &buf)
         )
     }
 
@@ -1749,6 +1752,7 @@ public struct FfiConverterTypeItemsProjection: FfiConverterRustBuffer {
         FfiConverterString.write(value.accountId, into: &buf)
         FfiConverterUInt64.write(value.replicaRevision, into: &buf)
         FfiConverterSequenceTypeLoginItemProjection.write(value.items, into: &buf)
+        FfiConverterSequenceTypeVaultProjection.write(value.vaults, into: &buf)
     }
 }
 
@@ -1827,6 +1831,85 @@ public func FfiConverterTypeRuntimeStatusProjection_lift(_ buf: RustBuffer) thro
 #endif
 public func FfiConverterTypeRuntimeStatusProjection_lower(_ value: RuntimeStatusProjection) -> RustBuffer {
     return FfiConverterTypeRuntimeStatusProjection.lower(value)
+}
+
+
+/**
+ * One Vault as an Items reader needs it. Plain data: a Vault name has never been ciphertext.
+ */
+public struct VaultProjection: Equatable, Hashable {
+    public var vaultId: String
+    public var name: String
+    public var vaultType: VaultProjectionType
+    public var icon: String?
+    public var imageUrl: String?
+    /**
+     * Whether this Device may write Items here.
+     */
+    public var writable: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(vaultId: String, name: String, vaultType: VaultProjectionType, icon: String?, imageUrl: String?,
+        /**
+         * Whether this Device may write Items here.
+         */writable: Bool) {
+        self.vaultId = vaultId
+        self.name = name
+        self.vaultType = vaultType
+        self.icon = icon
+        self.imageUrl = imageUrl
+        self.writable = writable
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaultProjection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultProjection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultProjection {
+        return
+            try VaultProjection(
+                vaultId: FfiConverterString.read(from: &buf),
+                name: FfiConverterString.read(from: &buf),
+                vaultType: FfiConverterTypeVaultProjectionType.read(from: &buf),
+                icon: FfiConverterOptionString.read(from: &buf),
+                imageUrl: FfiConverterOptionString.read(from: &buf),
+                writable: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VaultProjection, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.vaultId, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterTypeVaultProjectionType.write(value.vaultType, into: &buf)
+        FfiConverterOptionString.write(value.icon, into: &buf)
+        FfiConverterOptionString.write(value.imageUrl, into: &buf)
+        FfiConverterBool.write(value.writable, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjection_lift(_ buf: RustBuffer) throws -> VaultProjection {
+    return try FfiConverterTypeVaultProjection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjection_lower(_ value: VaultProjection) -> RustBuffer {
+    return FfiConverterTypeVaultProjection.lower(value)
 }
 
 // Note that we don't yet support `indirect` for enums.
@@ -2646,6 +2729,73 @@ public func FfiConverterTypeRuntimeResponse_lower(_ value: RuntimeResponse) -> R
 }
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum VaultProjectionType: Equatable, Hashable {
+
+    case personal
+    case team
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaultProjectionType: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultProjectionType: FfiConverterRustBuffer {
+    typealias SwiftType = VaultProjectionType
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultProjectionType {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .personal
+
+        case 2: return .team
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VaultProjectionType, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .personal:
+            writeInt(&buf, Int32(1))
+
+
+        case .team:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjectionType_lift(_ buf: RustBuffer) throws -> VaultProjectionType {
+    return try FfiConverterTypeVaultProjectionType.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultProjectionType_lower(_ value: VaultProjectionType) -> RustBuffer {
+    return FfiConverterTypeVaultProjectionType.lower(value)
+}
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -2813,6 +2963,31 @@ fileprivate struct FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeAccountStatus.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeVaultProjection: FfiConverterRustBuffer {
+    typealias SwiftType = [VaultProjection]
+
+    public static func write(_ value: [VaultProjection], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeVaultProjection.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultProjection] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [VaultProjection]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeVaultProjection.read(from: &buf))
         }
         return seq
     }

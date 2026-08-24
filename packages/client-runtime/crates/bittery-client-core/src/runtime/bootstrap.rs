@@ -606,8 +606,10 @@ impl Runtime {
                 custom_fields: projection.custom_fields,
                 tags: projection.tags,
                 favorite: false,
-                created_at: String::new(),
-                updated_at: String::new(),
+                // The instant this Device accepted the create, kept durable with the overlay so
+                // a restart cannot reshuffle a list that sorts by it.
+                created_at: overlay.created_at.clone(),
+                updated_at: overlay.created_at.clone(),
                 status,
             });
         }

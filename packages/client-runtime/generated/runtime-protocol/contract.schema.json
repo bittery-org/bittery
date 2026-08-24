@@ -110,12 +110,20 @@
         "replicaRevision": {
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "vaults": {
+          "description": "The Vaults these Items live in, so a host can name one and can tell a reader from a\nwriter without asking a second source. Present for the first slice's create affordance;\nfull Vault metadata still belongs to the read path that owns it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultProjection"
+          }
         }
       },
       "required": [
         "accountId",
         "replicaRevision",
-        "items"
+        "items",
+        "vaults"
       ]
     },
     "LoginCustomField": {
@@ -639,6 +647,50 @@
         "revision",
         "accounts",
         "closed"
+      ]
+    },
+    "VaultProjection": {
+      "description": "One Vault as an Items reader needs it: enough to label it and to know what may be written.",
+      "type": "object",
+      "properties": {
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        },
+        "vaultType": {
+          "$ref": "#/$defs/VaultProjectionType"
+        },
+        "writable": {
+          "description": "Whether this Device may write Items here. It answers the Vault's role, not the first\nslice's narrower create rule, so a host that only creates Login Items in a personal\nVault filters on the Vault type as well.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "vaultId",
+        "name",
+        "vaultType",
+        "writable"
+      ]
+    },
+    "VaultProjectionType": {
+      "type": "string",
+      "enum": [
+        "personal",
+        "team"
       ]
     }
   },

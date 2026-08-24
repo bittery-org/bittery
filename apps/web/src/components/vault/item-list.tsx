@@ -1,3 +1,4 @@
+import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
 import { useItemListFilters } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
@@ -10,8 +11,10 @@ import {
 	VaultItemListRow,
 } from "@bittery/ui";
 import {
+	IconClock as Clock,
 	IconKey as Key,
 	IconSmartphone as Smartphone,
+	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useCallback, useRef } from "react";
@@ -19,10 +22,20 @@ import { useI18n } from "@/providers/i18n-provider";
 import { useVaultDnd } from "@/providers/vault-dnd-provider";
 import { Favicon } from "./favicon";
 
+/**
+ * A list Item, plus what the Runtime says about it when the Runtime is the reader.
+ *
+ * Optional because the importers, the extension bridge, and the share views still pass plain
+ * repository Items. A row without a status renders exactly as it did before.
+ */
+export type ItemListEntry = DecryptedItemWithContext & {
+	runtimeStatus?: ItemProjectionStatus;
+};
+
 interface ItemListProps {
-	items: DecryptedItemWithContext[];
+	items: ItemListEntry[];
 	isLoading: boolean;
-	onItemSelect?: (item: DecryptedItemWithContext) => void;
+	onItemSelect?: (item: ItemListEntry) => void;
 	selectedItemId?: string;
 	selectionMode?: boolean;
 	selectedItemIds?: string[];
@@ -207,9 +220,9 @@ export function ItemList({
 }
 
 interface ItemRowProps {
-	item: DecryptedItemWithContext;
+	item: ItemListEntry;
 	isSelected: boolean;
-	onSelect?: (item: DecryptedItemWithContext) => void;
+	onSelect?: (item: ItemListEntry) => void;
 	selectionMode?: boolean;
 	isChecked?: boolean;
 	onToggleCheck?: () => void;
@@ -270,13 +283,33 @@ function ItemRow({
 			})}
 			leadingVisual={<Favicon item={item} cardBrand={cardBrand} size="md" />}
 			indicators={
-				item.category === "login" && item.totpSecret ? (
-					<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
-						{/* PROTOTYPE: most variants have no purple fill, so the flipped
-						    foreground colour would be invisible in light mode. */}
-						<Smartphone className="h-3 w-3 shrink-0 text-muted-foreground" />
-					</span>
-				) : null
+				<>
+					{/* A write the Server has not accepted is not a saved Item, and a list that
+					    looks identical either way would say it was. */}
+					{item.runtimeStatus === "pending" && (
+						<span
+							title={m.vaults_detail_items_status_pending()}
+							data-testid="item-status-pending"
+						>
+							<Clock className="h-3 w-3 shrink-0 text-muted-foreground" />
+						</span>
+					)}
+					{item.runtimeStatus === "failed" && (
+						<span
+							title={m.vaults_detail_items_status_failed()}
+							data-testid="item-status-failed"
+						>
+							<TriangleAlert className="h-3 w-3 shrink-0 text-destructive" />
+						</span>
+					)}
+					{item.category === "login" && item.totpSecret ? (
+						<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
+							{/* PROTOTYPE: most variants have no purple fill, so the flipped
+							    foreground colour would be invisible in light mode. */}
+							<Smartphone className="h-3 w-3 shrink-0 text-muted-foreground" />
+						</span>
+					) : null}
+				</>
 			}
 			secondaryText={item.username}
 			tertiaryText={maskedCardNumber}

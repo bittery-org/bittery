@@ -1,3 +1,4 @@
+import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
 import {
 	getAttachmentUploadErrorCode,
 	type UnifiedItem,
@@ -29,6 +30,7 @@ import {
 import {
 	IconArrowLeft as ArrowLeft,
 	IconArrowLeftRight as ArrowLeftRight,
+	IconClock as Clock,
 	IconEllipsis as Dots,
 	IconHistory as History,
 	IconKey as Key,
@@ -36,6 +38,7 @@ import {
 	IconShare as Share,
 	IconStar as Star,
 	IconTrash as Trash,
+	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useState } from "react";
@@ -68,8 +71,13 @@ export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** The pane's Item, plus what the Runtime says about it when the Runtime is the reader. */
+export type ItemDetailEntry = UnifiedItem & {
+	runtimeStatus?: ItemProjectionStatus;
+};
+
 interface ItemDetailPaneProps {
-	selectedItem: UnifiedItem | null;
+	selectedItem: ItemDetailEntry | null;
 	selectedItemId: string | null;
 	availableTags: string[];
 	canWriteItems: boolean;
@@ -174,6 +182,26 @@ export function ItemDetailPane({
 		>
 			{selectedItem ? (
 				<>
+					{/* An unfinished write says so here too: the list badge is easy to miss, and
+					    a detail view that looks saved is the one that misleads. */}
+					{selectedItem.runtimeStatus === "pending" && (
+						<div
+							className="flex shrink-0 items-center gap-2 border-b bg-foreground/3 px-3 py-1.5 text-muted-foreground text-xs"
+							data-testid="item-detail-status-pending"
+						>
+							<Clock className="size-3.5 shrink-0" />
+							{m.vaults_detail_items_status_pending()}
+						</div>
+					)}
+					{selectedItem.runtimeStatus === "failed" && (
+						<div
+							className="flex shrink-0 items-center gap-2 border-b bg-destructive/8 px-3 py-1.5 text-destructive text-xs"
+							data-testid="item-detail-status-failed"
+						>
+							<TriangleAlert className="size-3.5 shrink-0" />
+							{m.vaults_detail_items_status_failed()}
+						</div>
+					)}
 					<div className="flex h-11 min-w-0 shrink-0 items-center justify-between border-b px-2.5 xl:h-12">
 						<Button
 							variant="ghost"

@@ -8,6 +8,7 @@ function itemsProjection(accountId: string, title: string) {
 		value: {
 			accountId,
 			replicaRevision: "1",
+			vaults: [],
 			items: [
 				{
 					itemId: "item-1",

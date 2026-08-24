@@ -3551,6 +3551,8 @@ data class ItemsProjection (
     var `replicaRevision`: kotlin.ULong
     ,
     var `items`: List<LoginItemProjection>
+    ,
+    var `vaults`: List<VaultProjection>
 
 ): Disposable{
 
@@ -3564,7 +3566,8 @@ data class ItemsProjection (
     Disposable.destroy(
         this.`accountId`,
         this.`replicaRevision`,
-        this.`items`
+        this.`items`,
+        this.`vaults`
     )
     }
 
@@ -3580,19 +3583,22 @@ public object FfiConverterTypeItemsProjection: FfiConverterRustBuffer<ItemsProje
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterSequenceTypeLoginItemProjection.read(buf),
+            FfiConverterSequenceTypeVaultProjection.read(buf),
         )
     }
 
     override fun allocationSize(value: ItemsProjection) = (
             FfiConverterString.allocationSize(value.`accountId`) +
             FfiConverterULong.allocationSize(value.`replicaRevision`) +
-            FfiConverterSequenceTypeLoginItemProjection.allocationSize(value.`items`)
+            FfiConverterSequenceTypeLoginItemProjection.allocationSize(value.`items`) +
+            FfiConverterSequenceTypeVaultProjection.allocationSize(value.`vaults`)
     )
 
     override fun write(value: ItemsProjection, buf: ByteBuffer) {
             FfiConverterString.write(value.`accountId`, buf)
             FfiConverterULong.write(value.`replicaRevision`, buf)
             FfiConverterSequenceTypeLoginItemProjection.write(value.`items`, buf)
+            FfiConverterSequenceTypeVaultProjection.write(value.`vaults`, buf)
     }
 }
 
@@ -3641,6 +3647,70 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterULong.write(value.`revision`, buf)
             FfiConverterSequenceTypeAccountStatus.write(value.`accounts`, buf)
             FfiConverterBoolean.write(value.`closed`, buf)
+    }
+}
+
+
+
+/**
+ * One Vault as an Items reader needs it. Plain data: a Vault name has never been ciphertext.
+ */
+data class VaultProjection (
+    var `vaultId`: kotlin.String
+    ,
+    var `name`: kotlin.String
+    ,
+    var `vaultType`: VaultProjectionType
+    ,
+    var `icon`: kotlin.String?
+    ,
+    var `imageUrl`: kotlin.String?
+    ,
+    /**
+     * Whether this Device may write Items here.
+     */
+    var `writable`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultProjection: FfiConverterRustBuffer<VaultProjection> {
+    override fun read(buf: ByteBuffer): VaultProjection {
+        return VaultProjection(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeVaultProjectionType.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VaultProjection) = (
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterTypeVaultProjectionType.allocationSize(value.`vaultType`) +
+            FfiConverterOptionalString.allocationSize(value.`icon`) +
+            FfiConverterOptionalString.allocationSize(value.`imageUrl`) +
+            FfiConverterBoolean.allocationSize(value.`writable`)
+    )
+
+    override fun write(value: VaultProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterTypeVaultProjectionType.write(value.`vaultType`, buf)
+            FfiConverterOptionalString.write(value.`icon`, buf)
+            FfiConverterOptionalString.write(value.`imageUrl`, buf)
+            FfiConverterBoolean.write(value.`writable`, buf)
     }
 }
 
@@ -4433,6 +4503,40 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
 
 
 
+enum class VaultProjectionType {
+
+    PERSONAL,
+    TEAM;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultProjectionType: FfiConverterRustBuffer<VaultProjectionType> {
+    override fun read(buf: ByteBuffer) = try {
+        VaultProjectionType.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VaultProjectionType) = 4UL
+
+    override fun write(value: VaultProjectionType, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 /**
  * @suppress
  */
@@ -4634,6 +4738,34 @@ public object FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeAccountStatus.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeVaultProjection: FfiConverterRustBuffer<List<VaultProjection>> {
+    override fun read(buf: ByteBuffer): List<VaultProjection> {
+        val len = buf.getInt()
+        return List<VaultProjection>(len) {
+            FfiConverterTypeVaultProjection.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<VaultProjection>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeVaultProjection.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<VaultProjection>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeVaultProjection.write(it, buf)
         }
     }
 }

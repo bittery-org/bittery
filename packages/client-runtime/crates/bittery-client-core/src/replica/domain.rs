@@ -205,6 +205,13 @@ pub(crate) struct ReplicaItemRecord {
     pub encryption_algorithm: String,
     pub encryption_version: i32,
     pub encrypted_by_user_id: String,
+    /// When this Device accepted the create, in the same RFC 3339 spelling the Server uses.
+    ///
+    /// It is this Device's own truth until authority replaces it, and it is durable because a
+    /// list that sorts by time must not reshuffle across a restart. `default` keeps an overlay
+    /// written before this field existed loadable rather than bricking the Account.
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

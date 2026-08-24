@@ -125,7 +125,10 @@ impl Runtime {
             .entry(account_id.clone())
             .or_insert(0);
 
-        let prepared = self.prepare_create(&snapshot, &vault_id, draft)?;
+        // One instant stamps the Operation's Item, so the overlay and the projection can never
+        // disagree about when this Device accepted it.
+        let accepted_at = rfc3339(self.clock.now_ms()?)?;
+        let prepared = self.prepare_create(&snapshot, &vault_id, draft, &accepted_at)?;
         let PreparedCreate {
             operation,
             overlay,
@@ -263,6 +266,7 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         vault_id: &str,
         draft: LoginItemDraft,
+        accepted_at: &str,
     ) -> Result<PreparedCreate, RuntimeError> {
         if snapshot.bootstrap.state != ReplicaState::Ready {
             return Err(RuntimeError::new(
@@ -394,6 +398,7 @@ impl Runtime {
                 encryption_algorithm: sealed.algorithm,
                 encryption_version: CREATE_ITEM_ENCRYPTION_VERSION,
                 encrypted_by_user_id: snapshot.user_id.clone(),
+                created_at: accepted_at.to_owned(),
             },
             projection: LoginItemProjection {
                 account_id: snapshot.account_id.clone(),
@@ -409,12 +414,32 @@ impl Runtime {
                 custom_fields: draft.custom_fields,
                 tags: draft.tags,
                 favorite: false,
-                created_at: String::new(),
-                updated_at: String::new(),
+                // Nothing has changed this Item since this Device wrote it, so the two dates are
+                // the same one. The Server's own dates arrive with authority at reconciliation.
+                created_at: accepted_at.to_owned(),
+                updated_at: accepted_at.to_owned(),
                 status: ItemProjectionStatus::Pending,
             },
         })
     }
+}
+
+/// Spells a Device instant the way the Server spells its own dates, so one list can sort both.
+fn rfc3339(now_ms: u64) -> Result<String, RuntimeError> {
+    let nanoseconds = i128::from(now_ms) * 1_000_000;
+    time::OffsetDateTime::from_unix_timestamp_nanos(nanoseconds)
+        .ok()
+        .and_then(|instant| {
+            instant
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the Device clock is outside the supported range",
+            )
+        })
 }
 
 /// Opens the Vault key exactly the way the Bootstrap read path opens it, including the wrap-context

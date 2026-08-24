@@ -34,14 +34,15 @@ use crate::{
         PendingAccountInstallIntent, PlatformStorage, SerializedPlatformStorageExecutor,
     },
     replica::{
-        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, RecomputedPlanResult,
-        Replica, ReplicaItemRecord, ReplicaPersistence, SerializedReplicaExecutor,
+        AuthorityVaultRole, AuthorityVaultType, GuardedCommitPlan, InMemoryReplica,
+        OperationRecord, PlanMutation, RecomputedPlanResult, Replica, ReplicaItemRecord,
+        ReplicaPersistence, ReplicaSnapshot, SerializedReplicaExecutor,
         SerializedReplicaPersistence,
     },
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
     ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, RequestCancellation,
     RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection,
+    RuntimeStatusProjection, VaultProjection, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -1236,6 +1237,7 @@ impl Runtime {
                             .get(account_id)
                             .cloned()
                             .unwrap_or_default(),
+                        vaults: visible_vaults(&snapshot),
                     }),
                     generation: Some(generation),
                     token: Some(token),
@@ -1452,6 +1454,35 @@ fn finish_generation_fence(token: Option<Arc<DeliveryToken>>) {
     if let Some(token) = token {
         token.wait_for_other_threads();
     }
+}
+
+/// The Vaults of the active Bootstrap generation, in the order a host can rely on.
+///
+/// This reads authority the Account already holds, so it needs no key and no decryption: a Vault
+/// name has never been ciphertext. Nothing else is copied out of the authority record.
+fn visible_vaults(snapshot: &ReplicaSnapshot) -> Vec<VaultProjection> {
+    let Some(generation) = snapshot.bootstrap.active_generation.clone() else {
+        return Vec::new();
+    };
+    let mut vaults: Vec<_> = snapshot
+        .bootstrap
+        .vaults
+        .iter()
+        .filter(|((vault_generation, _), _)| vault_generation == &generation)
+        .map(|(_, vault)| VaultProjection {
+            vault_id: vault.id.clone(),
+            name: vault.name.clone(),
+            vault_type: match vault.vault_type {
+                AuthorityVaultType::Personal => VaultProjectionType::Personal,
+                AuthorityVaultType::Team => VaultProjectionType::Team,
+            },
+            icon: vault.icon.clone(),
+            image_url: vault.image_url.clone(),
+            writable: vault.role != AuthorityVaultRole::ReadOnly,
+        })
+        .collect();
+    vaults.sort_by(|left, right| left.vault_id.cmp(&right.vault_id));
+    vaults
 }
 
 fn startup_invariant(message: impl Into<String>) -> RuntimeError {

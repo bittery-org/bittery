@@ -363,6 +363,25 @@ pub struct ItemsProjection {
     pub account_id: String,
     pub replica_revision: u64,
     pub items: Vec<Arc<LoginItemProjection>>,
+    pub vaults: Vec<VaultProjection>,
+}
+
+/// One Vault as an Items reader needs it. Plain data: a Vault name has never been ciphertext.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct VaultProjection {
+    pub vault_id: String,
+    pub name: String,
+    pub vault_type: VaultProjectionType,
+    pub icon: Option<String>,
+    pub image_url: Option<String>,
+    /// Whether this Device may write Items here.
+    pub writable: bool,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum VaultProjectionType {
+    Personal,
+    Team,
 }
 
 impl fmt::Debug for ItemsProjection {
@@ -467,6 +486,13 @@ pub struct ClientRuntime {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl ClientRuntime {
+    /// A native Runtime with no Server identity, no transport, and no Device storage yet.
+    ///
+    /// It deliberately does not drive `run_operation_dispatch`. That loop returns immediately
+    /// without an authentication client configuration, and no native constructor supplies one or
+    /// the executors it would need, so spawning it here would only look like ownership. The
+    /// native host that gains those constructors drives the loop from its own executor, the way
+    /// the Web binding drives it from the Worker's.
     fn headless() -> Arc<Self> {
         Arc::new(Self {
             inner: core::Runtime::new(),
@@ -634,6 +660,7 @@ impl From<core::ItemsProjection> for ItemsProjection {
             account_id,
             replica_revision,
             items,
+            vaults,
         } = value;
         Self {
             account_id: account_id.into(),
@@ -642,6 +669,7 @@ impl From<core::ItemsProjection> for ItemsProjection {
                 .into_iter()
                 .map(|item| Arc::new(LoginItemProjection::from(item)))
                 .collect(),
+            vaults: vaults.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -714,6 +742,36 @@ impl From<core::CustomFieldKind> for CustomFieldKind {
             core::CustomFieldKind::Password => Self::Password,
             core::CustomFieldKind::Email => Self::Email,
             core::CustomFieldKind::Url => Self::Url,
+        }
+    }
+}
+
+impl From<core::VaultProjection> for VaultProjection {
+    fn from(value: core::VaultProjection) -> Self {
+        let core::VaultProjection {
+            vault_id,
+            name,
+            vault_type,
+            icon,
+            image_url,
+            writable,
+        } = value;
+        Self {
+            vault_id,
+            name,
+            vault_type: vault_type.into(),
+            icon,
+            image_url,
+            writable,
+        }
+    }
+}
+
+impl From<core::VaultProjectionType> for VaultProjectionType {
+    fn from(value: core::VaultProjectionType) -> Self {
+        match value {
+            core::VaultProjectionType::Personal => Self::Personal,
+            core::VaultProjectionType::Team => Self::Team,
         }
     }
 }
@@ -876,6 +934,14 @@ mod tests {
                     updated_at: "2026-08-23T00:00:00Z".into(),
                     status: ItemProjectionStatus::Pending,
                 })],
+                vaults: vec![VaultProjection {
+                    vault_id: "vault-1".into(),
+                    name: "Personal".into(),
+                    vault_type: VaultProjectionType::Personal,
+                    icon: None,
+                    image_url: None,
+                    writable: true,
+                }],
             },
         };
 

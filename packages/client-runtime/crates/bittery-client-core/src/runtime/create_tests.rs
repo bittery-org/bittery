@@ -580,3 +580,111 @@ impl SerializedReplicaExecutor for PlainExecutor {
         })
     }
 }
+
+// ---------------------------------------------------------------- slice D: what the host sees
+
+/// What an Items observer would receive right now, without opening one.
+fn visible(runtime: &Runtime, account_id: &AccountId) -> ItemsProjection {
+    match runtime
+        .projection(&ObservationRequest::Items {
+            account_id: account_id.clone(),
+        })
+        .expect("an unlocked Account projects Items")
+        .projection
+    {
+        RuntimeProjection::Items(items) => items,
+        other => panic!("expected an Items projection, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_offline_create_is_visible_as_pending_at_once_and_after_a_restart() {
+    // This executor has no transport at all, so nothing can reach a Server here by construction.
+    let executor = RecordingExecutor::seeded();
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+
+    let (_, item_id, _) = accepted(
+        runtime
+            .request(
+                create(&account_id, TEST_VAULT_ID),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+
+    let before = visible(&runtime, &account_id).items;
+    assert_eq!(before.len(), 1, "the accepted Item is visible at once");
+    assert_eq!(before[0].item_id, item_id);
+    assert_eq!(before[0].title, TITLE);
+    assert_eq!(before[0].status, ItemProjectionStatus::Pending);
+    // A list that sorts by time has to be able to read these. An empty string is not a date.
+    assert!(
+        !before[0].created_at.is_empty(),
+        "a pending Item has a date"
+    );
+    assert_eq!(before[0].updated_at, before[0].created_at);
+    let created_at = before[0].created_at.clone();
+
+    // A killed Worker never gets to close politely, so this restart does not either.
+    drop(runtime);
+
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    restarted
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    restarted.unlock_account(&account_id).await.unwrap();
+
+    let after = visible(&restarted, &account_id).items;
+    assert_eq!(after.len(), 1, "the restarted process still shows the Item");
+    assert_eq!(after[0].item_id, item_id);
+    assert_eq!(after[0].title, TITLE);
+    assert_eq!(after[0].status, ItemProjectionStatus::Pending);
+    // The date is durable too: a restart must not reshuffle a list that sorts by it.
+    assert_eq!(after[0].created_at, created_at);
+}
+
+#[tokio::test]
+async fn the_items_projection_names_the_vaults_a_host_may_offer() {
+    let executor = RecordingExecutor::seeded();
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+
+    let vaults = visible(&runtime, &account_id).vaults;
+    assert_eq!(vaults.len(), 1);
+    assert_eq!(vaults[0].vault_id, TEST_VAULT_ID);
+    assert_eq!(vaults[0].name, "Personal");
+    assert_eq!(vaults[0].vault_type, VaultProjectionType::Personal);
+    assert!(
+        vaults[0].writable,
+        "an owned personal Vault is where a create goes"
+    );
+}
+
+#[tokio::test]
+async fn a_read_only_vault_is_projected_as_one() {
+    let state = InMemoryReplica::default();
+    let account_id = AccountId::from(ACCOUNT);
+    state
+        .install(
+            account_id.clone(),
+            USER.to_owned(),
+            Incarnation::from(INCARNATION),
+        )
+        .unwrap();
+    let mut vault = personal_vault(TEST_VAULT_ID, USER);
+    vault.role = AuthorityVaultRole::ReadOnly;
+    state.seed_ready_personal_vault(&account_id, vault).unwrap();
+    let runtime = Runtime::with_serialized_replica_executor(Arc::new(PlainExecutor(state)));
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
+
+    let vaults = visible(&runtime, &account_id).vaults;
+    assert_eq!(vaults.len(), 1);
+    assert!(
+        !vaults[0].writable,
+        "the same refusal the create path makes, before the user tries"
+    );
+}

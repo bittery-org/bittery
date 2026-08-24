@@ -4,10 +4,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StrictMode } from "react";
-import { createRuntimeClient, type RuntimeClient } from "../client";
+import {
+	createRuntimeClient,
+	type RuntimeAccepted,
+	type RuntimeClient,
+} from "../client";
 import { createFakeRuntimeTransport } from "../testing";
 import {
 	RuntimeProvider,
+	useCreateLoginItem,
 	useRuntimeItems,
 	useRuntimeQuickUnlock,
 	useRuntimeSession,
@@ -20,6 +25,7 @@ function itemsProjection(accountId: string, title: string) {
 		value: {
 			accountId,
 			replicaRevision: "1",
+			vaults: [],
 			items: [
 				{
 					itemId: "item-1",
@@ -228,5 +234,70 @@ describe("React entrypoint", () => {
 		});
 
 		expect(signedIn).toEqual({ accountId: "account-1", userId: "user-1" });
+	});
+});
+
+describe("creating a Login Item from React", () => {
+	test("hands the create to the Runtime and answers with what it accepted", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		let accepting: Promise<RuntimeAccepted> | undefined;
+
+		function CreateButton() {
+			const create = useCreateLoginItem();
+			return (
+				<button
+					type="button"
+					data-testid="create"
+					onClick={() => {
+						accepting = create.mutateAsync({
+							accountId: "account-1",
+							vaultId: "vault-1",
+							draft: { title: "Bank" },
+						});
+					}}
+				>
+					create
+				</button>
+			);
+		}
+
+		const view = render(host(client, <CreateButton />));
+		await flush(transport);
+
+		await act(async () => {
+			screen.getByTestId("create").click();
+			await transport.settled();
+		});
+
+		// One Runtime request, and it is the create. Nothing else was written anywhere.
+		const requests = transport.calls.filter((call) => call.type === "request");
+		expect(requests).toHaveLength(1);
+		expect(JSON.parse(requests[0]?.requestJson ?? "{}")).toEqual({
+			type: "createLoginItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: { title: "Bank" },
+		});
+
+		await act(async () => {
+			transport.answer({
+				type: "succeeded",
+				value: {
+					type: "accepted",
+					operationId: "operation-1",
+					itemId: "item-1",
+					replicaRevision: "7",
+				},
+			});
+			await transport.settled();
+		});
+		expect(await accepting).toEqual({
+			operationId: "operation-1",
+			itemId: "item-1",
+			replicaRevision: "7",
+		});
+
+		view.unmount();
 	});
 });

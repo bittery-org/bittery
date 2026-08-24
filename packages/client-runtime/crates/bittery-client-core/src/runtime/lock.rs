@@ -48,25 +48,33 @@ impl Runtime {
                 "Account lock epoch is exhausted",
             ));
         }
-        let _publication = self.publication.lock().expect("publication lock poisoned");
-        self.account_access
-            .lock()
-            .expect("Account access lock poisoned")
-            .insert(account_id.clone(), AccountAccessState::Unlocked);
-        self.unlocked_items
-            .lock()
-            .expect("unlocked projection lock poisoned")
-            .entry(account_id.clone())
-            .or_default();
-        self.account_lock_epochs
-            .lock()
-            .expect("Account lock epoch lock poisoned")
-            .entry(account_id.clone())
-            .or_insert(0);
-        // A real unlock ends with the Account's live master unlock key in memory. Tests that write
-        // locally need the same key the seeded Vault fixture wrapped its Vault key under.
-        self.seed_live_master_unlock_key(account_id, &snapshot.incarnation);
-        Ok(())
+        {
+            let _publication = self.publication.lock().expect("publication lock poisoned");
+            self.account_access
+                .lock()
+                .expect("Account access lock poisoned")
+                .insert(account_id.clone(), AccountAccessState::Unlocked);
+            self.unlocked_items
+                .lock()
+                .expect("unlocked projection lock poisoned")
+                .entry(account_id.clone())
+                .or_default();
+            // The durable epoch, not zero: a Quick Unlock preserves what the Replica already
+            // holds, and a restored Account can carry an epoch a previous close advanced.
+            self.account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned")
+                .entry(account_id.clone())
+                .or_insert(snapshot.lock_epoch);
+            // A real unlock ends with the Account's live master unlock key in memory. Tests that
+            // write locally need the same key the seeded Vault fixture wrapped its Vault key
+            // under.
+            self.seed_live_master_unlock_key(account_id, &snapshot.incarnation);
+        }
+        // And a real unlock ends by projecting what the Replica already holds. Without this the
+        // shortcut would show an empty Account after every restart and quietly disagree with the
+        // Sign-in and Quick Unlock paths it stands in for.
+        self.decrypt_visible_items(account_id)
     }
 
     #[doc(hidden)]

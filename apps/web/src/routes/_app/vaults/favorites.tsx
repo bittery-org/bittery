@@ -1,7 +1,5 @@
 import {
-	useAllVaultKeys,
 	useAvailableTags,
-	useCreateItem,
 	useDeleteItem,
 	useUpdateItem,
 } from "@bittery/core/hooks";
@@ -24,7 +22,6 @@ import {
 	DialogTitle,
 	EditItemSheet,
 	toast,
-	type VaultOption,
 } from "@bittery/ui";
 import { IconStar as Star } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -33,7 +30,9 @@ import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { ItemListState } from "@/components/vault/item-list-state";
+import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
+import { canWriteVault, creatableVaults } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/favorites")({
@@ -51,14 +50,18 @@ function FavoritesPage() {
 	const { m } = useI18n();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 
-	const { items: allItems, state: itemsState } = useRuntimeItems();
-	const { vaultKeys } = useAllVaultKeys();
+	const {
+		items: allItems,
+		accountId,
+		vaults,
+		state: itemsState,
+	} = useRuntimeItems();
 	const favoriteItems = useMemo(
 		() => allItems.filter((item) => item.favorite),
 		[allItems],
 	);
 	const availableTags = useAvailableTags(favoriteItems);
-	const createItem = useCreateItem();
+	const acceptLoginItem = useAcceptLoginItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 
@@ -77,10 +80,7 @@ function FavoritesPage() {
 			: (favoriteItems.find((item) => item.id === selectedItemId) ?? null);
 
 	const canWriteItems = selectedItem
-		? (() => {
-				const vault = vaultKeys.find((v) => v.vaultId === selectedItem.vaultId);
-				return vault ? vault.role !== "read-only" : false;
-			})()
+		? canWriteVault(vaults, selectedItem.vaultId)
 		: true;
 
 	const handleItemSelect = (item: DecryptedItem) => {
@@ -96,13 +96,9 @@ function FavoritesPage() {
 		vaultId: string,
 		category: ItemCategory,
 	) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
-		if (!accountId) throw new Error("Vault account is unavailable");
-		const result = await createItem.mutateAsync({
-			vaultId,
+		const result = await acceptLoginItem.accept({
 			accountId,
+			vaultId,
 			category,
 			data,
 		});
@@ -139,13 +135,7 @@ function FavoritesPage() {
 		}
 	};
 
-	const itemFormVaults: VaultOption[] = vaultKeys.map((v) => ({
-		id: v.vaultId,
-		name: v.vaultName,
-		type: v.vaultType,
-		icon: v.vaultIcon,
-		imageUrl: v.vaultImageUrl,
-	}));
+	const itemFormVaults = creatableVaults(vaults);
 
 	return (
 		<>
@@ -207,7 +197,7 @@ function FavoritesPage() {
 				open={isCreateItemSheetOpen}
 				onOpenChange={setIsCreateItemSheetOpen}
 				vaults={itemFormVaults}
-				selectedVaultId={vaultKeys[0]?.vaultId}
+				selectedVaultId={itemFormVaults[0]?.id}
 				onCreateItem={handleCreateItem}
 			/>
 

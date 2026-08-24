@@ -1,7 +1,6 @@
 import {
 	useAvailableTags,
 	useConvertVaultType,
-	useCreateItem,
 	useDeleteItem,
 	useUpdateItem,
 	useVaultInfo,
@@ -51,6 +50,7 @@ import { ItemList } from "@/components/vault/item-list";
 import { ItemListState } from "@/components/vault/item-list-state";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
+import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -79,7 +79,7 @@ function VaultDetailPage() {
 	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
-	const { items: allItems, state: itemsState } = useRuntimeItems();
+	const { items: allItems, accountId, state: itemsState } = useRuntimeItems();
 	const decryptedItems = useMemo(
 		() => allItems.filter((item) => item.vaultId === vaultId),
 		[allItems, vaultId],
@@ -93,7 +93,7 @@ function VaultDetailPage() {
 		selectedItemId === null
 			? null
 			: (decryptedItems.find((item) => item.id === selectedItemId) ?? null);
-	const createItem = useCreateItem();
+	const acceptLoginItem = useAcceptLoginItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 	const convertVaultType = useConvertVaultType();
@@ -141,12 +141,12 @@ function VaultDetailPage() {
 		targetVaultId: string,
 		category: ItemCategory,
 	) => {
-		if (!vaultInfo?.accountId || targetVaultId !== vaultInfo.vaultId) {
+		if (targetVaultId !== vaultId) {
 			throw new Error("Vault account is unavailable");
 		}
-		const result = await createItem.mutateAsync({
+		const result = await acceptLoginItem.accept({
+			accountId,
 			vaultId: targetVaultId,
-			accountId: vaultInfo.accountId,
 			category,
 			data,
 		});

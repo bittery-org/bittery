@@ -48,6 +48,7 @@ value: RuntimeStatusProjection
 })
 export type CustomFieldKind = ("text" | "password" | "email" | "url")
 export type ItemProjectionStatus = ("pending" | "authoritative" | "failed")
+export type VaultProjectionType = ("personal" | "team")
 export type AccountWaitingReason = "reauthenticationRequired"
 export type RuntimeRequest = ({
 email: string
@@ -87,6 +88,12 @@ export interface ItemsProjection {
 accountId: string
 items: LoginItemProjection[]
 replicaRevision: string
+/**
+ * The Vaults these Items live in, so a host can name one and can tell a reader from a
+ * writer without asking a second source. Present for the first slice's create affordance;
+ * full Vault metadata still belongs to the read path that owns it.
+ */
+vaults: VaultProjection[]
 }
 export interface LoginItemProjection {
 accountId: string
@@ -111,6 +118,22 @@ id: string
 label: string
 type: CustomFieldKind
 value: string
+}
+/**
+ * One Vault as an Items reader needs it: enough to label it and to know what may be written.
+ */
+export interface VaultProjection {
+icon?: (string | null)
+imageUrl?: (string | null)
+name: string
+vaultId: string
+vaultType: VaultProjectionType
+/**
+ * Whether this Device may write Items here. It answers the Vault's role, not the first
+ * slice's narrower create rule, so a host that only creates Login Items in a personal
+ * Vault filters on the Vault type as well.
+ */
+writable: boolean
 }
 export interface RuntimeStatusProjection {
 accountId: (string | null)

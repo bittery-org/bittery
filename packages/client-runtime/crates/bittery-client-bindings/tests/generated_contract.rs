@@ -63,3 +63,43 @@ fn web_close_cancels_binding_requests_before_waiting_for_core_close() {
 
     assert!(cancel < core_close);
 }
+
+/// Every Web Runtime drives the dispatch loop, whichever constructor built it.
+///
+/// The core loop is a plain future with no scheduler of its own, so an unspawned one means an
+/// Operation accepted offline is durable and never sent. `from_inner` is the single place every
+/// constructor funnels through, which is why the assertion is anchored there.
+#[test]
+fn web_constructors_drive_the_operation_dispatch_loop() {
+    let from_inner = WEB_BINDING_SOURCE
+        .find("fn from_inner(inner: Arc<core::Runtime>) -> Self {")
+        .expect("Web from_inner constructor");
+    let body = &WEB_BINDING_SOURCE[from_inner..];
+    let end = body.find("\n    }\n").expect("from_inner body ends");
+    let body = &body[..end];
+    assert!(
+        body.contains("spawn_local(Arc::clone(&inner).run_operation_dispatch());"),
+        "from_inner must lend the Runtime the Worker's executor"
+    );
+    assert!(
+        body.contains("drain_published_observations("),
+        "and must still deliver published observations"
+    );
+
+    for constructor in [
+        "pub fn new() -> Self {",
+        "pub fn with_replica_executor(",
+        "pub fn with_executors(",
+        "pub fn with_configured_executors(",
+    ] {
+        let start = WEB_BINDING_SOURCE
+            .find(constructor)
+            .unwrap_or_else(|| panic!("constructor {constructor}"));
+        let rest = &WEB_BINDING_SOURCE[start..];
+        let end = rest.find("\n    }\n").expect("constructor body ends");
+        assert!(
+            rest[..end].contains("Self::from_inner("),
+            "{constructor} must build through from_inner"
+        );
+    }
+}

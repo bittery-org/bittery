@@ -55,6 +55,7 @@ pub use protocol::{
     ItemProjectionStatus, ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection,
     ObservationRequest, ObservationSink, RequestCancellation, RuntimeError, RuntimeErrorCode,
     RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    VaultProjection, VaultProjectionType,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]

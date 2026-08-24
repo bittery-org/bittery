@@ -369,6 +369,42 @@ pub struct ItemsProjection {
     )]
     pub replica_revision: u64,
     pub items: Vec<LoginItemProjection>,
+    /// The Vaults these Items live in, so a host can name one and can tell a reader from a
+    /// writer without asking a second source. Present for the first slice's create affordance;
+    /// full Vault metadata still belongs to the read path that owns it.
+    pub vaults: Vec<VaultProjection>,
+}
+
+/// One Vault as an Items reader needs it: enough to label it and to know what may be written.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultProjection {
+    pub vault_id: String,
+    pub name: String,
+    pub vault_type: VaultProjectionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    /// Whether this Device may write Items here. It answers the Vault's role, not the first
+    /// slice's narrower create rule, so a host that only creates Login Items in a personal
+    /// Vault filters on the Vault type as well.
+    pub writable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum VaultProjectionType {
+    Personal,
+    Team,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
