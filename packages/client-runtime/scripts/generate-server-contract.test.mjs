@@ -127,7 +127,10 @@ test("generated auth requests preserve the established immutable JSON field orde
 		generated.indexOf("pub struct StartLoginRequest"),
 		generated.indexOf("pub struct SyncChangesResponse"),
 	);
-	assert.ok(start.indexOf("pub email: String") < start.indexOf("pub client_public_key: String"));
+	assert.ok(
+		start.indexOf("pub email: String") <
+			start.indexOf("pub client_public_key: String"),
+	);
 	const finish = generated.slice(
 		generated.indexOf("pub struct FinishLoginRequest"),
 		generated.indexOf("pub struct FinishLoginResponse"),

@@ -10,9 +10,13 @@ import {
 const run = promisify(execFile);
 
 test("generated HTTP transport artifacts match the Rust contract", async () => {
-	await run("node", ["./scripts/generate-http-transport-contract.mjs", "--check"], {
-		cwd: new URL("..", import.meta.url),
-	});
+	await run(
+		"node",
+		["./scripts/generate-http-transport-contract.mjs", "--check"],
+		{
+			cwd: new URL("..", import.meta.url),
+		},
+	);
 });
 
 test("generated validators keep the primitive transport closed", () => {
@@ -28,7 +32,12 @@ test("generated validators keep the primitive transport closed", () => {
 		true,
 	);
 	assert.equal(
-		validateHttpResponseJson({ type: "completed", status: 0, headers: [], body: [] }),
+		validateHttpResponseJson({
+			type: "completed",
+			status: 0,
+			headers: [],
+			body: [],
+		}),
 		true,
 	);
 	assert.equal(validateHttpResponseJson({ type: "futureFailure" }), false);
@@ -44,11 +53,22 @@ test("generated validators keep the primitive transport closed", () => {
 		false,
 	);
 	assert.equal(
-		validateHttpResponseJson({ type: "completed", status: 600, headers: [], body: [] }),
+		validateHttpResponseJson({
+			type: "completed",
+			status: 600,
+			headers: [],
+			body: [],
+		}),
 		false,
 	);
 	assert.equal(
-		validateHttpResponseJson({ type: "completed", status: 200, headers: [], body: [], extra: true }),
+		validateHttpResponseJson({
+			type: "completed",
+			status: 200,
+			headers: [],
+			body: [],
+			extra: true,
+		}),
 		false,
 	);
 });

@@ -8,7 +8,10 @@ import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
 
 const run = promisify(execFile);
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const packageRoot = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+);
 const outputRoot = path.join(packageRoot, "generated/http-transport");
 const schemaPath = path.join(outputRoot, "contract.schema.json");
 const typesPath = path.join(outputRoot, "contract.ts");
@@ -38,7 +41,8 @@ schema.$id = schemaId;
 const schemaText = `${JSON.stringify(schema, null, 2)}\n`;
 const typesText = await compile(schema, "HttpTransportContract", {
 	additionalProperties: false,
-	bannerComment: "/* eslint-disable */\n/* This file is generated. Do not edit. */",
+	bannerComment:
+		"/* eslint-disable */\n/* This file is generated. Do not edit. */",
 	format: false,
 	unknownAny: false,
 });
@@ -56,18 +60,17 @@ ajv.addSchema({ $id: requestId, $ref: `${schemaId}#/$defs/HttpRequest` });
 ajv.addSchema({ $id: responseId, $ref: `${schemaId}#/$defs/HttpResponse` });
 ajv.getSchema(requestId);
 ajv.getSchema(responseId);
-const standaloneValidator = standaloneCode(
-	ajv,
-	{
-		validateHttpRequestJson: requestId,
-		validateHttpResponseJson: responseId,
-	},
-).replace(
+const standaloneValidator = standaloneCode(ajv, {
+	validateHttpRequestJson: requestId,
+	validateHttpResponseJson: responseId,
+}).replace(
 	/const (func\d+) = require\("ajv\/dist\/runtime\/ucs2length"\)\.default;/g,
 	"const $1 = (value) => Array.from(value).length;",
 );
 if (standaloneValidator.includes("require(")) {
-	throw new Error("Generated HTTP validator contains a CommonJS runtime dependency");
+	throw new Error(
+		"Generated HTTP validator contains a CommonJS runtime dependency",
+	);
 }
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
@@ -89,9 +92,13 @@ if (check) {
 		if (actual !== expected) stale.push(path.relative(packageRoot, file));
 	}
 	if (stale.length > 0) {
-		throw new Error(`Generated HTTP transport contract is stale: ${stale.join(", ")}`);
+		throw new Error(
+			`Generated HTTP transport contract is stale: ${stale.join(", ")}`,
+		);
 	}
 } else {
 	await mkdir(outputRoot, { recursive: true });
-	await Promise.all(outputs.map(([file, contents]) => writeFile(file, contents)));
+	await Promise.all(
+		outputs.map(([file, contents]) => writeFile(file, contents)),
+	);
 }
