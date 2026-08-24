@@ -205,3 +205,22 @@ The delivery order gains a dedicated **Attachment Move staging** slice immediate
 durable-acceptance slice. The later general dispatch slice only receives already-prepared immutable
 requests. All subsequent slice numbers shift by one; the Attachment Runtime service still owns
 ordinary upload/download/rename/delete behavior separately.
+
+### 2026-08-24 — Attachment Move staging split for verification
+
+The staging workflow cannot be implemented and fault-injected as one independently verifiable
+slice. Before starting it, the new boundary is split once more:
+
+1. **Server staging and atomic finalization:** add Operation-scoped stable Attachment staging
+   identities/credential renewal, verify uploaded staged objects and the complete accepted
+   Attachment set/envelope versions, atomically commit Item plus Attachment metadata/storage-key
+   switch with the retained Move outcome, and durably enqueue idempotent old/staged object cleanup.
+   Server fault injection covers each database boundary and cleanup replay.
+2. **Runtime Move preparation:** replace the temporary pre-write refusal with a durable Move intent
+   and per-Attachment progress. Rust downloads, decrypts, target-AAD re-encrypts, uploads, persists
+   each checkpoint, survives restart and more than five transport failures, freezes the final
+   request only when preparation is complete, and hands that request to the general dispatcher.
+
+These are sequential and path-disjoint: the first owns Server schema/domain/routes/generated Server
+contract; the second owns Client Runtime Move preparation and its protocol/Replica tests. Neither
+widens ordinary Attachment service ownership or Share delivery.
