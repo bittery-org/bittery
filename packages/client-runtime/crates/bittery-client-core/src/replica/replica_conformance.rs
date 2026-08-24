@@ -498,16 +498,26 @@ fn stage_page(
     continuation: BootstrapContinuation,
     item_id: &str,
 ) -> StageBootstrapPagePlan {
+    let phase = request_cursor.phase();
     StageBootstrapPagePlan {
         guard: guard(account_id, revision, 0),
         generation_id: BootstrapGenerationId("generation-1".to_owned()),
-        page_identity: BootstrapPageIdentity(page_identity),
+        page_identity: match phase {
+            super::BootstrapPhase::Vaults => BootstrapPageIdentity::vaults(page_identity),
+            super::BootstrapPhase::Items => BootstrapPageIdentity::items(page_identity),
+        },
         request_cursor,
         raw_response_fingerprint: Sha256Fingerprint::of_bytes(item_id.as_bytes()),
         pinned_watermark: watermark,
         continuation,
-        vaults: vec![vault(account_id)],
-        items: vec![authority_item(account_id, item_id, 1)],
+        vaults: (phase == super::BootstrapPhase::Vaults)
+            .then(|| vault(account_id))
+            .into_iter()
+            .collect(),
+        items: (phase == super::BootstrapPhase::Items)
+            .then(|| authority_item(account_id, item_id, 1))
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -607,17 +617,15 @@ fn bootstrap_history() -> Result<History, RuntimeError> {
         },
     )?;
     let page_commit = history.stage_bootstrap(
-        "stage first Bootstrap page with captured-empty Cursor",
+        "stage standalone Bootstrap Vault authority",
         stage_page(
             "account-bootstrap",
             1,
             0,
-            BootstrapPageCursor::Initial,
+            BootstrapPageCursor::VaultsInitial,
             SyncCursor::CapturedEmpty,
-            BootstrapContinuation::More {
-                next_cursor: "page-2".to_owned(),
-            },
-            "bootstrap-item-1",
+            BootstrapContinuation::Final,
+            "vault-phase",
         ),
     )?;
     history.replay(
@@ -630,12 +638,26 @@ fn bootstrap_history() -> Result<History, RuntimeError> {
         },
     )?;
     history.stage_bootstrap(
-        "stage final Bootstrap page and accumulate authority",
+        "stage first Item page and accumulate authority",
+        stage_page(
+            "account-bootstrap",
+            1,
+            0,
+            BootstrapPageCursor::ItemsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::More {
+                next_cursor: "page-2".to_owned(),
+            },
+            "bootstrap-item-1",
+        ),
+    )?;
+    history.stage_bootstrap(
+        "stage final Bootstrap Item page",
         stage_page(
             "account-bootstrap",
             1,
             1,
-            BootstrapPageCursor::After {
+            BootstrapPageCursor::ItemsAfter {
                 cursor: "page-2".to_owned(),
             },
             SyncCursor::CapturedEmpty,
@@ -663,12 +685,26 @@ fn ready_operation_history(history: &mut HistoryBuilder) -> Result<(), RuntimeEr
         },
     )?;
     history.stage_bootstrap(
-        "stage ready Operation Account authority",
+        "stage ready Operation Account Vault authority",
         stage_page(
             "account-operations",
             1,
             0,
-            BootstrapPageCursor::Initial,
+            BootstrapPageCursor::VaultsInitial,
+            SyncCursor::CapturedValue {
+                id: "cursor-captured".to_owned(),
+            },
+            BootstrapContinuation::Final,
+            "vault-phase",
+        ),
+    )?;
+    history.stage_bootstrap(
+        "stage ready Operation Account Item authority",
+        stage_page(
+            "account-operations",
+            1,
+            0,
+            BootstrapPageCursor::ItemsInitial,
             SyncCursor::CapturedValue {
                 id: "cursor-captured".to_owned(),
             },

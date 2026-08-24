@@ -272,10 +272,37 @@ pub(crate) enum SyncCursor {
 )]
 pub(crate) enum BootstrapPageCursor {
     #[default]
-    Initial,
-    After {
+    VaultsInitial,
+    VaultsAfter {
         cursor: String,
     },
+    ItemsInitial,
+    ItemsAfter {
+        cursor: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum BootstrapPhase {
+    Vaults,
+    Items,
+}
+
+impl BootstrapPageCursor {
+    pub(crate) fn phase(&self) -> BootstrapPhase {
+        match self {
+            Self::VaultsInitial | Self::VaultsAfter { .. } => BootstrapPhase::Vaults,
+            Self::ItemsInitial | Self::ItemsAfter { .. } => BootstrapPhase::Items,
+        }
+    }
+
+    pub(crate) fn cursor(&self) -> Option<&str> {
+        match self {
+            Self::VaultsInitial | Self::ItemsInitial => None,
+            Self::VaultsAfter { cursor } | Self::ItemsAfter { cursor } => Some(cursor),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,12 +330,40 @@ pub(crate) enum BootstrapContinuation {
 pub(crate) struct BootstrapGenerationId(pub(crate) String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
     dead_code,
     reason = "the persistence wire consumes this closed model next"
 )]
-pub(crate) struct BootstrapPageIdentity(#[serde(with = "decimal_u64")] pub(crate) u64);
+pub(crate) struct BootstrapPageIdentity {
+    pub(crate) phase: BootstrapPhase,
+    #[serde(with = "decimal_u64")]
+    pub(crate) ordinal: u64,
+}
+
+impl BootstrapPageIdentity {
+    pub(crate) fn vaults(ordinal: u64) -> Self {
+        Self {
+            phase: BootstrapPhase::Vaults,
+            ordinal,
+        }
+    }
+
+    pub(crate) fn items(ordinal: u64) -> Self {
+        Self {
+            phase: BootstrapPhase::Items,
+            ordinal,
+        }
+    }
+
+    pub(crate) fn record_id(self) -> String {
+        let phase = match self.phase {
+            BootstrapPhase::Vaults => "vaults",
+            BootstrapPhase::Items => "items",
+        };
+        format!("{phase}:{}", self.ordinal)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
@@ -793,8 +848,8 @@ impl AccountReplica {
                 generation_id: plan.generation_id.clone(),
                 fallback_state,
                 pinned_watermark: SyncCursor::Cold,
-                next_page_identity: BootstrapPageIdentity(0),
-                next_page_cursor: BootstrapPageCursor::Initial,
+                next_page_identity: BootstrapPageIdentity::vaults(0),
+                next_page_cursor: BootstrapPageCursor::VaultsInitial,
                 final_page_staged: false,
             },
         );
@@ -876,6 +931,7 @@ impl AccountReplica {
         if generation.final_page_staged
             || generation.next_page_identity != plan.page_identity
             || generation.next_page_cursor != plan.request_cursor
+            || plan.page_identity.phase != plan.request_cursor.phase()
         {
             return Err(replica_invariant(
                 "Bootstrap page does not match the expected page position",
@@ -890,6 +946,15 @@ impl AccountReplica {
             ));
         }
         validate_continuation(&plan.continuation)?;
+        match plan.request_cursor.phase() {
+            BootstrapPhase::Vaults if !plan.items.is_empty() => {
+                return Err(replica_invariant("Vault Bootstrap page carried Items"));
+            }
+            BootstrapPhase::Items if !plan.vaults.is_empty() => {
+                return Err(replica_invariant("Item Bootstrap page carried Vaults"));
+            }
+            _ => {}
+        }
         validate_authority_page(&plan.vaults, &plan.items)?;
         for item in &plan.items {
             if self
@@ -903,9 +968,9 @@ impl AccountReplica {
             }
         }
 
-        let next_identity = plan
+        let next_ordinal = plan
             .page_identity
-            .0
+            .ordinal
             .checked_add(1)
             .ok_or_else(|| replica_invariant("Bootstrap page identity overflowed"))?;
         let mut next = self.bootstrap.clone();
@@ -935,12 +1000,29 @@ impl AccountReplica {
             .get_mut(&plan.generation_id)
             .expect("staging generation was checked above");
         generation.pinned_watermark = plan.pinned_watermark;
-        generation.next_page_identity = BootstrapPageIdentity(next_identity);
         match plan.continuation {
-            BootstrapContinuation::Final => generation.final_page_staged = true,
+            BootstrapContinuation::Final
+                if plan.request_cursor.phase() == BootstrapPhase::Vaults =>
+            {
+                generation.next_page_cursor = BootstrapPageCursor::ItemsInitial;
+                generation.next_page_identity = BootstrapPageIdentity::items(0);
+            }
+            BootstrapContinuation::Final => {
+                generation.final_page_staged = true;
+                generation.next_page_identity = BootstrapPageIdentity::items(next_ordinal);
+            }
             BootstrapContinuation::More { next_cursor } => {
-                generation.next_page_cursor = BootstrapPageCursor::After {
-                    cursor: next_cursor,
+                generation.next_page_identity = match plan.request_cursor.phase() {
+                    BootstrapPhase::Vaults => BootstrapPageIdentity::vaults(next_ordinal),
+                    BootstrapPhase::Items => BootstrapPageIdentity::items(next_ordinal),
+                };
+                generation.next_page_cursor = match plan.request_cursor.phase() {
+                    BootstrapPhase::Vaults => BootstrapPageCursor::VaultsAfter {
+                        cursor: next_cursor,
+                    },
+                    BootstrapPhase::Items => BootstrapPageCursor::ItemsAfter {
+                        cursor: next_cursor,
+                    },
                 };
             }
         }
@@ -1488,20 +1570,23 @@ impl BootstrapAuthority {
                 .filter(|((receipt_generation, _), _)| receipt_generation == generation_id)
                 .map(|(_, receipt)| receipt)
                 .collect();
-            receipts.sort_by_key(|receipt| receipt.page_identity.0);
-            if u64::try_from(receipts.len()).ok() != Some(generation.next_page_identity.0) {
-                return Err(replica_invariant(
-                    "Bootstrap page receipt sequence has a gap",
-                ));
-            }
-            let mut expected_cursor = BootstrapPageCursor::Initial;
+            receipts.sort_by_key(|receipt| {
+                (
+                    match receipt.page_identity.phase {
+                        BootstrapPhase::Vaults => 0,
+                        BootstrapPhase::Items => 1,
+                    },
+                    receipt.page_identity.ordinal,
+                )
+            });
+            let mut expected_cursor = BootstrapPageCursor::VaultsInitial;
+            let mut expected_identity = BootstrapPageIdentity::vaults(0);
             let mut terminal = false;
-            for (expected_identity, receipt) in receipts.iter().enumerate() {
-                let expected_identity = u64::try_from(expected_identity)
-                    .map_err(|_| replica_invariant("Bootstrap page identity overflowed"))?;
+            for receipt in &receipts {
                 if receipt.generation_id != *generation_id
-                    || receipt.page_identity != BootstrapPageIdentity(expected_identity)
+                    || receipt.page_identity != expected_identity
                     || receipt.request_cursor != expected_cursor
+                    || receipt.page_identity.phase != receipt.request_cursor.phase()
                     || receipt.pinned_watermark != generation.pinned_watermark
                     || terminal
                 {
@@ -1510,19 +1595,51 @@ impl BootstrapAuthority {
                     ));
                 }
                 validate_captured_cursor(&receipt.pinned_watermark)?;
-                match &receipt.continuation {
-                    BootstrapContinuation::Final => terminal = true,
-                    BootstrapContinuation::More { next_cursor } => {
+                match (&receipt.request_cursor.phase(), &receipt.continuation) {
+                    (BootstrapPhase::Vaults, BootstrapContinuation::Final) => {
+                        expected_cursor = BootstrapPageCursor::ItemsInitial;
+                        expected_identity = BootstrapPageIdentity::items(0);
+                    }
+                    (BootstrapPhase::Items, BootstrapContinuation::Final) => {
+                        terminal = true;
+                        expected_identity = BootstrapPageIdentity::items(
+                            receipt
+                                .page_identity
+                                .ordinal
+                                .checked_add(1)
+                                .ok_or_else(|| {
+                                    replica_invariant("Bootstrap page identity overflowed")
+                                })?,
+                        );
+                    }
+                    (phase, BootstrapContinuation::More { next_cursor }) => {
                         validate_identifier(next_cursor, "next Bootstrap page Cursor")?;
-                        expected_cursor = BootstrapPageCursor::After {
-                            cursor: next_cursor.clone(),
+                        expected_cursor = match phase {
+                            BootstrapPhase::Vaults => BootstrapPageCursor::VaultsAfter {
+                                cursor: next_cursor.clone(),
+                            },
+                            BootstrapPhase::Items => BootstrapPageCursor::ItemsAfter {
+                                cursor: next_cursor.clone(),
+                            },
+                        };
+                        let next_ordinal = receipt
+                            .page_identity
+                            .ordinal
+                            .checked_add(1)
+                            .ok_or_else(|| {
+                                replica_invariant("Bootstrap page identity overflowed")
+                            })?;
+                        expected_identity = match phase {
+                            BootstrapPhase::Vaults => BootstrapPageIdentity::vaults(next_ordinal),
+                            BootstrapPhase::Items => BootstrapPageIdentity::items(next_ordinal),
                         };
                     }
                 }
             }
-            if generation.next_page_identity.0 == 0 {
+            if receipts.is_empty() {
                 if generation.pinned_watermark != SyncCursor::Cold
-                    || generation.next_page_cursor != BootstrapPageCursor::Initial
+                    || generation.next_page_cursor != BootstrapPageCursor::VaultsInitial
+                    || generation.next_page_identity != BootstrapPageIdentity::vaults(0)
                     || generation.final_page_staged
                 {
                     return Err(replica_invariant(
@@ -1532,6 +1649,7 @@ impl BootstrapAuthority {
             } else if generation.pinned_watermark == SyncCursor::Cold
                 || generation.final_page_staged != terminal
                 || (!terminal && generation.next_page_cursor != expected_cursor)
+                || generation.next_page_identity != expected_identity
             {
                 return Err(replica_invariant(
                     "Bootstrap generation progress is inconsistent",
@@ -1584,8 +1702,22 @@ impl BootstrapAuthority {
         generation_records.sort_by(|left, right| left.generation_id.0.cmp(&right.generation_id.0));
         let mut page_receipts: Vec<_> = self.pages.values().cloned().collect();
         page_receipts.sort_by(|left, right| {
-            (&left.generation_id.0, left.page_identity.0)
-                .cmp(&(&right.generation_id.0, right.page_identity.0))
+            (
+                &left.generation_id.0,
+                match left.page_identity.phase {
+                    BootstrapPhase::Vaults => 0,
+                    BootstrapPhase::Items => 1,
+                },
+                left.page_identity.ordinal,
+            )
+                .cmp(&(
+                    &right.generation_id.0,
+                    match right.page_identity.phase {
+                        BootstrapPhase::Vaults => 0,
+                        BootstrapPhase::Items => 1,
+                    },
+                    right.page_identity.ordinal,
+                ))
         });
         let staged_vault_count = self.staging_generation.as_ref().map_or(0, |staging| {
             self.vaults
@@ -1707,8 +1839,8 @@ mod bootstrap_head_invariant_tests {
             generation_id: BootstrapGenerationId(id.into()),
             fallback_state: ReplicaState::Cold,
             pinned_watermark: SyncCursor::Cold,
-            next_page_identity: BootstrapPageIdentity(0),
-            next_page_cursor: BootstrapPageCursor::Initial,
+            next_page_identity: BootstrapPageIdentity::vaults(0),
+            next_page_cursor: BootstrapPageCursor::VaultsInitial,
             final_page_staged: false,
         }
     }
@@ -1728,18 +1860,29 @@ mod bootstrap_head_invariant_tests {
             generation_id.clone(),
             BootstrapGenerationRecord {
                 pinned_watermark: SyncCursor::CapturedEmpty,
-                next_page_identity: BootstrapPageIdentity(1),
+                next_page_identity: BootstrapPageIdentity::items(1),
                 final_page_staged: true,
                 ..generation_record("active")
             },
         );
         authority.pages.insert(
-            (generation_id.clone(), BootstrapPageIdentity(0)),
+            (generation_id.clone(), BootstrapPageIdentity::vaults(0)),
             BootstrapPageReceipt {
                 generation_id: generation_id.clone(),
-                page_identity: BootstrapPageIdentity(0),
-                request_cursor: BootstrapPageCursor::Initial,
+                page_identity: BootstrapPageIdentity::vaults(0),
+                request_cursor: BootstrapPageCursor::VaultsInitial,
                 raw_response_fingerprint: Sha256Fingerprint([1; 32]),
+                pinned_watermark: SyncCursor::CapturedEmpty,
+                continuation: BootstrapContinuation::Final,
+            },
+        );
+        authority.pages.insert(
+            (generation_id.clone(), BootstrapPageIdentity::items(0)),
+            BootstrapPageReceipt {
+                generation_id: generation_id.clone(),
+                page_identity: BootstrapPageIdentity::items(0),
+                request_cursor: BootstrapPageCursor::ItemsInitial,
+                raw_response_fingerprint: Sha256Fingerprint([2; 32]),
                 pinned_watermark: SyncCursor::CapturedEmpty,
                 continuation: BootstrapContinuation::Final,
             },

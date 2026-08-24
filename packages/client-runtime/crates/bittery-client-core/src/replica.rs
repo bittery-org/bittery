@@ -32,7 +32,7 @@ pub(crate) use domain::{
     AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
     BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
-    BootstrapPageCursor, BootstrapPageIdentity, CleanupBootstrapGenerationPlan,
+    BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase, CleanupBootstrapGenerationPlan,
     CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
     MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
     OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
@@ -165,7 +165,10 @@ mod bootstrap_authority_tests {
         StageBootstrapPagePlan {
             guard: guard(account_id, revision),
             generation_id: generation(generation_id),
-            page_identity: BootstrapPageIdentity(page_identity),
+            page_identity: match request_cursor.phase() {
+                BootstrapPhase::Vaults => BootstrapPageIdentity::vaults(page_identity),
+                BootstrapPhase::Items => BootstrapPageIdentity::items(page_identity),
+            },
             request_cursor,
             raw_response_fingerprint: Sha256Fingerprint([fingerprint_byte; 32]),
             pinned_watermark: watermark,
@@ -187,6 +190,158 @@ mod bootstrap_authority_tests {
                 generation_id: generation(generation_id),
             })
             .unwrap()
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "phase protocol fields stay explicit"
+    )]
+    fn phase_page(
+        account_id: &AccountId,
+        generation_id: &str,
+        page_identity: u64,
+        request_cursor: BootstrapPageCursor,
+        fingerprint_byte: u8,
+        continuation: BootstrapContinuation,
+        vaults: Vec<AuthorityVaultRecord>,
+        items: Vec<AuthorityItemRecord>,
+    ) -> StageBootstrapPagePlan {
+        StageBootstrapPagePlan {
+            guard: guard(account_id, 1),
+            generation_id: generation(generation_id),
+            page_identity: match request_cursor.phase() {
+                BootstrapPhase::Vaults => BootstrapPageIdentity::vaults(page_identity),
+                BootstrapPhase::Items => BootstrapPageIdentity::items(page_identity),
+            },
+            request_cursor,
+            raw_response_fingerprint: Sha256Fingerprint([fingerprint_byte; 32]),
+            pinned_watermark: SyncCursor::CapturedValue {
+                id: "pinned-watermark".into(),
+            },
+            continuation,
+            vaults,
+            items,
+        }
+    }
+
+    #[test]
+    fn phase_and_cursor_identity_resume_independently_before_atomic_promotion() {
+        let (replica, account_id) = installed();
+        begin(&replica, &account_id, 0, "two-phase");
+
+        let first_vault = phase_page(
+            &account_id,
+            "two-phase",
+            0,
+            BootstrapPageCursor::VaultsInitial,
+            1,
+            BootstrapContinuation::More {
+                next_cursor: "shared-cursor".into(),
+            },
+            vec![vault("vault-1")],
+            Vec::new(),
+        );
+        assert_eq!(
+            replica.stage_bootstrap_page(first_vault.clone()).unwrap(),
+            StageBootstrapPageResult::Applied
+        );
+        assert_eq!(
+            replica.stage_bootstrap_page(first_vault).unwrap(),
+            StageBootstrapPageResult::Replayed
+        );
+        assert!(replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                guard: guard(&account_id, 1),
+                generation_id: generation("two-phase"),
+            })
+            .is_err());
+
+        let wrong_phase = phase_page(
+            &account_id,
+            "two-phase",
+            1,
+            BootstrapPageCursor::ItemsAfter {
+                cursor: "shared-cursor".into(),
+            },
+            0,
+            BootstrapContinuation::Final,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert!(replica.stage_bootstrap_page(wrong_phase).is_err());
+
+        replica
+            .stage_bootstrap_page(phase_page(
+                &account_id,
+                "two-phase",
+                1,
+                BootstrapPageCursor::VaultsAfter {
+                    cursor: "shared-cursor".into(),
+                },
+                2,
+                BootstrapContinuation::Final,
+                vec![vault("vault-2")],
+                Vec::new(),
+            ))
+            .unwrap();
+        let resumed = replica.snapshot(&account_id).unwrap();
+        let generation_record = resumed
+            .bootstrap
+            .generations
+            .get(&generation("two-phase"))
+            .unwrap();
+        assert_eq!(
+            generation_record.next_page_cursor,
+            BootstrapPageCursor::ItemsInitial
+        );
+
+        let first_item = phase_page(
+            &account_id,
+            "two-phase",
+            0,
+            BootstrapPageCursor::ItemsInitial,
+            3,
+            BootstrapContinuation::More {
+                next_cursor: "shared-cursor".into(),
+            },
+            Vec::new(),
+            vec![item("item-1", "vault-1")],
+        );
+        replica.stage_bootstrap_page(first_item.clone()).unwrap();
+        assert_eq!(
+            replica.stage_bootstrap_page(first_item).unwrap(),
+            StageBootstrapPageResult::Replayed
+        );
+        assert!(replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                guard: guard(&account_id, 1),
+                generation_id: generation("two-phase"),
+            })
+            .is_err());
+        replica
+            .stage_bootstrap_page(phase_page(
+                &account_id,
+                "two-phase",
+                1,
+                BootstrapPageCursor::ItemsAfter {
+                    cursor: "shared-cursor".into(),
+                },
+                4,
+                BootstrapContinuation::Final,
+                Vec::new(),
+                vec![item("item-2", "vault-2")],
+            ))
+            .unwrap();
+        promote(&replica, &account_id, 1, "two-phase");
+        let ready = replica.bootstrap_snapshot(&account_id).unwrap();
+        assert_eq!(ready.visible_vaults.len(), 2);
+        assert_eq!(ready.visible_items.len(), 2);
+        assert_eq!(
+            ready.active_cursor,
+            SyncCursor::CapturedValue {
+                id: "pinned-watermark".into()
+            }
+        );
     }
 
     #[test]
@@ -213,12 +368,12 @@ mod bootstrap_authority_tests {
 
         assert_eq!(
             replica
-                .stage_bootstrap_page(page(
+                .stage_bootstrap_test_page(page(
                     &account_id,
                     1,
                     "generation-1",
                     0,
-                    BootstrapPageCursor::Initial,
+                    BootstrapPageCursor::ItemsInitial,
                     1,
                     SyncCursor::CapturedEmpty,
                     BootstrapContinuation::Final,
@@ -249,12 +404,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "old");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "old",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedValue {
                     id: "event-1".into(),
@@ -267,12 +422,12 @@ mod bootstrap_authority_tests {
 
         begin(&replica, &account_id, 2, "new");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 3,
                 "new",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 2,
                 SyncCursor::CapturedValue {
                     id: "event-2".into(),
@@ -301,12 +456,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "old");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "old",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedValue {
                     id: "event-1".into(),
@@ -374,7 +529,7 @@ mod bootstrap_authority_tests {
             1,
             "generation-1",
             0,
-            BootstrapPageCursor::Initial,
+            BootstrapPageCursor::ItemsInitial,
             7,
             SyncCursor::CapturedValue {
                 id: "event-1".into(),
@@ -385,12 +540,12 @@ mod bootstrap_authority_tests {
             "item-1",
         );
         assert_eq!(
-            replica.stage_bootstrap_page(first.clone()).unwrap(),
+            replica.stage_bootstrap_test_page(first.clone()).unwrap(),
             StageBootstrapPageResult::Applied
         );
         let after_apply = replica.bootstrap_snapshot(&account_id).unwrap();
         assert_eq!(
-            replica.stage_bootstrap_page(first.clone()).unwrap(),
+            replica.stage_bootstrap_test_page(first.clone()).unwrap(),
             StageBootstrapPageResult::Replayed
         );
         assert_eq!(
@@ -401,7 +556,7 @@ mod bootstrap_authority_tests {
         let mut mismatch = first;
         mismatch.raw_response_fingerprint = Sha256Fingerprint([8; 32]);
         assert_eq!(
-            replica.stage_bootstrap_page(mismatch).unwrap(),
+            replica.stage_bootstrap_test_page(mismatch).unwrap(),
             StageBootstrapPageResult::ReplayMismatch
         );
         assert_eq!(
@@ -411,12 +566,12 @@ mod bootstrap_authority_tests {
 
         assert_eq!(
             replica
-                .stage_bootstrap_page(page(
+                .stage_bootstrap_test_page(page(
                     &account_id,
                     1,
                     "generation-1",
                     1,
-                    BootstrapPageCursor::After {
+                    BootstrapPageCursor::ItemsAfter {
                         cursor: "page-2".into()
                     },
                     9,
@@ -492,7 +647,7 @@ mod bootstrap_authority_tests {
             1,
             "guarded",
             0,
-            BootstrapPageCursor::Initial,
+            BootstrapPageCursor::ItemsInitial,
             1,
             SyncCursor::CapturedEmpty,
             BootstrapContinuation::Final,
@@ -500,7 +655,7 @@ mod bootstrap_authority_tests {
         );
         stale_page.guard.user_id = "another-user".into();
         assert_eq!(
-            replica.stage_bootstrap_page(stale_page).unwrap(),
+            replica.stage_bootstrap_test_page(stale_page).unwrap(),
             StageBootstrapPageResult::Stale { actual_revision: 1 }
         );
         let mut stale_promote = guard(&account_id, 1);
@@ -542,12 +697,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "active");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "active",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedEmpty,
                 BootstrapContinuation::Final,
@@ -619,12 +774,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "abandoned-cold");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "abandoned-cold",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedEmpty,
                 BootstrapContinuation::Final,
@@ -655,31 +810,31 @@ mod bootstrap_authority_tests {
         begin(&replica, &account_id, 0, "generation-1");
         let before = replica.bootstrap_snapshot(&account_id).unwrap();
 
-        let mut cold = page(
+        let mut cold = phase_page(
             &account_id,
-            1,
             "generation-1",
             0,
-            BootstrapPageCursor::Initial,
+            BootstrapPageCursor::VaultsInitial,
             1,
-            SyncCursor::Cold,
             BootstrapContinuation::Final,
-            "item-1",
+            vec![vault("vault-1")],
+            Vec::new(),
         );
+        cold.pinned_watermark = SyncCursor::Cold;
         assert_eq!(
             replica.stage_bootstrap_page(cold.clone()).unwrap_err().code,
             RuntimeErrorCode::InvariantViolation
         );
         cold.pinned_watermark = SyncCursor::CapturedEmpty;
-        cold.request_cursor = BootstrapPageCursor::After {
+        cold.request_cursor = BootstrapPageCursor::VaultsAfter {
             cursor: "wrong".into(),
         };
         assert_eq!(
             replica.stage_bootstrap_page(cold.clone()).unwrap_err().code,
             RuntimeErrorCode::InvariantViolation
         );
-        cold.request_cursor = BootstrapPageCursor::Initial;
-        cold.items.push(cold.items[0].clone());
+        cold.request_cursor = BootstrapPageCursor::VaultsInitial;
+        cold.vaults.push(cold.vaults[0].clone());
         assert_eq!(
             replica.stage_bootstrap_page(cold).unwrap_err().code,
             RuntimeErrorCode::InvariantViolation
@@ -692,12 +847,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "generation-1");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "generation-1",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedEmpty,
                 BootstrapContinuation::More {
@@ -712,7 +867,7 @@ mod bootstrap_authority_tests {
             1,
             "generation-1",
             1,
-            BootstrapPageCursor::After {
+            BootstrapPageCursor::ItemsAfter {
                 cursor: "page-2".into(),
             },
             2,
@@ -724,7 +879,7 @@ mod bootstrap_authority_tests {
         );
         assert_eq!(
             replica
-                .stage_bootstrap_page(changed_watermark)
+                .stage_bootstrap_test_page(changed_watermark)
                 .unwrap_err()
                 .code,
             RuntimeErrorCode::InvariantViolation
@@ -734,7 +889,7 @@ mod bootstrap_authority_tests {
             1,
             "generation-1",
             2,
-            BootstrapPageCursor::After {
+            BootstrapPageCursor::ItemsAfter {
                 cursor: "page-2".into(),
             },
             2,
@@ -744,7 +899,7 @@ mod bootstrap_authority_tests {
         );
         assert_eq!(
             replica
-                .stage_bootstrap_page(wrong_identity)
+                .stage_bootstrap_test_page(wrong_identity)
                 .unwrap_err()
                 .code,
             RuntimeErrorCode::InvariantViolation
@@ -757,12 +912,12 @@ mod bootstrap_authority_tests {
         let (replica, account_id) = installed();
         begin(&replica, &account_id, 0, "generation-1");
         replica
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "generation-1",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedEmpty,
                 BootstrapContinuation::Final,
@@ -804,12 +959,12 @@ mod bootstrap_authority_tests {
             .unwrap();
         begin(&persistence, &account_id, 0, "generation-1");
         persistence
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "generation-1",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedEmpty,
                 BootstrapContinuation::Final,
@@ -846,12 +1001,12 @@ mod bootstrap_authority_tests {
             .unwrap();
         begin(&persistence, &account_id, 0, "generation-1");
         persistence
-            .stage_bootstrap_page(page(
+            .stage_bootstrap_test_page(page(
                 &account_id,
                 1,
                 "generation-1",
                 0,
-                BootstrapPageCursor::Initial,
+                BootstrapPageCursor::ItemsInitial,
                 1,
                 SyncCursor::CapturedValue {
                     id: "event-1".into(),
@@ -1701,6 +1856,47 @@ impl InMemoryReplica {
         account.stage_bootstrap_page(plan)
     }
 
+    /// Adapts pre-two-phase unit-test pages without weakening the production plan contract.
+    #[cfg(test)]
+    fn stage_bootstrap_test_page(
+        &self,
+        mut plan: StageBootstrapPagePlan,
+    ) -> Result<StageBootstrapPageResult, RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let Some(account) = state.accounts.get_mut(&plan.guard.account_id) else {
+            return Ok(StageBootstrapPageResult::Missing);
+        };
+        if plan.request_cursor.phase() == BootstrapPhase::Items {
+            let needs_vault_phase = plan.request_cursor == BootstrapPageCursor::ItemsInitial
+                && account
+                    .bootstrap
+                    .generations
+                    .get(&plan.generation_id)
+                    .ok_or_else(|| replica_invariant("test Bootstrap generation is missing"))?
+                    .next_page_cursor
+                    == BootstrapPageCursor::VaultsInitial;
+            if needs_vault_phase {
+                let vault_page = StageBootstrapPagePlan {
+                    guard: plan.guard.clone(),
+                    generation_id: plan.generation_id.clone(),
+                    page_identity: BootstrapPageIdentity::vaults(0),
+                    request_cursor: BootstrapPageCursor::VaultsInitial,
+                    raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"test-vault-phase"),
+                    pinned_watermark: plan.pinned_watermark.clone(),
+                    continuation: BootstrapContinuation::Final,
+                    vaults: std::mem::take(&mut plan.vaults),
+                    items: Vec::new(),
+                };
+                let result = account.stage_bootstrap_page(vault_page)?;
+                if result != StageBootstrapPageResult::Applied {
+                    return Ok(result);
+                }
+            }
+            plan.vaults.clear();
+        }
+        account.stage_bootstrap_page(plan)
+    }
+
     #[cfg(test)]
     pub(crate) fn promote_bootstrap(
         &self,
@@ -1770,12 +1966,23 @@ impl InMemoryReplica {
         account.stage_bootstrap_page(StageBootstrapPagePlan {
             guard: guard(account),
             generation_id: generation_id.clone(),
-            page_identity: BootstrapPageIdentity(0),
-            request_cursor: BootstrapPageCursor::Initial,
-            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-page"),
+            page_identity: BootstrapPageIdentity::vaults(0),
+            request_cursor: BootstrapPageCursor::VaultsInitial,
+            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-vault-page"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
             vaults: vec![vault],
+            items: Vec::new(),
+        })?;
+        account.stage_bootstrap_page(StageBootstrapPagePlan {
+            guard: guard(account),
+            generation_id: generation_id.clone(),
+            page_identity: BootstrapPageIdentity::items(0),
+            request_cursor: BootstrapPageCursor::ItemsInitial,
+            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-item-page"),
+            pinned_watermark: SyncCursor::CapturedEmpty,
+            continuation: BootstrapContinuation::Final,
+            vaults: Vec::new(),
             items: Vec::new(),
         })?;
         account.promote_bootstrap(PromoteBootstrapPlan {

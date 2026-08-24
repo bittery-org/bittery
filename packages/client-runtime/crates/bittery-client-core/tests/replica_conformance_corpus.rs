@@ -48,7 +48,7 @@ fn corpus_declares_independent_oracle_empty_cursor_long_retry_and_plaintext_caus
 }
 
 #[test]
-fn bootstrap_corpus_accumulates_two_captured_empty_pages_before_promotion() {
+fn bootstrap_corpus_accumulates_phase_scoped_pages_before_promotion() {
     let corpus: Value = serde_json::from_str(
         &std::fs::read_to_string(corpus_path()).expect("Replica corpus is checked in"),
     )
@@ -69,44 +69,70 @@ fn bootstrap_corpus_accumulates_two_captured_empty_pages_before_promotion() {
         [
             "install Bootstrap Account",
             "begin staged Bootstrap generation",
-            "stage first Bootstrap page with captured-empty Cursor",
+            "stage standalone Bootstrap Vault authority",
             "retry exact staged page persistence request",
-            "stage final Bootstrap page and accumulate authority",
+            "stage first Item page and accumulate authority",
+            "stage final Bootstrap Item page",
             "promote captured-empty Bootstrap generation atomically",
         ]
     );
 
-    let first_page = &steps[2];
-    let first_receipt = row_payload(first_page, "bootstrapPages", "generation-1/0");
-    assert_eq!(first_receipt["pageIdentity"], "0");
+    let vault_page = &steps[2];
+    let vault_receipt = row_payload(vault_page, "bootstrapPages", "generation-1/vaults:0");
     assert_eq!(
-        first_receipt["requestCursor"],
-        serde_json::json!({ "type": "initial" })
+        vault_receipt["pageIdentity"],
+        serde_json::json!({ "phase": "vaults", "ordinal": "0" })
     );
     assert_eq!(
-        first_receipt["pinnedWatermark"],
+        vault_receipt["requestCursor"],
+        serde_json::json!({ "type": "vaultsInitial" })
+    );
+    assert_eq!(
+        vault_receipt["pinnedWatermark"],
         serde_json::json!({ "type": "capturedEmpty" })
     );
     assert_eq!(
-        first_receipt["continuation"],
+        vault_receipt["continuation"],
+        serde_json::json!({ "type": "final" })
+    );
+    assert_eq!(
+        row_payload(vault_page, "authorityVaults", "generation-1/vault-1")["id"],
+        "vault-1"
+    );
+    assert_eq!(steps[3]["request"], vault_page["request"]);
+
+    let first_item_page = &steps[4];
+    let first_item_receipt = row_payload(first_item_page, "bootstrapPages", "generation-1/items:0");
+    assert_eq!(
+        first_item_receipt["pageIdentity"],
+        serde_json::json!({ "phase": "items", "ordinal": "0" })
+    );
+    assert_eq!(
+        first_item_receipt["requestCursor"],
+        serde_json::json!({ "type": "itemsInitial" })
+    );
+    assert_eq!(
+        first_item_receipt["continuation"],
         serde_json::json!({ "type": "more", "nextCursor": "page-2" })
     );
     assert_eq!(
         row_payload(
-            first_page,
+            first_item_page,
             "authorityItems",
             "generation-1/bootstrap-item-1"
         )["id"],
         "bootstrap-item-1"
     );
-    assert_eq!(steps[3]["request"], first_page["request"]);
 
-    let final_page = &steps[4];
-    let final_receipt = row_payload(final_page, "bootstrapPages", "generation-1/1");
-    assert_eq!(final_receipt["pageIdentity"], "1");
+    let final_page = &steps[5];
+    let final_receipt = row_payload(final_page, "bootstrapPages", "generation-1/items:1");
+    assert_eq!(
+        final_receipt["pageIdentity"],
+        serde_json::json!({ "phase": "items", "ordinal": "1" })
+    );
     assert_eq!(
         final_receipt["requestCursor"],
-        serde_json::json!({ "type": "after", "cursor": "page-2" })
+        serde_json::json!({ "type": "itemsAfter", "cursor": "page-2" })
     );
     assert_eq!(
         final_receipt["pinnedWatermark"],
@@ -125,7 +151,7 @@ fn bootstrap_corpus_accumulates_two_captured_empty_pages_before_promotion() {
         "bootstrap-item-2"
     );
 
-    let loaded = &steps[5]["expectedLoadedState"][0]["response"];
+    let loaded = &steps[6]["expectedLoadedState"][0]["response"];
     let rows = loaded["rows"].as_array().expect("promoted state has rows");
     let metadata: Value = serde_json::from_str(
         rows.iter()

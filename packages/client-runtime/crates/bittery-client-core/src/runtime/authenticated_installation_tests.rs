@@ -566,7 +566,7 @@ impl RoutingAuthHttp {
 
     fn bootstrap_page(&self, state: &mut RoutingAuthState) -> String {
         let pages = self.bootstrap_pages.lock().unwrap();
-        let page = pages
+        let mut page = pages
             .get(state.bootstrap_index)
             .cloned()
             .unwrap_or_else(|| {
@@ -577,7 +577,43 @@ impl RoutingAuthHttp {
                     "syncCursor": null
                 })
             });
-        state.bootstrap_index += 1;
+        if page.get("phase").is_none() {
+            let requested_phase = state
+                .requests
+                .last()
+                .and_then(|request| request["url"].as_str())
+                .and_then(|url| url.split("phase=").nth(1))
+                .and_then(|query| query.split('&').next())
+                .unwrap_or("vaults");
+            if requested_phase == "vaults" {
+                let mut vaults = Vec::new();
+                for item in page["items"].as_array().into_iter().flatten() {
+                    if let Some(vault) = item.get("vault") {
+                        if vaults
+                            .iter()
+                            .all(|existing: &Value| existing["id"] != vault["id"])
+                        {
+                            vaults.push(vault.clone());
+                        }
+                    }
+                }
+                page = json!({
+                    "phase": "vaults",
+                    "hasMore": false,
+                    "nextCursor": null,
+                    "syncCursor": page["syncCursor"].clone(),
+                    "vaults": vaults
+                });
+            } else {
+                for item in page["items"].as_array_mut().into_iter().flatten() {
+                    item.as_object_mut().unwrap().remove("vault");
+                }
+                page["phase"] = json!("items");
+                state.bootstrap_index += 1;
+            }
+        } else {
+            state.bootstrap_index += 1;
+        }
         routing_completed(200, page)
     }
 
@@ -2233,6 +2269,114 @@ fn sealed_login_item(item_id: &str, title: &str, password: &str) -> (String, Val
             "version": 1
         }),
     )
+}
+
+#[tokio::test]
+async fn bootstrap_stages_a_standalone_empty_vault_before_the_item_phase() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (wrapped, _item) = sealed_login_item("unused-item", "Unused", "unused");
+    *http.bootstrap_pages.lock().unwrap() = vec![
+        json!({
+            "phase": "vaults",
+            "hasMore": false,
+            "nextCursor": null,
+            "syncCursor": { "id": "evt-empty-vault" },
+            "vaults": [{
+                "encryptedVaultKey": wrapped,
+                "icon": null,
+                "id": "vault-1",
+                "imageUrl": null,
+                "name": "Empty Personal",
+                "role": "owner",
+                "vaultType": "personal"
+            }]
+        }),
+        json!({
+            "phase": "items",
+            "hasMore": false,
+            "items": [],
+            "nextCursor": null,
+            "syncCursor": { "id": "evt-empty-vault" }
+        }),
+    ];
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+
+    let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+    let authority = snapshot.bootstrap.snapshot();
+    assert_eq!(authority.visible_vaults.len(), 1);
+    assert_eq!(authority.visible_vaults[0].id, "vault-1");
+    assert!(authority.visible_items.is_empty());
+    assert_eq!(
+        snapshot.bootstrap.active_cursor,
+        crate::replica::SyncCursor::CapturedValue {
+            id: "evt-empty-vault".into()
+        }
+    );
+    let bootstrap_urls: Vec<_> = http
+        .requests()
+        .into_iter()
+        .filter_map(|request| request["url"].as_str().map(ToOwned::to_owned))
+        .filter(|url| url.contains("/sync/bootstrap"))
+        .collect();
+    assert_eq!(bootstrap_urls.len(), 2);
+    assert!(bootstrap_urls[0].contains("phase=vaults"));
+    assert!(bootstrap_urls[1].contains("phase=items"));
+}
+
+#[tokio::test]
+async fn bootstrap_rejects_a_response_from_the_wrong_phase_without_promotion() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    *http.bootstrap_pages.lock().unwrap() = vec![json!({
+        "phase": "items",
+        "hasMore": false,
+        "items": [],
+        "nextCursor": null,
+        "syncCursor": { "id": "evt-wrong-phase" }
+    })];
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+
+    let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.bootstrap.state, crate::replica::ReplicaState::Cold);
+    assert!(snapshot.bootstrap.active_generation.is_none());
+    assert!(snapshot.bootstrap.vaults.is_empty());
+    assert!(snapshot.bootstrap.items.is_empty());
+    let bootstrap_urls: Vec<_> = http
+        .requests()
+        .into_iter()
+        .filter_map(|request| request["url"].as_str().map(ToOwned::to_owned))
+        .filter(|url| url.contains("/sync/bootstrap"))
+        .collect();
+    assert_eq!(bootstrap_urls.len(), 1);
+    assert!(bootstrap_urls[0].contains("phase=vaults"));
 }
 
 #[tokio::test]

@@ -253,6 +253,7 @@ impl<'transport> AuthHttpClient<'transport> {
     pub(crate) async fn bootstrap_page(
         &self,
         token: &str,
+        phase: &str,
         request_cursor: Option<&str>,
         pinned_sync_cursor: Option<&str>,
         sync_cursor_captured: bool,
@@ -266,6 +267,7 @@ impl<'transport> AuthHttpClient<'transport> {
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("limit", "500");
+            query.append_pair("phase", phase);
             if let Some(cursor) = request_cursor {
                 query.append_pair("cursor", cursor);
             }

@@ -680,10 +680,8 @@ pub(super) fn reconstruct_snapshot(
             ReplicaStore::BootstrapPages => {
                 let receipt: BootstrapPageReceipt = serde_json::from_str(&row.payload_json)
                     .map_err(|_| replica_invariant("Replica Bootstrap page payload is invalid"))?;
-                if composite_record_id(
-                    &receipt.generation_id.0,
-                    &receipt.page_identity.0.to_string(),
-                ) != row.key.record_id
+                if composite_record_id(&receipt.generation_id.0, &receipt.page_identity.record_id())
+                    != row.key.record_id
                 {
                     return Err(replica_invariant(
                         "Replica Bootstrap page key does not match its payload",
@@ -832,7 +830,7 @@ fn bootstrap_rows(
         rows.push(stored_row(
             ReplicaStore::BootstrapPages,
             account_id,
-            &composite_record_id(&generation_id.0, &page_identity.0.to_string()),
+            &composite_record_id(&generation_id.0, &page_identity.record_id()),
             receipt,
         )?);
     }

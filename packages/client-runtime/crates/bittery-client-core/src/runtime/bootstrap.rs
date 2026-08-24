@@ -7,9 +7,9 @@ use crate::{
     replica::{
         AbandonBootstrapPlan, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
         AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapContinuation,
-        BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, MarkRefreshRequiredPlan,
-        PlanResult, PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState, Sha256Fingerprint,
-        StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+        BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPhase,
+        MarkRefreshRequiredPlan, PlanResult, PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState,
+        Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
     },
     server_contract::{
         BootstrapItemResponse, BootstrapItemsResponse, BootstrapVaultSummary, ItemCategory,
@@ -157,10 +157,8 @@ impl Runtime {
             if generation.final_page_staged {
                 break;
             }
-            let request_cursor = match &generation.next_page_cursor {
-                BootstrapPageCursor::Initial => None,
-                BootstrapPageCursor::After { cursor } => Some(cursor.clone()),
-            };
+            let phase = generation.next_page_cursor.phase();
+            let request_cursor = generation.next_page_cursor.cursor().map(ToOwned::to_owned);
             let captured = generation.pinned_watermark != SyncCursor::Cold;
             let pinned = match &generation.pinned_watermark {
                 SyncCursor::CapturedValue { id } => Some(id.clone()),
@@ -170,6 +168,7 @@ impl Runtime {
             let mut page = http
                 .bootstrap_page(
                     &token,
+                    bootstrap_phase_query(phase),
                     request_cursor.as_deref(),
                     pinned.as_deref(),
                     captured,
@@ -184,6 +183,7 @@ impl Runtime {
                 page = http
                     .bootstrap_page(
                         &token,
+                        bootstrap_phase_query(phase),
                         request_cursor.as_deref(),
                         pinned.as_deref(),
                         captured,
@@ -204,22 +204,29 @@ impl Runtime {
                     ));
                 }
             };
-            let watermark = captured_watermark(page.value.sync_cursor.as_ref());
+            let BootstrapAuthorityPage {
+                phase: response_phase,
+                has_more,
+                next_cursor,
+                watermark,
+                vaults,
+                items,
+            } = authority_from_bootstrap_page(&page.value)?;
+            if response_phase != phase {
+                self.abandon_staging(account_id).await?;
+                return Err(sync_failure("Bootstrap Server returned the wrong phase"));
+            }
             if captured && watermark != generation.pinned_watermark {
                 self.abandon_staging(account_id).await?;
                 return Err(sync_failure("Bootstrap watermark changed between pages"));
             }
-            let continuation = if page.value.has_more {
-                let next_cursor = page
-                    .value
-                    .next_cursor
-                    .clone()
+            let continuation = if has_more {
+                let next_cursor = next_cursor
                     .ok_or_else(|| sync_failure("Bootstrap page is missing its next Cursor"))?;
                 BootstrapContinuation::More { next_cursor }
             } else {
                 BootstrapContinuation::Final
             };
-            let (vaults, items) = authority_from_bootstrap_page(&page.value)?;
             let snapshot = self.require_snapshot(account_id)?;
             let staging = snapshot
                 .bootstrap
@@ -232,6 +239,8 @@ impl Runtime {
                 .get(&staging)
                 .ok_or_else(replica_busy)?
                 .clone();
+            let response_fingerprint =
+                bootstrap_page_fingerprint(&generation.next_page_cursor, &page.raw_body);
             match self
                 .replica
                 .stage_bootstrap_page(StageBootstrapPagePlan {
@@ -239,7 +248,7 @@ impl Runtime {
                     generation_id: staging,
                     page_identity: generation.next_page_identity,
                     request_cursor: generation.next_page_cursor,
-                    raw_response_fingerprint: Sha256Fingerprint::of_bytes(&page.raw_body),
+                    raw_response_fingerprint: response_fingerprint,
                     pinned_watermark: watermark,
                     continuation,
                     vaults,
@@ -703,24 +712,111 @@ fn captured_watermark_from_response(cursor: &SyncCursorResponse) -> SyncCursor {
     captured_watermark(Some(cursor))
 }
 
+fn bootstrap_phase_query(phase: BootstrapPhase) -> &'static str {
+    match phase {
+        BootstrapPhase::Vaults => "vaults",
+        BootstrapPhase::Items => "items",
+    }
+}
+
+fn bootstrap_page_fingerprint(
+    request_cursor: &BootstrapPageCursor,
+    raw_body: &[u8],
+) -> Sha256Fingerprint {
+    let (phase_tag, cursor_variant_tag, cursor_bytes) = match request_cursor {
+        BootstrapPageCursor::VaultsInitial => (0_u8, 0_u8, &[][..]),
+        BootstrapPageCursor::VaultsAfter { cursor } => (0, 1, cursor.as_bytes()),
+        BootstrapPageCursor::ItemsInitial => (1, 0, &[][..]),
+        BootstrapPageCursor::ItemsAfter { cursor } => (1, 1, cursor.as_bytes()),
+    };
+    let cursor_length =
+        u64::try_from(cursor_bytes.len()).expect("supported targets fit byte lengths in u64");
+    let body_length =
+        u64::try_from(raw_body.len()).expect("supported targets fit byte lengths in u64");
+    const FRAME_VERSION: &[u8] = b"bootstrap-page-v1";
+    let mut identified =
+        Vec::with_capacity(FRAME_VERSION.len() + 18 + cursor_bytes.len() + raw_body.len());
+    identified.extend_from_slice(FRAME_VERSION);
+    identified.push(phase_tag);
+    identified.push(cursor_variant_tag);
+    identified.extend_from_slice(&cursor_length.to_be_bytes());
+    identified.extend_from_slice(cursor_bytes);
+    identified.extend_from_slice(&body_length.to_be_bytes());
+    identified.extend_from_slice(raw_body);
+    Sha256Fingerprint::of_bytes(&identified)
+}
+
+struct BootstrapAuthorityPage {
+    phase: BootstrapPhase,
+    has_more: bool,
+    next_cursor: Option<String>,
+    watermark: SyncCursor,
+    vaults: Vec<AuthorityVaultRecord>,
+    items: Vec<AuthorityItemRecord>,
+}
+
+#[cfg(test)]
+#[test]
+fn bootstrap_page_fingerprint_binds_the_closed_phase() {
+    let body = br#"{"nextCursor":"same"}"#;
+    assert_ne!(
+        bootstrap_page_fingerprint(&BootstrapPageCursor::VaultsInitial, body),
+        bootstrap_page_fingerprint(&BootstrapPageCursor::ItemsInitial, body)
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn bootstrap_page_fingerprint_binds_the_phase_scoped_request_cursor() {
+    let body = br#"{"nextCursor":"same"}"#;
+    let initial = BootstrapPageCursor::ItemsInitial;
+    let after = BootstrapPageCursor::ItemsAfter {
+        cursor: "same".into(),
+    };
+    assert_ne!(
+        bootstrap_page_fingerprint(&initial, body),
+        bootstrap_page_fingerprint(&after, body),
+        "ItemsInitial and ItemsAfter(same) need distinct replay fingerprints"
+    );
+}
+
 fn authority_from_bootstrap_page(
     page: &BootstrapItemsResponse,
-) -> Result<(Vec<AuthorityVaultRecord>, Vec<AuthorityItemRecord>), RuntimeError> {
-    let mut vaults = Vec::new();
-    let mut items = Vec::new();
-    for item in &page.items {
-        if let Some(vault) = &item.vault {
-            let converted = authority_vault(vault)?;
-            if vaults
+) -> Result<BootstrapAuthorityPage, RuntimeError> {
+    match page {
+        BootstrapItemsResponse::Vaults {
+            has_more,
+            next_cursor,
+            sync_cursor,
+            vaults,
+        } => Ok(BootstrapAuthorityPage {
+            phase: BootstrapPhase::Vaults,
+            has_more: *has_more,
+            next_cursor: next_cursor.clone(),
+            watermark: captured_watermark(sync_cursor.as_ref()),
+            vaults: vaults
                 .iter()
-                .all(|existing: &AuthorityVaultRecord| existing.id != converted.id)
-            {
-                vaults.push(converted);
-            }
-        }
-        items.push(authority_item_from_bootstrap(item)?);
+                .map(authority_vault)
+                .collect::<Result<Vec<_>, _>>()?,
+            items: Vec::new(),
+        }),
+        BootstrapItemsResponse::Items {
+            has_more,
+            items,
+            next_cursor,
+            sync_cursor,
+        } => Ok(BootstrapAuthorityPage {
+            phase: BootstrapPhase::Items,
+            has_more: *has_more,
+            next_cursor: next_cursor.clone(),
+            watermark: captured_watermark(sync_cursor.as_ref()),
+            vaults: Vec::new(),
+            items: items
+                .iter()
+                .map(authority_item_from_bootstrap)
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
     }
-    Ok((vaults, items))
 }
 
 fn authority_vault(vault: &BootstrapVaultSummary) -> Result<AuthorityVaultRecord, RuntimeError> {

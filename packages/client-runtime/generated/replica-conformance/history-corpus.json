@@ -1006,7 +1006,7 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
                   }
                 }
               ]
@@ -1047,7 +1047,7 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
                   }
                 ]
               }
@@ -1055,7 +1055,7 @@
           ]
         },
         {
-          "label": "stage first Bootstrap page with captured-empty Cursor",
+          "label": "stage standalone Bootstrap Vault authority",
           "request": {
             "type": "commit",
             "prepared": {
@@ -1083,7 +1083,7 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
                   }
                 },
                 {
@@ -1092,9 +1092,9 @@
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/vaults:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   }
                 },
                 {
@@ -1106,17 +1106,6 @@
                       "recordId": "generation-1/vault-1"
                     },
                     "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
-                  }
-                },
-                {
-                  "type": "put",
-                  "row": {
-                    "store": "authorityItems",
-                    "key": {
-                      "accountId": "account-bootstrap",
-                      "recordId": "generation-1/bootstrap-item-1"
-                    },
-                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
                   }
                 }
               ]
@@ -1157,15 +1146,15 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/vaults:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -1174,14 +1163,6 @@
                       "recordId": "generation-1/vault-1"
                     },
                     "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
-                  },
-                  {
-                    "store": "authorityItems",
-                    "key": {
-                      "accountId": "account-bootstrap",
-                      "recordId": "generation-1/bootstrap-item-1"
-                    },
-                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
                   }
                 ]
               }
@@ -1217,7 +1198,7 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
                   }
                 },
                 {
@@ -1226,9 +1207,9 @@
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/vaults:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   }
                 },
                 {
@@ -1240,6 +1221,110 @@
                       "recordId": "generation-1/vault-1"
                     },
                     "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage first Item page and accumulate authority",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
                   }
                 },
                 {
@@ -1291,15 +1376,23 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -1323,7 +1416,7 @@
           ]
         },
         {
-          "label": "stage final Bootstrap page and accumulate authority",
+          "label": "stage final Bootstrap Item page",
           "request": {
             "type": "commit",
             "prepared": {
@@ -1351,7 +1444,7 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
                   }
                 },
                 {
@@ -1360,9 +1453,9 @@
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/1"
+                      "recordId": "generation-1/items:1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   }
                 },
                 {
@@ -1414,23 +1507,31 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/1"
+                      "recordId": "generation-1/items:1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -1531,23 +1632,31 @@
                       "accountId": "account-bootstrap",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-bootstrap",
-                      "recordId": "generation-1/1"
+                      "recordId": "generation-1/items:1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -1674,7 +1783,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
                   }
                 }
               ]
@@ -1715,7 +1824,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
                   }
                 ]
               }
@@ -1723,7 +1832,7 @@
           ]
         },
         {
-          "label": "stage ready Operation Account authority",
+          "label": "stage ready Operation Account Vault authority",
           "request": {
             "type": "commit",
             "prepared": {
@@ -1751,7 +1860,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
                   }
                 },
                 {
@@ -1760,9 +1869,9 @@
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/vaults:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   }
                 },
                 {
@@ -1774,6 +1883,110 @@
                       "recordId": "generation-1/vault-1"
                     },
                     "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage ready Operation Account Item authority",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   }
                 },
                 {
@@ -1825,15 +2038,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -1926,15 +2147,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2054,15 +2283,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2171,15 +2408,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2288,15 +2533,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2435,15 +2688,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2579,15 +2840,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
@@ -2720,15 +2989,23 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
                   },
                   {
                     "store": "bootstrapPages",
                     "key": {
                       "accountId": "account-operations",
-                      "recordId": "generation-1/0"
+                      "recordId": "generation-1/items:0"
                     },
-                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
                   },
                   {
                     "store": "authorityVaults",
