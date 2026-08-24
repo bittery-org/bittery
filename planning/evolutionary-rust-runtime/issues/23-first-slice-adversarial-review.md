@@ -1,7 +1,7 @@
 # First-slice adversarial review
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 22, 31, 32, 36, 37
 Spec: ../spec.md#verification
 
@@ -77,3 +77,18 @@ Two Spec-review claims are real blockers and are filed rather than fixed under t
 A stale Server comment and one JSON-token corpus assertion were non-blocking documentation/test-style
 observations; neither substitutes for behavior or demonstrates a correctness/security discrepancy.
 Ticket 23 remains open until tickets 36 and 37 land and their delta receives a final rerun.
+
+### 2026-08-24 — resolved after final blocker delta review
+
+The final independent Standards and Spec reviews over `1d60d73c...5f014624` found no remaining
+issue. Ticket 36 landed the post-restart offline authoritative Web read in `bb4ec003`; ticket 37
+landed the complete SQLite write-boundary failure matrix in `2976d505`. The primary agent verified
+the focused browser and Rust paths, the 11-test whole-entry Web reachability audit, and both full CI
+gates from a clean tree. The complete criterion map and command evidence are in the linked review
+report.
+
+Deliberately left open: ticket 28 owns the already-classified transitional Web mutation holdouts,
+ticket 29 owns Rotation protocol/storage decisions, and ticket 30 owns SSE reconnect/backoff. The
+review found no hidden finite Operation retry or discard, plaintext persistence/logging, implicit
+Runtime Account scope, second Web Runtime owner, reachable Web create/Sync dual writer, or
+source-text/self-certifying acceptance test in the delivered first slice.
