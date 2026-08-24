@@ -91,16 +91,6 @@ impl ApiError {
         )
     }
 
-    pub(crate) fn version_conflict(detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::PRECONDITION_FAILED,
-            ErrorCode::VersionConflict,
-            "Version conflict",
-            detail,
-            false,
-        )
-    }
-
     pub(crate) fn unprocessable(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,

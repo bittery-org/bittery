@@ -1732,28 +1732,6 @@ export interface components {
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
         };
-        readonly CreateItemOperationOutcome: {
-            readonly kind: components["schemas"]["OperationKind"];
-            readonly operationId: string;
-            readonly result: components["schemas"]["CreateItemOperationResult"];
-        };
-        readonly CreateItemOperationResult: {
-            readonly itemId: string;
-            /** @enum {string} */
-            readonly status: "applied";
-            /** Format: int32 */
-            readonly version: number;
-        } | {
-            readonly code: components["schemas"]["CreateItemRejectionCode"];
-            readonly details?: unknown;
-            /** @enum {string} */
-            readonly status: "rejected";
-        };
-        /**
-         * @description The terminal semantic rejections currently possible for Create Item.
-         * @enum {string}
-         */
-        readonly CreateItemRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict";
         readonly CreateShareLinkRequest: {
             readonly accessMode: components["schemas"]["ShareLinkAccessMode"];
             readonly allowedEmails?: readonly components["schemas"]["EmailAddress"][] | null;
@@ -2141,6 +2119,25 @@ export interface components {
          * @enum {string}
          */
         readonly ItemCategory: "login" | "secure-note" | "credit-card" | "identity" | "totp";
+        /**
+         * @description What one Item Operation left behind.
+         *
+         *     `Applied` retains the affected Item and the version it reached. That is exactly enough for a
+         *     client that lost its response to tell an applied Operation from a rejected one, and to line the
+         *     answer up with its own record, without replaying the effect to find out.
+         */
+        readonly ItemOperationResult: {
+            readonly itemId: string;
+            /** @enum {string} */
+            readonly status: "applied";
+            /** Format: int32 */
+            readonly version: number;
+        } | {
+            readonly code: components["schemas"]["OperationRejectionCode"];
+            readonly details?: unknown;
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
         readonly ItemResponseDto: {
             readonly category: components["schemas"]["ItemCategory"];
             readonly createdAt: string;
@@ -2254,11 +2251,53 @@ export interface components {
             readonly sourceVaultId: string;
             readonly targetVaultId: string;
         };
+        /** @description The one retained outcome shape, discriminated by Operation kind. */
+        readonly OperationOutcome: {
+            /** @enum {string} */
+            readonly kind: "create_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "update_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "set_item_favorite";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "trash_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "restore_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "move_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "permanently_delete_item";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ItemOperationResult"];
+        };
         /**
-         * @description The Domain operation represented by one retained outcome.
+         * @description The terminal semantic rejections an Item Operation can prove.
+         *
+         *     One set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`
+         *     are the same fact whichever mutation met them, and a client that learns to read them once can
+         *     read them everywhere. Each kind then contributes only its own genuinely new failures, and the
+         *     handler -- not the wire type -- decides which subset it can ever prove.
          * @enum {string}
          */
-        readonly OperationKind: "create_item";
+        readonly OperationRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict" | "item_not_found" | "item_version_conflict" | "item_trashed" | "item_not_trashed" | "source_vault_mismatch" | "target_vault_access_denied" | "target_vault_read_only";
         readonly PageCursor: string;
         readonly PageRequest: {
             readonly cursor?: null | components["schemas"]["PageCursor"];
@@ -2675,11 +2714,6 @@ export interface components {
             readonly encryptedData?: string | null;
             readonly encryptionAlgorithm?: string | null;
             readonly encryptionIv?: string | null;
-        };
-        readonly UpdateItemResponse: {
-            readonly success: boolean;
-            /** Format: int32 */
-            readonly version: number;
         };
         readonly UpdateTeamRequest: {
             readonly imageKey?: string | null;
@@ -4672,8 +4706,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same queued mutation outcome for 24 hours when preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4682,20 +4716,16 @@ export interface operations {
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["SuccessResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4706,42 +4736,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -4767,7 +4761,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4776,7 +4770,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4788,17 +4782,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4813,8 +4796,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4827,20 +4810,16 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["UpdateItemResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4851,42 +4830,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -4912,7 +4855,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4921,7 +4864,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -4933,17 +4876,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5365,8 +5297,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5379,20 +5311,16 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["SuccessResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5403,42 +5331,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5464,7 +5356,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5473,7 +5365,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5485,17 +5377,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5510,8 +5391,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5524,20 +5405,16 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["UpdateItemResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5548,42 +5425,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5609,7 +5450,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5618,7 +5459,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5630,17 +5471,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5655,8 +5485,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same queued mutation outcome for 24 hours when preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5665,20 +5495,16 @@ export interface operations {
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Final strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["SuccessResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5689,42 +5515,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5750,7 +5540,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5759,7 +5549,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5771,17 +5561,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5796,8 +5575,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
-                /** @description Replays the same outcome for 24 hours when preconditions match */
-                readonly "Idempotency-Key"?: string | null;
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5806,20 +5585,16 @@ export interface operations {
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
-                    readonly ETag?: string;
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["SuccessResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
-            /** @description Bad request */
+            /** @description Malformed request, Operation ID, or If-Match */
             readonly 400: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5830,42 +5605,6 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5891,7 +5630,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5900,7 +5639,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description If-Match is required */
+            /** @description If-Match is required for this Item mutation */
             readonly 428: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -5912,17 +5651,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6136,7 +5864,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["CreateItemOperationOutcome"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Malformed Operation ID */
@@ -11869,7 +11597,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["CreateItemOperationOutcome"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Malformed request or Operation ID */

@@ -92,7 +92,10 @@ export async function performDeltaSync(
 		if (outcome.result.status === "applied") {
 			await reconcileCurrentItem(outcome.result.itemId);
 		}
-		return outcome;
+		// The lookup answers one union tagged on `kind`. Only a create outcome reconciles a
+		// pending create; any other kind belongs to work this caller does not own, and the Item
+		// it names has already been refreshed above.
+		return outcome.kind === "create_item" ? outcome : undefined;
 	}
 
 	const syncVaultKeysFromServer = async () => {

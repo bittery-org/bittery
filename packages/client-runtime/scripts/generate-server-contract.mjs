@@ -21,7 +21,7 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
 	"CreateItemBody",
 	"ItemResponseDto",
-	"CreateItemOperationOutcome",
+	"OperationOutcome",
 	"FinishLoginRequest",
 	"FinishLoginResponse",
 	"LoginAttemptResponse",
@@ -36,7 +36,7 @@ export const ROOT_ALLOWLIST = Object.freeze([
 // the Runtime allowlist must have a shape the generator understands; silently replacing a new or
 // unsupported shape with `serde_json::Value` would defeat the contract drift gate.
 const FREE_JSON_FIELDS = new Set([
-	"CreateItemOperationResult.details",
+	"ItemOperationResult.details",
 	"SyncEventResponse.metadata",
 ]);
 
@@ -276,8 +276,40 @@ function renderEnum(name, schema) {
 	].join("\n");
 }
 
+/// The one property every branch pins to a single literal value is the discriminator.
+///
+/// The Server tags results on `status` and Operation outcomes on `kind`; the generator finds the
+/// tag rather than hard-coding one, so a union it cannot discriminate fails loudly instead of
+/// silently losing a variant.
+function discriminatorOf(name, schema) {
+	const candidates = schema.oneOf.map((branch) => {
+		const required = new Set(branch.required ?? []);
+		return new Set(
+			Object.entries(branch.properties ?? {})
+				.filter(
+					([field, property]) =>
+						required.has(field) &&
+						property?.type === "string" &&
+						property.enum?.length === 1,
+				)
+				.map(([field]) => field),
+		);
+	});
+	const shared = [...(candidates[0] ?? [])].filter((field) =>
+		candidates.every((branch) => branch.has(field)),
+	);
+	if (shared.length !== 1) {
+		unsupportedSchema(
+			name,
+			undefined,
+			`tagged union needs exactly one discriminator, found ${shared.length}`,
+		);
+	}
+	return shared[0];
+}
+
 function renderTaggedOneOf(name, schema) {
-	const variants = schema.oneOf.map((branch, index) => {
+	for (const [index, branch] of schema.oneOf.entries()) {
 		if (
 			branch.type !== "object" ||
 			branch.allOf ||
@@ -290,25 +322,13 @@ function renderTaggedOneOf(name, schema) {
 				`tagged branch ${index + 1} is not an object`,
 			);
 		}
-		const statusSchema = branch.properties?.status;
-		const status = statusSchema?.enum?.[0] ?? `variant-${index + 1}`;
-		if (statusSchema?.type !== "string" || statusSchema.enum?.length !== 1) {
-			unsupportedSchema(
-				name,
-				undefined,
-				`tagged branch ${index + 1} has no single status tag`,
-			);
-		}
+	}
+	const tag = discriminatorOf(name, schema);
+	const variants = schema.oneOf.map((branch) => {
+		const label = branch.properties[tag].enum[0];
 		const required = new Set(branch.required ?? []);
-		if (!required.has("status")) {
-			unsupportedSchema(
-				name,
-				undefined,
-				`tagged branch ${index + 1} must require its status discriminator`,
-			);
-		}
 		const fields = Object.entries(branch.properties ?? {})
-			.filter(([field]) => field !== "status")
+			.filter(([field]) => field !== tag)
 			.sort(([left], [right]) => compareCodePoints(left, right))
 			.map(([field, fieldSchema]) => {
 				const base = rustType(fieldSchema, name, field);
@@ -323,11 +343,11 @@ function renderTaggedOneOf(name, schema) {
 						: `        #[serde(rename = ${JSON.stringify(field)})]\n`;
 				return `${rename}        ${rustField}: ${type},`;
 			});
-		return `    #[serde(rename = ${JSON.stringify(status)})]\n    ${pascalCase(status)} {\n${fields.join("\n")}\n    },`;
+		return `    #[serde(rename = ${JSON.stringify(label)})]\n    ${pascalCase(label)} {\n${fields.join("\n")}\n    },`;
 	});
 	return [
 		"#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]",
-		'#[serde(tag = "status", rename_all = "camelCase", deny_unknown_fields)]',
+		`#[serde(tag = ${JSON.stringify(tag)}, rename_all = "camelCase", deny_unknown_fields)]`,
 		`pub enum ${rustTypeName(name)} {`,
 		...variants,
 		"}",

@@ -1,3 +1,16 @@
+//! One retained answer per Operation, for the lifetime of the User.
+//!
+//! An Operation is identified by `(User, Operation ID)` and pinned to a fingerprint of the exact
+//! bytes that asked for it. Everything the Server decided about it — the effect, the audit trail,
+//! the entity Sync event, the outcome row and the `operation_resolved` event — commits in one
+//! transaction, so a client that lost the response can ask again and get the same answer instead
+//! of causing a second effect.
+//!
+//! The wire type is one union tagged on `kind`. A caller recovering from a lost response is
+//! precisely the caller that does not yet know what happened, so it cannot pick a per-kind route;
+//! it reads `kind`, checks it against its own durable record, and only then reads the result. A
+//! `kind` it does not know fails to parse rather than being read as some other Operation's answer.
+
 pub(crate) mod http;
 
 use serde::{Deserialize, Serialize};
@@ -9,74 +22,221 @@ use utoipa::ToSchema;
 use crate::{
     db::{
         enums::{
-            CreateItemRejectionCode, ItemCategory, OperationKind, OperationOutcomeStatus,
-            SyncEntityType, SyncEventType,
+            OperationKind, OperationOutcomeStatus, OperationRejectionCode, SyncEntityType,
+            SyncEventType,
         },
         events::{begin_sync_event_transaction, insert_user_sync_event},
     },
-    domains::vaults::{self, CreateItemEffect, CreateItemEffectInput},
+    domains::vaults::{
+        self, CreateItemEffectInput, FavoriteItemEffectInput, ItemEffect, ItemEffectInput,
+        MoveItemEffectInput, UpdateItemEffectInput,
+    },
     error::AppError,
     shared::transaction::{acquire_advisory_lock, database_error},
 };
 
-const CREATE_ITEM_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
-const CREATE_ITEM_KIND: &[u8] = b"create_item";
-const CREATE_ITEM_ROUTE: &[u8] = b"PUT /api/v1/vaults/{vaultId}/items/{itemId}";
+/// Pins every fingerprint to this protocol, so bytes hashed under a later one can never collide.
+const OPERATION_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
 
+/// What one Item Operation asked for, and which Domain effect answers it.
+///
+/// The variants carry the route identity and canonical path values the fingerprint needs, so a
+/// handler cannot accidentally fingerprint one route's bytes under another route's name.
+pub(crate) enum ItemOperationEffect {
+    Create(CreateItemEffectInput),
+    Update(UpdateItemEffectInput),
+    SetFavorite(FavoriteItemEffectInput),
+    Trash(ItemEffectInput),
+    Restore(ItemEffectInput),
+    Move(MoveItemEffectInput),
+    PermanentlyDelete(ItemEffectInput),
+}
+
+impl ItemOperationEffect {
+    pub(crate) fn kind(&self) -> OperationKind {
+        match self {
+            Self::Create(_) => OperationKind::CreateItem,
+            Self::Update(_) => OperationKind::UpdateItem,
+            Self::SetFavorite(_) => OperationKind::SetItemFavorite,
+            Self::Trash(_) => OperationKind::TrashItem,
+            Self::Restore(_) => OperationKind::RestoreItem,
+            Self::Move(_) => OperationKind::MoveItem,
+            Self::PermanentlyDelete(_) => OperationKind::PermanentlyDeleteItem,
+        }
+    }
+
+    /// The canonical route identity, method included: `DELETE` and `PATCH` on one path are two
+    /// different Operations and must never share a fingerprint.
+    fn route(&self) -> &'static str {
+        match self {
+            Self::Create(_) => "PUT /api/v1/vaults/{vaultId}/items/{itemId}",
+            Self::Update(_) => "PATCH /api/v1/items/{itemId}",
+            Self::SetFavorite(_) => "PATCH /api/v1/items/{itemId}/favorite",
+            Self::Trash(_) => "DELETE /api/v1/items/{itemId}",
+            Self::Restore(_) => "POST /api/v1/items/{itemId}/restore",
+            Self::Move(_) => "POST /api/v1/items/{itemId}/moves",
+            Self::PermanentlyDelete(_) => "DELETE /api/v1/items/{itemId}/permanent",
+        }
+    }
+
+    /// The path values, in route order.
+    fn path_values(&self) -> Vec<&str> {
+        match self {
+            Self::Create(input) => vec![input.vault_id.as_str(), input.item_id.as_str()],
+            Self::Update(input) => vec![input.item_id.as_str()],
+            Self::SetFavorite(input) => vec![input.item_id.as_str()],
+            Self::Trash(input) => vec![input.item_id.as_str()],
+            Self::Restore(input) => vec![input.item_id.as_str()],
+            Self::Move(input) => vec![input.item_id.as_str()],
+            Self::PermanentlyDelete(input) => vec![input.item_id.as_str()],
+        }
+    }
+
+    /// The normalized concurrency precondition, or none where the route has none.
+    fn precondition(&self) -> Option<i32> {
+        match self {
+            Self::Create(_) => None,
+            Self::Update(input) => Some(input.expected_version),
+            Self::SetFavorite(input) => Some(input.expected_version),
+            Self::Trash(input) => Some(input.expected_version),
+            Self::Restore(input) => Some(input.expected_version),
+            Self::Move(input) => Some(input.expected_version),
+            Self::PermanentlyDelete(input) => Some(input.expected_version),
+        }
+    }
+
+    fn client_id(&self) -> Option<&str> {
+        match self {
+            Self::Create(input) => input.client_id.as_deref(),
+            Self::Update(input) => input.client_id.as_deref(),
+            Self::SetFavorite(input) => input.client_id.as_deref(),
+            Self::Trash(input) => input.client_id.as_deref(),
+            Self::Restore(input) => input.client_id.as_deref(),
+            Self::Move(input) => input.client_id.as_deref(),
+            Self::PermanentlyDelete(input) => input.client_id.as_deref(),
+        }
+    }
+}
+
+/// What one Item Operation left behind.
+///
+/// `Applied` retains the affected Item and the version it reached. That is exactly enough for a
+/// client that lost its response to tell an applied Operation from a rejected one, and to line the
+/// answer up with its own record, without replaying the effect to find out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(
-    tag = "status",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub(crate) enum CreateItemOperationResult {
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum ItemOperationResult {
     Applied {
         #[serde(rename = "itemId")]
         item_id: String,
         version: i32,
     },
     Rejected {
-        code: CreateItemRejectionCode,
+        code: OperationRejectionCode,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Value>,
     },
 }
 
+/// The one retained outcome shape, discriminated by Operation kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CreateItemOperationOutcome {
-    pub(crate) operation_id: String,
-    pub(crate) kind: OperationKind,
-    pub(crate) result: CreateItemOperationResult,
+// The field rename is spelled out per variant because the OpenAPI generator reads `rename`, not
+// serde's `rename_all_fields`, and a schema that disagrees with the wire is worse than no schema.
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum OperationOutcome {
+    CreateItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    UpdateItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    SetItemFavorite {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    TrashItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    RestoreItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    MoveItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
+    PermanentlyDeleteItem {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ItemOperationResult,
+    },
 }
 
-pub(crate) struct CreateItemOperationInput {
+impl OperationOutcome {
+    fn new(kind: OperationKind, operation_id: String, result: ItemOperationResult) -> Self {
+        match kind {
+            OperationKind::CreateItem => Self::CreateItem {
+                operation_id,
+                result,
+            },
+            OperationKind::UpdateItem => Self::UpdateItem {
+                operation_id,
+                result,
+            },
+            OperationKind::SetItemFavorite => Self::SetItemFavorite {
+                operation_id,
+                result,
+            },
+            OperationKind::TrashItem => Self::TrashItem {
+                operation_id,
+                result,
+            },
+            OperationKind::RestoreItem => Self::RestoreItem {
+                operation_id,
+                result,
+            },
+            OperationKind::MoveItem => Self::MoveItem {
+                operation_id,
+                result,
+            },
+            OperationKind::PermanentlyDeleteItem => Self::PermanentlyDeleteItem {
+                operation_id,
+                result,
+            },
+        }
+    }
+}
+
+pub(crate) struct ItemOperationInput {
     pub(crate) operation_id: String,
     pub(crate) user_id: String,
-    pub(crate) vault_id: String,
-    pub(crate) item_id: String,
-    pub(crate) category: ItemCategory,
-    pub(crate) encrypted_data: String,
-    pub(crate) encryption_iv: String,
-    pub(crate) encryption_algorithm: String,
-    pub(crate) client_id: Option<String>,
+    pub(crate) effect: ItemOperationEffect,
     pub(crate) raw_body: Vec<u8>,
-    pub(crate) ciphertext_limit: usize,
 }
 
 #[derive(FromRow)]
 struct StoredOutcomeRow {
+    operation_kind: OperationKind,
     request_fingerprint: Vec<u8>,
     result_status: OperationOutcomeStatus,
     entity_id: Option<String>,
     entity_version: Option<i32>,
-    rejection_code: Option<CreateItemRejectionCode>,
+    rejection_code: Option<OperationRejectionCode>,
     rejection_details: Option<String>,
 }
 
 pub(crate) enum OperationResolution {
     Outcome {
-        outcome: CreateItemOperationOutcome,
+        outcome: OperationOutcome,
         newly_committed: bool,
     },
     IdReused,
@@ -87,28 +247,34 @@ fn fingerprint_part(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(value);
 }
 
-fn create_item_fingerprint(input: &CreateItemOperationInput) -> [u8; 32] {
+/// Hashes the immutable request: protocol, kind, route, path values, exact body bytes, and the
+/// normalized precondition. Bearer token, Session, client ID and tracing headers are excluded,
+/// because the same work sent from a renewed Session is the same work.
+fn item_operation_fingerprint(input: &ItemOperationInput) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    for part in [
-        CREATE_ITEM_DISCRIMINATOR,
-        CREATE_ITEM_KIND,
-        CREATE_ITEM_ROUTE,
-        input.vault_id.as_bytes(),
-        input.item_id.as_bytes(),
-        input.raw_body.as_slice(),
-        b"" as &[u8],
-    ] {
-        fingerprint_part(&mut hasher, part);
+    let kind = input.effect.kind();
+    let precondition = input
+        .effect
+        .precondition()
+        .map(|version| version.to_string())
+        .unwrap_or_default();
+    fingerprint_part(&mut hasher, OPERATION_DISCRIMINATOR);
+    fingerprint_part(&mut hasher, kind.as_str().as_bytes());
+    fingerprint_part(&mut hasher, input.effect.route().as_bytes());
+    for value in input.effect.path_values() {
+        fingerprint_part(&mut hasher, value.as_bytes());
     }
+    fingerprint_part(&mut hasher, input.raw_body.as_slice());
+    fingerprint_part(&mut hasher, precondition.as_bytes());
     hasher.finalize().into()
 }
 
 fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
-) -> Result<CreateItemOperationOutcome, AppError> {
+) -> Result<OperationOutcome, AppError> {
     let result = match row.result_status {
-        OperationOutcomeStatus::Applied => CreateItemOperationResult::Applied {
+        OperationOutcomeStatus::Applied => ItemOperationResult::Applied {
             item_id: row
                 .entity_id
                 .ok_or_else(|| AppError::internal("Stored applied Operation has no entity"))?,
@@ -116,7 +282,7 @@ fn outcome_from_row(
                 .entity_version
                 .ok_or_else(|| AppError::internal("Stored applied Operation has no version"))?,
         },
-        OperationOutcomeStatus::Rejected => CreateItemOperationResult::Rejected {
+        OperationOutcomeStatus::Rejected => ItemOperationResult::Rejected {
             code: row
                 .rejection_code
                 .ok_or_else(|| AppError::internal("Stored rejected Operation has no code"))?,
@@ -127,11 +293,11 @@ fn outcome_from_row(
                 .map_err(|_| AppError::internal("Stored Operation details are invalid"))?,
         },
     };
-    Ok(CreateItemOperationOutcome {
-        operation_id: operation_id.to_owned(),
-        kind: OperationKind::CreateItem,
+    Ok(OperationOutcome::new(
+        row.operation_kind,
+        operation_id.to_owned(),
         result,
-    })
+    ))
 }
 
 async fn load_outcome<'e>(
@@ -140,7 +306,7 @@ async fn load_outcome<'e>(
     operation_id: &str,
 ) -> Result<Option<StoredOutcomeRow>, AppError> {
     query_as::<_, StoredOutcomeRow>(
-        "SELECT request_fingerprint, result_status::text AS result_status, entity_id, entity_version, rejection_code::text AS rejection_code, rejection_details::text AS rejection_details FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+        "SELECT operation_kind::text AS operation_kind, request_fingerprint, result_status::text AS result_status, entity_id, entity_version, rejection_code::text AS rejection_code, rejection_details::text AS rejection_details FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
     )
     .bind(user_id)
     .bind(operation_id)
@@ -149,22 +315,25 @@ async fn load_outcome<'e>(
     .map_err(|error| database_error(error, "Failed to load Operation outcome"))
 }
 
-pub(crate) async fn get_create_item_outcome(
+pub(crate) async fn get_operation_outcome(
     pool: &PgPool,
     user_id: &str,
     operation_id: &str,
-) -> Result<Option<CreateItemOperationOutcome>, AppError> {
+) -> Result<Option<OperationOutcome>, AppError> {
     load_outcome(pool, user_id, operation_id)
         .await?
         .map(|row| outcome_from_row(operation_id, row))
         .transpose()
 }
 
-pub(crate) async fn execute_create_item(
+/// Runs one Item Operation to a terminal answer, exactly once per `(User, Operation ID)`.
+pub(crate) async fn execute_item_operation(
     pool: &PgPool,
-    input: CreateItemOperationInput,
+    input: ItemOperationInput,
 ) -> Result<OperationResolution, AppError> {
-    let fingerprint = create_item_fingerprint(&input);
+    let fingerprint = item_operation_fingerprint(&input);
+    let kind = input.effect.kind();
+    let client_id = input.effect.client_id().map(str::to_owned);
     let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start Operation transaction"))?;
@@ -199,30 +368,38 @@ pub(crate) async fn execute_create_item(
         });
     }
 
-    let effect = vaults::apply_create_item(
-        &mut transaction,
-        &input.user_id,
-        CreateItemEffectInput {
-            item_id: input.item_id,
-            vault_id: input.vault_id,
-            category: input.category,
-            encrypted_data: input.encrypted_data,
-            encryption_iv: input.encryption_iv,
-            encryption_algorithm: input.encryption_algorithm,
-            client_id: input.client_id.clone(),
-            ciphertext_limit: input.ciphertext_limit,
-        },
-    )
-    .await?;
+    let effect = match input.effect {
+        ItemOperationEffect::Create(effect) => {
+            vaults::apply_create_item(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::Update(effect) => {
+            vaults::apply_update_item(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::SetFavorite(effect) => {
+            vaults::apply_set_item_favorite(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::Trash(effect) => {
+            vaults::apply_trash_item(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::Restore(effect) => {
+            vaults::apply_restore_item(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::Move(effect) => {
+            vaults::apply_move_item(&mut transaction, &input.user_id, effect).await?
+        }
+        ItemOperationEffect::PermanentlyDelete(effect) => {
+            vaults::apply_permanently_delete_item(&mut transaction, &input.user_id, effect).await?
+        }
+    };
 
     let result = match effect {
-        CreateItemEffect::Rejected(code) => {
+        ItemEffect::Rejected(code) => {
             query(
-                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, $3::operation_kind, $4, $5::operation_outcome_status, $6::create_item_rejection_code)",
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, $3::operation_kind, $4, $5::operation_outcome_status, $6::operation_rejection_code)",
             )
             .bind(&input.user_id)
             .bind(&input.operation_id)
-            .bind(OperationKind::CreateItem)
+            .bind(kind)
             .bind(fingerprint.as_slice())
             .bind(OperationOutcomeStatus::Rejected)
             .bind(code)
@@ -231,18 +408,18 @@ pub(crate) async fn execute_create_item(
             .map_err(|error| {
                 database_error(error, "Failed to retain rejected Operation outcome")
             })?;
-            CreateItemOperationResult::Rejected {
+            ItemOperationResult::Rejected {
                 code,
                 details: None,
             }
         }
-        CreateItemEffect::Applied { item_id, version } => {
+        ItemEffect::Applied { item_id, version } => {
             query(
                 "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, entity_id, entity_version) VALUES ($1, $2, $3::operation_kind, $4, $5::operation_outcome_status, $6, $7)",
             )
             .bind(&input.user_id)
             .bind(&input.operation_id)
-            .bind(OperationKind::CreateItem)
+            .bind(kind)
             .bind(fingerprint.as_slice())
             .bind(OperationOutcomeStatus::Applied)
             .bind(&item_id)
@@ -252,7 +429,7 @@ pub(crate) async fn execute_create_item(
             .map_err(|error| {
                 database_error(error, "Failed to retain applied Operation outcome")
             })?;
-            CreateItemOperationResult::Applied { item_id, version }
+            ItemOperationResult::Applied { item_id, version }
         }
     };
 
@@ -263,7 +440,7 @@ pub(crate) async fn execute_create_item(
         SyncEntityType::Operation,
         &input.user_id,
         1,
-        input.client_id.as_deref(),
+        client_id.as_deref(),
         None,
     )
     .await?;
@@ -272,38 +449,11 @@ pub(crate) async fn execute_create_item(
         .await
         .map_err(|error| database_error(error, "Failed to commit Operation outcome"))?;
     Ok(OperationResolution::Outcome {
-        outcome: CreateItemOperationOutcome {
-            operation_id: input.operation_id,
-            kind: OperationKind::CreateItem,
-            result,
-        },
+        outcome: OperationOutcome::new(kind, input.operation_id, result),
         newly_committed: true,
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{create_item_fingerprint, CreateItemOperationInput};
-    use crate::db::enums::ItemCategory;
-
-    #[test]
-    fn fingerprint_is_exactly_sensitive_to_raw_body_bytes() {
-        let input = |raw_body: &[u8]| CreateItemOperationInput {
-            operation_id: "ignored".into(),
-            user_id: "ignored".into(),
-            vault_id: "vault".into(),
-            item_id: "item".into(),
-            category: ItemCategory::Login,
-            encrypted_data: "ciphertext".into(),
-            encryption_iv: "iv".into(),
-            encryption_algorithm: "aes-gcm".into(),
-            client_id: None,
-            raw_body: raw_body.to_vec(),
-            ciphertext_limit: 1024,
-        };
-        assert_ne!(
-            create_item_fingerprint(&input(br#"{"a":1}"#)),
-            create_item_fingerprint(&input(br#"{ "a": 1 }"#)),
-        );
-    }
-}
+#[path = "tests.rs"]
+mod tests;

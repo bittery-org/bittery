@@ -509,10 +509,22 @@ closed_enum!(VaultKeyRotationManifestKind, "vault_key_rotation_manifest_kind", {
 #[serde(rename_all = "snake_case")]
 pub enum OperationKind {
     CreateItem,
+    UpdateItem,
+    SetItemFavorite,
+    TrashItem,
+    RestoreItem,
+    MoveItem,
+    PermanentlyDeleteItem,
 }
 
 closed_enum!(OperationKind, "operation_kind", {
     CreateItem => "create_item",
+    UpdateItem => "update_item",
+    SetItemFavorite => "set_item_favorite",
+    TrashItem => "trash_item",
+    RestoreItem => "restore_item",
+    MoveItem => "move_item",
+    PermanentlyDeleteItem => "permanently_delete_item",
 });
 
 /// Whether a retained Operation applied its effect or proved a terminal rejection.
@@ -528,21 +540,40 @@ closed_enum!(OperationOutcomeStatus, "operation_outcome_status", {
     Rejected => "rejected",
 });
 
-/// The terminal semantic rejections currently possible for Create Item.
+/// The terminal semantic rejections an Item Operation can prove.
+///
+/// One set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`
+/// are the same fact whichever mutation met them, and a client that learns to read them once can
+/// read them everywhere. Each kind then contributes only its own genuinely new failures, and the
+/// handler -- not the wire type -- decides which subset it can ever prove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum CreateItemRejectionCode {
+pub enum OperationRejectionCode {
     InvalidCiphertext,
     VaultAccessDenied,
     VaultReadOnly,
     ItemIdConflict,
+    ItemNotFound,
+    ItemVersionConflict,
+    ItemTrashed,
+    ItemNotTrashed,
+    SourceVaultMismatch,
+    TargetVaultAccessDenied,
+    TargetVaultReadOnly,
 }
 
-closed_enum!(CreateItemRejectionCode, "create_item_rejection_code", {
+closed_enum!(OperationRejectionCode, "operation_rejection_code", {
     InvalidCiphertext => "invalid_ciphertext",
     VaultAccessDenied => "vault_access_denied",
     VaultReadOnly => "vault_read_only",
     ItemIdConflict => "item_id_conflict",
+    ItemNotFound => "item_not_found",
+    ItemVersionConflict => "item_version_conflict",
+    ItemTrashed => "item_trashed",
+    ItemNotTrashed => "item_not_trashed",
+    SourceVaultMismatch => "source_vault_mismatch",
+    TargetVaultAccessDenied => "target_vault_access_denied",
+    TargetVaultReadOnly => "target_vault_read_only",
 });
 
 #[cfg(test)]

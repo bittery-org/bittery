@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::enums::{CreateItemRejectionCode, ItemCategory, VaultRole, VaultType},
+    db::enums::{ItemCategory, OperationRejectionCode, VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_vault_shape, item_shape, success_shape, update_item_shape, update_vault_shape,
+        create_vault_shape, item_shape, success_shape, update_vault_shape,
         vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
         vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
@@ -36,10 +36,10 @@ pub(crate) use catalog::{
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
-    apply_create_item, bulk_import_vault_items, delete_vault_item, get_vault_item,
-    list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,
-    list_vault_items_page, move_vault_item, permanently_delete_vault_item, restore_vault_item,
-    toggle_vault_favorite, update_vault_item,
+    apply_create_item, apply_move_item, apply_permanently_delete_item, apply_restore_item,
+    apply_set_item_favorite, apply_trash_item, apply_update_item, bulk_import_vault_items,
+    get_vault_item, list_all_deleted_vault_items_page, list_all_vault_items_page,
+    list_deleted_vault_items_page, list_vault_items_page,
 };
 pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
@@ -91,9 +91,51 @@ pub(crate) struct CreateItemEffectInput {
     pub(crate) ciphertext_limit: usize,
 }
 
-pub(crate) enum CreateItemEffect {
+/// What one Item Operation did, decided inside its own transaction.
+///
+/// The two arms are the whole vocabulary: the effect landed at a known version, or the Server
+/// proved one closed reason it never will. Anything else is an infrastructure failure and leaves
+/// through `Err`, where it retains nothing.
+pub(crate) enum ItemEffect {
     Applied { item_id: String, version: i32 },
-    Rejected(CreateItemRejectionCode),
+    Rejected(OperationRejectionCode),
+}
+
+pub(crate) struct UpdateItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) encrypted_data: Option<String>,
+    pub(crate) encryption_iv: Option<String>,
+    pub(crate) encryption_algorithm: Option<String>,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
+}
+
+pub(crate) struct FavoriteItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) favorite: bool,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+}
+
+/// The input shared by the three Item Operations that carry no body: trash, restore and
+/// permanent delete.
+pub(crate) struct ItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+}
+
+pub(crate) struct MoveItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) encrypted_data: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encryption_algorithm: String,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -197,57 +239,6 @@ bulk_import_result_shape!(service_struct {
     #[serde(rename_all = "camelCase")]
     pub struct BulkImportItemsResponse
 });
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct UpdateItemInput {
-    pub item_id: String,
-    pub encrypted_data: Option<String>,
-    pub encryption_iv: Option<String>,
-    pub encryption_algorithm: Option<String>,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-update_item_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct UpdateItemResponse
-});
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct MoveItemInput {
-    pub item_id: String,
-    pub source_vault_id: String,
-    pub target_vault_id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct ToggleFavoriteInput {
-    pub item_id: String,
-    pub favorite: bool,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct ItemClientInput {
-    pub item_id: String,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

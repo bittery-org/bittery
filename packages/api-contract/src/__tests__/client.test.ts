@@ -4,8 +4,8 @@ import { ApiError } from "../errors.ts";
 import type {
 	ApiResult,
 	LoginAttempt,
+	OperationOutcome,
 	SyncChanges,
-	UpdateItemResponse,
 } from "../index.ts";
 
 function metadata() {
@@ -261,7 +261,7 @@ describe("Bittery API facade", () => {
 			},
 		});
 
-		const result: ApiResult<UpdateItemResponse> = await client.items.update(
+		const result: ApiResult<OperationOutcome> = await client.items.update(
 			"item-1",
 			{ encryptedData: null },
 			{ etag: '"version-6"', idempotencyKey: "request-key-1" },

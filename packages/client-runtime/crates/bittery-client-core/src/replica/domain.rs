@@ -88,7 +88,11 @@ pub(crate) struct CursorAdvance {
     pub next: SyncCursor,
 }
 
-/// The closed set of terminal rejections the Server can answer for a create.
+/// The closed set of terminal rejections the Server can answer for an Item Operation.
+///
+/// It mirrors the Server's one shared set exactly, so a fact keeps one name on both sides of the
+/// seam. Which subset any one kind can actually produce is a property of that kind, not of this
+/// type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OperationRejectionCode {
@@ -96,6 +100,13 @@ pub(crate) enum OperationRejectionCode {
     VaultAccessDenied,
     VaultReadOnly,
     ItemIdConflict,
+    ItemNotFound,
+    ItemVersionConflict,
+    ItemTrashed,
+    ItemNotTrashed,
+    SourceVaultMismatch,
+    TargetVaultAccessDenied,
+    TargetVaultReadOnly,
 }
 
 /// What the Server decided about one Operation. Transport status is deliberately absent.

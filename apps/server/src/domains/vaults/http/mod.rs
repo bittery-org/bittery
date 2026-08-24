@@ -11,8 +11,12 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     app::NotifySyncExt,
     db::enums::{ItemCategory, VaultRole, VaultType},
-    domains::vaults as vault,
-    error::{AppError, AppErrorCode},
+    domains::{
+        operations::{
+            ItemOperationEffect, ItemOperationInput, OperationOutcome, OperationResolution,
+        },
+        vaults as vault,
+    },
     http::{
         dto::{
             CursorPage, DecimalString, PageCursor, PageRequest, PatchField,
@@ -25,7 +29,6 @@ use crate::{
             ApiJson, ApiJsonBytes, ApiMergePatch, ApiMergePatchBytes, ApiQuery,
             AuthenticatedRequest,
         },
-        idempotency,
         openapi::ORDINARY_API_BODY_LIMIT_BYTES,
         pagination::{
             decode_page_key, page_prefetched, page_prefetched_with_more, page_values, query_limit,
@@ -35,9 +38,9 @@ use crate::{
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_vault_shape, item_shape, update_item_shape, update_vault_shape,
-        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
-        vault_member_shape, vault_stats_shape, vault_summary_shape,
+        create_vault_shape, item_shape, update_vault_shape, vault_available_member_shape,
+        vault_details_shape, vault_list_entry_shape, vault_member_shape, vault_stats_shape,
+        vault_summary_shape,
     },
     AppState,
 };
@@ -309,13 +312,6 @@ bulk_import_result_shape!(shape_from {
     vault::BulkImportItemsResponse => BulkImportItemsResponse
 });
 
-update_item_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct UpdateItemResponse
-});
-update_item_shape!(shape_from { vault::UpdateItemResponse => UpdateItemResponse });
-
 create_attachment_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
@@ -525,14 +521,6 @@ fn required_item_version(headers: &HeaderMap) -> Result<i32, ApiError> {
     Ok(version)
 }
 
-fn item_mutation_error(error: AppError) -> ApiError {
-    if error.code == AppErrorCode::Conflict {
-        ApiError::version_conflict(error.message)
-    } else {
-        error.into()
-    }
-}
-
 fn versioned_json<T: Serialize>(value: T, version: i32) -> Result<Response, ApiError> {
     let mut response = Json(value).into_response();
     response.headers_mut().insert(
@@ -624,7 +612,7 @@ enum VaultErrorResponses {
 
 #[derive(IntoResponses)]
 #[allow(dead_code)]
-enum CreateItemOperationErrorResponses {
+enum ItemOperationErrorResponses {
     #[response(
         status = 400,
         description = "Malformed request or Operation ID",
@@ -655,6 +643,57 @@ enum CreateItemOperationErrorResponses {
         content_type = "application/problem+json"
     )]
     OperationIdReused(ProblemDetails),
+    #[response(
+        status = 500,
+        description = "Internal error",
+        content_type = "application/problem+json"
+    )]
+    Internal(ProblemDetails),
+}
+
+/// The transport-level refusals an Item mutation Operation can answer with.
+///
+/// A mutation adds `428` to the create set because it requires `If-Match`. Every other refusal it
+/// can produce is a semantic rejection carried inside a `200` outcome, not a status code.
+#[derive(IntoResponses)]
+#[allow(dead_code)]
+enum ItemMutationOperationErrorResponses {
+    #[response(
+        status = 400,
+        description = "Malformed request, Operation ID, or If-Match",
+        content_type = "application/problem+json"
+    )]
+    BadRequest(ProblemDetails),
+    #[response(
+        status = 401,
+        description = "Authentication required",
+        content_type = "application/problem+json"
+    )]
+    Unauthorized(ProblemDetails),
+    #[response(
+        status = 413,
+        description = "Payload too large",
+        content_type = "application/problem+json"
+    )]
+    PayloadTooLarge(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Operation ID was reused with different immutable request bytes",
+        content_type = "application/problem+json"
+    )]
+    OperationIdReused(ProblemDetails),
+    #[response(
+        status = 428,
+        description = "If-Match is required for this Item mutation",
+        content_type = "application/problem+json"
+    )]
+    PreconditionRequired(ProblemDetails),
     #[response(
         status = 500,
         description = "Internal error",
@@ -1003,11 +1042,30 @@ mod tests {
         );
     }
 
+    /// No Item route may reach the legacy response-cache wrapper any more.
+    ///
+    /// Rotation still uses it, so `idempotency_record` and its module survive until ticket 29.
+    /// This assertion holds the line that the Item half of the migration cannot slip back.
+    #[test]
+    fn no_item_route_reaches_the_legacy_response_cache() {
+        let source = include_str!("items.rs");
+        assert!(
+            !source.contains("idempotency::execute"),
+            "Item routes must resolve through the retained Operation contract"
+        );
+        assert!(
+            include_str!("rotation.rs").contains("idempotency::execute"),
+            "this assertion is only meaningful while some caller still exists"
+        );
+    }
+
     #[test]
     fn router_registers_all_used_vault_operations_only() {
         let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
-        let rendered = openapi.to_string();
-        assert_eq!(rendered.matches("operationId").count(), 33);
+        let rendered = openapi["paths"].to_string();
+        // Counted over `paths` alone: the retained Operation outcome schema carries an
+        // `operationId` property of its own, and that is a field name, not a route.
+        assert_eq!(rendered.matches("operationId").count(), 31);
         assert!(rendered.contains("listAllTrashedItems"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));

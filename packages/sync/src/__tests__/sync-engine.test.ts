@@ -190,6 +190,29 @@ function apiResult<T>(data: T) {
 	return { data, etag: null, requestId: null };
 }
 
+/** The retained outcome an applied Item mutation now answers with. */
+function appliedOutcome(
+	kind: string,
+	itemId: string,
+	version: number,
+	operationId?: string,
+) {
+	return apiResult({
+		operationId: operationId ?? itemId,
+		kind,
+		result: { status: "applied" as const, itemId, version },
+	});
+}
+
+/**
+ * The version an applied Item mutation reaches: one past the strong version it was written
+ * against. The retained outcome now carries it, where the response ETag used to.
+ */
+function nextVersion(options?: TestWriteOptions): number {
+	const match = /^"(\d+)"$/.exec(options?.etag ?? "");
+	return match?.[1] ? Number(match[1]) + 1 : 1;
+}
+
 interface TestApiClientOptions {
 	changes?: (input: { sinceId?: string; limit?: number }) => Promise<{
 		events: SyncEvent[];
@@ -327,19 +350,39 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.update?.(itemId, options);
-				return apiResult({ success: true, version: 1 });
+				return appliedOutcome(
+					"update_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			trash: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.trash?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"trash_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			deletePermanently: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.deletePermanently?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"permanently_delete_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			restore: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.restore?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"restore_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			move: async (
 				itemId: string,
@@ -347,7 +390,12 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.move?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"move_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			setFavorite: async (
 				itemId: string,
@@ -355,7 +403,12 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.setFavorite?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"set_item_favorite",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 		},
 	} as unknown as OutboundQueueApiClient;
@@ -1272,6 +1325,10 @@ describe("outbound queue multi-account drain isolation", () => {
 				id: "later-edit",
 				type: "update",
 				encryptedPayload,
+				// Written against the version the favorite before it reaches, the way a real
+				// client chains: the retained outcome now reports that version, so a command
+				// still sitting on the stale one would rightly be refused.
+				baseVersion: 2,
 				timestamp: 3,
 			}),
 		);
@@ -1856,6 +1913,7 @@ describe("outbound queue multi-account drain isolation", () => {
 						encryptionVersion: 1,
 						encryptedByUserId: "user_1",
 					},
+					baseVersion: index + 1,
 					timestamp: index,
 				}),
 			);
@@ -1891,16 +1949,19 @@ describe("outbound queue multi-account drain isolation", () => {
 		);
 		const requests: TestWriteOptions[] = [];
 		const client = outboundApiClient() as any;
-		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
 			requests.push(options);
-			return { ...apiResult({}), etag: '"2"' };
+			return { ...appliedOutcome("trash_item", id, 2), etag: '"2"' };
 		};
 		client.items.deletePermanently = async (
-			_id: string,
+			id: string,
 			options: TestWriteOptions,
 		) => {
 			requests.push(options);
-			return { ...apiResult({}), etag: '"3"' };
+			return {
+				...appliedOutcome("permanently_delete_item", id, 3),
+				etag: '"3"',
+			};
 		};
 
 		await queue.drain(() => client);
@@ -1933,8 +1994,8 @@ describe("outbound queue multi-account drain isolation", () => {
 					}),
 				);
 				const client = outboundApiClient() as any;
-				client.items.trash = async () => ({
-					...apiResult({}),
+				client.items.trash = async (id: string) => ({
+					...appliedOutcome("trash_item", id, 2),
 					etag: '"2"',
 				});
 
@@ -2026,16 +2087,19 @@ describe("outbound queue multi-account drain isolation", () => {
 				etag: `"${version}"`,
 			});
 			client.items.setFavorite = async (
-				_itemId: string,
+				itemId: string,
 				_input: unknown,
 				options: TestWriteOptions,
 			) => {
 				requireCas(options);
 				version += 1;
-				return { ...apiResult({}), etag: `"${version}"` };
+				return {
+					...appliedOutcome("set_item_favorite", itemId, version),
+					etag: `"${version}"`,
+				};
 			};
 			client.items.update = async (
-				_itemId: string,
+				itemId: string,
 				_input: unknown,
 				options: TestWriteOptions,
 			) => {
@@ -2044,7 +2108,7 @@ describe("outbound queue multi-account drain isolation", () => {
 				encryptionVersion = version;
 				stampedEncryptionVersions.push(encryptionVersion);
 				return {
-					...apiResult({ success: true, version }),
+					...appliedOutcome("update_item", itemId, version),
 					etag: `"${version}"`,
 				};
 			};
@@ -2083,7 +2147,10 @@ describe("outbound queue multi-account drain isolation", () => {
 			buildDeleteMutation("account_a", "item_a", { id: "trash" }),
 		);
 		const client = outboundApiClient() as any;
-		client.items.trash = async () => ({ ...apiResult({}), etag: '"2"' });
+		client.items.trash = async (id: string) => ({
+			...appliedOutcome("trash_item", id, 2),
+			etag: '"2"',
+		});
 
 		await queue.drain(() => client);
 
@@ -2145,7 +2212,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			options: TestWriteOptions,
 		) => {
 			requests.set(itemId, { input, options });
-			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+			return { ...appliedOutcome("update_item", itemId, 7), etag: '"7"' };
 		};
 		client.items.move = async (
 			itemId: string,
@@ -2153,7 +2220,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			options: TestWriteOptions,
 		) => {
 			requests.set(itemId, { input, options });
-			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+			return { ...appliedOutcome("move_item", itemId, 7), etag: '"7"' };
 		};
 
 		await queue.drain(() => client);
@@ -2258,13 +2325,45 @@ describe("outbound queue multi-account drain isolation", () => {
 			...apiResult({ id: "item_a", version: 2 }),
 			etag: '"2"',
 		});
-		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
 			requests.push(options);
 			if (first) {
 				first = false;
 				throw conflictError(412);
 			}
-			return { ...apiResult({}), etag: '"3"' };
+			return { ...appliedOutcome("trash_item", id, 3), etag: '"3"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests.map((request) => request.etag)).toEqual(['"1"', '"2"']);
+		expect(requests[1]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
+		expect(queue.getPendingCount()).toBe(0);
+	});
+
+	test("rebases a metadata command after a retained version-conflict rejection", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		const requests: TestWriteOptions[] = [];
+		let first = true;
+		const client = outboundApiClient() as any;
+		client.items.get = async () => ({
+			...apiResult({ id: "item_a", version: 2 }),
+			etag: '"2"',
+		});
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
+			requests.push(options);
+			if (first) {
+				first = false;
+				// The Server no longer says "stale version" with a status code; it retains the
+				// rejection and answers `200`. The queue must still rebase rather than fail.
+				return apiResult({
+					operationId: options.idempotencyKey,
+					kind: "trash_item",
+					result: { status: "rejected", code: "item_version_conflict" },
+				});
+			}
+			return { ...appliedOutcome("trash_item", id, 3), etag: '"3"' };
 		};
 
 		await queue.drain(() => client);

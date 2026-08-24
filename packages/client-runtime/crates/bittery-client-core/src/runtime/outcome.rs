@@ -12,12 +12,12 @@ use crate::{
     auth_http::AuthenticatedOutcome,
     platform_storage::CurrentSessionDocument,
     replica::{
-        AuthorityItemRecord, CursorAdvance, ObservedOutcome, OperationOutcomeResult,
+        AuthorityItemRecord, CursorAdvance, ObservedOutcome, OperationKind, OperationOutcomeResult,
         OperationRejectionCode, ReplicaSnapshot, SyncCursor,
     },
     server_contract::{
-        CreateItemOperationOutcome, CreateItemOperationResult, CreateItemRejectionCode,
-        OperationKind as WireOperationKind,
+        ItemOperationResult as WireItemOperationResult, OperationOutcome as WireOperationOutcome,
+        OperationRejectionCode as WireOperationRejectionCode,
     },
 };
 
@@ -57,7 +57,7 @@ impl Runtime {
         body: &[u8],
     ) -> SemanticAnswer {
         match status {
-            200 => match serde_json::from_slice::<CreateItemOperationOutcome>(body) {
+            200 => match serde_json::from_slice::<WireOperationOutcome>(body) {
                 Ok(outcome) => observed_outcome(operation, outcome),
                 // A `200` this Runtime cannot read is not a decision it may act on. The Operation
                 // survives, and the identical bytes are sent again later.
@@ -376,17 +376,26 @@ impl Runtime {
 }
 
 /// Reads one wire outcome as this Operation's outcome, or refuses it.
-fn observed_outcome(
-    operation: &OperationRecord,
-    outcome: CreateItemOperationOutcome,
-) -> SemanticAnswer {
-    if outcome.operation_id != operation.operation_id
-        || outcome.kind != WireOperationKind::CreateItem
-    {
+///
+/// The lookup route answers one union tagged on `kind`, so the first thing that happens here is
+/// the check the contract was designed for: does the kind the Server answered match the kind this
+/// Device durably accepted? A `kind` this Runtime does not carry fails to deserialize; a `kind` it
+/// carries but did not ask for is identity reuse. Neither is ever read as this Operation's answer.
+fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) -> SemanticAnswer {
+    let WireOperationOutcome::CreateItem {
+        operation_id,
+        result,
+    } = outcome
+    else {
+        // This Device only owns creates so far. Any other kind under this ID answers work this
+        // Device never accepted.
+        return SemanticAnswer::IdentityReused;
+    };
+    if operation_id != operation.operation_id || operation.kind != OperationKind::CreateItem {
         return SemanticAnswer::IdentityReused;
     }
-    let result = match outcome.result {
-        CreateItemOperationResult::Applied { item_id, version } => {
+    let result = match result {
+        WireItemOperationResult::Applied { item_id, version } => {
             if item_id != operation.item_id || version < 1 {
                 // The Operation ID is ours; the entity is not. Keeping the fingerprint
                 // independent of the Operation ID is what makes that visible at all.
@@ -397,7 +406,7 @@ fn observed_outcome(
                 version,
             }
         }
-        CreateItemOperationResult::Rejected { code, .. } => OperationOutcomeResult::Rejected {
+        WireItemOperationResult::Rejected { code, .. } => OperationOutcomeResult::Rejected {
             code: rejection_code(code),
         },
     };
@@ -408,12 +417,27 @@ fn observed_outcome(
     })
 }
 
-fn rejection_code(code: CreateItemRejectionCode) -> OperationRejectionCode {
+fn rejection_code(code: WireOperationRejectionCode) -> OperationRejectionCode {
     match code {
-        CreateItemRejectionCode::InvalidCiphertext => OperationRejectionCode::InvalidCiphertext,
-        CreateItemRejectionCode::VaultAccessDenied => OperationRejectionCode::VaultAccessDenied,
-        CreateItemRejectionCode::VaultReadOnly => OperationRejectionCode::VaultReadOnly,
-        CreateItemRejectionCode::ItemIdConflict => OperationRejectionCode::ItemIdConflict,
+        WireOperationRejectionCode::InvalidCiphertext => OperationRejectionCode::InvalidCiphertext,
+        WireOperationRejectionCode::VaultAccessDenied => OperationRejectionCode::VaultAccessDenied,
+        WireOperationRejectionCode::VaultReadOnly => OperationRejectionCode::VaultReadOnly,
+        WireOperationRejectionCode::ItemIdConflict => OperationRejectionCode::ItemIdConflict,
+        WireOperationRejectionCode::ItemNotFound => OperationRejectionCode::ItemNotFound,
+        WireOperationRejectionCode::ItemVersionConflict => {
+            OperationRejectionCode::ItemVersionConflict
+        }
+        WireOperationRejectionCode::ItemTrashed => OperationRejectionCode::ItemTrashed,
+        WireOperationRejectionCode::ItemNotTrashed => OperationRejectionCode::ItemNotTrashed,
+        WireOperationRejectionCode::SourceVaultMismatch => {
+            OperationRejectionCode::SourceVaultMismatch
+        }
+        WireOperationRejectionCode::TargetVaultAccessDenied => {
+            OperationRejectionCode::TargetVaultAccessDenied
+        }
+        WireOperationRejectionCode::TargetVaultReadOnly => {
+            OperationRejectionCode::TargetVaultReadOnly
+        }
     }
 }
 

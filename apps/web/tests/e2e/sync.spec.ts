@@ -225,7 +225,10 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 		operation: "trash" | "delete_forever";
 		status: number;
 		ifMatch: string | undefined;
-		etag: string | undefined;
+		// The retained Operation outcome carries the version the effect reached, where the
+		// response ETag used to. There is one representation of that fact, not two.
+		kind: string | undefined;
+		version: number | undefined;
 	};
 	const writes: ObservedWrite[] = [];
 	const observeWrite = async (
@@ -238,12 +241,16 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 			return;
 		}
 		const requestHeaders = await request.allHeaders();
-		const responseHeaders = await response.allHeaders();
+		const outcome = (await response.json()) as {
+			kind?: string;
+			result?: { version?: number };
+		};
 		writes.push({
 			operation: path.endsWith("/permanent") ? "delete_forever" : "trash",
 			status: response.status(),
 			ifMatch: requestHeaders["if-match"],
-			etag: responseHeaders.etag,
+			kind: outcome.kind,
+			version: outcome.result?.version,
 		});
 	};
 	writer.on("response", observeWrite);
@@ -285,13 +292,15 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 				operation: "trash",
 				status: 200,
 				ifMatch: '"1"',
-				etag: '"2"',
+				kind: "trash_item",
+				version: 2,
 			},
 			{
 				operation: "delete_forever",
 				status: 200,
 				ifMatch: '"2"',
-				etag: '"3"',
+				kind: "permanently_delete_item",
+				version: 3,
 			},
 		]);
 

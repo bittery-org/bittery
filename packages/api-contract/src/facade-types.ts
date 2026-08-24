@@ -14,8 +14,19 @@ export interface ApiWriteOptions {
 	idempotencyKey?: string;
 }
 
+/**
+ * The write options an Item Operation requires.
+ *
+ * `Idempotency-Key` is no longer an optimisation a caller may skip: it carries the stable
+ * Operation ID, and the Server refuses an Item mutation without one.
+ */
 export interface CreateItemWriteOptions extends ApiWriteOptions {
 	idempotencyKey: string;
+}
+
+/** An Item mutation additionally requires the strong version it is written against. */
+export interface ItemOperationWriteOptions extends CreateItemWriteOptions {
+	etag: string;
 }
 
 export interface ApiPageRequest {
@@ -143,9 +154,21 @@ export type VaultItem = Omit<WireVaultItem, "attachments"> & {
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;
-export type CreateItemOperationOutcome = Schema<"CreateItemOperationOutcome">;
+/**
+ * The one retained Operation outcome, discriminated by `kind`.
+ *
+ * `GET /operations/{operationId}` answers this union, because a caller recovering from a lost
+ * response is exactly the caller that does not yet know what happened. Read `kind`, check it
+ * against your own durable record, and only then read `result`.
+ */
+export type OperationOutcome = Schema<"OperationOutcome">;
+export type ItemOperationResult = Schema<"ItemOperationResult">;
+export type OperationRejectionCode = Schema<"OperationRejectionCode">;
+export type CreateItemOperationOutcome = Extract<
+	OperationOutcome,
+	{ kind: "create_item" }
+>;
 export type UpdateItemInput = Schema<"UpdateItemBody">;
-export type UpdateItemResponse = Schema<"UpdateItemResponse">;
 export type FavoriteInput = Schema<"FavoriteBody">;
 export type MoveItemInput = Schema<"MoveItemBody">;
 

@@ -74,14 +74,26 @@ pub(super) async fn load_item_row<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     item_id: &str,
 ) -> Result<DbBootstrapItemRow, AppError> {
+    find_item_row(executor, item_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Item not found"))
+}
+
+/// Reads one Item row without deciding that a missing Item is an error.
+///
+/// An Operation has to be able to prove "no such Item" as a retained semantic rejection, which a
+/// `404`-shaped `AppError` cannot express.
+pub(super) async fn find_item_row<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    item_id: &str,
+) -> Result<Option<DbBootstrapItemRow>, AppError> {
     query_as::<_, DbBootstrapItemRow>(&format!(
         "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = $1 LIMIT 1"
     ))
     .bind(item_id)
     .fetch_optional(executor)
     .await
-    .map_err(|error| database_error(error, "Failed to load item"))?
-    .ok_or_else(|| AppError::not_found("Item not found"))
+    .map_err(|error| database_error(error, "Failed to load item"))
 }
 
 #[allow(clippy::too_many_arguments)]

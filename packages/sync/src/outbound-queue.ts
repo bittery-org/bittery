@@ -2,8 +2,10 @@ import {
 	type ApiClient,
 	ApiError,
 	type CreateItemOperationOutcome,
+	type ItemOperationResult,
 	isApiErrorStatus,
 	isApiTransportError,
+	type OperationOutcome,
 } from "@bittery/api-contract";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import type {
@@ -67,6 +69,44 @@ function writeOptions(mutation: PendingMutation): {
 		etag: `"${mutation.baseVersion}"`,
 		idempotencyKey: mutation.attemptId ?? mutation.id,
 	};
+}
+
+/**
+ * Reads one Item mutation response as the semantic outcome it now carries.
+ *
+ * A `200` only earns the right to read what the Server decided. The retained outcome names the
+ * kind it answered, so an answer for another kind is a contradiction rather than this command's
+ * result, and a rejection is terminal rather than something to retry.
+ */
+function appliedItemOperation(
+	outcome: OperationOutcome,
+	expectedKind: OperationOutcome["kind"],
+): Extract<ItemOperationResult, { status: "applied" }> {
+	if (outcome.kind !== expectedKind) {
+		throw new Error(
+			`Operation ${outcome.operationId} resolved as ${outcome.kind}, not ${expectedKind}`,
+		);
+	}
+	if (outcome.result.status === "rejected") {
+		// A stale strong version is the one rejection this queue can act on itself: it rebases
+		// the command against the authoritative Item and sends fresh bytes. The Server used to
+		// say that with `412`, and says it with a retained rejection now; the queue's own
+		// handling of the fact is unchanged.
+		if (outcome.result.code === "item_version_conflict") {
+			throw new ApiError(
+				{
+					type: "https://bittery.com/problems/conflict",
+					title: "Conflict",
+					status: 412,
+					code: "PRECONDITION_FAILED",
+					detail: `Operation ${outcome.operationId} was written against a stale Item version`,
+				},
+				null,
+			);
+		}
+		throw new SemanticOperationRejected(outcome.result.code);
+	}
+	return outcome.result;
 }
 
 function strongNumericEtag(
@@ -852,11 +892,7 @@ export class ItemSyncEngine {
 					},
 					{ idempotencyKey: mutation.operationId ?? mutation.id },
 				);
-				const outcome = response.data;
-				if (outcome.result.status === "rejected") {
-					throw new SemanticOperationRejected(outcome.result.code);
-				}
-				const result = outcome.result;
+				const result = appliedItemOperation(response.data, "create_item");
 
 				const realId = result.itemId;
 				if (realId && realId !== mutation.entityId) {
@@ -886,23 +922,44 @@ export class ItemSyncEngine {
 					},
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "update_item").version,
+				};
 			}
 			case "delete": {
 				const response = await client.items.trash(
 					mutation.entityId,
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "trash_item").version,
+				};
 			}
-			case "permanent_delete":
-				return client.items
-					.deletePermanently(mutation.entityId, writeOptions(mutation))
-					.then((response) => ({ etag: response.etag }));
-			case "restore":
-				return client.items
-					.restore(mutation.entityId, writeOptions(mutation))
-					.then((response) => ({ etag: response.etag }));
+			case "permanent_delete": {
+				const response = await client.items.deletePermanently(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(
+						response.data,
+						"permanently_delete_item",
+					).version,
+				};
+			}
+			case "restore": {
+				const response = await client.items.restore(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "restore_item").version,
+				};
+			}
 			case "move": {
 				const payload = mutation.encryptedPayload;
 				if (!payload || !mutation.targetVaultId) {
@@ -919,7 +976,10 @@ export class ItemSyncEngine {
 					},
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "move_item").version,
+				};
 			}
 			case "cross_account_move":
 				throw new Error(
@@ -931,7 +991,11 @@ export class ItemSyncEngine {
 					{ favorite: mutation.favorite ?? false },
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "set_item_favorite")
+						.version,
+				};
 			}
 		}
 	}

@@ -13,7 +13,7 @@ use crate::{
     AppState,
 };
 
-use super::CreateItemOperationOutcome;
+use super::OperationOutcome;
 
 fn operation_id(headers: &HeaderMap) -> Result<String, ApiError> {
     let value = headers.get("idempotency-key").ok_or_else(|| {
@@ -59,7 +59,7 @@ pub(crate) fn required_operation_id(headers: &HeaderMap) -> Result<String, ApiEr
     tag = "operations",
     params(("operationId" = String, Path)),
     responses(
-        (status = 200, description = "Retained semantic Operation outcome", body = CreateItemOperationOutcome),
+        (status = 200, description = "Retained semantic Operation outcome", body = OperationOutcome),
         (status = 400, description = "Malformed Operation ID", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Authentication required", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No outcome exists for this User and Operation ID", body = ProblemDetails, content_type = "application/problem+json"),
@@ -70,10 +70,10 @@ async fn get_operation_outcome(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(operation_id): Path<String>,
-) -> Result<Json<CreateItemOperationOutcome>, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let operation_id = validate_operation_id_str(&operation_id)?;
     let outcome =
-        super::get_create_item_outcome(&state.db_pool, &auth.session.user_id, &operation_id)
+        super::get_operation_outcome(&state.db_pool, &auth.session.user_id, &operation_id)
             .await?
             .ok_or_else(|| {
                 ApiError::not_found(

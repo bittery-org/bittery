@@ -356,10 +356,8 @@ impl<'transport> AuthHttpClient<'transport> {
         token: &str,
         operation_id: &str,
         cancellation: RequestCancellation,
-    ) -> Result<
-        AuthenticatedOutcome<Option<crate::server_contract::CreateItemOperationOutcome>>,
-        RuntimeError,
-    > {
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::OperationOutcome>>, RuntimeError>
+    {
         validate_bearer(token)?;
         validate_operation_id(operation_id)?;
         let url = self.endpoint(&["api", "v1", "operations", operation_id])?;

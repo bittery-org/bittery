@@ -1,7 +1,6 @@
 use super::{
     assert_item_write_access, attachment_quota_lock_key, base64_encoded_length,
-    encrypted_attachment_storage_size, pending_attachment_upload_expiry, toggle_vault_favorite,
-    ToggleFavoriteInput,
+    encrypted_attachment_storage_size, pending_attachment_upload_expiry,
 };
 use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
@@ -60,6 +59,27 @@ fn idempotency_headers(token: &str, key: &str) -> HeaderMap {
         HeaderValue::from_str(key).expect("idempotency key should be valid"),
     );
     headers
+}
+
+/// Asserts one applied Operation outcome: the kind the caller asked for, the Item it names, and
+/// the version the effect reached.
+fn assert_applied(body: &Value, kind: &str, item_id: &str, version: i32) {
+    assert_eq!(body["kind"], json!(kind), "unexpected outcome kind: {body}");
+    assert_eq!(
+        body["result"],
+        json!({ "status": "applied", "itemId": item_id, "version": version }),
+        "unexpected applied outcome: {body}"
+    );
+}
+
+/// Asserts one retained semantic rejection.
+fn assert_rejected(body: &Value, kind: &str, code: &str) {
+    assert_eq!(body["kind"], json!(kind), "unexpected outcome kind: {body}");
+    assert_eq!(
+        body["result"],
+        json!({ "status": "rejected", "code": code }),
+        "unexpected rejected outcome: {body}"
+    );
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
@@ -1319,10 +1339,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                 .await
                 .expect("active item version should load");
             let update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "active-encrypted-data-updated", "encryptionIv": "active-iv-updated" })), with_if_match(owner_headers.clone(), current_version))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "active-encrypted-data-updated", "encryptionIv": "active-iv-updated" })), idempotent_item_headers(&owner_session.token, current_version, "lifecycle-update-item"))
                 .await;
             update_response.assert_contract_status();
-            assert_eq!(update_response.body["version"], json!(current_version + 1));
+            assert_applied(&update_response.body, "update_item", &fixture.active_item_id, current_version + 1);
             let updated_data: String =
                 query_scalar("SELECT encrypted_data FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1332,9 +1352,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(updated_data, "active-encrypted-data-updated");
 
             let toggle_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}/favorite", fixture.active_item_id), Some(json!({ "favorite": true })), with_if_match(owner_headers.clone(), current_version + 1))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}/favorite", fixture.active_item_id), Some(json!({ "favorite": true })), idempotent_item_headers(&owner_session.token, current_version + 1, "lifecycle-favorite-item"))
                 .await;
             toggle_response.assert_contract_status();
+            assert_applied(&toggle_response.body, "set_item_favorite", &fixture.active_item_id, current_version + 2);
             let favorite: bool = query_scalar("SELECT favorite FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
                 .fetch_one(&app.pool)
@@ -1343,9 +1364,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(favorite);
 
             let delete_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}", imported_item_a), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}", imported_item_a), None, idempotent_item_headers(&owner_session.token, 1, "lifecycle-trash-item"))
                 .await;
             delete_response.assert_contract_status();
+            assert_applied(&delete_response.body, "trash_item", imported_item_a, 2);
             let deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1355,9 +1377,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(deleted_at.is_some());
 
             let restore_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.deleted_item_id), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.deleted_item_id), None, idempotent_item_headers(&owner_session.token, 1, "lifecycle-restore-item"))
                 .await;
             restore_response.assert_contract_status();
+            assert_applied(&restore_response.body, "restore_item", &fixture.deleted_item_id, 2);
             let restored_deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.deleted_item_id)
@@ -1367,9 +1390,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(restored_deleted_at.is_none());
 
             let move_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "lifecycle-move-item"))
                 .await;
             move_response.assert_contract_status();
+            assert_applied(&move_response.body, "move_item", &fixture.movable_item_id, 2);
             let moved_vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
                 .bind(&fixture.movable_item_id)
                 .fetch_one(&app.pool)
@@ -1378,9 +1402,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(moved_vault_id, fixture.target_vault_id);
 
             let permanent_delete_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", imported_item_a), None, with_if_match(owner_headers, 2))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", imported_item_a), None, idempotent_item_headers(&owner_session.token, 2, "lifecycle-permanent-delete-item"))
                 .await;
             permanent_delete_response.assert_contract_status();
+            assert_applied(&permanent_delete_response.body, "permanently_delete_item", imported_item_a, 3);
             let remaining_rows: i64 =
                 query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1425,25 +1450,46 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                 .await;
             assert_eq!(missing_delete.status, StatusCode::PRECONDITION_REQUIRED);
 
-            let mut stale_headers = headers.clone();
-            stale_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            // A well-formed precondition without a stable Operation ID is still malformed
+            // transport, and it must not reach semantic execution.
+            let missing_operation_id = app
+                .api_json(
+                    Method::PATCH,
+                    &item_uri,
+                    Some(json!({ "encryptedData": "must-not-write" })),
+                    with_if_match(headers.clone(), 1),
+                )
+                .await;
+            assert_eq!(missing_operation_id.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                missing_operation_id.body["code"],
+                json!("INVALID_OPERATION_ID")
+            );
+
             let stale = app
                 .api_json(
                     Method::PATCH,
                     &item_uri,
                     Some(json!({ "encryptedData": "stale-write" })),
-                    stale_headers,
+                    idempotent_item_headers(
+                        &owner_session.token,
+                        99,
+                        "strong-version-stale-update",
+                    ),
                 )
                 .await;
-            assert_eq!(stale.status, StatusCode::PRECONDITION_FAILED);
-            assert_eq!(stale.body["code"], json!("VERSION_CONFLICT"));
-            let mut stale_delete_headers = headers.clone();
-            stale_delete_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            stale.assert_contract_status();
+            assert_rejected(&stale.body, "update_item", "item_version_conflict");
             let stale_delete = app
-                .api_json(Method::DELETE, &item_uri, None, stale_delete_headers)
+                .api_json(
+                    Method::DELETE,
+                    &item_uri,
+                    None,
+                    idempotent_item_headers(&owner_session.token, 99, "strong-version-stale-trash"),
+                )
                 .await;
-            assert_eq!(stale_delete.status, StatusCode::PRECONDITION_FAILED);
-            assert_eq!(stale_delete.body["code"], json!("VERSION_CONFLICT"));
+            stale_delete.assert_contract_status();
+            assert_rejected(&stale_delete.body, "trash_item", "item_version_conflict");
             let unchanged: (String, i32, bool, Option<OffsetDateTime>) = sqlx::query_as(
                 "SELECT encrypted_data, version, favorite, deleted_at FROM item WHERE id = $1",
             )
@@ -1456,30 +1502,32 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                 ("active-encrypted-data".to_string(), 1, false, None)
             );
 
-            let mut version_headers = headers.clone();
-            version_headers.insert(IF_MATCH, HeaderValue::from_static("\"1\""));
             let updated = app
                 .api_json(
                     Method::PATCH,
                     &item_uri,
                     Some(json!({ "encryptedData": "version-two" })),
-                    version_headers,
+                    idempotent_item_headers(&owner_session.token, 1, "strong-version-update"),
                 )
                 .await;
             updated.assert_contract_status();
-            assert_eq!(updated.headers.get(ETAG).unwrap(), "\"2\"");
+            assert_applied(&updated.body, "update_item", &fixture.active_item_id, 2);
 
-            let mut favorite_headers = headers.clone();
-            favorite_headers.insert(IF_MATCH, HeaderValue::from_static("\"2\""));
             let favorite = app
                 .api_json(
                     Method::PATCH,
                     &format!("{item_uri}/favorite"),
                     Some(json!({ "favorite": true })),
-                    favorite_headers,
+                    idempotent_item_headers(&owner_session.token, 2, "strong-version-favorite"),
                 )
                 .await;
             favorite.assert_contract_status();
+            assert_applied(
+                &favorite.body,
+                "set_item_favorite",
+                &fixture.active_item_id,
+                3,
+            );
             let after_favorite: (i32, bool) =
                 sqlx::query_as("SELECT version, favorite FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1488,12 +1536,16 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                     .unwrap();
             assert_eq!(after_favorite, (3, true));
 
-            let mut trash_headers = headers.clone();
-            trash_headers.insert(IF_MATCH, HeaderValue::from_static("\"3\""));
             let trashed = app
-                .api_json(Method::DELETE, &item_uri, None, trash_headers)
+                .api_json(
+                    Method::DELETE,
+                    &item_uri,
+                    None,
+                    idempotent_item_headers(&owner_session.token, 3, "strong-version-trash"),
+                )
                 .await;
             trashed.assert_contract_status();
+            assert_applied(&trashed.body, "trash_item", &fixture.active_item_id, 4);
             let after_trash: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1503,17 +1555,16 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
             assert_eq!(after_trash.0, 4);
             assert!(after_trash.1.is_some());
 
-            let mut restore_headers = headers;
-            restore_headers.insert(IF_MATCH, HeaderValue::from_static("\"4\""));
             let restored = app
                 .api_json(
                     Method::POST,
                     &format!("{item_uri}/restore"),
                     None,
-                    restore_headers,
+                    idempotent_item_headers(&owner_session.token, 4, "strong-version-restore"),
                 )
                 .await;
             restored.assert_contract_status();
+            assert_applied(&restored.body, "restore_item", &fixture.active_item_id, 5);
             let after_restore: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1530,18 +1581,21 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
 async fn favorite_service_advances_item_version() {
     with_api_test_app("favorite_service_advances_item_version", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
-        toggle_vault_favorite(
-            &app.pool,
-            &fixture.owner_user_id,
-            ToggleFavoriteInput {
-                item_id: fixture.active_item_id.clone(),
-                favorite: true,
-                expected_version: None,
-                client_id: Some("favorite-service-client".to_string()),
-            },
-        )
-        .await
-        .expect("favorite mutation should succeed");
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}/favorite", fixture.active_item_id),
+                Some(json!({ "favorite": true })),
+                idempotent_item_headers(&session.token, 1, "favorite-service-operation"),
+            )
+            .await;
+        assert_applied(
+            &response.body,
+            "set_item_favorite",
+            &fixture.active_item_id,
+            2,
+        );
 
         let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
             .bind(&fixture.active_item_id)
@@ -1566,7 +1620,8 @@ async fn favorite_event_retains_the_request_client_id_and_encryption_context() {
         .await
         .unwrap();
         let session = app.issue_session(&fixture.owner_user_id).await;
-        let mut headers = with_if_match(authenticated_json_headers(&session.token), 1);
+        let mut headers =
+            idempotent_item_headers(&session.token, 1, "favorite-client-id-operation");
         headers.insert(
             "bittery-client-id",
             HeaderValue::from_static("favorite-regression-client"),
@@ -1581,8 +1636,12 @@ async fn favorite_event_retains_the_request_client_id_and_encryption_context() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.headers.get(ETAG).unwrap(), "\"2\"");
+        assert_applied(
+            &response.body,
+            "set_item_favorite",
+            &fixture.active_item_id,
+            2,
+        );
         let event: (Option<String>, String) = sqlx::query_as(
             "SELECT client_id, entity_id FROM sync_event WHERE event_type = 'item_updated'::sync_event_type ORDER BY created_at DESC LIMIT 1",
         )
@@ -1674,28 +1733,28 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                 Method::PATCH,
                 &format!("{item_uri}/favorite"),
                 Some(json!({ "favorite": true })),
-                with_if_match(authenticated_json_headers(&owner_session.token), 1),
+                idempotent_item_headers(&owner_session.token, 1, "encryption-context-favorite"),
             )
             .await;
-        assert_eq!(favorite.status, StatusCode::OK);
+        assert_applied(&favorite.body, "set_item_favorite", item_id, 2);
         let trashed = app
             .api_json(
                 Method::DELETE,
                 &item_uri,
                 None,
-                with_if_match(authenticated_json_headers(&member_session.token), 2),
+                idempotent_item_headers(&member_session.token, 2, "encryption-context-trash"),
             )
             .await;
-        assert_eq!(trashed.status, StatusCode::OK);
+        assert_applied(&trashed.body, "trash_item", item_id, 3);
         let restored = app
             .api_json(
                 Method::POST,
                 &format!("{item_uri}/restore"),
                 None,
-                with_if_match(authenticated_json_headers(&member_session.token), 3),
+                idempotent_item_headers(&member_session.token, 3, "encryption-context-restore"),
             )
             .await;
-        assert_eq!(restored.status, StatusCode::OK);
+        assert_applied(&restored.body, "restore_item", item_id, 4);
         let after_metadata: (i32, Option<i32>, Option<String>, Option<String>) =
             sqlx::query_as(
                 "SELECT version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
@@ -1717,10 +1776,10 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                     "encryptedData": "member-ciphertext",
                     "encryptionIv": "member-iv"
                 })),
-                with_if_match(authenticated_json_headers(&member_session.token), 4),
+                idempotent_item_headers(&member_session.token, 4, "encryption-context-update"),
             )
             .await;
-        assert_eq!(updated.status, StatusCode::OK);
+        assert_applied(&updated.body, "update_item", item_id, 5);
         let after_content: (i32, Option<i32>, Option<String>) = sqlx::query_as(
             "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
         )
@@ -1754,77 +1813,17 @@ async fn move_item_requires_source_vault_write_access() {
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
 
             let response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(authenticated_json_headers(&readonly_session.token), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&readonly_session.token, 1, "move-readonly-source"))
                 .await;
 
             response.assert_contract_status();
-            assert_handler_error(
-                &response.body,
-                "FORBIDDEN",
-                "Cannot move items from a read-only vault",
-            );
+            assert_rejected(&response.body, "move_item", "vault_read_only");
             let vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
                 .bind(&fixture.movable_item_id)
                 .fetch_one(&app.pool)
                 .await
                 .expect("item vault should load");
             assert_eq!(vault_id, fixture.main_vault_id);
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn item_update_idempotency_replays_without_a_second_mutation() {
-    with_api_test_app(
-        "item_update_idempotency_replay",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let session = app.issue_session(&fixture.owner_user_id).await;
-            let body = json!({
-                "encryptedData": "idempotent-encrypted-data",
-                "encryptionIv": "idempotent-iv"
-            });
-
-            let first = app
-                .api_json(
-                    Method::PATCH,
-                    &format!("/api/v1/items/{}", fixture.active_item_id),
-                    Some(body.clone()),
-                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
-                )
-                .await;
-            let replay = app
-                .api_json(
-                    Method::PATCH,
-                    &format!("/api/v1/items/{}", fixture.active_item_id),
-                    Some(body),
-                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
-                )
-                .await;
-
-            assert_eq!(first.status, StatusCode::OK);
-            assert_eq!(replay.status, first.status);
-            assert_eq!(replay.body, first.body);
-            assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-            assert_eq!(
-                replay.headers.get("idempotency-replayed"),
-                Some(&HeaderValue::from_static("true")),
-            );
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(&fixture.active_item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            let events: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_updated'::sync_event_type",
-            )
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("sync event count should load");
-            assert_eq!(version, 2);
-            assert_eq!(events, 1);
         },
     )
     .await;
@@ -2140,155 +2139,6 @@ async fn deleting_a_user_cascades_retained_operation_outcomes() {
 }
 
 #[tokio::test]
-async fn queued_item_trash_replays_a_lost_success_without_advancing_twice() {
-    with_api_test_app("queued_item_trash_replay", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let headers = || idempotent_item_headers(&session.token, 1, "queued-trash-key");
-
-        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
-        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
-
-        assert_eq!(first.status, StatusCode::OK);
-        assert_eq!(replay.status, first.status);
-        assert_eq!(replay.body, first.body);
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
-        );
-        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("trashed item version should load");
-        let events: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_deleted'::sync_event_type",
-        )
-        .bind(&fixture.active_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("trash event count should load");
-        assert_eq!(version, 2);
-        assert_eq!(events, 1);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn queued_item_permanent_delete_replays_a_lost_success_without_second_delete() {
-    with_api_test_app("queued_item_permanent_delete_replay", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!(
-            "/api/v1/items/{}/permanent",
-            fixture.deleted_item_id
-        );
-        let headers = || {
-            idempotent_item_headers(&session.token, 1, "queued-permanent-delete-key")
-        };
-
-        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
-        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
-
-        assert_eq!(first.status, StatusCode::OK);
-        assert_eq!(replay.status, first.status);
-        assert_eq!(replay.body, first.body);
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
-        );
-        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
-            .bind(&fixture.deleted_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("permanently deleted item count should load");
-        let events: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_permanently_deleted'::sync_event_type",
-        )
-        .bind(&fixture.deleted_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("permanent delete event count should load");
-        assert_eq!(item_count, 0);
-        assert_eq!(events, 1);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
-    with_api_test_app("queued_item_idempotency_mismatch", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let create_uri = format!(
-            "/api/v1/vaults/{}/items/item_queued_mismatch",
-            fixture.main_vault_id
-        );
-        let create_headers = || idempotency_headers(&session.token, "queued-create-mismatch");
-        let first = app
-            .api_json(
-                Method::PUT,
-                &create_uri,
-                Some(json!({
-                    "category": "login",
-                    "encryptedData": "first",
-                    "encryptionIv": "iv",
-                    "encryptionAlgorithm": "aes-gcm"
-                })),
-                create_headers(),
-            )
-            .await;
-        assert_eq!(first.status, StatusCode::OK);
-        let body_mismatch = app
-            .api_json(
-                Method::PUT,
-                &create_uri,
-                Some(json!({
-                    "category": "login",
-                    "encryptedData": "second",
-                    "encryptionIv": "iv",
-                    "encryptionAlgorithm": "aes-gcm"
-                })),
-                create_headers(),
-            )
-            .await;
-        assert_eq!(body_mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body_mismatch.body["code"], json!("OPERATION_ID_REUSED"));
-
-        let trash_uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let first = app
-            .api_json(
-                Method::DELETE,
-                &trash_uri,
-                None,
-                idempotent_item_headers(&session.token, 1, "queued-trash-mismatch"),
-            )
-            .await;
-        assert_eq!(first.status, StatusCode::OK);
-        let precondition_mismatch = app
-            .api_json(
-                Method::DELETE,
-                &trash_uri,
-                None,
-                idempotent_item_headers(&session.token, 2, "queued-trash-mismatch"),
-            )
-            .await;
-        assert_eq!(
-            precondition_mismatch.status,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            precondition_mismatch.body["code"],
-            json!("IDEMPOTENCY_KEY_REUSED")
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn concurrent_queued_item_create_executes_once_and_then_replays() {
     with_api_test_app("concurrent_queued_item_create", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
@@ -2481,212 +2331,6 @@ async fn stale_idempotency_claims_fail_closed_and_completed_records_are_cleaned(
 }
 
 #[tokio::test]
-async fn concurrent_item_update_idempotency_executes_once() {
-    with_api_test_app("concurrent_item_update_idempotency", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let body = json!({
-            "encryptedData": "concurrent-encrypted-data",
-            "encryptionIv": "concurrent-iv"
-        });
-        let request_a = app.api_json(
-            Method::PATCH,
-            &uri,
-            Some(body.clone()),
-            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
-        );
-        let request_b = app.api_json(
-            Method::PATCH,
-            &uri,
-            Some(body),
-            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
-        );
-
-        let (first, second) = tokio::join!(request_a, request_b);
-        assert!(matches!(
-            first.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(matches!(
-            second.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
-        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("item version should load");
-        assert_eq!(version, 2);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn item_update_idempotency_rejects_body_mismatch() {
-    with_api_test_app("item_update_idempotency_mismatch", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let headers = || idempotent_item_headers(&session.token, 1, "mismatch-key");
-        let first = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                headers(),
-            )
-            .await;
-        assert_eq!(first.status, StatusCode::OK);
-
-        let mismatch = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "second", "encryptionIv": "iv" })),
-                headers(),
-            )
-            .await;
-        assert_eq!(mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_handler_error(
-            &mismatch.body,
-            "IDEMPOTENCY_KEY_REUSED",
-            "The idempotency key was already used for a different request.",
-        );
-
-        let precondition_mismatch = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                idempotent_item_headers(&session.token, 2, "mismatch-key"),
-            )
-            .await;
-        assert_eq!(
-            precondition_mismatch.status,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            precondition_mismatch.body["code"],
-            json!("IDEMPOTENCY_KEY_REUSED")
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn completed_item_idempotency_records_expire_after_twenty_four_hours() {
-    with_api_test_app(
-        "completed_item_idempotency_expiry",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let session = app.issue_session(&fixture.owner_user_id).await;
-            let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-            let first = app
-                .api_json(
-                    Method::PATCH,
-                    &uri,
-                    Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                    idempotent_item_headers(&session.token, 1, "expiry-key"),
-                )
-                .await;
-            assert_eq!(first.status, StatusCode::OK);
-            query("UPDATE idempotency_record SET expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1")
-                .bind("expiry-key")
-                .execute(&app.pool)
-                .await
-                .expect("idempotency record should expire");
-
-            let after_expiry = app
-                .api_json(
-                    Method::PATCH,
-                    &uri,
-                    Some(json!({ "encryptedData": "second", "encryptionIv": "iv-2" })),
-                    idempotent_item_headers(&session.token, 2, "expiry-key"),
-                )
-                .await;
-            assert_eq!(after_expiry.status, StatusCode::OK);
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(&fixture.active_item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            assert_eq!(version, 3);
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn restore_move_and_favorite_commands_replay_idempotently() {
-    with_api_test_app("restore_move_favorite_idempotency", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-
-        let restore_uri = format!("/api/v1/items/{}/restore", fixture.deleted_item_id);
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::POST,
-                    &restore_uri,
-                    None,
-                    idempotent_item_headers(&session.token, 1, "restore-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
-
-        let favorite_uri = format!("/api/v1/items/{}/favorite", fixture.active_item_id);
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::PATCH,
-                    &favorite_uri,
-                    Some(json!({ "favorite": true })),
-                    idempotent_item_headers(&session.token, 1, "favorite-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
-
-        let move_uri = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
-        let move_body = json!({
-            "sourceVaultId": fixture.main_vault_id,
-            "targetVaultId": fixture.target_vault_id,
-            "encryptedData": "moved-idempotently",
-            "encryptionIv": "moved-iv",
-            "encryptionAlgorithm": "aes-gcm"
-        });
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::POST,
-                    &move_uri,
-                    Some(move_body.clone()),
-                    idempotent_item_headers(&session.token, 1, "move-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
-
-        for item_id in [
-            fixture.deleted_item_id,
-            fixture.active_item_id,
-            fixture.movable_item_id,
-        ] {
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            assert_eq!(version, 2);
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
     with_api_test_app(
         "vault_item_mutation_handlers_reject_invalid_state_and_access",
@@ -2695,21 +2339,26 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let owner_session = app.issue_session(&fixture.owner_user_id).await;
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
             let owner_headers = authenticated_json_headers(&owner_session.token);
-            let readonly_headers = authenticated_json_headers(&readonly_session.token);
 
             let readonly_create_response = app
                 .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&readonly_session.token, "readonly-create-item"))
                 .await;
             readonly_create_response.assert_contract_status();
-            assert_eq!(readonly_create_response.status, StatusCode::OK);
-            assert_eq!(readonly_create_response.body["result"]["status"], "rejected");
-            assert_eq!(readonly_create_response.body["result"]["code"], "vault_read_only");
+            assert_rejected(
+                &readonly_create_response.body,
+                "create_item",
+                "vault_read_only",
+            );
 
             let readonly_update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "enc" })), with_if_match(readonly_headers, 1))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "enc" })), idempotent_item_headers(&readonly_session.token, 1, "readonly-update-item"))
                 .await;
             readonly_update_response.assert_contract_status();
-            assert_handler_error(&readonly_update_response.body, "FORBIDDEN", "Access denied");
+            assert_rejected(
+                &readonly_update_response.body,
+                "update_item",
+                "vault_read_only",
+            );
 
             let duplicate_import_response = app
                 .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [
@@ -2737,46 +2386,831 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let stale_update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "stale-update" })), with_if_match(owner_headers.clone(), 99))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "stale-update" })), idempotent_item_headers(&owner_session.token, 99, "stale-update-item"))
                 .await;
             stale_update_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &stale_update_response.body,
-                "VERSION_CONFLICT",
-                "Item has been modified by another client",
+                "update_item",
+                "item_version_conflict",
             );
 
             let restore_active_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.active_item_id), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.active_item_id), None, idempotent_item_headers(&owner_session.token, 1, "restore-active-item"))
                 .await;
             restore_active_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &restore_active_response.body,
-                "BAD_REQUEST",
-                "Item is not deleted",
+                "restore_item",
+                "item_not_trashed",
             );
 
             let wrong_source_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "move-wrong-source"))
                 .await;
             wrong_source_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &wrong_source_response.body,
-                "BAD_REQUEST",
-                "Item does not belong to the source vault",
+                "move_item",
+                "source_vault_mismatch",
             );
 
             let permanent_delete_active_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", fixture.active_item_id), None, with_if_match(owner_headers, 1))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", fixture.active_item_id), None, idempotent_item_headers(&owner_session.token, 1, "permanent-delete-active-item"))
                 .await;
             permanent_delete_active_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &permanent_delete_active_response.body,
-                "BAD_REQUEST",
-                "Can only permanently delete items in trash",
+                "permanently_delete_item",
+                "item_not_trashed",
             );
+
+            // Every one of those rejections is retained, and none of them wrote.
+            let unchanged: (String, i32, Option<OffsetDateTime>) = sqlx::query_as(
+                "SELECT encrypted_data, version, deleted_at FROM item WHERE id = $1",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+            assert_eq!(unchanged, ("active-encrypted-data".to_string(), 1, None));
+            let retained: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM operation_outcome WHERE result_status = 'rejected'::operation_outcome_status AND operation_id = ANY($1)",
+            )
+            .bind(vec![
+                "readonly-create-item",
+                "readonly-update-item",
+                "stale-update-item",
+                "restore-active-item",
+                "move-wrong-source",
+                "permanent-delete-active-item",
+            ])
+            .fetch_one(&app.pool)
+            .await
+            .expect("retained rejection count should load");
+            assert_eq!(retained, 6);
         },
     )
+    .await;
+}
+
+/// One Item Operation, described once so every contract test can drive all six routes.
+struct ItemOperationCase {
+    kind: &'static str,
+    method: Method,
+    path: String,
+    body: Option<Value>,
+    /// The same Operation with one byte or one precondition changed. Sending it under the first
+    /// Operation ID is identity reuse, and the Server must refuse rather than answer.
+    other_bytes: Option<Value>,
+    other_precondition: i32,
+    item_id: String,
+    expected_version: i32,
+    applied_version: i32,
+    event_type: &'static str,
+    /// The audit action an applied Operation writes, where the Domain writes one.
+    applied_audit: Option<&'static str>,
+}
+
+/// Seeds one Item per case so the six Operations never contend for the same row.
+async fn item_operation_cases(
+    pool: &PgPool,
+    fixture: &VaultRouterFixture,
+) -> Vec<ItemOperationCase> {
+    for (item_id, trashed) in [
+        ("case_update_item", false),
+        ("case_favorite_item", false),
+        ("case_trash_item", false),
+        ("case_restore_item", true),
+        ("case_move_item", false),
+        ("case_permanent_item", true),
+    ] {
+        seed_item(
+            pool,
+            item_id,
+            &fixture.main_vault_id,
+            "login",
+            "case-ciphertext",
+            "case-iv",
+            &fixture.owner_user_id,
+        )
+        .await;
+        if trashed {
+            query("UPDATE item SET deleted_at = NOW() WHERE id = $1")
+                .bind(item_id)
+                .execute(pool)
+                .await
+                .expect("case item should trash");
+        }
+    }
+    let move_body = |ciphertext: &str| {
+        json!({
+            "sourceVaultId": fixture.main_vault_id,
+            "targetVaultId": fixture.target_vault_id,
+            "encryptedData": ciphertext,
+            "encryptionIv": "case-iv",
+            "encryptionAlgorithm": "aes-gcm"
+        })
+    };
+    vec![
+        ItemOperationCase {
+            kind: "update_item",
+            method: Method::PATCH,
+            path: "/api/v1/items/case_update_item".into(),
+            body: Some(json!({ "encryptedData": "case-updated", "encryptionIv": "case-iv" })),
+            other_bytes: Some(json!({ "encryptedData": "case-other", "encryptionIv": "case-iv" })),
+            other_precondition: 2,
+            item_id: "case_update_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_updated",
+            applied_audit: None,
+        },
+        ItemOperationCase {
+            kind: "set_item_favorite",
+            method: Method::PATCH,
+            path: "/api/v1/items/case_favorite_item/favorite".into(),
+            body: Some(json!({ "favorite": true })),
+            other_bytes: Some(json!({ "favorite": false })),
+            other_precondition: 2,
+            item_id: "case_favorite_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_updated",
+            applied_audit: None,
+        },
+        ItemOperationCase {
+            kind: "trash_item",
+            method: Method::DELETE,
+            path: "/api/v1/items/case_trash_item".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_trash_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_deleted",
+            applied_audit: Some("item_deleted"),
+        },
+        ItemOperationCase {
+            kind: "restore_item",
+            method: Method::POST,
+            path: "/api/v1/items/case_restore_item/restore".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_restore_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_restored",
+            applied_audit: Some("item_restored"),
+        },
+        ItemOperationCase {
+            kind: "move_item",
+            method: Method::POST,
+            path: "/api/v1/items/case_move_item/moves".into(),
+            body: Some(move_body("case-moved")),
+            other_bytes: Some(move_body("case-moved-differently")),
+            other_precondition: 2,
+            item_id: "case_move_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_moved",
+            applied_audit: Some("item_moved"),
+        },
+        ItemOperationCase {
+            kind: "permanently_delete_item",
+            method: Method::DELETE,
+            path: "/api/v1/items/case_permanent_item/permanent".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_permanent_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_permanently_deleted",
+            applied_audit: Some("item_permanently_deleted"),
+        },
+    ]
+}
+
+async fn entity_event_count(pool: &PgPool, entity_id: &str, event_type: &str) -> i64 {
+    query_scalar(
+        "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+    )
+    .bind(entity_id)
+    .bind(event_type)
+    .fetch_one(pool)
+    .await
+    .expect("entity event count should load")
+}
+
+async fn retained_outcome_count(pool: &PgPool, user_id: &str, operation_id: &str) -> i64 {
+    query_scalar(
+        "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .fetch_one(pool)
+    .await
+    .expect("retained outcome count should load")
+}
+
+/// An identical retry answers the retained outcome, and a lost response is recoverable by lookup.
+#[tokio::test]
+async fn every_item_operation_replays_one_retained_outcome() {
+    with_api_test_app("item_operation_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("replay-{}", case.kind);
+            let headers =
+                || idempotent_item_headers(&session.token, case.expected_version, &operation_id);
+            let first = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers(),
+                )
+                .await;
+            first.assert_contract_status();
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+
+            let replay = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers(),
+                )
+                .await;
+            assert_eq!(replay.status, first.status);
+            assert_eq!(replay.body, first.body, "{} must replay", case.kind);
+
+            // The response the client lost is recoverable without replaying the effect, and a
+            // renewed Session reads the same answer because identity is `(User, Operation ID)`.
+            let renewed = app.issue_session(&fixture.owner_user_id).await;
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&renewed.token),
+                )
+                .await;
+            lookup.assert_contract_status();
+            assert_eq!(lookup.body, first.body);
+
+            let isolated = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&outsider.token),
+                )
+                .await;
+            assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+            assert_eq!(isolated.body["code"], json!("OPERATION_OUTCOME_NOT_FOUND"));
+
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1,
+                "{} must emit exactly one entity event",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                1,
+                "{} must resolve exactly once",
+                case.kind
+            );
+            if let Some(action) = case.applied_audit {
+                let audits: i64 = query_scalar(
+                    "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+                )
+                .bind(&case.item_id)
+                .bind(action)
+                .fetch_one(&app.pool)
+                .await
+                .expect("audit count should load");
+                assert_eq!(audits, 1, "{} must audit exactly once", case.kind);
+            }
+        }
+    })
+    .await;
+}
+
+/// The same Operation ID with other immutable bytes is identity reuse, never a second answer.
+#[tokio::test]
+async fn every_item_operation_refuses_a_reused_id_with_other_bytes() {
+    with_api_test_app("item_operation_id_reuse", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("reuse-{}", case.kind);
+            let first = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    idempotent_item_headers(&session.token, case.expected_version, &operation_id),
+                )
+                .await;
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+
+            // Body routes change one byte; the bodyless routes change the normalized precondition.
+            let (changed_body, changed_version) = match case.other_bytes.clone() {
+                Some(body) => (Some(body), case.expected_version),
+                None => (case.body.clone(), case.other_precondition),
+            };
+            let reused = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    changed_body,
+                    idempotent_item_headers(&session.token, changed_version, &operation_id),
+                )
+                .await;
+            assert_eq!(
+                reused.status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{} must refuse a reused Operation ID: {}",
+                case.kind,
+                reused.body
+            );
+            assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(
+                lookup.body, first.body,
+                "{} must leave the original outcome untouched",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+/// Two identical requests in flight at once resolve to one effect and one shared answer.
+#[tokio::test]
+async fn concurrent_duplicate_item_operations_execute_once() {
+    with_api_test_app("item_operation_concurrency", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("concurrent-{}", case.kind);
+            let headers =
+                || idempotent_item_headers(&session.token, case.expected_version, &operation_id);
+            let (first, second) = tokio::join!(
+                app.api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers()
+                ),
+                app.api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers()
+                ),
+            );
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(first.body, second.body);
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1,
+                "{} must apply exactly once",
+                case.kind
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+/// Malformed transport and failed authentication are refused before semantic execution, so they
+/// retain nothing a later lookup could mistake for a decision.
+#[tokio::test]
+async fn item_operations_retain_nothing_for_malformed_or_unauthenticated_requests() {
+    with_api_test_app("item_operation_no_retention", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("unretained-{}", case.kind);
+            let without_operation_id = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    with_if_match(
+                        authenticated_json_headers(&session.token),
+                        case.expected_version,
+                    ),
+                )
+                .await;
+            assert_eq!(without_operation_id.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                without_operation_id.body["code"],
+                json!("INVALID_OPERATION_ID")
+            );
+
+            let without_precondition = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(
+                without_precondition.status,
+                StatusCode::PRECONDITION_REQUIRED
+            );
+
+            let mut unauthenticated = unauthenticated_json_headers();
+            unauthenticated.insert(
+                IF_MATCH,
+                HeaderValue::from_str(&format!("\"{}\"", case.expected_version)).unwrap(),
+            );
+            unauthenticated.insert(
+                "idempotency-key",
+                HeaderValue::from_str(&operation_id).unwrap(),
+            );
+            let unauthorized = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    unauthenticated,
+                )
+                .await;
+            assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
+
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                0,
+                "{} must retain nothing for refused transport",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                0
+            );
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(lookup.status, StatusCode::NOT_FOUND);
+        }
+    })
+    .await;
+}
+
+/// The effect, its audit, its entity Sync event, the retained outcome and `operation_resolved` all
+/// commit together or not at all.
+#[tokio::test]
+async fn item_operations_roll_back_every_step_together() {
+    for (kind, table, when_clause) in [
+        ("update_item", "operation_outcome", ""),
+        (
+            "set_item_favorite",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+        (
+            "trash_item",
+            "audit_log",
+            "WHEN (NEW.action = 'item_deleted')",
+        ),
+        (
+            "restore_item",
+            "sync_event",
+            "WHEN (NEW.event_type = 'item_restored')",
+        ),
+        ("move_item", "operation_outcome", ""),
+        (
+            "permanently_delete_item",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+    ] {
+        with_api_test_app(
+            &format!("item_operation_atomicity_{kind}"),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                let cases = item_operation_cases(&app.pool, &fixture).await;
+                let case = cases
+                    .into_iter()
+                    .find(|case| case.kind == kind)
+                    .expect("every kind has a case");
+                install_operation_step_failure_trigger(&app.pool, table, when_clause).await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("atomic-{kind}");
+
+                let response = app
+                    .api_json(
+                        case.method.clone(),
+                        &case.path,
+                        case.body.clone(),
+                        idempotent_item_headers(
+                            &session.token,
+                            case.expected_version,
+                            &operation_id,
+                        ),
+                    )
+                    .await;
+                assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+                let version: Option<i32> = query_scalar("SELECT version FROM item WHERE id = $1")
+                    .bind(&case.item_id)
+                    .fetch_optional(&app.pool)
+                    .await
+                    .expect("case item version should load");
+                assert_eq!(
+                    version,
+                    Some(case.expected_version),
+                    "{kind} must leave the Item exactly where it was"
+                );
+                assert_eq!(
+                    entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                    0
+                );
+                assert_eq!(
+                    entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                    0
+                );
+                assert_eq!(
+                    retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                    0
+                );
+                if let Some(action) = case.applied_audit {
+                    let audits: i64 = query_scalar(
+                    "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+                )
+                .bind(&case.item_id)
+                .bind(action)
+                .fetch_one(&app.pool)
+                .await
+                .expect("audit count should load");
+                    assert_eq!(audits, 0, "{kind} must roll its audit back too");
+                }
+            },
+        )
+        .await;
+    }
+}
+
+/// Every Item kind proves its own closed rejection set, and one fact keeps one name across kinds.
+#[tokio::test]
+async fn item_operations_prove_their_closed_rejection_sets() {
+    with_api_test_app("item_operation_rejection_sets", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let readonly = app.issue_session(&fixture.readonly_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let missing = "item_that_never_existed";
+
+        // `item_not_found` is the same fact for all five Operations that address an existing Item.
+        for (index, (method, path, body, kind)) in [
+            (
+                Method::PATCH,
+                format!("/api/v1/items/{missing}"),
+                Some(json!({ "encryptedData": "enc" })),
+                "update_item",
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v1/items/{missing}/favorite"),
+                Some(json!({ "favorite": true })),
+                "set_item_favorite",
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v1/items/{missing}"),
+                None,
+                "trash_item",
+            ),
+            (
+                Method::POST,
+                format!("/api/v1/items/{missing}/restore"),
+                None,
+                "restore_item",
+            ),
+            (
+                Method::POST,
+                format!("/api/v1/items/{missing}/moves"),
+                Some(json!({
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                "move_item",
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v1/items/{missing}/permanent"),
+                None,
+                "permanently_delete_item",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = app
+                .api_json(
+                    method,
+                    &path,
+                    body,
+                    idempotent_item_headers(&owner.token, 1, &format!("missing-item-{index}")),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_rejected(&response.body, kind, "item_not_found");
+        }
+
+        // `vault_access_denied` and `vault_read_only` likewise keep one name for every kind.
+        for (index, (token, code)) in [
+            (&outsider.token, "vault_access_denied"),
+            (&readonly.token, "vault_read_only"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let favorite = app
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/items/{}/favorite", fixture.active_item_id),
+                    Some(json!({ "favorite": true })),
+                    idempotent_item_headers(token, 1, &format!("favorite-access-{index}")),
+                )
+                .await;
+            favorite.assert_contract_status();
+            assert_rejected(&favorite.body, "set_item_favorite", code);
+
+            let trash = app
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/items/{}", fixture.active_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("trash-access-{index}")),
+                )
+                .await;
+            trash.assert_contract_status();
+            assert_rejected(&trash.body, "trash_item", code);
+
+            let restore = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/restore", fixture.deleted_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("restore-access-{index}")),
+                )
+                .await;
+            restore.assert_contract_status();
+            assert_rejected(&restore.body, "restore_item", code);
+
+            let permanent = app
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/items/{}/permanent", fixture.deleted_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("permanent-access-{index}")),
+                )
+                .await;
+            permanent.assert_contract_status();
+            assert_rejected(&permanent.body, "permanently_delete_item", code);
+        }
+
+        // A move carries two Vaults, so the destination keeps its own two codes.
+        seed_vault_key(
+            &app.pool,
+            "vault_key_member_readonly_target",
+            &fixture.target_vault_id,
+            &fixture.member_user_id,
+            "target-readonly-key",
+            "read-only",
+        )
+        .await;
+        let member = app.issue_session(&fixture.member_user_id).await;
+        let readonly_target = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&member.token, 1, "move-target-read-only"),
+            )
+            .await;
+        readonly_target.assert_contract_status();
+        assert_rejected(&readonly_target.body, "move_item", "target_vault_read_only");
+
+        let denied_target = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.owner_personal_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&member.token, 1, "move-target-unreadable"),
+            )
+            .await;
+        denied_target.assert_contract_status();
+        assert_rejected(
+            &denied_target.body,
+            "move_item",
+            "target_vault_access_denied",
+        );
+
+        // A trashed Item cannot move; that is the exact inverse of `item_not_trashed`.
+        let trashed_move = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.deleted_item_id),
+                Some(json!({
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&owner.token, 1, "move-trashed-item"),
+            )
+            .await;
+        trashed_move.assert_contract_status();
+        assert_rejected(&trashed_move.body, "move_item", "item_trashed");
+
+        // Oversized ciphertext is a retained semantic rejection on the two kinds that carry one.
+        let oversized = "x".repeat(1_048_577);
+        let oversized_update = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}", fixture.active_item_id),
+                Some(json!({ "encryptedData": oversized })),
+                idempotent_item_headers(&owner.token, 1, "oversized-update"),
+            )
+            .await;
+        oversized_update.assert_contract_status();
+        assert_rejected(&oversized_update.body, "update_item", "invalid_ciphertext");
+
+        let oversized_move = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": oversized,
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&owner.token, 1, "oversized-move"),
+            )
+            .await;
+        oversized_move.assert_contract_status();
+        assert_rejected(&oversized_move.body, "move_item", "invalid_ciphertext");
+    })
     .await;
 }
 

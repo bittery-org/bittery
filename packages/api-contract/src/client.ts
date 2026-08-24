@@ -26,7 +26,6 @@ import type {
 	CreateAttachmentInput,
 	CreateAttachmentResponse,
 	CreateItemInput,
-	CreateItemOperationOutcome,
 	CreateItemWriteOptions,
 	CreateTeamInput,
 	CreateVaultInput,
@@ -40,9 +39,11 @@ import type {
 	FinishLoginInput,
 	FinishLoginResponse,
 	ImageUploadInput,
+	ItemOperationWriteOptions,
 	ItemPayload,
 	LoginAttempt,
 	MoveItemInput,
+	OperationOutcome,
 	PasswordChangeInput,
 	PendingTeamInvitation,
 	PresignedUpload,
@@ -83,7 +84,6 @@ import type {
 	TeamVault,
 	UpdateAttachmentInput,
 	UpdateItemInput,
-	UpdateItemResponse,
 	UpdateTeamInput,
 	UpdateVaultInput,
 	UpdateVaultMemberRoleInput,
@@ -294,37 +294,37 @@ export interface ApiClient {
 			itemId: string,
 			input: CreateItemInput,
 			options: CreateItemWriteOptions,
-		): Promise<ApiResult<CreateItemOperationOutcome>>;
+		): Promise<ApiResult<OperationOutcome>>;
 		update(
 			itemId: string,
 			input: UpdateItemInput,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<UpdateItemResponse>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 		setFavorite(
 			itemId: string,
 			input: FavoriteInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 		move(
 			itemId: string,
 			input: MoveItemInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 		trash(
 			itemId: string,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 		deletePermanently(
 			itemId: string,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 		restore(
 			itemId: string,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<OperationOutcome>>;
 	};
 	readonly operations: {
-		get(operationId: string): Promise<ApiResult<CreateItemOperationOutcome>>;
+		get(operationId: string): Promise<ApiResult<OperationOutcome>>;
 	};
 	readonly attachments: {
 		list(itemId: string): Promise<ApiResult<readonly Attachment[]>>;
@@ -549,15 +549,19 @@ function writeHeaders(
 	return headers;
 }
 
-function writeHeaderParams(options: ApiWriteOptions | undefined): {
-	header: { "If-Match": string; "Idempotency-Key"?: string };
+/**
+ * The two headers an Item mutation Operation must carry.
+ *
+ * `If-Match` is the concurrency precondition and `Idempotency-Key` is the stable Operation ID.
+ * Both are required by the Server, so neither is optional here.
+ */
+function itemOperationHeaderParams(options: ItemOperationWriteOptions): {
+	header: { "If-Match": string; "Idempotency-Key": string };
 } {
 	return {
 		header: {
-			"If-Match": options?.etag as string,
-			...(options?.idempotencyKey
-				? { "Idempotency-Key": options.idempotencyKey }
-				: {}),
+			"If-Match": options.etag,
+			"Idempotency-Key": options.idempotencyKey,
 		},
 	};
 }
@@ -1120,35 +1124,35 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			update: (itemId, input, write) =>
 				call("PATCH", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			setFavorite: (itemId, input, write) =>
 				call("PATCH", "/api/v1/items/{itemId}/favorite", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			move: (itemId, input, write) =>
 				call("POST", "/api/v1/items/{itemId}/moves", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			trash: (itemId, write) =>
 				call("DELETE", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 			deletePermanently: (itemId, write) =>
 				call("DELETE", "/api/v1/items/{itemId}/permanent", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 			restore: (itemId, write) =>
 				call("POST", "/api/v1/items/{itemId}/restore", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
+					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
 					headers: writeHeaders(write),
 				}),
 		},

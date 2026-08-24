@@ -339,6 +339,11 @@ and cascaded from Server User deletion. It stores:
 - closed rejection code and bounded safe details for rejected results; and
 - resolution timestamp.
 
+One `operation_kind` set covers every Item Operation: `create_item`, `update_item`,
+`set_item_favorite`, `trash_item`, `restore_item`, `move_item` and `permanently_delete_item`. One
+shared `operation_rejection_code` set covers their rejections, because a single column has to hold
+them and because one fact must keep one name across kinds.
+
 Rows have no expiry. They do not store arbitrary HTTP response bytes, authentication, or Session
 identity. Rust-defined closed values generate the OpenAPI contract under ADR 0012.
 
@@ -382,15 +387,66 @@ PUT /api/v1/vaults/{vaultId}/items/{itemId}
 Idempotency-Key: <operation-id>
 ```
 
-It returns a generated closed `CreateItemOperationOutcome` body for applied and rejected terminal
-results. Add authenticated `GET /api/v1/operations/{operationId}` returning the same User-scoped type
-or `404`. A caller may recover by retrying identical bytes or by lookup.
+It returns a generated closed `OperationOutcome` body for applied and rejected terminal results. Add
+authenticated `GET /api/v1/operations/{operationId}` returning the same User-scoped type or `404`. A
+caller may recover by retrying identical bytes or by lookup.
 
 Changes include `operation_resolved` as a User-scoped event and fetch its authority through the lookup
 route. Applied creates also retain `item_created`. Current bounded page/byte limits, opaque Cursor,
 authoritative entity fetch, and hint-only SSE remain. Bootstrap never enumerates unbounded historical
 outcomes; locally pending IDs remain directly retrievable even when their outcome predates the pinned
 watermark.
+
+### Every Item mutation is an Operation
+
+`PATCH /api/v1/items/{itemId}`, `PATCH /api/v1/items/{itemId}/favorite`,
+`DELETE /api/v1/items/{itemId}`, `POST /api/v1/items/{itemId}/restore`,
+`POST /api/v1/items/{itemId}/moves` and `DELETE /api/v1/items/{itemId}/permanent` follow the create
+rules exactly. Each requires `Idempotency-Key`, fingerprints its own canonical route identity, its
+path values, its exact raw body bytes and its normalized `If-Match` version, and commits its effect
+or proved rejection together with the audit record, the existing entity Sync event, the retained
+outcome and `operation_resolved`. Method is part of route identity, so `PATCH` and `DELETE` on one
+path are two Operations and never share a fingerprint.
+
+`If-Match` remains required, and its absence is still `428` — malformed transport, refused before
+semantic execution, retaining nothing. A stale version is the opposite: the request was well formed
+and the Server decided, so it is a retained `item_version_conflict` rejection inside a `200`, not
+`412`.
+
+### One lookup, one union tagged on kind
+
+`GET /api/v1/operations/{operationId}` answers a single generated `OperationOutcome` discriminated by
+the `kind` the outcome already carries. Response-loss recovery is exactly the caller that does not yet
+know what happened, so it cannot choose a per-kind route; and closed types forbid a free-form payload.
+A client reads `kind`, checks it against its own durable record, and only then reads `result`. A
+`kind` it does not know fails to parse rather than being read as another Operation's answer. The
+mutation routes answer the same union, so one type describes one fact.
+
+Every Item kind retains `{itemId, version}` when applied. That is exactly enough for a client that
+lost its response to tell applied from rejected and to line the answer up with its own record without
+replaying the effect; the authoritative entity fetch supplies everything else. For a permanent delete
+the retained version is the final validator of an Item that no longer exists.
+
+### Rejections share a core
+
+`invalid_ciphertext`, `vault_access_denied` and `vault_read_only` are common to every kind and are
+declared once. Each kind adds only its own real failures:
+
+| Kind | Adds |
+| --- | --- |
+| `create_item` | `item_id_conflict` |
+| `update_item` | `item_not_found`, `item_version_conflict` |
+| `set_item_favorite` | `item_not_found`, `item_version_conflict` |
+| `trash_item` | `item_not_found`, `item_version_conflict` |
+| `restore_item` | `item_not_found`, `item_not_trashed`, `item_version_conflict` |
+| `move_item` | `item_not_found`, `source_vault_mismatch`, `item_trashed`, `target_vault_access_denied`, `target_vault_read_only`, `item_version_conflict` |
+| `permanently_delete_item` | `item_not_found`, `item_not_trashed`, `item_version_conflict` |
+
+`set_item_favorite` carries no ciphertext, so it cannot prove `invalid_ciphertext`. A move is the one
+Item Operation with two Vaults, so its destination keeps its own two codes; collapsing them into the
+source codes would send a client to the wrong Vault. A single generic rejection code was rejected:
+the client could no longer tell whether to re-authenticate, reload, or stop, and that distinction is
+the whole reason semantic outcomes exist.
 
 All remaining uses of the old HTTP response-cache idempotency wrapper must migrate before its tables,
 24-hour expiry, stale claims, indeterminate errors, and code are deleted. Temporary development

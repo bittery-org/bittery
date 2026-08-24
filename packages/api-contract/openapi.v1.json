@@ -2465,43 +2465,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2512,46 +2495,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2581,7 +2524,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2591,7 +2534,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2602,24 +2545,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2661,13 +2586,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -2683,31 +2605,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateItemResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2718,46 +2626,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2787,7 +2655,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2797,7 +2665,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2808,24 +2676,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3394,13 +3244,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3416,31 +3263,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3451,46 +3284,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3520,7 +3313,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3530,7 +3323,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3541,24 +3334,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3602,13 +3377,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3624,31 +3396,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateItemResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3659,46 +3417,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3728,7 +3446,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3738,7 +3456,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3749,24 +3467,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3810,43 +3510,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Final strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3857,46 +3540,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3926,7 +3569,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3936,7 +3579,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3947,24 +3590,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4008,43 +3633,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4055,46 +3663,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4124,7 +3692,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4134,7 +3702,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4145,24 +3713,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4457,7 +4007,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateItemOperationOutcome"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -12139,7 +11689,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateItemOperationOutcome"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -14395,81 +13945,6 @@
         },
         "additionalProperties": false
       },
-      "CreateItemOperationOutcome": {
-        "type": "object",
-        "required": [
-          "operationId",
-          "kind",
-          "result"
-        ],
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/OperationKind"
-          },
-          "operationId": {
-            "type": "string"
-          },
-          "result": {
-            "$ref": "#/components/schemas/CreateItemOperationResult"
-          }
-        }
-      },
-      "CreateItemOperationResult": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "itemId",
-              "version",
-              "status"
-            ],
-            "properties": {
-              "itemId": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "applied"
-                ]
-              },
-              "version": {
-                "type": "integer",
-                "format": "int32"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "code",
-              "status"
-            ],
-            "properties": {
-              "code": {
-                "$ref": "#/components/schemas/CreateItemRejectionCode"
-              },
-              "details": {},
-              "status": {
-                "type": "string",
-                "enum": [
-                  "rejected"
-                ]
-              }
-            }
-          }
-        ]
-      },
-      "CreateItemRejectionCode": {
-        "type": "string",
-        "description": "The terminal semantic rejections currently possible for Create Item.",
-        "enum": [
-          "invalid_ciphertext",
-          "vault_access_denied",
-          "vault_read_only",
-          "item_id_conflict"
-        ]
-      },
       "CreateShareLinkRequest": {
         "type": "object",
         "required": [
@@ -16217,6 +15692,53 @@
           "totp"
         ]
       },
+      "ItemOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "itemId",
+              "version",
+              "status"
+            ],
+            "properties": {
+              "itemId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "format": "int32"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/OperationRejectionCode"
+              },
+              "details": {},
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What one Item Operation left behind.\n\n`Applied` retains the affected Item and the version it reached. That is exactly enough for a\nclient that lost its response to tell an applied Operation from a rejected one, and to line the\nanswer up with its own record, without replaying the effect to find out."
+      },
       "ItemResponseDto": {
         "type": "object",
         "required": [
@@ -16683,11 +16205,180 @@
         },
         "additionalProperties": false
       },
-      "OperationKind": {
+      "OperationOutcome": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "update_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "set_item_favorite"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "trash_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "restore_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "move_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "permanently_delete_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          }
+        ],
+        "description": "The one retained outcome shape, discriminated by Operation kind."
+      },
+      "OperationRejectionCode": {
         "type": "string",
-        "description": "The Domain operation represented by one retained outcome.",
+        "description": "The terminal semantic rejections an Item Operation can prove.\n\nOne set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`\nare the same fact whichever mutation met them, and a client that learns to read them once can\nread them everywhere. Each kind then contributes only its own genuinely new failures, and the\nhandler -- not the wire type -- decides which subset it can ever prove.",
         "enum": [
-          "create_item"
+          "invalid_ciphertext",
+          "vault_access_denied",
+          "vault_read_only",
+          "item_id_conflict",
+          "item_not_found",
+          "item_version_conflict",
+          "item_trashed",
+          "item_not_trashed",
+          "source_vault_mismatch",
+          "target_vault_access_denied",
+          "target_vault_read_only"
         ]
       },
       "PageCursor": {
@@ -18361,22 +18052,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "UpdateItemResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "version"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
       },
       "UpdateTeamRequest": {
         "type": "object",

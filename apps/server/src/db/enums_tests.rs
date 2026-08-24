@@ -130,15 +130,33 @@ fn closed_sets_keep_their_wire_strings() {
         VaultKeyRotationManifestKind,
         ["member", "item", "attachment"]
     );
-    assert_wire_labels!(OperationKind, ["create_item"]);
+    assert_wire_labels!(
+        OperationKind,
+        [
+            "create_item",
+            "update_item",
+            "set_item_favorite",
+            "trash_item",
+            "restore_item",
+            "move_item",
+            "permanently_delete_item"
+        ]
+    );
     assert_wire_labels!(OperationOutcomeStatus, ["applied", "rejected"]);
     assert_wire_labels!(
-        CreateItemRejectionCode,
+        OperationRejectionCode,
         [
             "invalid_ciphertext",
             "vault_access_denied",
             "vault_read_only",
-            "item_id_conflict"
+            "item_id_conflict",
+            "item_not_found",
+            "item_version_conflict",
+            "item_trashed",
+            "item_not_trashed",
+            "source_vault_mismatch",
+            "target_vault_access_denied",
+            "target_vault_read_only"
         ]
     );
 }
@@ -222,7 +240,7 @@ fn closed_sets_match_the_postgres_enums() {
     assert_matches_postgres!(VaultKeyRotationManifestKind);
     assert_matches_postgres!(OperationKind);
     assert_matches_postgres!(OperationOutcomeStatus);
-    assert_matches_postgres!(CreateItemRejectionCode);
+    assert_matches_postgres!(OperationRejectionCode);
 }
 
 #[test]

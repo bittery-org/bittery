@@ -146,11 +146,37 @@ test("tagged unions reject an optional discriminator", async () => {
 		new URL("../../api-contract/openapi.v1.json", import.meta.url),
 	);
 	const document = JSON.parse(source);
-	const branch = document.components.schemas.CreateItemOperationResult.oneOf[0];
+	const branch = document.components.schemas.ItemOperationResult.oneOf[0];
 	branch.required = branch.required.filter((field) => field !== "status");
 
 	assert.throws(
 		() => generateServerContract(document, source),
-		/tagged branch 1 must require its status discriminator/,
+		/tagged union needs exactly one discriminator, found 0/,
 	);
+});
+
+test("the Operation outcome union is discriminated by its own tag", async () => {
+	const source = await readFile(
+		new URL("../../api-contract/openapi.v1.json", import.meta.url),
+	);
+	const generated = generateServerContract(JSON.parse(source), source);
+	const union = generated.slice(
+		generated.indexOf('#[serde(tag = "kind"'),
+		generated.indexOf("pub enum OperationRejectionCode"),
+	);
+	assert.match(union, /pub enum OperationOutcome \{/);
+	for (const kind of [
+		"create_item",
+		"update_item",
+		"set_item_favorite",
+		"trash_item",
+		"restore_item",
+		"move_item",
+		"permanently_delete_item",
+	]) {
+		assert.match(union, new RegExp(`#\\[serde\\(rename = "${kind}"\\)\\]`));
+	}
+	// `deny_unknown_fields` on an internally tagged enum is what makes an unknown kind a parse
+	// failure rather than another kind's answer read by accident.
+	assert.match(union, /deny_unknown_fields/);
 });
