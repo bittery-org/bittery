@@ -1,7 +1,7 @@
 # Web offline authoritative Replica read
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 32, 35
 Spec: ../spec.md#bootstrap
 
@@ -42,3 +42,10 @@ checks, and then both full gates from a clean tree.
 This is a missing behavioral acceptance proof, not a demonstrated Runtime storage defect. It stays
 separate from ticket 30: the transport is deliberately disconnected after online unlock, so no
 held-SSE reconnect/backoff behavior is decided here.
+
+### 2026-08-24 — kept as one browser slice
+
+The independently verifiable boundary is the whole path from online authoritative Bootstrap through
+Worker replacement and online unlock to a rendered read after transport disconnection. Seeding,
+restart, or transport harness changes without that final behavior would not satisfy a separate spec
+statement, so one implementer and reviewer own the complete scenario.
