@@ -1,4 +1,7 @@
 mod bootstrap;
+mod create;
+#[cfg(test)]
+mod create_tests;
 mod install;
 mod lock;
 mod open;
@@ -823,194 +826,8 @@ impl Runtime {
                 vault_id,
                 draft,
             } => {
-                self.ensure_open()?;
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before durable acceptance",
-                    ));
-                }
-                let execution_lock = self.account_execution_lock(&account_id)?;
-                let _execution_guard = execution_lock.lock().await;
-                self.ensure_open()?;
-                let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
-                    RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
-                })?;
-                if snapshot.failure.is_some() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AccountFailed,
-                        "the selected Account module has failed",
-                    ));
-                }
-                if snapshot.lock_epoch == u64::MAX {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationRequired,
-                        "Account lock epoch is exhausted",
-                    ));
-                }
-                if self
-                    .account_access
-                    .lock()
-                    .expect("Account access lock poisoned")
-                    .get(&account_id)
-                    != Some(&AccountAccessState::Unlocked)
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationRequired,
-                        "the selected Account is signed out or locked",
-                    ));
-                }
-                if self
-                    .lock_epoch_pending
-                    .lock()
-                    .expect("pending lock epoch lock poisoned")
-                    .contains_key(&account_id)
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::InvariantViolation,
-                        "Account lock epoch persistence is pending",
-                    ));
-                }
-                let lock_epoch = *self
-                    .account_lock_epochs
-                    .lock()
-                    .expect("Account lock epoch lock poisoned")
-                    .entry(account_id.clone())
-                    .or_insert(0);
-                let operation_id = bittery_crypto_core::generate_uuid();
-                let item_id = bittery_crypto_core::generate_uuid();
-                let projection = LoginItemProjection {
-                    account_id: account_id.clone(),
-                    item_id: item_id.clone(),
-                    vault_id: vault_id.clone(),
-                    title: draft.title,
-                    url: draft.url,
-                    urls: draft.urls,
-                    username: draft.username,
-                    password: draft.password,
-                    notes: draft.notes,
-                    note: draft.note,
-                    custom_fields: draft.custom_fields,
-                    tags: draft.tags,
-                    favorite: false,
-                    created_at: String::new(),
-                    updated_at: String::new(),
-                    status: ItemProjectionStatus::Pending,
-                };
-                // Ticket 21 replaces this marker with existing crypto-core encryption and AAD.
-                // This foundation never persists the plaintext draft.
-                let sealed_item = ReplicaItemRecord {
-                    account_id: account_id.clone(),
-                    item_id: item_id.clone(),
-                    vault_id,
-                    ciphertext: format!("simulated-sealed:{item_id}").into_bytes(),
-                    optimistic: true,
-                };
-                let result = self
-                    .replica
-                    .execute_recomputing(GuardedCommitPlan::new(
-                        account_id.clone(),
-                        snapshot.incarnation,
-                        snapshot.revision,
-                        lock_epoch,
-                        vec![
-                            PlanMutation::AcceptOperation(OperationRecord {
-                                operation_id: operation_id.clone(),
-                                item_id: item_id.clone(),
-                                request_bytes: format!("simulated-sealed-request:{item_id}")
-                                    .into_bytes(),
-                            }),
-                            PlanMutation::PutOptimisticItem(sealed_item),
-                        ],
-                    ))
-                    .await?;
-                let (replica_revision, next_snapshot) = match result {
-                    RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
-                    RecomputedPlanResult::Fenced { snapshot } => {
-                        let _publication =
-                            self.publication.lock().expect("publication lock poisoned");
-                        let invalidated_delivery = self.invalidate_delivery(&account_id);
-                        self.replica.cache(snapshot.clone());
-                        self.unlocked_items
-                            .lock()
-                            .expect("unlocked projection lock poisoned")
-                            .remove(&account_id);
-                        self.clear_live_master_unlock_keys_for_account(&account_id);
-                        self.account_access
-                            .lock()
-                            .expect("Account access lock poisoned")
-                            .insert(account_id.clone(), AccountAccessState::Locked);
-                        self.account_lock_epochs
-                            .lock()
-                            .expect("Account lock epoch lock poisoned")
-                            .insert(account_id.clone(), snapshot.lock_epoch);
-                        self.device_revision.fetch_add(1, Ordering::SeqCst);
-                        drop(_publication);
-                        drop(_execution_guard);
-                        if let Some(token) = invalidated_delivery {
-                            token.wait_for_other_threads();
-                        }
-                        self.publish_all();
-                        return Err(RuntimeError::new(
-                            RuntimeErrorCode::AuthenticationRequired,
-                            "Account was locked while accepting work",
-                        ));
-                    }
-                    RecomputedPlanResult::Missing => {
-                        let _publication =
-                            self.publication.lock().expect("publication lock poisoned");
-                        self.replica.remove_cached(&account_id);
-                        self.recovery_accounts
-                            .lock()
-                            .expect("recovery Account lock poisoned")
-                            .remove(&account_id);
-                        self.unlocked_items
-                            .lock()
-                            .expect("unlocked projection lock poisoned")
-                            .remove(&account_id);
-                        self.clear_live_master_unlock_keys_for_account(&account_id);
-                        self.device_revision.fetch_add(1, Ordering::SeqCst);
-                        drop(_publication);
-                        drop(_execution_guard);
-                        self.publish_all();
-                        return Err(RuntimeError::new(
-                            RuntimeErrorCode::AccountMissing,
-                            "account was removed during durable acceptance",
-                        ));
-                    }
-                };
-                let _publication = self.publication.lock().expect("publication lock poisoned");
-                self.replica.cache(next_snapshot);
-                if self
-                    .account_lock_epochs
-                    .lock()
-                    .expect("Account lock epoch lock poisoned")
-                    .get(&account_id)
-                    == Some(&lock_epoch)
-                {
-                    self.unlocked_items
-                        .lock()
-                        .expect("unlocked projection lock poisoned")
-                        .entry(account_id)
-                        .or_default()
-                        .push(projection);
-                }
-                self.device_revision.fetch_add(1, Ordering::SeqCst);
-                drop(_publication);
-                accepted();
-                drop(_execution_guard);
-                self.publish_all();
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled after durable acceptance",
-                    ));
-                }
-                Ok(RuntimeResponse::Accepted {
-                    operation_id,
-                    item_id,
-                    replica_revision,
-                })
+                self.accept_create_login_item(account_id, vault_id, draft, cancellation, accepted)
+                    .await
             }
         }
     }
@@ -1272,6 +1089,27 @@ impl Runtime {
             .expect("live master unlock key lock poisoned")
             .get(&(account_id.clone(), incarnation.clone()))
             .map(LiveMasterUnlockKey::copy_bytes)
+    }
+
+    /// Puts the fixture master unlock key in memory, the way a real Sign-in or unlock leaves one.
+    ///
+    /// This is the only seam that publishes `TEST_MASTER_UNLOCK_KEY`, and it is compiled out of
+    /// every non-test build together with the fixture module that owns the constant.
+    #[cfg(test)]
+    pub(crate) fn seed_live_master_unlock_key(
+        &self,
+        account_id: &AccountId,
+        incarnation: &crate::protocol::Incarnation,
+    ) {
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .insert(
+                (account_id.clone(), incarnation.clone()),
+                LiveMasterUnlockKey::new(Zeroizing::new(
+                    crate::test_fixtures::TEST_MASTER_UNLOCK_KEY,
+                )),
+            );
     }
 
     fn clear_live_master_unlock_keys_for_account(&self, account_id: &AccountId) {

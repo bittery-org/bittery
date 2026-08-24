@@ -24,6 +24,8 @@ mod runtime;
 mod wire;
 
 #[cfg(test)]
+mod test_fixtures;
+#[cfg(test)]
 mod tests;
 
 pub mod server_contract {

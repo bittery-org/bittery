@@ -63,6 +63,9 @@ impl Runtime {
             .expect("Account lock epoch lock poisoned")
             .entry(account_id.clone())
             .or_insert(0);
+        // A real unlock ends with the Account's live master unlock key in memory. Tests that write
+        // locally need the same key the seeded Vault fixture wrapped its Vault key under.
+        self.seed_live_master_unlock_key(account_id, &snapshot.incarnation);
         Ok(())
     }
 

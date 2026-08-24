@@ -869,7 +869,9 @@ fn runtime_status(runtime: &Runtime) -> RuntimeStatusProjection {
 fn create_request(account_id: &str) -> RuntimeRequest {
     RuntimeRequest::CreateLoginItem {
         account_id: AccountId::from(account_id),
-        vault_id: "visible".into(),
+        // The Bootstrap fixtures publish one personal Vault, and a local write has to name the
+        // Vault the Replica actually holds.
+        vault_id: "vault-1".into(),
         draft: crate::LoginItemDraft {
             title: "Login".into(),
             url: None,
@@ -2424,6 +2426,14 @@ async fn session_refresh_installs_a_usable_token_and_401_preserves_operations() 
         RoutingAuthBehavior::Success,
         None,
     ));
+    // The first Bootstrap has to publish the personal Vault the accepted create writes into.
+    let (_wrapped, item) = sealed_login_item("item-1", "Bank", "secret-password");
+    *http.bootstrap_pages.lock().unwrap() = vec![json!({
+        "hasMore": false,
+        "items": [item],
+        "nextCursor": null,
+        "syncCursor": { "id": "evt-1" }
+    })];
     let (runtime, _replica, platform) = routing_harness(http.clone()).await;
     let RuntimeResponse::SignedIn { account_id, .. } = runtime
         .request(

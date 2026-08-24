@@ -1,3 +1,4 @@
+use crate::http_transport::{HttpHeader, HttpMethod};
 use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
@@ -46,22 +47,69 @@ pub(crate) enum PlanMutation {
     RemoveOperation { operation_id: String },
 }
 
+/// The closed set of durable mutations this Runtime accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OperationKind {
+    CreateItem,
+}
+
+/// The exact bytes an accepted Operation will send, forever.
+///
+/// Authorization is deliberately absent. A credential belongs to the Session that is current when
+/// the Operation is dispatched, not to work that may outlive several Sessions, so dispatch attaches
+/// it. Everything here is fixed at acceptance and is replayed byte for byte after any restart.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ImmutableHttpRequest {
+    pub method: HttpMethod,
+    pub path: String,
+    pub headers: Vec<HttpHeader>,
+    pub body: Vec<u8>,
+}
+
+/// Diagnostic scheduling for an accepted Operation.
+///
+/// There is deliberately no attempt limit and no discarded state: a transport count never owns
+/// accepted work. Only an authoritative semantic outcome ends an Operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationSchedulingState {
+    #[serde(with = "decimal_u64")]
+    pub attempt_count: u64,
+    /// Earliest Device time at which the next attempt may start. Zero means "eligible now".
+    #[serde(with = "decimal_u64")]
+    pub not_before_ms: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct OperationRecord {
     pub operation_id: String,
+    pub kind: OperationKind,
     pub item_id: String,
-    pub request_bytes: Vec<u8>,
+    pub vault_id: String,
+    pub request: ImmutableHttpRequest,
+    /// Covers the request, never the Operation ID. A Server outcome that carries this Operation ID
+    /// with another fingerprint is therefore a detectable identity reuse, not a replay.
+    pub request_fingerprint: Sha256Fingerprint,
+    pub scheduling: OperationSchedulingState,
 }
 
+/// One encrypted optimistic Item overlay, keyed by the Item and the Operation that owes it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReplicaItemRecord {
     pub account_id: AccountId,
     pub item_id: String,
     pub vault_id: String,
-    pub ciphertext: Vec<u8>,
-    pub optimistic: bool,
+    pub operation_id: String,
+    pub category: AuthorityItemCategory,
+    pub encrypted_data: String,
+    pub encryption_iv: String,
+    pub encryption_algorithm: String,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -971,6 +1019,7 @@ impl AccountReplica {
         match mutation {
             PlanMutation::PutOptimisticItem(item) => {
                 self.check_item_scope(&item)?;
+                self.check_overlay(&item)?;
                 self.items.insert(item.item_id.clone(), item);
             }
             PlanMutation::AcceptOperation(operation) => {
@@ -978,6 +1027,17 @@ impl AccountReplica {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "operation identity was reused",
+                    ));
+                }
+                check_immutable_request(&operation)?;
+                if self
+                    .operations
+                    .values()
+                    .any(|active| active.item_id == operation.item_id)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "another active Operation already owns this Item",
                     ));
                 }
                 self.operations
@@ -1006,6 +1066,38 @@ impl AccountReplica {
         }
     }
 
+    /// Rewinds the revision counter after a fixture replays Bootstrap prehistory.
+    ///
+    /// Only a test fixture may call this. Nothing observed the intermediate revisions, so no guard
+    /// can be invalidated by rewinding them.
+    #[cfg(test)]
+    pub(super) fn reset_revision_for_seeding(&mut self, revision: u64) {
+        self.revision = revision;
+    }
+
+    /// An overlay is the visible half of one accepted Operation, so it cannot outlive or precede it.
+    fn check_overlay(&self, item: &ReplicaItemRecord) -> Result<(), RuntimeError> {
+        let Some(operation) = self.operations.get(&item.operation_id) else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "optimistic overlay has no accepted Operation",
+            ));
+        };
+        if operation.item_id != item.item_id || operation.vault_id != item.vault_id {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "optimistic overlay does not match its Operation",
+            ));
+        }
+        if item.encrypted_data.is_empty() || item.encryption_iv.is_empty() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "optimistic overlay carries no ciphertext",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn snapshot(&self) -> ReplicaSnapshot {
         let mut items: Vec<_> = self.items.values().cloned().collect();
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
@@ -1023,6 +1115,29 @@ impl AccountReplica {
             bootstrap: self.bootstrap.clone(),
         }
     }
+}
+
+/// Durable request bytes never carry a credential, and a durable route is never ambiguous.
+fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    if operation.operation_id.is_empty() || operation.item_id.is_empty() {
+        return Err(replica_invariant("Operation identity is empty"));
+    }
+    if !operation.request.path.starts_with('/') {
+        return Err(replica_invariant("Operation route path is not absolute"));
+    }
+    if operation.request.body.is_empty() {
+        return Err(replica_invariant("Operation request body is empty"));
+    }
+    for header in &operation.request.headers {
+        if header.name.eq_ignore_ascii_case("authorization")
+            || header.name.eq_ignore_ascii_case("cookie")
+        {
+            return Err(replica_invariant(
+                "Operation request bytes cannot carry a credential",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]

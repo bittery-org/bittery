@@ -21,11 +21,13 @@ pub(crate) use domain::{
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
     BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
     BootstrapPageCursor, BootstrapPageIdentity, CleanupBootstrapGenerationPlan,
-    CleanupBootstrapGenerationResult, GuardedCommitPlan, MarkRefreshRequiredPlan, OperationRecord,
+    CleanupBootstrapGenerationResult, GuardedCommitPlan, ImmutableHttpRequest,
+    MarkRefreshRequiredPlan, OperationKind, OperationRecord, OperationSchedulingState,
     PlanMutation, PlanResult, PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord,
     ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
     StageBootstrapPageResult, SyncCursor,
 };
+
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use persistence_contract::persistence_contract_schema;
@@ -764,11 +766,9 @@ mod bootstrap_authority_tests {
                     Incarnation::from("incarnation-bootstrap"),
                     2,
                     0,
-                    vec![PlanMutation::AcceptOperation(OperationRecord {
-                        operation_id: "operation-1".into(),
-                        item_id: "item-new".into(),
-                        request_bytes: vec![1, 2, 3],
-                    })],
+                    vec![PlanMutation::AcceptOperation(
+                        crate::test_fixtures::test_operation("operation-1", "item-new",)
+                    )],
                 ))
                 .unwrap(),
             PlanResult::Applied {
@@ -1711,6 +1711,55 @@ impl InMemoryReplica {
         account.cleanup_bootstrap_generation(plan)
     }
 
+    /// Promotes one complete Bootstrap generation holding a single personal Vault.
+    ///
+    /// Tests that exercise local writes need the same readiness a real Bootstrap leaves behind:
+    /// a ready Replica, an active generation, and a Vault whose key the live MUK can open.
+    ///
+    /// The two Bootstrap plans this replays are prehistory, so the fixture restores the revision
+    /// it started from. A test's revision arithmetic then counts only the writes it performs.
+    #[cfg(test)]
+    pub(crate) fn seed_ready_personal_vault(
+        &self,
+        account_id: &AccountId,
+        vault: AuthorityVaultRecord,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("replica lock poisoned");
+        let account = state.accounts.get_mut(account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        let seeded_from_revision = account.revision;
+        let generation_id = BootstrapGenerationId(format!("seed-{}", account.revision));
+        let guard = |account: &AccountReplica| BootstrapGuard {
+            account_id: account.account_id.clone(),
+            user_id: account.user_id.clone(),
+            incarnation: account.incarnation.clone(),
+            expected_replica_revision: account.revision,
+            expected_lock_epoch: account.lock_epoch,
+        };
+        account.begin_bootstrap(BeginBootstrapPlan {
+            guard: guard(account),
+            generation_id: generation_id.clone(),
+        })?;
+        account.stage_bootstrap_page(StageBootstrapPagePlan {
+            guard: guard(account),
+            generation_id: generation_id.clone(),
+            page_identity: BootstrapPageIdentity(0),
+            request_cursor: BootstrapPageCursor::Initial,
+            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-page"),
+            pinned_watermark: SyncCursor::CapturedEmpty,
+            continuation: BootstrapContinuation::Final,
+            vaults: vec![vault],
+            items: Vec::new(),
+        })?;
+        account.promote_bootstrap(PromoteBootstrapPlan {
+            guard: guard(account),
+            generation_id,
+        })?;
+        account.reset_revision_for_seeding(seeded_from_revision);
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn fail(
         &self,
@@ -2044,14 +2093,18 @@ mod persistence_contract_tests {
                                 snapshot.operations.clear();
                             }
                             RowCorruption::Add => {
-                                snapshot.items.push(item("account-1", "hostile-item"));
+                                snapshot.items.push(item(
+                                    "account-1",
+                                    "hostile-item",
+                                    "hostile-operation",
+                                ));
                                 snapshot
                                     .operations
                                     .push(operation("hostile-operation", "hostile-item"));
                             }
                             RowCorruption::Change => {
-                                snapshot.items[0].ciphertext = b"hostile-ciphertext".to_vec();
-                                snapshot.operations[0].request_bytes = b"hostile-request".to_vec();
+                                snapshot.items[0].encrypted_data = "hostile-ciphertext".to_owned();
+                                snapshot.operations[0].request.body = b"hostile-request".to_vec();
                             }
                             RowCorruption::LockEpoch => {
                                 head.lock_epoch = head.lock_epoch.checked_add(1).unwrap();
@@ -2182,22 +2235,12 @@ mod persistence_contract_tests {
         }
     }
 
-    fn item(account_id: &str, item_id: &str) -> ReplicaItemRecord {
-        ReplicaItemRecord {
-            account_id: AccountId::from(account_id),
-            item_id: item_id.into(),
-            vault_id: "vault-1".into(),
-            ciphertext: b"sealed-item".to_vec(),
-            optimistic: true,
-        }
+    fn item(account_id: &str, item_id: &str, operation_id: &str) -> ReplicaItemRecord {
+        crate::test_fixtures::test_overlay(AccountId::from(account_id), item_id, operation_id)
     }
 
     fn operation(operation_id: &str, item_id: &str) -> OperationRecord {
-        OperationRecord {
-            operation_id: operation_id.into(),
-            item_id: item_id.into(),
-            request_bytes: b"sealed-request".to_vec(),
-        }
+        crate::test_fixtures::test_operation(operation_id, item_id)
     }
 
     #[tokio::test]
@@ -2274,7 +2317,7 @@ mod persistence_contract_tests {
                     incarnation: Incarnation::from("old-incarnation"),
                     revision: 1,
                     lock_epoch: 0,
-                    items: vec![item("account-1", "item-1")],
+                    items: vec![item("account-1", "item-1", "operation-1")],
                     operations: vec![operation("operation-1", "item-1")],
                     failure: None,
                     bootstrap: BootstrapAuthority::default(),
@@ -2307,7 +2350,7 @@ mod persistence_contract_tests {
                 incarnation: Incarnation::from("incarnation-1"),
                 revision: 1,
                 lock_epoch: 0,
-                items: vec![item("account-1", "item-1")],
+                items: vec![item("account-1", "item-1", "operation-1")],
                 operations: vec![operation("operation-1", "item-1")],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
@@ -2438,7 +2481,11 @@ mod persistence_contract_tests {
                 0,
                 0,
                 vec![
-                    PlanMutation::PutOptimisticItem(item("account-1", "item-invalid")),
+                    PlanMutation::PutOptimisticItem(item(
+                        "account-1",
+                        "item-invalid",
+                        "operation-1",
+                    )),
                     PlanMutation::RemoveOperation {
                         operation_id: "unknown-operation".into(),
                     },
@@ -2460,6 +2507,7 @@ mod persistence_contract_tests {
                 vec![PlanMutation::PutOptimisticItem(item(
                     "account-2",
                     "item-cross-account",
+                    "operation-1",
                 ))],
             ))
             .await
@@ -2475,7 +2523,7 @@ mod persistence_contract_tests {
                     0,
                     vec![
                         PlanMutation::AcceptOperation(operation("operation-1", "item-1")),
-                        PlanMutation::PutOptimisticItem(item("account-1", "item-1")),
+                        PlanMutation::PutOptimisticItem(item("account-1", "item-1", "operation-1")),
                     ],
                 ))
                 .await
@@ -2653,7 +2701,7 @@ mod persistence_contract_tests {
                 0,
                 vec![
                     PlanMutation::AcceptOperation(operation("operation-new", "item-new")),
-                    PlanMutation::PutOptimisticItem(item("account-1", "item-new")),
+                    PlanMutation::PutOptimisticItem(item("account-1", "item-new", "operation-new")),
                     PlanMutation::RemoveOperation {
                         operation_id: "operation-old".into(),
                     },

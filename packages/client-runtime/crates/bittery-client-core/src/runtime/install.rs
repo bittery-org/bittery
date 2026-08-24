@@ -13,7 +13,9 @@ impl Runtime {
         self.test_persistence
             .as_ref()
             .expect("test Account installation requires in-memory persistence")
-            .install(account_id.clone(), user_id, incarnation)?;
+            .install(account_id.clone(), user_id, incarnation.clone())?;
+        // A real Sign-in installs an Account already unlocked, with its master unlock key live.
+        self.seed_live_master_unlock_key(&account_id, &incarnation);
         self.replica.cache(
             self.test_persistence
                 .as_ref()

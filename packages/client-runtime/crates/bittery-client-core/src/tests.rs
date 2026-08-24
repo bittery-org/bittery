@@ -1,10 +1,10 @@
 use crate::{
     protocol::Incarnation,
     replica::{
-        GuardedCommitPlan, InMemoryReplica, OperationRecord, PlanMutation, PlanResult,
-        ReplicaItemRecord, ReplicaPersistence, ReplicaPersistenceRequest,
-        SerializedReplicaExecutor,
+        GuardedCommitPlan, InMemoryReplica, PlanMutation, PlanResult, ReplicaItemRecord,
+        ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
+    test_fixtures::{seed_ready_personal_vault, test_operation, test_overlay, TEST_VAULT_ID},
     AccountAccessState, AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle,
     ObservationRequest, ObservationSink, RequestCancellation, Runtime, RuntimeError,
     RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
@@ -50,13 +50,15 @@ struct StaleOnceExecutor {
 impl StaleOnceExecutor {
     fn seeded() -> Self {
         let state = InMemoryReplica::default();
+        let account_id = AccountId::from("account-1");
         state
             .install(
-                AccountId::from("account-1"),
+                account_id.clone(),
                 "user-1".into(),
                 Incarnation::from("incarnation-1"),
             )
             .unwrap();
+        seed_ready_personal_vault(&state, &account_id).unwrap();
         Self {
             state,
             remaining_races: AtomicUsize::new(9),
@@ -80,26 +82,24 @@ impl SerializedReplicaExecutor for StaleOnceExecutor {
                 let race_number = 10 - previous;
                 let operation_id = format!("competing-operation-{race_number}");
                 let item_id = format!("competing-item-{race_number}");
-                self.state.execute(GuardedCommitPlan::new(
+                let raced = self.state.execute(GuardedCommitPlan::new(
                     prepared.expected.account_id.clone(),
                     prepared.expected.incarnation.clone(),
                     prepared.expected.replica_revision,
                     prepared.expected.lock_epoch,
                     vec![
-                        PlanMutation::AcceptOperation(OperationRecord {
-                            operation_id,
-                            item_id: item_id.clone(),
-                            request_bytes: b"competing-sealed-request".to_vec(),
-                        }),
-                        PlanMutation::PutOptimisticItem(ReplicaItemRecord {
-                            account_id: prepared.expected.account_id.clone(),
-                            item_id,
-                            vault_id: "vault-1".into(),
-                            ciphertext: b"competing-sealed-item".to_vec(),
-                            optimistic: true,
-                        }),
+                        PlanMutation::AcceptOperation(test_operation(&operation_id, &item_id)),
+                        PlanMutation::PutOptimisticItem(test_overlay(
+                            prepared.expected.account_id.clone(),
+                            &item_id,
+                            &operation_id,
+                        )),
                     ],
                 ))?;
+                assert!(
+                    matches!(raced, PlanResult::Applied { .. }),
+                    "each race must actually advance the Replica, got {raced:?}"
+                );
             }
         }
         serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
@@ -215,13 +215,15 @@ impl SerializedReplicaExecutor for FailFirstLockEpochExecutor {
 impl RemoveOnCommitExecutor {
     fn seeded() -> Self {
         let state = InMemoryReplica::default();
+        let account_id = AccountId::from("account-1");
         state
             .install(
-                AccountId::from("account-1"),
+                account_id.clone(),
                 "user-1".into(),
                 Incarnation::from("incarnation-1"),
             )
             .unwrap();
+        seed_ready_personal_vault(&state, &account_id).unwrap();
         Self {
             state,
             remove_on_commit: AtomicBool::new(true),
@@ -295,13 +297,15 @@ impl SerializedReplicaExecutor for SerializedInMemoryExecutor {
 impl AdvanceBeforeLoadExecutor {
     fn seeded() -> Self {
         let state = InMemoryReplica::default();
+        let account_id = AccountId::from("account-1");
         state
             .install(
-                AccountId::from("account-1"),
+                account_id.clone(),
                 "user-1".into(),
                 Incarnation::from("incarnation-1"),
             )
             .unwrap();
+        seed_ready_personal_vault(&state, &account_id).unwrap();
         Self {
             state,
             load_calls: AtomicUsize::new(0),
@@ -315,26 +319,34 @@ impl SerializedReplicaExecutor for AdvanceBeforeLoadExecutor {
         let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
         if let ReplicaPersistenceRequest::Load { account_id } = &request {
             if self.load_calls.fetch_add(1, Ordering::SeqCst) == 1 {
-                self.state.execute(GuardedCommitPlan::new(
+                // A stale race would apply nothing and quietly turn this test green, so the
+                // competing commit reads the revision it is racing and must be applied.
+                let racing_revision = self
+                    .state
+                    .snapshot(account_id)
+                    .expect("the raced Account is installed")
+                    .revision;
+                let raced = self.state.execute(GuardedCommitPlan::new(
                     account_id.clone(),
                     Incarnation::from("incarnation-1"),
-                    0,
+                    racing_revision,
                     0,
                     vec![
-                        PlanMutation::AcceptOperation(OperationRecord {
-                            operation_id: "early-competing-operation".into(),
-                            item_id: "early-competing-item".into(),
-                            request_bytes: b"early-competing-sealed-request".to_vec(),
-                        }),
-                        PlanMutation::PutOptimisticItem(ReplicaItemRecord {
-                            account_id: account_id.clone(),
-                            item_id: "early-competing-item".into(),
-                            vault_id: "vault-1".into(),
-                            ciphertext: b"early-competing-sealed-item".to_vec(),
-                            optimistic: true,
-                        }),
+                        PlanMutation::AcceptOperation(test_operation(
+                            "early-competing-operation",
+                            "early-competing-item",
+                        )),
+                        PlanMutation::PutOptimisticItem(test_overlay(
+                            account_id.clone(),
+                            "early-competing-item",
+                            "early-competing-operation",
+                        )),
                     ],
                 ))?;
+                assert!(
+                    matches!(raced, PlanResult::Applied { .. }),
+                    "the early race must actually advance the Replica, got {raced:?}"
+                );
             }
         }
         serde_json::to_string(&self.state.invoke(request).await?).map_err(|_| {
@@ -353,13 +365,14 @@ fn installed_runtime() -> (Arc<Runtime>, AccountId, Incarnation) {
     runtime
         .install_account(account_id.clone(), "user-1".into(), incarnation.clone())
         .unwrap();
+    runtime.seed_ready_personal_vault_in_memory(&account_id);
     (runtime, account_id, incarnation)
 }
 
 fn create_request(account_id: AccountId) -> RuntimeRequest {
     RuntimeRequest::CreateLoginItem {
         account_id,
-        vault_id: "vault-1".into(),
+        vault_id: TEST_VAULT_ID.into(),
         draft: LoginItemDraft {
             title: "Example".into(),
             url: Some("https://example.test".into()),
@@ -375,13 +388,7 @@ fn create_request(account_id: AccountId) -> RuntimeRequest {
 }
 
 fn optimistic_item(account_id: AccountId, item_id: &str) -> ReplicaItemRecord {
-    ReplicaItemRecord {
-        account_id,
-        item_id: item_id.into(),
-        vault_id: "vault-1".into(),
-        ciphertext: b"sealed-fixture".to_vec(),
-        optimistic: true,
-    }
+    test_overlay(account_id, item_id, "operation-fixture")
 }
 
 #[tokio::test]
@@ -397,6 +404,8 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
         )
         .await
         .unwrap();
+    seed_ready_personal_vault(&executor.state, &account_id).unwrap();
+    first.replica().load(&account_id).await.unwrap().unwrap();
     first.unlock_account(&account_id).await.unwrap();
     first
         .request(
@@ -454,12 +463,37 @@ async fn replaced_account_restores_signed_out_and_cannot_create_until_unlocked()
     ));
     assert_eq!(
         restored
-            .request(create_request(account_id), RequestCancellation::new())
+            .request(
+                create_request(account_id.clone()),
+                RequestCancellation::new()
+            )
             .await
             .unwrap_err()
             .code,
         RuntimeErrorCode::AuthenticationRequired
     );
+
+    // Sign-out is the only thing that refused the request. The replacement left this Device with a
+    // cold Replica too, so a real return of access means Sign-in plus Bootstrap; once both are back
+    // the identical request is accepted, which is what "until unlocked" has to mean.
+    seed_ready_personal_vault(&executor.state, &account_id).unwrap();
+    restored.replica().load(&account_id).await.unwrap().unwrap();
+    restored.unlock_account(&account_id).await.unwrap();
+    assert!(matches!(
+        restored
+            .request(
+                create_request(account_id.clone()),
+                RequestCancellation::new()
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+    let snapshot = restored.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.revision, 3);
+    // The Operation the replaced Account accepted is still durable beside the new one.
+    assert_eq!(snapshot.operations.len(), 2);
+    assert_eq!(snapshot.items.len(), 2);
 }
 
 #[tokio::test]
@@ -529,6 +563,10 @@ fn work_started_before_another_runtime_locks_is_fenced_without_plaintext_publica
         Incarnation::from("incarnation-1"),
     ))
     .unwrap();
+    seed_ready_personal_vault(&executor.state, &account_id).unwrap();
+    block_on_test(first.replica().load(&account_id))
+        .unwrap()
+        .unwrap();
     block_on_test(first.unlock_account(&account_id)).unwrap();
     let items = Arc::new(ProjectionSink::default());
     let _observation = first
@@ -1458,13 +1496,15 @@ async fn plaintext_is_redacted_and_never_enters_replica_records() {
 #[tokio::test]
 async fn accounts_fail_in_isolation_and_close_stops_runtime_calls() {
     let (runtime, account_id, _incarnation) = installed_runtime();
+    let second_account = AccountId::from("account-2");
     runtime
         .install_account(
-            AccountId::from("account-2"),
+            second_account.clone(),
             "user-2".into(),
             Incarnation::from("incarnation-2"),
         )
         .unwrap();
+    runtime.seed_ready_personal_vault_in_memory(&second_account);
     runtime
         .fail_account(&account_id, RuntimeErrorCode::InvariantViolation)
         .unwrap();
@@ -1473,10 +1513,7 @@ async fn accounts_fail_in_isolation_and_close_stops_runtime_calls() {
         .await
         .is_err());
     assert!(runtime
-        .request(
-            create_request(AccountId::from("account-2")),
-            RequestCancellation::new(),
-        )
+        .request(create_request(second_account), RequestCancellation::new())
         .await
         .is_ok());
 
@@ -1542,11 +1579,7 @@ async fn accepted_plan_keeps_operation_and_overlay_in_one_revision() {
             0,
             0,
             vec![
-                PlanMutation::AcceptOperation(OperationRecord {
-                    operation_id: "operation-1".into(),
-                    item_id: "item-1".into(),
-                    request_bytes: b"sealed-request".to_vec(),
-                }),
+                PlanMutation::AcceptOperation(test_operation("operation-fixture", "item-1")),
                 PlanMutation::PutOptimisticItem(optimistic_item(account_id.clone(), "item-1")),
             ],
         ))
