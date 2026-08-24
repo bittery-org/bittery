@@ -116,3 +116,26 @@ weakening its hash-only storage rule.
 The retained `create_share` rejection set is `item_not_found`, `vault_read_only`,
 `share_entitlement_denied`, and `share_limit_reached`. Rate limiting, authentication, and
 infrastructure failures remain transport retry; invalid input is rejected before durable acceptance.
+
+### 2026-08-24 — slice split amended after the ownership decision
+
+The decision above adds two boundaries that did not exist in the original four-slice split. Before
+implementing either, the remaining sequence is amended to six commits:
+
+1. **Durable acceptance and projections:** the already-started slice now also accepts
+   `create_share` with Account-encrypted local capability state; Attachment work remains read
+   authority/projection only.
+2. **Server Share Operation:** replace the once-only create-Share route with the decided atomic
+   retained outcome while preserving hash-only token storage and keeping raw capability material
+   off the Server.
+3. **Dispatch and retry:** dispatch every accepted Item and Share request with persisted unbounded
+   backoff, restart, duplicate-send, and renewed-Session coverage.
+4. **Outcome and reconciliation:** reconcile the tagged Item/Share outcomes, authoritative Item
+   state, and acknowledged local Share capability delivery atomically.
+5. **Attachment Runtime service:** move Attachment crypto and existing read/download/upload/rename/
+   delete endpoint ownership into a dedicated Rust module, outside the Item Operation union.
+6. **Web host cutover:** wire all remaining mutation consumers and four read holdouts to Runtime,
+   remove their transitional hooks, and make `item-write` forbidden in the whole-entry audit.
+
+The same test-first, fresh implementer, disjoint ownership, independent review, and green-slice rules
+continue to apply. Generated artifacts travel with the slice that changes their source contract.
