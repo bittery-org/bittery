@@ -1,7 +1,7 @@
 # Remaining Item write kinds through the Runtime
 
 Type: task
-Status: ready-for-agent
+Status: claimed
 Blocked by: 22, 24, 31, 32
 Spec: ../spec.md#offline-create
 
@@ -68,3 +68,27 @@ already passes. `pnpm check:ci` and `pnpm check:ci:rust` pass.
 The first-slice adversarial review found that the shared Replica adapter conformance and the complete
 Web acceptance scenario had been specified but never implemented. Tickets 31 and 32 must establish
 those gates before this ticket widens the same Operation machinery to the remaining Item kinds.
+
+### 2026-08-24 — claimed and split into four delivery slices
+
+Ticket 23 and its blockers are resolved. Following ticket 21's proven boundaries, ticket 28 will
+land as four sequential, independently reviewed commits with disjoint implementation paths:
+
+1. **Durable acceptance and projections:** extend the closed Runtime request/draft, Operation,
+   Replica mutation, and Item projection contracts for every remaining Item action, including the
+   deleted/Attachment authority the recorded Web holdouts require. Prove atomic offline acceptance,
+   restart restoration, immutable bytes, and explicit Account scope for every accepted kind.
+2. **Dispatch and retry:** widen the kind-agnostic dispatcher to the new immutable requests and prove
+   authorization-only attachment, persisted unbounded backoff beyond five failures, restart, and
+   forced duplicate dispatch for every kind.
+3. **Outcome and reconciliation:** validate the tagged cross-kind outcome identity and atomically
+   reconcile each applied or rejected result against authoritative Item state, including dropped
+   mutation responses recovered by lookup.
+4. **Web host cutover:** route all remaining Item mutation consumers and the four recorded
+   transitional read holdouts through Runtime-owned projections/requests, remove the obsolete Web
+   mutation bridge, and tighten the whole-entry audit so no Web Item write reaches a transitional
+   owner.
+
+Generated contract artifacts belong to the Rust slice that defines them. The final Web slice owns
+only host/TypeScript paths. Each slice starts with its own failing behavioral test, receives a fresh
+implementer and reviewer, and must remain green before the next begins.
