@@ -139,3 +139,19 @@ implementing either, the remaining sequence is amended to six commits:
 
 The same test-first, fresh implementer, disjoint ownership, independent review, and green-slice rules
 continue to apply. Generated artifacts travel with the slice that changes their source contract.
+
+### 2026-08-24 — durable Share capability lifecycle resolved
+
+The locally retained Share capability is encrypted under MUK-bound Account access with a new
+Account- and Operation-bound AAD context and is decryptable only while that Account is unlocked. It
+survives Runtime/Worker restart and password Quick Unlock, but Lock hides it and Sign-out, Account
+removal, or Wipe destroys it with the Account's protected material. The new AAD context requires
+unchanged existing crypto vectors plus its own fixed cross-language vector; it does not alter an
+existing persisted cryptographic format.
+
+After reconciliation, Runtime publishes a durable `PendingShareResult` projection containing the
+Operation identity and reconstructed Share URL/result metadata. It remains visible without a time
+expiry until the host sends idempotent `AcknowledgeShareResult { accountId, operationId }`. That ACK
+atomically removes the protected capability/result record. A read-and-delete `take` was rejected
+because a host crash after the delete but before rendering would lose the once-only capability; an
+unbounded permanent Share-result history was rejected because it would retain capabilities forever.
