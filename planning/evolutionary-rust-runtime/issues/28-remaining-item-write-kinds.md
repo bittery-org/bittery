@@ -155,3 +155,19 @@ expiry until the host sends idempotent `AcknowledgeShareResult { accountId, oper
 atomically removes the protected capability/result record. A read-and-delete `take` was rejected
 because a host crash after the delete but before rendering would lose the once-only capability; an
 unbounded permanent Share-result history was rejected because it would retain capabilities forever.
+
+### 2026-08-24 — Move with Attachments resolved
+
+`move_item` atomically moves Attachment authority with the Item. Before acceptance, Rust unwraps
+only each Attachment key with the source Vault key and rewraps it under the target Vault key; it
+does not download or re-encrypt Attachment blobs. The immutable Move body carries the complete
+Attachment-ID/envelope-version set and each new encrypted key envelope. The Server verifies that
+the set and versions still match, then updates the Item and all Attachment Vault scopes/key
+envelopes in the same Operation transaction, audit, entity event, retained outcome, and
+`operation_resolved` boundary.
+
+If the Attachment set or an envelope version changed between acceptance and Server execution, the
+Server retains the terminal `attachment_state_conflict` rejection. It is distinct from
+`item_version_conflict`: the Item validator may still match while an Attachment changed. Runtime
+reconciles current authority; a later user command may accept a new Move with new immutable bytes.
+An accepted Operation's bytes are never rewritten internally.
