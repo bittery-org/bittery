@@ -1,0 +1,50 @@
+# Empty Vault Bootstrap authority
+
+Type: task
+Status: needs-info
+Blocked by: 22
+Spec: ../spec.md#bootstrap
+
+## Outcome
+
+The bounded Bootstrap protocol represents every accessible Vault needed by the first Web slice even
+when that Vault has no Items, and Rust stages and promotes its encrypted summary and wrapped key as
+authority without weakening page replay, byte bounds, or Account scope.
+
+## Why this blocks first-slice acceptance
+
+Ticket 32's complete browser scenario proved that full Rust Sign-in and Bootstrap reach the Server,
+while the Runtime Vault projection remains empty for a newly created personal Vault. PostgreSQL has
+the Vault and `vault_key` rows. `bootstrap_items` currently derives `selected_vault_ids` exclusively
+from Items on the current page and inlines Vault summaries only inside those Items, so an empty Vault
+cannot cross the wire. `AcceptCreateLoginItem` correctly refuses work without a ready personal Vault.
+
+## Maintainer decision required
+
+Decide how accessible Vault summaries participate in the existing bounded, resumable Bootstrap
+protocol. The answer must define page ownership and replay behavior, avoid an unbounded all-Vaults
+side list, and keep an empty Vault representable without manufacturing an Item. Implementation must
+not infer this product protocol choice.
+
+## Work after the decision
+
+- Add the Server red test for a newly created accessible Vault with zero Items.
+- Change the Server schema, OpenAPI, generated API contract, and generated Rust wire types together.
+- Stage and promote standalone Vault authority in Rust while preserving generation/page identity,
+  exact replay, byte bounds, and wrapped-key ciphertext.
+- Prove an empty personal Vault appears in the real Runtime projection and permits the first durable
+  offline Login Item acceptance.
+
+## Verification
+
+Start from the failing empty-Vault Server/Runtime test and retain its output. Run targeted Server,
+generated-contract, Runtime Bootstrap, and Web acceptance checks, followed by `pnpm check:ci` and
+`pnpm check:ci:rust` from a clean tree.
+
+## Comments
+
+### 2026-08-24 — discovered by ticket 32
+
+This is a product defect, not a fixture failure: the database authority exists, but the current wire
+shape has nowhere to carry it when a Vault contains no Item. Ticket 32 remains red and keeps its Web
+work set aside until this protocol frontier is decided and delivered.

@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22
+Blocked by: 22, 35
 Spec: ../spec.md#end-to-end
 
 ## Outcome
@@ -49,3 +49,12 @@ This ticket stays whole. Its one independently verifiable outcome is the complet
 through Worker, IndexedDB, HTTP Server, PostgreSQL, and rendered projection. A harness-only or
 partial-trace split would not satisfy a separately observable spec statement; the targeted scenario
 is therefore the red/green boundary for one implementer and one independent reviewer.
+
+### 2026-08-24 — blocked by empty-Vault Bootstrap
+
+The complete red scenario reached full Rust Sign-in, Bootstrap, and the Runtime Vault projection,
+then found no personal Vault. PostgreSQL held both the Vault and its wrapped key. The Server currently
+derives Bootstrap Vault summaries only from Items on the current page, so an empty accessible Vault
+has no wire representation and cannot become Runtime authority. Ticket 35 owns the separately
+claimed Server/contract/Runtime correction; this ticket deliberately does not infer how Vault
+summaries fit the bounded Bootstrap protocol.
