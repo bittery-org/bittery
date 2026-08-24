@@ -1,7 +1,7 @@
 # Bootstrap and offline read
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 18, 19
 Spec: ../spec.md#bootstrap
 
@@ -61,3 +61,18 @@ and keeps the previous complete projection readable. Lock during decrypt publish
 Failed authority fetch or commit leaves the prior generation and Cursor unchanged.
 
 Ready for adversarial review of this ticket. Tickets 18 and 21–24 are unchanged.
+
+### 2026-08-24 — delivered
+
+Bootstrap, the pinned tagged watermark, page fingerprint and resume, promotion, Cursor expiry
+refresh, the changes fetch, and hint-only SSE are Rust-owned, and the Web Items observation reads
+them. Ticket 23 still owes the adversarial review.
+
+Two defects in this area surfaced later and are fixed. A Cursor could never advance, because the
+generation's pinned watermark was required to equal the active Cursor while the item-apply path
+satisfied that by rewriting the watermark, which then contradicted the page receipt chain. And no
+optimistic overlay was ever projected, so a pending offline Item vanished from the list after a
+restart.
+
+One boundary this ticket does not cover: catch-up and the SSE hint run once inside a Sign-in or
+Quick Unlock and never again, so there is no live Sync. Ticket 30 carries that.

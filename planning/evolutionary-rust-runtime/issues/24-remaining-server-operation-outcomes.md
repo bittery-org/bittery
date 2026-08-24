@@ -1,7 +1,7 @@
 # Remaining Server Operation outcomes: Item routes
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 17
 Spec: ../spec.md#server-operation-contract
 
@@ -121,3 +121,9 @@ multi-stage plans carrying key material and are the harder half. `idempotency_re
 survives this ticket, used only by Rotation, and ticket 29 removes it. The zero-call-site assertion
 and the migration dropping the table move to ticket 29 with it; this ticket asserts only that no
 Item route reaches `idempotency::execute`.
+
+### 2026-08-24 — delivered
+
+The six Item routes commit retained semantic outcomes in one transaction with the effect, the audit
+record, the entity Sync event, and `operation_resolved`. Lookup answers one `OperationOutcome` union
+tagged on `kind`. Rotation still uses the legacy table; ticket 29 removes it.

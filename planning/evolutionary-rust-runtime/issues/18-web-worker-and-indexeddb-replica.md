@@ -1,7 +1,7 @@
 # Web Worker and IndexedDB Replica
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 15, 16
 Spec: ../spec.md#web-binding
 
@@ -132,3 +132,10 @@ pnpm --filter @bittery/crypto-wasm test:combined
 pnpm --filter @bittery/crypto-core test
 pnpm check:ci
 ```
+
+### 2026-08-24 — delivered
+
+The Worker, the combined WASM artifact, the IndexedDB Replica adapter, the platform-storage bridge,
+and Account rehydration all landed. Ticket 26 later moved the generic channel transport out of the
+crypto package into the Runtime, where it belongs, and ticket 27 replaced the localStorage session
+mirror with the RuntimeStatus observation.

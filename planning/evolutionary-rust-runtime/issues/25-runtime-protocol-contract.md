@@ -1,7 +1,7 @@
 # Runtime protocol contract generation
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 19
 Spec: ../spec.md#external-runtime-protocol
 
@@ -53,3 +53,11 @@ is dropped so a `Failed` Operation renders as an authoritative Item; `custom_fie
 `contract.ts` compiles and every field the Rust protocol declares, including `status`, `custom_fields`,
 `waiting_reason`, and `code`, is present and non-optional where Rust makes it non-optional.
 `pnpm --filter @bittery/client-runtime check` and `pnpm check:ci:rust` pass.
+
+## Comments
+
+### 2026-08-24 — delivered
+
+The protocol generates its TypeScript from the Rust Serde definitions, `RuntimeOutcome` is declared
+rather than implied by Serde's `Result` spelling, and revisions cross as canonical decimal strings.
+The generated types restored four fields the hand-written parsers dropped.

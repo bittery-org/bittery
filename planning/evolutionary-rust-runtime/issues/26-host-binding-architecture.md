@@ -1,7 +1,7 @@
 # Host binding architecture and Worker transport ownership
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 25
 Spec: ../spec.md#web-binding
 
@@ -81,3 +81,15 @@ on `client-runtime/crates/bittery-client-bindings` and re-exports `WebClientRunt
 graph holds a genuine cycle that neither pnpm, turbo, nor `check-architecture.mjs` can see, because
 the Rust edge is a Cargo path dependency. Document it in `packages/client-runtime/CONTEXT.md` here and
 fix it there.
+
+### 2026-08-24 — delivered
+
+The transport moved into the Runtime package, and observation identity and lifetime moved out of
+React into a reference-counted registry with minted ids. Two corrections to this ticket were proven
+rather than assumed: the dependency edge runs crypto-port to client-runtime, because crypto-port
+still hosts the Desktop and Mobile Worker roots; and the `new URL(..., import.meta.url)` literal has
+to stay inside `new Worker(...)` at the host, because behind an indirection Vite emits no worker
+chunk at all.
+
+The architecture guard is still not added. It becomes addable when those Worker roots leave
+crypto-port.

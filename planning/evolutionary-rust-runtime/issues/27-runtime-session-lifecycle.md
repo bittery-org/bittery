@@ -1,7 +1,7 @@
 # Runtime session lifecycle, lock, and observation delivery
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 26
 Spec: ../spec.md#sign-in-and-session-behavior
 

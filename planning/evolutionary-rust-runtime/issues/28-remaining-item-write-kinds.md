@@ -1,7 +1,7 @@
 # Remaining Item write kinds through the Runtime
 
 Type: task
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 22, 24
 Spec: ../spec.md#offline-create
 
@@ -21,22 +21,25 @@ That gap is deliberate and time-boxed: this rebuild ships only once every path i
 meets it, and gating the UI would be throwaway work. It is nonetheless the last thing standing
 between the current state and a Web host that is genuinely complete.
 
-## Frontier — why this is `needs-info`
+## Contract, inherited and now decided
 
-Ticket 24 owns the Server side and is itself a maintainer frontier: eleven legacy response-cache call
-sites remain, and the cross-kind semantic outcome and rejection contract is undecided. `createItem`
-has a retained semantic outcome; update and delete still run through the old idempotency table.
+This ticket was `needs-info` while ticket 24's cross-kind contract was open. It is resolved:
 
-Resolve that contract before implementing. The specific questions:
+- Lookup answers one `OperationOutcome` union tagged on `kind`. An unrecognised `kind` fails to parse
+  and is retried rather than misread; a parsable `kind` this Device never accepted under that id is
+  identity reuse and fails the Account.
+- Rejections share `invalid_ciphertext`, `vault_access_denied`, and `vault_read_only` across kinds and
+  add only genuinely new failures. Ticket 24 confirmed the real per-kind sets against the handlers,
+  including that a stale version and a missing Item apply to all six Item routes, not just update and
+  delete.
+- Every Item kind retains `{itemId, version}`, which is both the strong validator the next command
+  sends as `If-Match` and enough to tell applied from rejected without replaying.
+- The trash, restore, and permanent routes carry no body, so their request fingerprint rests on the
+  normalized `If-Match`, and method is part of route identity.
 
-- Does every write kind retain a User-lifetime semantic outcome the way `createItem` does, or do
-  idempotent-by-nature kinds (favorite, move) get a cheaper contract?
-- What is the rejection vocabulary across kinds? `CreateItemRejectionCode` is create-shaped; a stale
-  version on update and a missing Item on delete are different failures.
-- Does an update carry a concurrency precondition in the request fingerprint? `create_item_fingerprint`
-  hashes an empty precondition today, and the Server hashes normalized preconditions in the same slot.
-- Is delete a tombstone Operation with an authoritative fetch, or does reconciliation need a different
-  plan shape than "fetch the authoritative entity, then commit"?
+One client-side bridge from ticket 24 is this ticket's to remove: `packages/sync/outbound-queue.ts`
+translates `item_version_conflict` back into a 412-shaped error so its existing rebase-and-resend path
+keeps working. That queue dies here.
 
 ## Work
 

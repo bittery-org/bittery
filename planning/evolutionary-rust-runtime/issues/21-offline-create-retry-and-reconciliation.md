@@ -1,7 +1,7 @@
 # Offline create, retry, and reconciliation
 
 Type: task
-Status: ready-for-human
+Status: resolved
 Blocked by: 17, 20
 Spec: ../spec.md#offline-create
 

@@ -110,6 +110,9 @@ or rollout order.
   routes. Lookup answers one outcome union tagged on `kind`; rejections share a common core and add
   only genuinely new per-kind failures. Old idempotency cleanup is gated on an executable
   zero-call-site inventory in ticket 29.
+- Live Sync ownership is [ticket 30](issues/30-runtime-owned-live-sync.md). Rust owns every part of
+  Sync, but catch-up and the SSE hint run only inside a Sign-in or Quick Unlock, so the Web host has
+  no live Sync between unlocks.
 - Web host integration, followed by Extension and Desktop host integration.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.

@@ -1,7 +1,7 @@
 # Web cutover and replaced-path cleanup
 
 Type: task
-Status: ready-for-human
+Status: resolved
 Blocked by: 21, 27
 Spec: ../spec.md#web-cutover
 

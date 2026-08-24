@@ -1,7 +1,7 @@
 # Rust Sign-in and Session
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 16, 18
 Spec: ../spec.md#sign-in-and-session-behavior
 
@@ -131,3 +131,9 @@ ceremony; this ticket's remaining Session work is done.
   Auth and master unlock keys. Reconstructing the Auth key from the stored master unlock key is not
   possible, while persisting a new Auth key or SRP password would change the sensitive storage and
   crypto specification that this pivot keeps fixed.
+
+### 2026-08-24 — delivered
+
+Sign-in, password Quick Unlock, and Session renewal run through Rust. Ticket 27 added Sign-out and
+Lock, and made a restart restore an Account with intact Quick Unlock material as Locked rather than
+SignedOut, so a host can tell a lock screen from a full Sign-in.
