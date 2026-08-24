@@ -18,6 +18,8 @@ mod authentication;
 // Ticket 19 keeps compatibility wrapping and time conversion private until Account installation.
 #[allow(dead_code)]
 mod authentication_installation;
+// Ticket 21 slice B needs a wall clock the Runtime can wait on, not only read.
+mod device_timer;
 mod protocol;
 mod replica;
 mod runtime;

@@ -430,7 +430,7 @@ impl Runtime {
         }
     }
 
-    async fn renew_session(
+    pub(super) async fn renew_session(
         &self,
         account_id: &AccountId,
         session: &CurrentSessionDocument,
@@ -456,7 +456,7 @@ impl Runtime {
                 self.platform_storage
                     .store_current_session(&renewed)
                     .await?;
-                self.clear_waiting_reason(account_id);
+                self.note_session_available(account_id);
                 Ok(renewed)
             }
             AuthenticatedOutcome::ReauthenticationRequired => Err(RuntimeError::new(
@@ -577,7 +577,7 @@ impl Runtime {
         })
     }
 
-    fn mark_reauthentication_required(&self, account_id: &AccountId) {
+    pub(super) fn mark_reauthentication_required(&self, account_id: &AccountId) {
         self.waiting_reasons
             .lock()
             .expect("waiting reason lock poisoned")
@@ -589,7 +589,7 @@ impl Runtime {
         self.publish_all_unless_closed();
     }
 
-    fn clear_waiting_reason(&self, account_id: &AccountId) {
+    pub(super) fn clear_waiting_reason(&self, account_id: &AccountId) {
         self.waiting_reasons
             .lock()
             .expect("waiting reason lock poisoned")

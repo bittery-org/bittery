@@ -2,10 +2,14 @@ mod bootstrap;
 mod create;
 #[cfg(test)]
 mod create_tests;
+mod dispatch;
+#[cfg(test)]
+mod dispatch_tests;
 mod install;
 mod lock;
 mod open;
 
+use dispatch::DispatchLeases;
 use lock::AccessRetirement;
 
 #[cfg(test)]
@@ -18,6 +22,7 @@ use crate::{
         AuthenticationInstallationEvidence, Clock, InstallationEntropy, PreparedQuickUnlock,
         SystemClock, SystemInstallationEntropy,
     },
+    device_timer::{DeviceTimer, SystemDeviceTimer},
     http_transport::{HttpTransport, SerializedHttpExecutor},
     platform_storage::{
         DeviceCatalogAccount, DeviceCatalogDocument, DeviceKeyDocument,
@@ -390,6 +395,20 @@ pub struct Runtime {
     waiting_reasons: Mutex<HashMap<AccountId, AccountWaitingReason>>,
     delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
+    clock: Arc<dyn Clock>,
+    device_timer: Arc<dyn DeviceTimer>,
+    /// Wakes the dispatcher when something that can change eligibility happened: work was
+    /// accepted, a Session arrived, or the Runtime is closing.
+    dispatch_wake: tokio::sync::Notify,
+    dispatch_leases: Arc<DispatchLeases>,
+    /// Operations whose last attempt already reached the Server's Operation table.
+    ///
+    /// Reaching it is not local completion, so the Operation stays durable and keeps its overlay.
+    /// This only stops one Runtime from re-sending bytes it already has an answer for while the
+    /// outcome and reconciliation slice is not there to consume that answer. It is in-memory on
+    /// purpose: after a restart the identical bytes replay and the Server returns the retained
+    /// outcome again.
+    awaiting_outcome: Mutex<HashSet<String>>,
 }
 
 impl Runtime {
@@ -409,6 +428,8 @@ impl Runtime {
             Arc::new(HttpTransport::unavailable()),
             None,
             true,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
             #[cfg(test)]
             Some(in_memory),
         )
@@ -434,6 +455,8 @@ impl Runtime {
             Arc::new(HttpTransport::unavailable()),
             None,
             true,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
             #[cfg(test)]
             None,
         )
@@ -471,7 +494,32 @@ impl Runtime {
             Arc::new(HttpTransport::new(http)),
             auth_config,
             false,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
             #[cfg(test)]
+            None,
+        )
+    }
+
+    /// Builds a Runtime whose wall clock and delay are the test's, so dispatch scheduling can be
+    /// asserted exactly instead of waited on.
+    #[cfg(test)]
+    pub(crate) fn with_test_dispatch_environment(
+        replica: Arc<dyn SerializedReplicaExecutor>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        http: Arc<dyn SerializedHttpExecutor>,
+        auth_config: AuthClientConfig,
+        clock: Arc<dyn Clock>,
+        device_timer: Arc<dyn DeviceTimer>,
+    ) -> Arc<Self> {
+        Self::with_persistence(
+            Arc::new(SerializedReplicaPersistence::new(replica)),
+            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(HttpTransport::new(http)),
+            Some(auth_config),
+            true,
+            clock,
+            device_timer,
             None,
         )
     }
@@ -505,12 +553,18 @@ impl Runtime {
             reason = "the Web Runtime is confined to one Worker, while Arc preserves shared binding ownership"
         )
     )]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one private constructor owns every Runtime port, including the Device clock and timer"
+    )]
     fn with_persistence(
         persistence: Arc<dyn ReplicaPersistence>,
         platform_storage: Arc<PlatformStorage>,
         http_transport: Arc<HttpTransport>,
         auth_client_config: Option<AuthClientConfig>,
         ready: bool,
+        clock: Arc<dyn Clock>,
+        device_timer: Arc<dyn DeviceTimer>,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -539,6 +593,11 @@ impl Runtime {
             waiting_reasons: Mutex::new(HashMap::new()),
             delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
+            clock,
+            device_timer,
+            dispatch_wake: tokio::sync::Notify::new(),
+            dispatch_leases: Arc::new(DispatchLeases::default()),
+            awaiting_outcome: Mutex::new(HashSet::new()),
         })
     }
 
@@ -933,6 +992,7 @@ impl Runtime {
 
     pub async fn close(&self) {
         if self.closed.swap(true, Ordering::SeqCst) {
+            self.wake_dispatch();
             let reentrant_delivery = ActiveRuntimeDelivery::is_active(self.identity());
             loop {
                 let finished = self.close_finished.notified();
@@ -944,6 +1004,7 @@ impl Runtime {
                 finished.await;
             }
         } else {
+            self.wake_dispatch();
             let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks

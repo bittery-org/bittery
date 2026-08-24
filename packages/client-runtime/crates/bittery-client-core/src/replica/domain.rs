@@ -44,7 +44,14 @@ impl GuardedCommitPlan {
 pub(crate) enum PlanMutation {
     PutOptimisticItem(ReplicaItemRecord),
     AcceptOperation(OperationRecord),
-    RemoveOperation { operation_id: String },
+    /// Records one dispatch attempt's diagnostic count and next eligible time.
+    ///
+    /// The whole record travels so the Replica can prove the immutable half did not move. No
+    /// mutation exists that can change an accepted Operation's identity, bytes, or fingerprint.
+    RescheduleOperation(OperationRecord),
+    RemoveOperation {
+        operation_id: String,
+    },
 }
 
 /// The closed set of durable mutations this Runtime accepts.
@@ -1038,6 +1045,24 @@ impl AccountReplica {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "another active Operation already owns this Item",
+                    ));
+                }
+                self.operations
+                    .insert(operation.operation_id.clone(), operation);
+            }
+            PlanMutation::RescheduleOperation(operation) => {
+                let existing = self
+                    .operations
+                    .get(&operation.operation_id)
+                    .ok_or_else(|| replica_invariant("cannot reschedule an unknown Operation"))?;
+                if existing.kind != operation.kind
+                    || existing.item_id != operation.item_id
+                    || existing.vault_id != operation.vault_id
+                    || existing.request != operation.request
+                    || existing.request_fingerprint != operation.request_fingerprint
+                {
+                    return Err(replica_invariant(
+                        "rescheduling cannot change accepted Operation bytes",
                     ));
                 }
                 self.operations

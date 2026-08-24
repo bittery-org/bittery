@@ -29,6 +29,8 @@ zeroize.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 js-sys = "=0.3.103"
+wasm-bindgen.workspace = true
+wasm-bindgen-futures = "=0.4.76"
 
 [[bin]]
 name = "generate-persistence-contract-schema"

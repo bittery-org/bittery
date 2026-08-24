@@ -439,6 +439,8 @@ impl Runtime {
         drop(catalog_guard);
         finish_generation_fence(invalidated);
         self.publish_all_unless_closed();
+        // A Session is installed again, so anything parked on one may resume.
+        self.note_session_available(&account_id);
         let _ = self
             .bootstrap_account(&account_id, RequestCancellation::new())
             .await;
@@ -660,6 +662,8 @@ impl Runtime {
         drop(execution_guard);
         finish_generation_fence(invalidated);
         self.publish_all_unless_closed();
+        // A Session is installed again, so anything parked on one may resume.
+        self.note_session_available(&account_id);
         let _ = self
             .bootstrap_account(&account_id, RequestCancellation::new())
             .await;

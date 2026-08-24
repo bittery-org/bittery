@@ -1,5 +1,6 @@
 use crate::{
     http_transport::{HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpTransport},
+    replica::ImmutableHttpRequest,
     server_contract::{
         AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, FinishLoginRequest,
         FinishLoginResponse, LoginAttemptResponse, StartLoginRequest, TravelModeResponse,
@@ -11,6 +12,8 @@ use std::collections::HashSet;
 use url::{Host, Url};
 
 const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
+/// One Operation outcome is a small closed document, never an entity page.
+const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
 
 pub(crate) enum AuthenticatedOutcome<T> {
@@ -27,6 +30,16 @@ impl<T> AuthenticatedOutcome<T> {
             Self::Transient => AuthenticatedOutcome::Transient,
         }
     }
+}
+
+/// What one dispatched Operation attempt brought back, before anyone reads meaning into it.
+///
+/// Transport status is deliberately preserved rather than interpreted here. Turning this into a
+/// semantic outcome, with fingerprint and Item-version verification, belongs to the outcome and
+/// reconciliation slice.
+pub(crate) struct OperationDispatchResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
 }
 
 pub(crate) struct RawJsonPage<T> {
@@ -333,6 +346,62 @@ impl<'transport> AuthHttpClient<'transport> {
         }
     }
 
+    /// Replays one accepted Operation's immutable bytes and attaches what is deliberately not
+    /// durable: the Session credential, and the `Idempotency-Key` that carries the Operation ID.
+    ///
+    /// The classification is the same one every other authenticated route uses. `401` is the
+    /// renewable Session answer the caller refreshes against, transport failure and the Server's
+    /// own retryable statuses are transient, and everything else is handed back untouched because
+    /// only a semantic reader may decide what it means.
+    pub(crate) async fn dispatch_operation(
+        &self,
+        token: &str,
+        operation_id: &str,
+        request: &ImmutableHttpRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<OperationDispatchResponse>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let url = self.route(&request.path)?;
+        let mut headers = request.headers.clone();
+        headers.push(HttpHeader {
+            name: "Idempotency-Key".to_owned(),
+            value: operation_id.to_owned(),
+        });
+        headers.extend(self.headers(Some(token))?);
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    request.method,
+                    url.into(),
+                    headers,
+                    request.body.clone(),
+                    OPERATION_OUTCOME_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status, body, .. } => match status {
+                401 => AuthenticatedOutcome::ReauthenticationRequired,
+                // An opaque zero status, a timeout, a rate limit, and every Server-side failure
+                // are the same answer: try the identical bytes again later.
+                0 | 408 | 425 | 429 | 500..=599 => AuthenticatedOutcome::Transient,
+                _ => AuthenticatedOutcome::Ok(OperationDispatchResponse { status, body }),
+            },
+            HttpResponse::NetworkFailure | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Transient
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Operation dispatch was cancelled",
+                ));
+            }
+        })
+    }
+
     async fn get_authenticated_json<T: DeserializeOwned>(
         &self,
         url: Url,
@@ -525,6 +594,17 @@ impl<'transport> AuthHttpClient<'transport> {
             });
         }
         Ok(headers)
+    }
+
+    /// Joins one accepted Operation's stored absolute path onto this Account's Server, keeping
+    /// any path prefix the normalized Server URL carries.
+    fn route(&self, path: &str) -> Result<Url, RuntimeError> {
+        if !path.starts_with('/') {
+            return Err(invariant("Operation route path is not absolute"));
+        }
+        let base = self.base_url.as_str().trim_end_matches('/');
+        Url::parse(&format!("{base}{path}"))
+            .map_err(|_| invariant("Operation route path is invalid"))
     }
 
     fn endpoint(&self, segments: &[&str]) -> Result<Url, RuntimeError> {
@@ -752,6 +832,19 @@ fn validate_bearer(token: &str) -> Result<(), RuntimeError> {
             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
     {
         return Err(invariant("Authentication bearer token is invalid"));
+    }
+    Ok(())
+}
+
+/// The Server's own `Idempotency-Key` rule, applied before a byte leaves the Device: one to 255
+/// visible ASCII characters. A request that cannot satisfy it would be rejected as malformed and
+/// would never reach the Operation table, so it is a local invariant violation, not a retry.
+fn validate_operation_id(value: &str) -> Result<(), RuntimeError> {
+    if value.is_empty()
+        || value.len() > 255
+        || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err(invariant("Operation identity is not a usable wire value"));
     }
     Ok(())
 }

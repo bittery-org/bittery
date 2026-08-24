@@ -370,6 +370,14 @@ pub(super) fn prepare_commit(
                     operation,
                 )?,
             },
+            PlanMutation::RescheduleOperation(operation) => PreparedReplicaWrite::Put {
+                row: stored_row(
+                    ReplicaStore::Operations,
+                    &plan.account_id,
+                    &operation.operation_id,
+                    operation,
+                )?,
+            },
             PlanMutation::RemoveOperation { operation_id } => PreparedReplicaWrite::Delete {
                 store: ReplicaStore::Operations,
                 key: ReplicaRowKey {

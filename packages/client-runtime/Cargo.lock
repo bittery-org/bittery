@@ -220,6 +220,8 @@ dependencies = [
  "time",
  "tokio",
  "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "zeroize",
 ]
 

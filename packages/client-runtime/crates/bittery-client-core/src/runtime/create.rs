@@ -223,6 +223,8 @@ impl Runtime {
         drop(_publication);
         accepted();
         drop(_execution_guard);
+        // The Operation is durable, so the dispatcher may start owing it immediately.
+        self.wake_dispatch();
         self.publish_all();
         if cancellation.is_cancelled() {
             return Err(RuntimeError::new(
