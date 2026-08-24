@@ -1,7 +1,7 @@
 # Empty Vault Bootstrap authority
 
 Type: task
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 22
 Spec: ../spec.md#bootstrap
 
@@ -48,3 +48,17 @@ generated-contract, Runtime Bootstrap, and Web acceptance checks, followed by `p
 This is a product defect, not a fixture failure: the database authority exists, but the current wire
 shape has nowhere to carry it when a Vault contains no Item. Ticket 32 remains red and keeps its Web
 work set aside until this protocol frontier is decided and delivered.
+
+### 2026-08-24 — maintainer decision: one two-phase feed
+
+The maintainer chose one bounded, resumable Bootstrap feed with an explicit phase. Vault pages come
+first, ordered and cursor-paginated independently; Item pages follow only after the terminal Vault
+page. The request, response, stored page identity, and replay fingerprint carry the closed phase tag,
+so an Item cursor is never interpreted as a Vault cursor. Both phases share the generation's pinned
+Sync watermark and existing old-or-new promotion boundary.
+
+Vault pages carry standalone Vault summaries and wrapped keys, including Vaults with zero Items.
+Item pages carry Items and no longer need an embedded Vault summary as the authority source. Each
+phase obeys the response byte budget, exact replay is phase-and-cursor scoped, and promotion requires
+terminal completion of both phases. This avoids an unbounded all-Vault side list, repeated key
+material on every Item page, and a second independently orchestrated route.

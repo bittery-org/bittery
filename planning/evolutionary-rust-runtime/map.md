@@ -100,6 +100,9 @@ or rollout order.
   Extension during the current migration, use Rust SQLite on native hosts, and preserve SQLite/OPFS
   as a later Web prototype plus a separate Extension-placement frontier rather than a universal
   requirement.
+- [Empty Vault Bootstrap authority](issues/35-empty-vault-bootstrap.md): keep one bounded Bootstrap
+  feed, but make it explicitly two-phase: cursor-paginated standalone Vault summaries and wrapped
+  keys first, then cursor-paginated Items under the same pinned watermark and promotion boundary.
 
 ## Not yet specified
 
