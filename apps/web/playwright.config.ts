@@ -208,9 +208,12 @@ function stackServers(stack: Stack): WebServer[] {
 	const { api, web } = STACK_PORTS[stack];
 	const serverUrl = `http://localhost:${api}`;
 	const webAppUrl = `http://localhost:${web}`;
+	const diagnosticLog = path.join(browserTmpDir, `${stack}-api.log`);
 	return [
 		{
-			command: "node tests/e2e-launch.mjs",
+			// `exec` preserves the launcher's real-server PID while the redirection gives
+			// behavioral E2E assertions access to the exact diagnostics the Server emitted.
+			command: `exec node tests/e2e-launch.mjs > ${JSON.stringify(diagnosticLog)} 2>&1`,
 			url: `${serverUrl}/healthz`,
 			// Never true, not even locally: a reused server keeps its own
 			// environment, which silently drops the rate-limit overrides and the
