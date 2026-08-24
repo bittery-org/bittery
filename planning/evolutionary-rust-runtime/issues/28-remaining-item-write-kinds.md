@@ -92,3 +92,27 @@ land as four sequential, independently reviewed commits with disjoint implementa
 Generated contract artifacts belong to the Rust slice that defines them. The final Web slice owns
 only host/TypeScript paths. Each slice starts with its own failing behavioral test, receives a fresh
 implementer and reviewer, and must remain green before the next begins.
+
+### 2026-08-24 — Share and Attachment ownership frontier resolved
+
+The maintainer confirmed that TypeScript Core ownership must be replaced by the Rust Runtime for
+both surfaces.
+
+**Attachments use a dedicated Runtime service.** Bootstrap Item authority already carries encrypted
+Attachment metadata. Rust will own Attachment cryptography, metadata, download, upload, rename, and
+delete through the existing Attachment endpoints, but these streaming/binary workflows do not join
+the closed Item Operation union. This preserves their current request semantics while removing the
+transitional TypeScript owner.
+
+**Share creation is a durable `create_share` Operation.** A crash or lost response must not require
+the user to create another link. Rust generates the share token and Share key before acceptance and
+keeps the capability material only in Account-encrypted local durable result state until the host
+acknowledges delivery. The Server accepts and persists only the token hash, retains a non-secret
+applied payload `{ shareLinkId, baseShareUrl, expiresAt }`, and never stores or replays the raw token.
+Rust combines that payload with the locally protected capability material after reconciliation.
+This deliberately replaces the current once-only Server-generated-token route contract rather than
+weakening its hash-only storage rule.
+
+The retained `create_share` rejection set is `item_not_found`, `vault_read_only`,
+`share_entitlement_denied`, and `share_limit_reached`. Rate limiting, authentication, and
+infrastructure failures remain transport retry; invalid input is rejected before durable acceptance.
