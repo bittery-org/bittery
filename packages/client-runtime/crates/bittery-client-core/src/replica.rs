@@ -8,6 +8,11 @@ use std::{
 
 mod domain;
 mod persistence_contract;
+#[cfg(all(
+    any(test, feature = "replica-conformance"),
+    not(target_arch = "wasm32")
+))]
+pub(crate) mod replica_conformance;
 #[cfg(not(target_arch = "wasm32"))]
 mod sqlite;
 #[cfg(all(test, not(target_arch = "wasm32")))]

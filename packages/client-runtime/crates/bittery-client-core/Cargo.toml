@@ -11,6 +11,7 @@ persistence-contract-schema = ["dep:schemars"]
 platform-storage-contract-schema = ["dep:schemars"]
 http-transport-contract-schema = ["dep:schemars"]
 runtime-protocol-contract-schema = ["dep:schemars"]
+replica-conformance = []
 
 [dependencies]
 async-trait.workspace = true
@@ -54,3 +55,8 @@ required-features = ["http-transport-contract-schema"]
 name = "generate-runtime-protocol-contract-schema"
 path = "src/bin/generate_runtime_protocol_contract_schema.rs"
 required-features = ["runtime-protocol-contract-schema"]
+
+[[bin]]
+name = "generate-replica-conformance-corpus"
+path = "src/bin/generate_replica_conformance_corpus.rs"
+required-features = ["replica-conformance"]

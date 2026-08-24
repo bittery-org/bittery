@@ -60,6 +60,9 @@ pub use protocol::{
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use replica::persistence_contract_schema;
+#[cfg(all(feature = "replica-conformance", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub use replica::replica_conformance::generate_replica_conformance_corpus;
 #[doc(hidden)]
 pub use replica::SerializedReplicaExecutor;
 #[cfg(not(target_arch = "wasm32"))]

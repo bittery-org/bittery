@@ -1,0 +1,2765 @@
+{
+  "formatVersion": 1,
+  "oracle": "rustDomainLogicalSnapshots",
+  "plaintextCausality": "encryptedCreatePlanInput",
+  "forbiddenDurableRowMarkers": [
+    "KNOWN-PLAINTEXT-LOGIN-PASSWORD-DO-NOT-PERSIST"
+  ],
+  "histories": [
+    {
+      "name": "installation-guards-account-isolation-and-incarnation",
+      "coverage": [
+        "install/load",
+        "missing and stale guards",
+        "exact revision and lock epoch",
+        "Account isolation",
+        "remove-readd incarnation fencing"
+      ],
+      "steps": [
+        {
+          "label": "load missing Account",
+          "request": {
+            "type": "load",
+            "accountId": "account-missing"
+          },
+          "expectedResponse": {
+            "type": "loaded",
+            "head": null,
+            "rows": []
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "install account-a first incarnation",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-a"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "install isolated account-b",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-b"
+              },
+              "nextHead": {
+                "accountId": "account-b",
+                "userId": "user-account-b",
+                "incarnation": "incarnation-account-b-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "accept Account-scoped encrypted Operation and overlay",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-a",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "replay exact accepted commit at stale revision",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-a",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "stale",
+              "actualRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "commit guarded by missing Account",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-missing",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-missing",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "missing"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "advance exact lock epoch without changing revision",
+          "request": {
+            "type": "advanceLockEpoch",
+            "prepared": {
+              "expected": {
+                "accountId": "account-a",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "1",
+                "failure": null
+              }
+            }
+          },
+          "expectedResponse": {
+            "type": "lockEpochAdvanced",
+            "result": {
+              "type": "applied",
+              "lockEpoch": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "1",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "replay old-epoch commit after lock fencing",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-a",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "stale",
+              "actualRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "1",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "remove and re-add with replacement incarnation",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "present",
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "1"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-replacement",
+                "replicaRevision": "2",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-replacement",
+                  "replicaRevision": "2",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "old incarnation request remains fenced",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-a",
+                "incarnation": "incarnation-account-a-first",
+                "userId": "user-account-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-a",
+                "userId": "user-account-a",
+                "incarnation": "incarnation-account-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "stale",
+              "actualRevision": "2"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-a",
+                  "userId": "user-account-a",
+                  "incarnation": "incarnation-account-a-replacement",
+                  "replicaRevision": "2",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "item-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-a\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-a\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-a",
+                      "recordId": "operation-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-a\",\"kind\":\"create_item\",\"itemId\":\"item-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"03a2cc1fc6aa9caa9d0bf892597c9e3c0b0628c7523553f5403a2331505582f8\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-b",
+                  "userId": "user-account-b",
+                  "incarnation": "incarnation-account-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-missing",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bootstrap-staging-promotion-and-tagged-cursor",
+      "coverage": [
+        "Bootstrap staging",
+        "exact page retry/replay",
+        "atomic promotion",
+        "CapturedEmpty distinct from Cold",
+        "tagged Sync cursor"
+      ],
+      "steps": [
+        {
+          "label": "install Bootstrap Account",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-bootstrap"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "begin staged Bootstrap generation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage first Bootstrap page with captured-empty Cursor",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "retry exact staged page persistence request",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage final Bootstrap page and accumulate authority",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-2"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-2\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-2\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-2"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-2\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-2\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "promote captured-empty Bootstrap generation atomically",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "userId": "user-account-bootstrap",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-bootstrap",
+                "userId": "user-account-bootstrap",
+                "incarnation": "incarnation-account-bootstrap-first",
+                "replicaRevision": "2",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedEmpty\"},\"stagingGeneration\":null}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "2"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-bootstrap",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-bootstrap",
+                  "userId": "user-account-bootstrap",
+                  "incarnation": "incarnation-account-bootstrap-first",
+                  "replicaRevision": "2",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedEmpty\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":\"2\",\"nextPageCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"a977066f49e8277c7e4c1f2fadc29596fba979a02dd6124f578b7abc5b62f0b1\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"1\",\"requestCursor\":{\"type\":\"after\",\"cursor\":\"page-2\"},\"rawResponseFingerprint\":\"175e3c459c609581a183d823c199696044ef6bdd1c2cf90215f52221a96aa1c3\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-bootstrap\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-1"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-1\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-1\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-bootstrap",
+                      "recordId": "generation-1/bootstrap-item-2"
+                    },
+                    "payloadJson": "{\"id\":\"bootstrap-item-2\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-bootstrap-item-2\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-bootstrap\",\"lastModifiedBy\":\"user-account-bootstrap\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "operation-retry-outcome-and-receipt-reconciliation",
+      "coverage": [
+        "accepted Operation and encrypted optimistic overlay",
+        "attempt count beyond five and exact replay",
+        "applied outcome and receipt reconciliation",
+        "rejected outcome retains encrypted overlay",
+        "known plaintext marker absent from durable rows"
+      ],
+      "steps": [
+        {
+          "label": "install Operation Account",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-operations"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "begin Operation Account Bootstrap",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":\"0\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":false}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage ready Operation Account authority",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "promote ready Operation Account authority",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "2",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"stagingGeneration\":null}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "2"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "2",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "accept durable Operation and encrypted optimistic overlay",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "2",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "3",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-applied"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-applied\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-applied\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "3"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "3",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-applied"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-applied\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-applied\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "persist seventh retry without discarding accepted Operation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "3",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "4",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"7\",\"notBeforeMs\":\"1700000005000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "4"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "4",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-applied"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-applied\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-applied\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"7\",\"notBeforeMs\":\"1700000005000\"}}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "replay exact seventh-retry persistence request",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "3",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "4",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"7\",\"notBeforeMs\":\"1700000005000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "stale",
+              "actualRevision": "4"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "4",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-applied"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-applied\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-applied\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-applied\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,97,112,112,108,105,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"scheduling\":{\"attemptCount\":\"7\",\"notBeforeMs\":\"1700000005000\"}}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "reconcile applied outcome receipt authority and Cursor",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "4",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "5",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  }
+                },
+                {
+                  "type": "delete",
+                  "store": "operations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-applied"
+                  }
+                },
+                {
+                  "type": "delete",
+                  "store": "optimisticItems",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "item-applied"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "5"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "5",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "accept second encrypted Operation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "5",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "6",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-rejected\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,114,101,106,101,99,116,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "6"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "6",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-rejected\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,114,101,106,101,99,116,101,100,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "retain rejected outcome receipt and encrypted overlay",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "6",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "7",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  }
+                },
+                {
+                  "type": "delete",
+                  "store": "operations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-rejected"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "7"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "7",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":\"1\",\"nextPageCursor\":{\"type\":\"initial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":\"0\",\"requestCursor\":{\"type\":\"initial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
