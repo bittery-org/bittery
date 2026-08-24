@@ -108,6 +108,7 @@ test("every revision crosses the boundary as a canonical decimal string", () => 
 				accountId: "account-1",
 				replicaRevision: "3",
 				items: [],
+				vaults: [],
 			},
 		}),
 		true,
@@ -115,7 +116,12 @@ test("every revision crosses the boundary as a canonical decimal string", () => 
 	assert.equal(
 		validateRuntimeProjection({
 			type: "items",
-			value: { accountId: "account-1", replicaRevision: 3, items: [] },
+			value: {
+				accountId: "account-1",
+				replicaRevision: 3,
+				items: [],
+				vaults: [],
+			},
 		}),
 		false,
 	);
@@ -144,7 +150,12 @@ test("every revision crosses the boundary as a canonical decimal string", () => 
 test("the Item projection keeps the fields the Web host used to drop", () => {
 	const projection = (item) => ({
 		type: "items",
-		value: { accountId: "account-1", replicaRevision: "1", items: [item] },
+		value: {
+			accountId: "account-1",
+			replicaRevision: "1",
+			items: [item],
+			vaults: [],
+		},
 	});
 	const item = {
 		accountId: "account-1",
