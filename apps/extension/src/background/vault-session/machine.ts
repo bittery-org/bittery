@@ -7,9 +7,10 @@
  *    the reducer says locked. `dispatchNow` therefore returns an already-locked
  *    snapshot while `clear_keys` is still in flight — that is what makes the
  *    synchronous `isUnlocked()` hot path honest.
- * 2. Effects run in emitted order. Awaited `dispatch` reports lifecycle failures;
- *    detached timer and `dispatchNow` paths log them after the reducer has already
- *    committed the locked state.
+ * 2. Effects run in emitted order, and a failing one never cancels the effects behind
+ *    it — a lock that skipped the alarm because storage failed is not a lock. Awaited
+ *    `dispatch` still reports the failure once they have all run; detached timer and
+ *    `dispatchNow` paths log it after the reducer has already committed locked state.
  */
 
 import type { VaultSessionPorts } from "./ports";
@@ -91,11 +92,24 @@ export function createVaultSessionMachine(
 		}
 	}
 
-	function guarded(effect: VaultSessionEffect): Promise<void> | void {
+	/**
+	 * One failing effect must never cancel the rest, and must still reach the caller.
+	 *
+	 * `clear_keys` reports a storage failure by rejecting. A lock that skipped the alarm
+	 * and the keepalive because of it is not a lock, so the failure is parked here and
+	 * every later effect still runs. `runEffects` rethrows it once they have, because a
+	 * caller that awaited a lock has to learn that storage may still hold the keys.
+	 */
+	function guarded(
+		effect: VaultSessionEffect,
+		failures: unknown[],
+	): Promise<void> | void {
 		try {
-			return runEffect(effect);
+			return runEffect(effect)?.catch((error: unknown) => {
+				failures.push(error);
+			});
 		} catch (error) {
-			console.error(`[vault-session] effect ${effect.kind} threw:`, error);
+			failures.push(error);
 		}
 	}
 
@@ -105,19 +119,27 @@ export function createVaultSessionMachine(
 	 * effect goes async everything after it queues behind it, preserving order.
 	 */
 	function runEffects(effects: VaultSessionEffect[]): Promise<void> {
+		const failures: unknown[] = [];
 		let chain: Promise<void> | null = null;
 		for (const effect of effects) {
 			if (chain) {
 				const queued = effect;
-				chain = chain.then(() => guarded(queued)).then(() => undefined);
+				chain = chain
+					.then(() => guarded(queued, failures))
+					.then(() => undefined);
 				continue;
 			}
-			const pending = guarded(effect);
+			const pending = guarded(effect, failures);
 			if (pending) {
 				chain = pending;
 			}
 		}
-		return chain ?? Promise.resolve();
+		const settle = () => {
+			if (failures.length > 0) {
+				throw failures[0];
+			}
+		};
+		return chain ? chain.then(settle) : (settle(), Promise.resolve());
 	}
 
 	function apply(event: VaultSessionEvent): {

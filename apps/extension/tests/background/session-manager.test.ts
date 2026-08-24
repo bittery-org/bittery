@@ -149,20 +149,22 @@ describe("isUnlocked with a desktop app connected", () => {
 	});
 });
 
-// The lifecycle module reports storage failures instead of throwing, so the
-// service-worker lifetime effects must not be conditional on it succeeding —
-// a lock that leaves the alarm armed and the keepalive running is not a lock.
+// A lock that leaves the alarm armed and the keepalive running is not a lock, so the
+// service-worker lifetime effects must not be conditional on storage succeeding. The
+// failure still reaches whoever awaited the lock, because storage may hold the keys.
 describe("lock when the storage lock fails", () => {
-	test("still clears the auto-lock alarm and never throws", async () => {
+	test("still clears the auto-lock alarm, then reports the failure", async () => {
 		setMasterUnlockKey(new Uint8Array(32).fill(7));
 		expect(isUnlocked()).toBe(true);
 		lockAllAccountsError = new Error("chrome.storage unavailable");
 
-		await vaultSession.dispatch({
-			type: "LOCK_REQUESTED",
-			source: "popup",
-			at: Date.now(),
-		});
+		await expect(
+			vaultSession.dispatch({
+				type: "LOCK_REQUESTED",
+				source: "popup",
+				at: Date.now(),
+			}),
+		).rejects.toThrow();
 
 		expect(lockAllAccountsCalls).toBe(1);
 		expect(alarmsClearCalls).toContain(AUTO_LOCK_ALARM_NAME);
