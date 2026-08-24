@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: 22, 24
+Blocked by: 22, 24, 31, 32
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -60,3 +60,11 @@ No Web write path reaches a transitional owner, proven by a dependency and impor
 whole Web entry graph rather than a file list. Each kind passes the offline accept, restart, more
 than five transient failures, forced duplicate dispatch, and dropped-response cases that create
 already passes. `pnpm check:ci` and `pnpm check:ci:rust` pass.
+
+## Comments
+
+### 2026-08-24 — ticket 23 added acceptance prerequisites
+
+The first-slice adversarial review found that the shared Replica adapter conformance and the complete
+Web acceptance scenario had been specified but never implemented. Tickets 31 and 32 must establish
+those gates before this ticket widens the same Operation machinery to the remaining Item kinds.
