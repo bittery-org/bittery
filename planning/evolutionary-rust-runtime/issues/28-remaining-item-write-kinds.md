@@ -283,3 +283,22 @@ match its Operation manifest is not stale Server authority. It returns HTTP `409
 code `attachment_staging_mismatch`, retains no outcome, and leaves the accepted Operation durable.
 Runtime treats it as a local invariant failure; corrected software may resume from the immutable
 intent, while retry count or elapsed time still cannot discard or terminalize it.
+
+### 2026-08-25 — stale preparation signal and Finalize body spelling resolved
+
+The manifest route's exact non-outcome Problem Details code is `ATTACHMENT_AUTHORITY_STALE`. It is
+deliberately distinct from the later retained rejection `attachment_state_conflict`, so observing the
+preparation response cannot be mistaken for observing an Operation outcome.
+
+The existing Move route accepts one closed body union tagged by `mode`:
+
+- `prepared` carries the target-encrypted Item and Attachment payload plus the accepted intent needed
+  to match the manifest;
+- `reject_stale_authority` carries only the accepted source, target, and complete Attachment
+  identity/version intent required for the Server to prove staleness.
+
+Optional fields without a discriminator and a parallel route were rejected. A proved stale rejection
+commits its rejection audit, retained outcome, and `operation_resolved` event atomically. It emits no
+`item_moved` entity event because no entity moved. The applied `prepared` path continues to commit
+both `item_moved` and `operation_resolved` with its effect and outcome. A rejection probe against
+still-matching authority returns `ATTACHMENT_STAGING_INCOMPLETE` with no outcome.
