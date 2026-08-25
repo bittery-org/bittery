@@ -62,3 +62,16 @@ and that the current Session, platform storage, Server metadata, transport, and 
 are deliberately crate-private. The defect is therefore a missing Core composition seam, not a Web
 fixture or an unresolved product decision. Deliberately left open: Web Worker lifecycle and binary
 stream wiring remain Ticket 28 C4b work after this ticket resolves.
+
+### 2026-08-26 — Slice A delivered the authenticated manifest HTTP authority
+
+Client Core now owns the exact authenticated manifest `PUT`, its typed wire request and bounded
+success response, and the closed stale-authority, busy, reauthentication-required, and transient
+classifications. The host receives no Server route or bearer responsibility.
+
+Independent review found a real product liveness defect rather than a fixture bug: the first 64-KiB
+response cap could not consume a valid multi-Attachment manifest and would leave accepted work on
+transient retry forever. The corrected implementation uses a dedicated finite 16-MiB bound and a
+behavioral 200-entry response larger than 64 KiB. A fresh re-review found no remaining issue.
+Deliberately left open: Slice B still owns current-Session load, one refresh and durable replacement,
+Scheduler adaptation, and removal of manifest renewal from the public host transfer port.
