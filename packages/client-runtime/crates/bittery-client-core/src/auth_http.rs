@@ -2,8 +2,9 @@ use crate::{
     http_transport::{HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpTransport},
     replica::ImmutableHttpRequest,
     server_contract::{
-        AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, FinishLoginRequest,
-        FinishLoginResponse, LoginAttemptResponse, StartLoginRequest, TravelModeResponse,
+        AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, ErrorCode, FinishLoginRequest,
+        FinishLoginResponse, LoginAttemptResponse, ProblemDetails, StartLoginRequest,
+        TravelModeResponse,
     },
     RequestCancellation, RuntimeError, RuntimeErrorCode,
 };
@@ -12,6 +13,10 @@ use std::collections::HashSet;
 use url::{Host, Url};
 
 const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
+// The Server accepts a roughly 1.1 MiB manifest request and returns one storage identity plus an
+// expanded presigned credential for every entry. Keep that amplification finite while allowing
+// about fifteen times the maximum request size for duplicated identities and signed URL material.
+const ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES: u32 = 16 * 1024 * 1024;
 /// One Operation outcome is a small closed document, never an entity page.
 const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
@@ -45,6 +50,45 @@ pub(crate) struct OperationDispatchResponse {
 pub(crate) struct RawJsonPage<T> {
     pub raw_body: Vec<u8>,
     pub value: T,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestHttpEntry {
+    pub(crate) attachment_id: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) ciphertext_sha256: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestHttpRequest {
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestHttpEntry>,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestUpload {
+    pub(crate) attachment_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) upload_url: String,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestHttpResponse {
+    pub(crate) operation_id: String,
+    pub(crate) expires_at: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestUpload>,
+}
+
+pub(crate) enum AttachmentMoveManifestAnswer {
+    Prepared(AttachmentMoveManifestHttpResponse),
+    Busy,
+    StaleAuthority,
 }
 
 struct RawHttpResponse {
@@ -384,6 +428,102 @@ impl<'transport> AuthHttpClient<'transport> {
             404 => Ok(AuthenticatedOutcome::Ok(None)),
             401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
             _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn renew_attachment_move_manifest(
+        &self,
+        token: &str,
+        operation_id: &str,
+        request: &AttachmentMoveManifestHttpRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentMoveManifestAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(request)
+            .map_err(|_| invariant("Attachment Move manifest request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/json".to_owned(),
+            },
+        );
+        let url = self.endpoint(&[
+            "api",
+            "v1",
+            "operations",
+            operation_id,
+            "attachment-move-manifest",
+        ])?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Put,
+                    url.into(),
+                    headers,
+                    body,
+                    ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let response = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment Move manifest returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(
+                    AttachmentMoveManifestAnswer::Prepared(response),
+                ))
+            }
+            HttpResponse::Completed {
+                status: 409,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment Move manifest returned invalid Problem Details",
+                    )
+                })?;
+                let answer = match problem.code {
+                    ErrorCode::AttachmentAuthorityStale => {
+                        AttachmentMoveManifestAnswer::StaleAuthority
+                    }
+                    ErrorCode::AttachmentStagingBusy => AttachmentMoveManifestAnswer::Busy,
+                    _ => {
+                        return Err(authentication_failure(
+                            "Attachment Move manifest returned an unexpected conflict",
+                        ));
+                    }
+                };
+                Ok(AuthenticatedOutcome::Ok(answer))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Attachment Move manifest request was cancelled",
+            )),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Attachment Move manifest returned an unexpected status",
+            )),
         }
     }
 
@@ -917,6 +1057,34 @@ fn require_json_content_type(headers: &[HttpHeader]) -> Result<(), RuntimeError>
     Ok(())
 }
 
+fn require_problem_json_content_type(headers: &[HttpHeader]) -> Result<(), RuntimeError> {
+    let mut values = headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("content-type"));
+    let Some(value) = values.next() else {
+        return Err(authentication_failure(
+            "Attachment Move manifest response is not Problem Details JSON",
+        ));
+    };
+    if values.next().is_some() {
+        return Err(authentication_failure(
+            "Attachment Move manifest response has ambiguous content type",
+        ));
+    }
+    let mut parts = value.value.split(';');
+    if !parts.next().is_some_and(|media_type| {
+        media_type
+            .trim()
+            .eq_ignore_ascii_case("application/problem+json")
+    }) || parts.any(|parameter| !parameter.trim().eq_ignore_ascii_case("charset=utf-8"))
+    {
+        return Err(authentication_failure(
+            "Attachment Move manifest response is not Problem Details JSON",
+        ));
+    }
+    Ok(())
+}
+
 fn next_cursor(
     has_more: bool,
     cursor: Option<String>,
@@ -1056,6 +1224,258 @@ mod tests {
                 "nextCursor": "cursor one/+"
             }
         })
+    }
+
+    fn manifest_request() -> AttachmentMoveManifestHttpRequest {
+        AttachmentMoveManifestHttpRequest {
+            item_id: "item-7".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: vec![AttachmentMoveManifestHttpEntry {
+                attachment_id: "attachment-7".into(),
+                envelope_version: 12,
+                ciphertext_sha256:
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            }],
+        }
+    }
+
+    fn problem(code: &str, status: u16) -> Value {
+        json!({
+            "type": "https://vault.example.test/problems/attachment-move",
+            "title": "Attachment Move preparation failed",
+            "status": status,
+            "detail": "safe bounded detail",
+            "instance": "/api/v1/operations/move-7/attachment-move-manifest",
+            "code": code,
+            "requestId": "request-7",
+            "retryable": false,
+            "errors": null
+        })
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_move_manifest_exchange() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json; charset=utf-8",
+            json!({
+                "operationId": "move/7",
+                "expiresAt": "2026-08-27T12:00:00Z",
+                "attachments": [{
+                    "attachmentId": "attachment-7",
+                    "storageKey": "attachments/staging/move-7/attachment-7",
+                    "uploadUrl": "https://objects.example.test/invocation-only-signature"
+                }]
+            }),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            "https://vault.example.test/root",
+            false,
+            metadata(),
+        )
+        .unwrap();
+
+        let answer = client
+            .renew_attachment_move_manifest(
+                "fresh-token",
+                "move/7",
+                &manifest_request(),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Prepared(manifest)) = answer
+        else {
+            panic!("expected a prepared manifest");
+        };
+        assert_eq!(manifest.operation_id, "move/7");
+        assert_eq!(manifest.expires_at, "2026-08-27T12:00:00Z");
+        assert_eq!(manifest.attachments.len(), 1);
+        assert_eq!(manifest.attachments[0].attachment_id, "attachment-7");
+        assert_eq!(
+            manifest.attachments[0].storage_key,
+            "attachments/staging/move-7/attachment-7"
+        );
+        assert_eq!(
+            manifest.attachments[0].upload_url,
+            "https://objects.example.test/invocation-only-signature"
+        );
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "PUT");
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/root/api/v1/operations/move%2F7/attachment-move-manifest"
+        );
+        assert_eq!(
+            requests[0]["headers"],
+            json!([
+                {"name":"Content-Type","value":"application/json"},
+                {"name":"Bittery-Client-Id","value":"client-7"},
+                {"name":"Bittery-Client-Platform","value":"web"},
+                {"name":"Bittery-Client-Version","value":"0.5.2"},
+                {"name":"Authorization","value":"Bearer fresh-token"}
+            ])
+        );
+        assert_eq!(
+            requests[0]["maxResponseBytes"],
+            ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES
+        );
+        assert_eq!(
+            String::from_utf8(
+                serde_json::from_value::<Vec<u8>>(requests[0]["body"].clone()).unwrap()
+            )
+            .unwrap(),
+            r#"{"itemId":"item-7","sourceVaultId":"vault-source","targetVaultId":"vault-target","attachments":[{"attachmentId":"attachment-7","envelopeVersion":12,"ciphertextSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn consumes_valid_multi_attachment_manifest_larger_than_small_auth_responses() {
+        let request = AttachmentMoveManifestHttpRequest {
+            item_id: "item-many".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: (0..200)
+                .map(|index| AttachmentMoveManifestHttpEntry {
+                    attachment_id: format!("attachment-{index:03}"),
+                    envelope_version: 12,
+                    ciphertext_sha256:
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                })
+                .collect(),
+        };
+        let attachments = request
+            .attachments
+            .iter()
+            .map(|entry| {
+                let attachment_id = &entry.attachment_id;
+                json!({
+                    "attachmentId": attachment_id,
+                    "storageKey": format!("attachments/staging/move-many/{attachment_id}"),
+                    "uploadUrl": format!(
+                        "https://objects.example.test/attachments/staging/move-many/{attachment_id}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date=20260827T120000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-content-sha256&X-Amz-Signature={}",
+                        "credential-expansion".repeat(8),
+                        "a".repeat(64),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let response_body = json!({
+            "operationId": "move-many",
+            "expiresAt": "2026-08-27T12:00:00Z",
+            "attachments": attachments
+        });
+        let response_bytes = serde_json::to_vec(&response_body).unwrap().len();
+        assert!(response_bytes > SMALL_AUTH_RESPONSE_BYTES as usize);
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            response_body,
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+
+        let answer = client
+            .renew_attachment_move_manifest(
+                "fresh-token",
+                "move-many",
+                &request,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Prepared(manifest)) = answer
+        else {
+            panic!("valid multi-Attachment manifest must not be classified as transient");
+        };
+        assert_eq!(manifest.attachments.len(), 200);
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]["maxResponseBytes"].as_u64().unwrap() >= response_bytes as u64);
+    }
+
+    #[tokio::test]
+    async fn classifies_attachment_move_manifest_authority_and_transport_answers() {
+        let cases = [
+            (
+                completed(
+                    409,
+                    "application/problem+json",
+                    problem("ATTACHMENT_AUTHORITY_STALE", 409),
+                ),
+                "stale",
+            ),
+            (
+                completed(
+                    409,
+                    "application/problem+json; charset=utf-8",
+                    problem("ATTACHMENT_STAGING_BUSY", 409),
+                ),
+                "busy",
+            ),
+            (
+                completed(401, "application/problem+json", json!({})),
+                "reauth",
+            ),
+            (
+                completed(408, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(425, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(429, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(500, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(599, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (r#"{"type":"networkFailure"}"#.to_owned(), "transient"),
+            (r#"{"type":"responseTooLarge"}"#.to_owned(), "transient"),
+        ];
+
+        for (response, expected) in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let answer = client
+                .renew_attachment_move_manifest(
+                    "fresh-token",
+                    "move-7",
+                    &manifest_request(),
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            match (expected, answer) {
+                (
+                    "stale",
+                    AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::StaleAuthority),
+                )
+                | ("busy", AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Busy))
+                | ("reauth", AuthenticatedOutcome::ReauthenticationRequired)
+                | ("transient", AuthenticatedOutcome::Transient) => {}
+                _ => panic!("unexpected manifest classification for {expected}"),
+            }
+        }
     }
 
     #[tokio::test]
