@@ -411,3 +411,45 @@ Runtime preparation is refined into three independently verifiable and path-disj
 The former two-slice note remains useful history but is superseded by this split: binary artifact
 durability must be verified independently from both Replica JSON transitions and streaming network/
 crypto behavior.
+
+### 2026-08-25 — artifact-store adapter slice split for fault isolation
+
+The artifact-store protocol and adapter slice is split before implementation because its native and
+browser durability boundaries cannot be independently fault-injected in one pass:
+
+1. **Rust-owned protocol and native SQLite adapter (B1):** new artifact-store Rust paths own the
+   closed bounded-chunk protocol and its native SQLite `BLOB` implementation, including publication,
+   restart, Account deletion, and exclusive orphan-sweep fault boundaries. It consumes Slice A's
+   `AttachmentMoveArtifactRef` contract without editing Replica or Runtime preparation paths.
+2. **Web and MV3 IndexedDB adapter (B2):** new generated artifact-contract and Web adapter paths
+   implement the same Rust-owned protocol with binary `ArrayBuffer` chunks and independently exercise
+   IndexedDB transaction, restart, and sweep boundaries. It does not edit the B1 native adapter.
+3. **Preparation worker, transport, and wiring (C):** later new worker paths consume the already-
+   committed A and B contracts and own streaming crypto/network behavior without editing either
+   persistence implementation.
+
+These implementation path sets remain disjoint. B1 can therefore prove SQLite transaction and
+failure semantics without browser fixtures, while B2 can prove structured-clone and IndexedDB binary
+semantics without treating the native adapter as evidence.
+
+### 2026-08-25 — B1 review corrected sweep and concurrent publication fixtures
+
+Independent review found that the first native fixture had incorrectly made a whole orphan sweep one
+atomic transaction. Whole-sweep atomicity was never a requirement: under the caller-proved exclusive
+startup boundary, each orphan is independently unreachable, so deleting one per short transaction is
+safe and restart-idempotent. A later deletion failure now preserves already-committed cleanup, never
+touches supplied live references, and restart resumes the remaining orphans.
+
+The same review required two exact publishers to converge. Once both have verified the same complete
+ciphertext, one may publish first and the other returns `AlreadyPublished`; the loser must not report
+a false invariant failure, and neither path may expose an incomplete artifact.
+
+### 2026-08-25 — B1 review added bounded authenticated chunk reads
+
+Closure review found a product defect, not a fixture defect: native reads materialized a SQLite `BLOB`
+before validating its bounded chunk length, and a same-length post-publication corruption was returned
+without revalidation. Every exact initial write now records a per-chunk SHA-256. Idempotent replay,
+publication hashing, and every published read validate both the fixed maximum length and that digest.
+SQLite length is checked before incremental `BLOB` I/O allocates the bounded buffer; publication still
+streams one fixed-size chunk at a time outside a long transaction and retains the overall artifact
+digest as final authority.

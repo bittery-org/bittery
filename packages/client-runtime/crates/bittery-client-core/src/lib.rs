@@ -16,6 +16,12 @@ mod auth_http;
 #[allow(dead_code)]
 mod authentication;
 // Ticket 19 keeps compatibility wrapping and time conversion private until Account installation.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "Ticket 28 lands artifact durability before the preparation worker consumes it"
+)]
+mod attachment_artifact_store;
 #[allow(dead_code)]
 mod authentication_installation;
 // Ticket 21 slice B needs a wall clock the Runtime can wait on, not only read.
@@ -42,6 +48,15 @@ pub use http_transport::http_transport_contract_schema;
 #[doc(hidden)]
 pub use http_transport::SerializedHttpExecutor;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use attachment_artifact_store::SqliteAttachmentArtifactStore;
+#[doc(hidden)]
+pub use attachment_artifact_store::{
+    ArtifactChunkWrite, ArtifactPublication, AttachmentArtifactOwner, AttachmentArtifactStore,
+    AttachmentArtifactStoreRequest, AttachmentArtifactStoreResponse, ExclusiveStartupBoundary,
+    PublishedArtifactChunk, ARTIFACT_CHUNK_BYTES,
+};
 #[cfg(feature = "platform-storage-contract-schema")]
 #[doc(hidden)]
 pub use platform_storage::platform_storage_contract_schema;
