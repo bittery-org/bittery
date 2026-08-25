@@ -29,16 +29,19 @@ use domain::AccountReplica;
     reason = "closed Replica types are re-exported for Runtime"
 )]
 pub(crate) use domain::{
-    AbandonBootstrapPlan, AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord,
-    AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan,
-    BootstrapAuthority, BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId,
-    BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase,
-    CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult, CursorAdvance,
-    GuardedCommitPlan, ImmutableHttpRequest, MarkRefreshRequiredPlan, ObservedOutcome,
-    OperationKind, OperationOutcomeResult, OperationReceiptRecord, OperationRecord,
-    OperationRejectionCode, OperationSchedulingState, PlanMutation, PlanResult,
-    PromoteBootstrapPlan, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
-    Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+    attachment_move_artifact_ref, attachment_move_intent_fingerprint, item_operation_fingerprint,
+    AbandonBootstrapPlan, AttachmentMoveArtifactRef, AttachmentMovePreparationRecord,
+    AttachmentMoveProgress, AttachmentMoveUploadState, AuthorityAttachmentRecord,
+    AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole,
+    AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority, BootstrapAuthoritySnapshot,
+    BootstrapContinuation, BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor,
+    BootstrapPageIdentity, BootstrapPhase, CleanupBootstrapGenerationPlan,
+    CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
+    MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
+    OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
+    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan, RecomputedPlanResult,
+    ReplicaItemRecord, ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
+    StageBootstrapPageResult, SyncCursor,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -1685,7 +1688,10 @@ impl Replica {
 
 fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) -> bool {
     let Some(current) = current else {
-        return next.items.is_empty() && next.operations.is_empty() && next.receipts.is_empty();
+        return next.items.is_empty()
+            && next.operations.is_empty()
+            && next.attachment_move_preparations.is_empty()
+            && next.receipts.is_empty();
     };
     let current_items: HashMap<_, _> = current
         .items
@@ -1707,6 +1713,16 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .iter()
         .map(|operation| (&operation.operation_id, operation))
         .collect();
+    let current_preparations: HashMap<_, _> = current
+        .attachment_move_preparations
+        .iter()
+        .map(|preparation| (&preparation.operation_id, preparation))
+        .collect();
+    let next_preparations: HashMap<_, _> = next
+        .attachment_move_preparations
+        .iter()
+        .map(|preparation| (&preparation.operation_id, preparation))
+        .collect();
     let current_receipts: HashMap<_, _> = current
         .receipts
         .iter()
@@ -1719,6 +1735,7 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .collect();
     current_items == next_items
         && current_operations == next_operations
+        && current_preparations == next_preparations
         && current_receipts == next_receipts
 }
 
@@ -1757,6 +1774,7 @@ impl InMemoryReplica {
                 lock_epoch: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
+                attachment_move_preparations: HashMap::new(),
                 receipts: HashMap::new(),
                 failure: None,
                 bootstrap: domain::BootstrapAuthority::default(),
@@ -2112,6 +2130,7 @@ impl ReplicaPersistence for InMemoryReplica {
                                 lock_epoch: head.lock_epoch,
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
+                                attachment_move_preparations: HashMap::new(),
                                 receipts: HashMap::new(),
                                 failure: head.failure,
                                 bootstrap: domain::BootstrapAuthority::default(),
@@ -2563,6 +2582,7 @@ mod persistence_contract_tests {
                     lock_epoch: 0,
                     items: vec![item("account-1", "item-1", "operation-1")],
                     operations: vec![operation("operation-1", "item-1")],
+                    attachment_move_preparations: vec![],
                     receipts: vec![],
                     failure: None,
                     bootstrap: BootstrapAuthority::default(),
@@ -2597,6 +2617,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![item("account-1", "item-1", "operation-1")],
                 operations: vec![operation("operation-1", "item-1")],
+                attachment_move_preparations: vec![],
                 receipts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
@@ -2917,6 +2938,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
+                attachment_move_preparations: vec![],
                 receipts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
@@ -3029,6 +3051,7 @@ mod persistence_contract_tests {
             lock_epoch: 0,
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
+            attachment_move_preparations: vec![],
             receipts: vec![],
             failure: None,
             bootstrap: BootstrapAuthority::default(),

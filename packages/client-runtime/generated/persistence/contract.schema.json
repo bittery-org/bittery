@@ -557,6 +557,7 @@
       "enum": [
         "optimisticItems",
         "operations",
+        "attachmentMovePreparations",
         "operationReceipts",
         "replicaMetadata",
         "bootstrapGenerations",

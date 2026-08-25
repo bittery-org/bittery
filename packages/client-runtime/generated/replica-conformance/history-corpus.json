@@ -1696,6 +1696,7 @@
         "attempt count beyond five and exact replay",
         "applied outcome and receipt reconciliation",
         "rejected outcome retains encrypted overlay",
+        "Attachment Move preparation checkpoint and atomic promotion",
         "known plaintext marker absent from durable rows"
       ],
       "steps": [
@@ -1997,7 +1998,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 }
               ]
@@ -2070,7 +2071,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 ]
               }
@@ -2179,7 +2180,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 ]
               }
@@ -2315,7 +2316,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 ]
               }
@@ -2440,7 +2441,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 ]
               }
@@ -2565,7 +2566,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   }
                 ]
               }
@@ -2720,7 +2721,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   },
                   {
                     "store": "authorityItems",
@@ -2872,7 +2873,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   },
                   {
                     "store": "authorityItems",
@@ -3021,7 +3022,7 @@
                       "accountId": "account-operations",
                       "recordId": "generation-1/existing-item"
                     },
-                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
                   },
                   {
                     "store": "authorityItems",
@@ -3030,6 +3031,1462 @@
                       "recordId": "generation-1/item-applied"
                     },
                     "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "accept Attachment Move preparation outside ready Operations",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "7",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "8",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"pending\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "8"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "8",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"pending\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "checkpoint one encrypted Attachment without a ready Operation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "8",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "9",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"needsUpload\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "9"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "9",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"needsUpload\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "checkpoint the stable ciphertext upload",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "9",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "10",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "10"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "10",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "atomically promote complete preparation into immutable ready Operation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "10",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "11",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "delete",
+                  "store": "attachmentMovePreparations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-attachment-move"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,112,114,101,112,97,114,101,100,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,73,118,34,58,34,116,97,114,103,101,116,45,107,101,121,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,65,116,116,97,99,104,109,101,110,116,75,101,121,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,107,101,121,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,73,118,34,58,34,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,78,97,109,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,110,97,109,101,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,110,97,109,101,45,105,118,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,105,116,101,109,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,105,116,101,109,45,105,118,34,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"09fa6453d22502583b677016305a1861b5a47fdced96d70f46ac127d6ee26219\",\"attachmentMoveRecovery\":{\"type\":\"prepared\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}},\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "11"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "11",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,112,114,101,112,97,114,101,100,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,73,118,34,58,34,116,97,114,103,101,116,45,107,101,121,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,65,116,116,97,99,104,109,101,110,116,75,101,121,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,107,101,121,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,73,118,34,58,34,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,78,97,109,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,110,97,109,101,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,110,97,109,101,45,105,118,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,105,116,101,109,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,105,116,101,109,45,105,118,34,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"09fa6453d22502583b677016305a1861b5a47fdced96d70f46ac127d6ee26219\",\"attachmentMoveRecovery\":{\"type\":\"prepared\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}},\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "reschedule promoted Attachment Move and synchronize its recovery",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "11",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "12",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,112,114,101,112,97,114,101,100,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,73,118,34,58,34,116,97,114,103,101,116,45,107,101,121,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,65,116,116,97,99,104,109,101,110,116,75,101,121,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,107,101,121,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,73,118,34,58,34,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,78,97,109,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,110,97,109,101,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,110,97,109,101,45,105,118,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,105,116,101,109,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,105,116,101,109,45,105,118,34,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"09fa6453d22502583b677016305a1861b5a47fdced96d70f46ac127d6ee26219\",\"attachmentMoveRecovery\":{\"type\":\"prepared\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}},\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "12"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "12",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,112,114,101,112,97,114,101,100,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,97,116,116,97,99,104,109,101,110,116,75,101,121,73,118,34,58,34,116,97,114,103,101,116,45,107,101,121,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,65,116,116,97,99,104,109,101,110,116,75,101,121,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,107,101,121,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,34,44,34,101,110,99,114,121,112,116,101,100,67,111,110,116,101,110,116,84,121,112,101,73,118,34,58,34,116,97,114,103,101,116,45,99,111,110,116,101,110,116,45,116,121,112,101,45,105,118,34,44,34,101,110,99,114,121,112,116,101,100,78,97,109,101,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,110,97,109,101,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,110,97,109,101,45,105,118,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,116,97,114,103,101,116,45,105,116,101,109,34,44,34,101,110,99,114,121,112,116,105,111,110,65,108,103,111,114,105,116,104,109,34,58,34,65,69,83,45,71,67,77,45,65,65,68,45,86,49,34,44,34,101,110,99,114,121,112,116,105,111,110,73,118,34,58,34,116,97,114,103,101,116,45,105,116,101,109,45,105,118,34,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"09fa6453d22502583b677016305a1861b5a47fdced96d70f46ac127d6ee26219\",\"attachmentMoveRecovery\":{\"type\":\"prepared\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}},\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "atomically reactivate promoted Attachment Move recovery after staging incomplete",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "12",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "13",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "delete",
+                  "store": "operations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-attachment-move"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "13"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "13",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "freeze stale-authority request with single-record recovery",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "13",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "14",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "delete",
+                  "store": "attachmentMovePreparations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-attachment-move"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,114,101,106,101,99,116,95,115,116,97,108,101,95,97,117,116,104,111,114,105,116,121,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"135e152eb8417f501c3c05d82decb88277940ca5efb8e5d90049f60d6fc1b2d2\",\"attachmentMoveRecovery\":{\"type\":\"rejectStaleAuthority\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}},\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "14"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "14",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,114,101,106,101,99,116,95,115,116,97,108,101,95,97,117,116,104,111,114,105,116,121,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"135e152eb8417f501c3c05d82decb88277940ca5efb8e5d90049f60d6fc1b2d2\",\"attachmentMoveRecovery\":{\"type\":\"rejectStaleAuthority\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}},\"scheduling\":{\"attemptCount\":\"3\",\"notBeforeMs\":\"3000\"}}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "reschedule stale-authority request and synchronize its recovery",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "14",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "15",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,114,101,106,101,99,116,95,115,116,97,108,101,95,97,117,116,104,111,114,105,116,121,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"135e152eb8417f501c3c05d82decb88277940ca5efb8e5d90049f60d6fc1b2d2\",\"attachmentMoveRecovery\":{\"type\":\"rejectStaleAuthority\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}},\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "15"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "15",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-attachment-move\",\"kind\":\"move_item\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"request\":{\"method\":\"POST\",\"path\":\"/api/v1/items/existing-item/moves\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"If-Match\",\"value\":\"\\\"1\\\"\"}],\"body\":[123,34,109,111,100,101,34,58,34,114,101,106,101,99,116,95,115,116,97,108,101,95,97,117,116,104,111,114,105,116,121,34,44,34,97,116,116,97,99,104,109,101,110,116,115,34,58,91,123,34,97,116,116,97,99,104,109,101,110,116,73,100,34,58,34,97,116,116,97,99,104,109,101,110,116,45,49,34,44,34,101,120,112,101,99,116,101,100,69,110,118,101,108,111,112,101,86,101,114,115,105,111,110,34,58,49,125,93,44,34,115,111,117,114,99,101,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,49,34,44,34,116,97,114,103,101,116,86,97,117,108,116,73,100,34,58,34,118,97,117,108,116,45,50,34,125]},\"requestFingerprint\":\"135e152eb8417f501c3c05d82decb88277940ca5efb8e5d90049f60d6fc1b2d2\",\"attachmentMoveRecovery\":{\"type\":\"rejectStaleAuthority\",\"preparation\":{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}},\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "atomically reactivate stale-authority recovery after staging incomplete",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "userId": "user-account-operations",
+                "replicaRevision": "15",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-operations",
+                "userId": "user-account-operations",
+                "incarnation": "incarnation-account-operations-first",
+                "replicaRevision": "16",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "delete",
+                  "store": "operations",
+                  "key": {
+                    "accountId": "account-operations",
+                    "recordId": "operation-attachment-move"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "16"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-operations",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-operations",
+                  "userId": "user-account-operations",
+                  "incarnation": "incarnation-account-operations-first",
+                  "replicaRevision": "16",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "existing-item"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-2\",\"operationId\":\"operation-attachment-move\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-existing-item\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "item-rejected"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-rejected\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-rejected\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-applied"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-applied\",\"kind\":\"create_item\",\"itemId\":\"item-applied\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"f7add8543507a41e2b9b8ccbb07b38ab68949176d4a7a35430747ccb479deddf\",\"result\":{\"type\":\"applied\",\"entityId\":\"item-applied\",\"version\":1},\"completedAtRevision\":\"5\"}"
+                  },
+                  {
+                    "store": "operationReceipts",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-rejected"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-rejected\",\"kind\":\"create_item\",\"itemId\":\"item-rejected\",\"vaultId\":\"vault-1\",\"requestFingerprint\":\"364b4ed3d8b53ba3efd0cc144a11cee23f5ee0d28e230000bd6c8e78c85b848f\",\"result\":{\"type\":\"rejected\",\"code\":\"vault_read_only\"},\"completedAtRevision\":\"7\"}"
+                  },
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedValue\",\"id\":\"cursor-after-applied\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"444fd7091edf86462cbf9405df6a56fc4c8827b70f986229aa77c48c70d75973\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"d4cb8f50e08f5c2a16f388fcb344073b4e5326d5a5a06b78e8fe38ff6e485011\",\"pinnedWatermark\":{\"type\":\"capturedValue\",\"id\":\"cursor-captured\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-operations\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/existing-item"
+                    },
+                    "payloadJson": "{\"id\":\"existing-item\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-existing-item\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "generation-1/item-applied"
+                    },
+                    "payloadJson": "{\"id\":\"item-applied\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-item-applied\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-operations\",\"lastModifiedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "attachmentMovePreparations",
+                    "key": {
+                      "accountId": "account-operations",
+                      "recordId": "operation-attachment-move"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-operations\",\"operationId\":\"operation-attachment-move\",\"itemId\":\"existing-item\",\"sourceVaultId\":\"vault-1\",\"targetVaultId\":\"vault-2\",\"expectedItemVersion\":1,\"targetEncryptedData\":\"opaque-target-item\",\"targetEncryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"targetEncryptionIv\":\"target-item-iv\",\"sourceAttachments\":[{\"id\":\"attachment-1\",\"itemId\":\"existing-item\",\"vaultId\":\"vault-1\",\"storageKey\":\"opaque/source/storage-key\",\"encryptedName\":\"opaque-source-name\",\"encryptionIv\":\"source-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-source-wrapped-key\",\"attachmentKeyIv\":\"source-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-source-content-type\",\"encryptedContentTypeIv\":\"source-content-type-iv\",\"envelopeVersion\":1,\"fileSize\":42,\"uploadedBy\":\"user-account-operations\",\"createdAt\":\"2026-08-24T00:00:00Z\"}],\"progress\":[{\"type\":\"encrypted\",\"attachmentId\":\"attachment-1\",\"expectedEnvelopeVersion\":1,\"artifact\":{\"artifactId\":\"cb583535379f067beba980b39a3a16ae74115609a733656cc5f8260de1a6ae7d\",\"ciphertextSha256\":\"9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a\",\"byteLength\":\"4\"},\"payload\":{\"encryptedName\":\"opaque-target-name\",\"encryptionIv\":\"target-name-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedAttachmentKey\":\"opaque-target-key\",\"attachmentKeyIv\":\"target-key-iv\",\"attachmentKeyAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptedContentType\":\"opaque-target-content-type\",\"encryptedContentTypeIv\":\"target-content-type-iv\"},\"upload\":\"uploaded\"}],\"intentFingerprint\":\"c4186ab73ac656cea414b46f3c3a80e4c676fc98bc26e8f2d59fd67a11bc4ca3\",\"scheduling\":{\"attemptCount\":\"4\",\"notBeforeMs\":\"4000\"}}"
                   }
                 ]
               }

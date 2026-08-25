@@ -9,9 +9,11 @@ use crate::{
     http_transport::{HttpHeader, HttpMethod},
     protocol::Incarnation,
     replica::{
-        AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRole,
-        AuthorityVaultType, InMemoryReplica, OperationKind, OperationRecord, ReplicaPersistence,
-        ReplicaPersistenceRequest, SerializedReplicaExecutor,
+        attachment_move_artifact_ref, AttachmentMoveArtifactRef, AttachmentMoveProgress,
+        AttachmentMoveUploadState, AuthorityAttachmentRecord, AuthorityItemCategory,
+        AuthorityItemRecord, AuthorityVaultRole, AuthorityVaultType, GuardedCommitPlan,
+        InMemoryReplica, OperationKind, OperationRecord, PlanMutation, PreparedMoveAttachment,
+        ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
     server_contract::{CreateItemBody, ItemCategory},
     test_fixtures::{personal_vault, seed_ready_personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
@@ -35,6 +37,8 @@ struct RecordingExecutor {
     requests: Mutex<Vec<String>>,
     fail_commits: AtomicBool,
     fence_before_commit: AtomicBool,
+    reverse_preparation_progress_on_load: AtomicBool,
+    invalidate_artifact_id_on_load: AtomicBool,
     cancel_after_commit: Mutex<Option<RequestCancellation>>,
 }
 
@@ -55,6 +59,8 @@ impl RecordingExecutor {
             requests: Mutex::new(Vec::new()),
             fail_commits: AtomicBool::new(false),
             fence_before_commit: AtomicBool::new(false),
+            reverse_preparation_progress_on_load: AtomicBool::new(false),
+            invalidate_artifact_id_on_load: AtomicBool::new(false),
             cancel_after_commit: Mutex::new(None),
         })
     }
@@ -68,6 +74,23 @@ impl RecordingExecutor {
     }
 
     fn seeded_item(deleted: bool, with_attachment: bool) -> Arc<Self> {
+        Self::seeded_item_with_attachments(
+            deleted,
+            with_attachment.then(attachment).into_iter().collect(),
+        )
+    }
+
+    fn seeded_with_two_attachments() -> Arc<Self> {
+        Self::seeded_item_with_attachments(
+            false,
+            vec![attachment(), attachment_named("attachment-2")],
+        )
+    }
+
+    fn seeded_item_with_attachments(
+        deleted: bool,
+        attachments: Vec<AuthorityAttachmentRecord>,
+    ) -> Arc<Self> {
         let state = InMemoryReplica::default();
         let account_id = AccountId::from(ACCOUNT);
         state
@@ -111,7 +134,7 @@ impl RecordingExecutor {
                     created_at: "2026-08-23T00:00:00Z".into(),
                     updated_at: "2026-08-23T00:00:00Z".into(),
                     deleted_at: deleted.then(|| "2026-08-24T00:00:00Z".into()),
-                    attachments: with_attachment.then(attachment).into_iter().collect(),
+                    attachments,
                 }],
             )
             .unwrap();
@@ -120,6 +143,8 @@ impl RecordingExecutor {
             requests: Mutex::new(Vec::new()),
             fail_commits: AtomicBool::new(false),
             fence_before_commit: AtomicBool::new(false),
+            reverse_preparation_progress_on_load: AtomicBool::new(false),
+            invalidate_artifact_id_on_load: AtomicBool::new(false),
             cancel_after_commit: Mutex::new(None),
         })
     }
@@ -159,6 +184,45 @@ impl SerializedReplicaExecutor for RecordingExecutor {
                 cancellation.cancel();
             }
         }
+        let mut response = serde_json::to_value(response).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "recording fake response could not be serialized",
+            )
+        })?;
+        if !is_commit
+            && self
+                .reverse_preparation_progress_on_load
+                .swap(false, Ordering::SeqCst)
+        {
+            let rows = response["rows"].as_array_mut().unwrap();
+            let row = rows
+                .iter_mut()
+                .find(|row| row["store"] == "attachmentMovePreparations")
+                .unwrap();
+            let mut payload: serde_json::Value =
+                serde_json::from_str(row["payloadJson"].as_str().unwrap()).unwrap();
+            payload["progress"].as_array_mut().unwrap().reverse();
+            row["payloadJson"] =
+                serde_json::Value::String(serde_json::to_string(&payload).unwrap());
+        }
+        if !is_commit
+            && self
+                .invalidate_artifact_id_on_load
+                .swap(false, Ordering::SeqCst)
+        {
+            let rows = response["rows"].as_array_mut().unwrap();
+            let row = rows
+                .iter_mut()
+                .find(|row| row["store"] == "attachmentMovePreparations")
+                .unwrap();
+            let mut payload: serde_json::Value =
+                serde_json::from_str(row["payloadJson"].as_str().unwrap()).unwrap();
+            payload["progress"][0]["artifact"]["artifactId"] =
+                serde_json::Value::String("../foreign-artifact".into());
+            row["payloadJson"] =
+                serde_json::Value::String(serde_json::to_string(&payload).unwrap());
+        }
         serde_json::to_string(&response).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -186,7 +250,10 @@ const ATTACHMENT_NAME: &str = "Zzz-Attachment-Name.txt";
 const ATTACHMENT_CONTENT_TYPE: &str = "text/x-z-marker";
 
 fn attachment() -> AuthorityAttachmentRecord {
-    let attachment_id = "attachment-1";
+    attachment_named("attachment-1")
+}
+
+fn attachment_named(attachment_id: &str) -> AuthorityAttachmentRecord {
     let attachment_key = [13u8; 32];
     let context = |entity_type: &str| AadContext {
         vault_id: TEST_VAULT_ID.into(),
@@ -427,7 +494,7 @@ async fn the_persisted_plan_carries_no_plaintext_and_no_credential() {
 #[tokio::test]
 async fn the_replica_refuses_durable_request_bytes_that_carry_a_credential() {
     let executor = RecordingExecutor::seeded();
-    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
     let snapshot = runtime.replica().snapshot(&account_id).unwrap();
     let mut operation = crate::test_fixtures::test_operation("operation-1", "item-1");
     operation.request.headers.push(HttpHeader {
@@ -664,7 +731,7 @@ async fn a_team_vault_and_a_read_only_vault_are_refused() {
 #[tokio::test]
 async fn each_create_mints_a_new_identity_and_one_item_owes_one_operation() {
     let executor = RecordingExecutor::seeded();
-    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
     let (first_operation, first_item, _) = accepted(
         runtime
             .request(
@@ -1171,6 +1238,630 @@ async fn remaining_item_kinds_are_durably_accepted_under_explicit_account_scope(
 }
 
 #[tokio::test]
+async fn attachment_bearing_move_is_accepted_offline_before_final_request_exists() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+
+    let outcome = runtime
+        .request(
+            RuntimeRequest::MoveItem {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                target_vault_id: "vault-2".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .expect("an offline Attachment-bearing Move is durably accepted");
+
+    let (operation_id, item_id, _) = accepted(outcome);
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(
+        snapshot.operations.is_empty(),
+        "preparation must not enter the dispatch-ready Operation collection"
+    );
+    assert_eq!(snapshot.attachment_move_preparations.len(), 1);
+    let preparation = &snapshot.attachment_move_preparations[0];
+    assert_eq!(preparation.account_id, account_id);
+    assert_eq!(preparation.operation_id, operation_id);
+    assert_eq!(preparation.item_id, item_id);
+    assert_eq!(preparation.source_vault_id, TEST_VAULT_ID);
+    assert_eq!(preparation.target_vault_id, "vault-2");
+    assert_eq!(preparation.expected_item_version, 1);
+    assert_eq!(preparation.source_attachments.len(), 1);
+    assert!(matches!(
+        preparation.progress.as_slice(),
+        [AttachmentMoveProgress::Pending { attachment_id, expected_envelope_version: 1 }]
+            if attachment_id == "attachment-1"
+    ));
+    assert_eq!(snapshot.items[0].vault_id, "vault-2");
+
+    let durable_json = executor.recorded().join("\n");
+    assert!(!durable_json.contains(ATTACHMENT_NAME));
+    assert!(!durable_json.contains(ATTACHMENT_CONTENT_TYPE));
+
+    drop(runtime);
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    restarted
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let restored = restarted.replica().snapshot(&account_id).unwrap();
+    assert_eq!(
+        restored.attachment_move_preparations,
+        snapshot.attachment_move_preparations
+    );
+    assert!(restored.operations.is_empty());
+}
+
+#[tokio::test]
+async fn attachment_move_restart_rejects_reordered_durable_progress() {
+    let executor = RecordingExecutor::seeded_with_two_attachments();
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    runtime
+        .request(
+            RemainingKindCase::Move.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    drop(runtime);
+
+    executor
+        .reverse_preparation_progress_on_load
+        .store(true, Ordering::SeqCst);
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    let error = restarted.replica().load(&account_id).await.unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+}
+
+fn prepared_attachment() -> PreparedMoveAttachment {
+    PreparedMoveAttachment {
+        encrypted_name: "target-encrypted-name".into(),
+        encryption_iv: "target-name-iv".into(),
+        encryption_algorithm: "AES-GCM-AAD-V1".into(),
+        encrypted_attachment_key: "target-wrapped-key".into(),
+        attachment_key_iv: "target-key-iv".into(),
+        attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+        encrypted_content_type: "target-encrypted-content-type".into(),
+        encrypted_content_type_iv: "target-content-type-iv".into(),
+    }
+}
+
+fn prepared_artifact(account_id: &AccountId, operation_id: &str) -> AttachmentMoveArtifactRef {
+    attachment_move_artifact_ref(
+        account_id,
+        operation_id,
+        "attachment-1",
+        "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+        4,
+    )
+    .unwrap()
+}
+
+async fn commit_move_mutation(
+    runtime: &Runtime,
+    account_id: &AccountId,
+    mutation: PlanMutation,
+) -> Result<crate::replica::PlanResult, RuntimeError> {
+    let snapshot = runtime.replica().snapshot(account_id).unwrap();
+    runtime
+        .execute_plan(GuardedCommitPlan::new(
+            account_id.clone(),
+            snapshot.incarnation,
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![mutation],
+        ))
+        .await
+}
+
+#[tokio::test]
+async fn attachment_move_checkpoints_reset_and_promote_without_rewriting_intent() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let (operation_id, _, _) = accepted(
+        runtime
+            .request(
+                RemainingKindCase::Move.request(account_id.clone()),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+    let accepted_preparation = runtime
+        .replica()
+        .snapshot(&account_id)
+        .unwrap()
+        .attachment_move_preparations[0]
+        .clone();
+    let pending = accepted_preparation.progress[0].clone();
+    let encrypted = AttachmentMoveProgress::Encrypted {
+        attachment_id: "attachment-1".into(),
+        expected_envelope_version: 1,
+        artifact: attachment_move_artifact_ref(
+            &account_id,
+            &operation_id,
+            "attachment-1",
+            "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+            4,
+        )
+        .unwrap(),
+        payload: Box::new(prepared_attachment()),
+        upload: AttachmentMoveUploadState::NeedsUpload,
+    };
+    let mut wrong_digest = encrypted.clone();
+    let AttachmentMoveProgress::Encrypted { artifact, .. } = &mut wrong_digest else {
+        unreachable!()
+    };
+    artifact.ciphertext_sha256 = "G".repeat(64);
+    let invalid = commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::CheckpointAttachmentMove {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            expected: pending.clone(),
+            next: wrong_digest,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(invalid.code, RuntimeErrorCode::InvariantViolation);
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::CheckpointAttachmentMove {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            expected: pending.clone(),
+            next: encrypted.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let after_encryption = runtime.replica().snapshot(&account_id).unwrap();
+    let durable_intent = &after_encryption.attachment_move_preparations[0];
+    assert_eq!(
+        durable_intent.intent_fingerprint,
+        accepted_preparation.intent_fingerprint
+    );
+    assert_eq!(
+        durable_intent.source_attachments,
+        accepted_preparation.source_attachments
+    );
+    assert_eq!(
+        durable_intent.progress[0], encrypted,
+        "the immutable artifact reference survives the checkpoint"
+    );
+    let AttachmentMoveProgress::Encrypted { artifact, .. } = &encrypted else {
+        unreachable!()
+    };
+    let durable_wire = executor.recorded().join("\n");
+    assert!(durable_wire.contains(&format!(r#"\"artifactId\":\"{}\""#, artifact.artifact_id)));
+    assert!(durable_wire.contains(r#"\"byteLength\":\"4\""#));
+    assert!(!durable_wire.contains("AQIDBA=="));
+    assert!(!durable_wire.contains(r#"\"encryptedBlob\""#));
+    assert!(!durable_wire.contains("[1,2,3,4]"));
+
+    executor
+        .invalidate_artifact_id_on_load
+        .store(true, Ordering::SeqCst);
+    let hostile_restart = Runtime::with_serialized_replica_executor(executor.clone());
+    let invalid_id = hostile_restart
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap_err();
+    assert_eq!(invalid_id.code, RuntimeErrorCode::InvariantViolation);
+
+    drop(runtime);
+    let restarted = Runtime::with_serialized_replica_executor(executor.clone());
+    restarted
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    restarted.unlock_account(&account_id).await.unwrap();
+    assert_eq!(
+        restarted
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .attachment_move_preparations[0]
+            .progress[0],
+        encrypted,
+        "restart must retain the same complete-artifact reference committed before the crash"
+    );
+    let runtime = restarted;
+
+    let mismatch = commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::CheckpointAttachmentMove {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            expected: pending,
+            next: encrypted.clone(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(mismatch.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(
+        runtime.replica().snapshot(&account_id).unwrap(),
+        after_encryption
+    );
+
+    let premature = commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::PromoteAttachmentMovePreparation {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(premature.code, RuntimeErrorCode::InvariantViolation);
+
+    let AttachmentMoveProgress::Encrypted {
+        attachment_id,
+        expected_envelope_version,
+        artifact,
+        payload,
+        ..
+    } = encrypted.clone()
+    else {
+        unreachable!()
+    };
+    let uploaded = AttachmentMoveProgress::Encrypted {
+        attachment_id,
+        expected_envelope_version,
+        artifact,
+        payload,
+        upload: AttachmentMoveUploadState::Uploaded,
+    };
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::CheckpointAttachmentMove {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            expected: encrypted.clone(),
+            next: uploaded.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::ResetAttachmentMoveUpload {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            attachment_id: "attachment-1".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .attachment_move_preparations[0]
+            .progress,
+        vec![encrypted.clone()],
+        "generation reset preserves the target artifact and only clears upload progress"
+    );
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::CheckpointAttachmentMove {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+            expected: encrypted,
+            next: uploaded.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::PromoteAttachmentMovePreparation {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: accepted_preparation.intent_fingerprint,
+        },
+    )
+    .await
+    .unwrap();
+
+    let promoted = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(promoted.attachment_move_preparations.is_empty());
+    assert_eq!(promoted.operations.len(), 1);
+    assert_eq!(promoted.operations[0].operation_id, operation_id);
+    assert_eq!(promoted.items[0].operation_id, operation_id);
+    assert_eq!(
+        promoted.operations[0].request_fingerprint,
+        create::item_operation_fingerprint(
+            OperationKind::MoveItem,
+            "POST /api/v1/items/{itemId}/moves",
+            "item-existing",
+            &promoted.operations[0].request.body,
+            1,
+        )
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&promoted.operations[0].request.body).unwrap();
+    assert_eq!(body["mode"], "prepared");
+    assert_eq!(body["attachments"][0]["attachmentId"], "attachment-1");
+
+    executor.fail_commits.store(true, Ordering::SeqCst);
+    assert!(commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::ReactivateAttachmentMovePreparation {
+            operation_id: operation_id.clone(),
+            expected_request_fingerprint: promoted.operations[0].request_fingerprint,
+        },
+    )
+    .await
+    .is_err());
+    assert_eq!(runtime.replica().snapshot(&account_id).unwrap(), promoted);
+    executor.fail_commits.store(false, Ordering::SeqCst);
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::ReactivateAttachmentMovePreparation {
+            operation_id: operation_id.clone(),
+            expected_request_fingerprint: promoted.operations[0].request_fingerprint,
+        },
+    )
+    .await
+    .unwrap();
+    let reactivated = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(reactivated.operations.is_empty());
+    assert_eq!(reactivated.attachment_move_preparations.len(), 1);
+    assert_eq!(
+        reactivated.attachment_move_preparations[0].progress,
+        vec![uploaded],
+        "nonterminal staging recovery retains the exact artifact reference and progress"
+    );
+}
+
+#[tokio::test]
+async fn stale_authority_freeze_uses_original_complete_intent() {
+    let executor = RecordingExecutor::seeded_with_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let (operation_id, _, _) = accepted(
+        runtime
+            .request(
+                RemainingKindCase::Move.request(account_id.clone()),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+    let preparation = runtime
+        .replica()
+        .snapshot(&account_id)
+        .unwrap()
+        .attachment_move_preparations[0]
+        .clone();
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::FreezeAttachmentMoveRejection {
+            operation_id: operation_id.clone(),
+            expected_intent_fingerprint: preparation.intent_fingerprint,
+        },
+    )
+    .await
+    .unwrap();
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.attachment_move_preparations.is_empty());
+    let operation = &snapshot.operations[0];
+    assert_eq!(operation.operation_id, operation_id);
+    let body: serde_json::Value = serde_json::from_slice(&operation.request.body).unwrap();
+    assert_eq!(body["mode"], "reject_stale_authority");
+    assert_eq!(body["sourceVaultId"], TEST_VAULT_ID);
+    assert_eq!(body["targetVaultId"], "vault-2");
+    assert_eq!(
+        body["attachments"],
+        serde_json::json!([{
+            "attachmentId": "attachment-1",
+            "expectedEnvelopeVersion": 1
+        }])
+    );
+
+    commit_move_mutation(
+        &runtime,
+        &account_id,
+        PlanMutation::ReactivateAttachmentMovePreparation {
+            operation_id: operation_id.clone(),
+            expected_request_fingerprint: operation.request_fingerprint,
+        },
+    )
+    .await
+    .unwrap();
+    let reactivated = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(reactivated.operations.is_empty());
+    assert_eq!(reactivated.attachment_move_preparations, vec![preparation]);
+}
+
+#[tokio::test]
+async fn promoted_and_rejected_attachment_moves_reschedule_and_restart_with_recovery() {
+    for reject_stale in [false, true] {
+        let executor = RecordingExecutor::seeded_with_item(false);
+        let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+        let (operation_id, _, _) = accepted(
+            runtime
+                .request(
+                    RemainingKindCase::Move.request(account_id.clone()),
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+        );
+        let preparation = runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .attachment_move_preparations[0]
+            .clone();
+        if reject_stale {
+            commit_move_mutation(
+                &runtime,
+                &account_id,
+                PlanMutation::FreezeAttachmentMoveRejection {
+                    operation_id: operation_id.clone(),
+                    expected_intent_fingerprint: preparation.intent_fingerprint,
+                },
+            )
+            .await
+            .unwrap();
+        } else {
+            let pending = preparation.progress[0].clone();
+            let needs_upload = AttachmentMoveProgress::Encrypted {
+                attachment_id: "attachment-1".into(),
+                expected_envelope_version: 1,
+                artifact: prepared_artifact(&account_id, &operation_id),
+                payload: Box::new(prepared_attachment()),
+                upload: AttachmentMoveUploadState::NeedsUpload,
+            };
+            let AttachmentMoveProgress::Encrypted {
+                attachment_id,
+                expected_envelope_version,
+                artifact,
+                payload,
+                ..
+            } = needs_upload.clone()
+            else {
+                unreachable!()
+            };
+            let uploaded = AttachmentMoveProgress::Encrypted {
+                attachment_id,
+                expected_envelope_version,
+                artifact,
+                payload,
+                upload: AttachmentMoveUploadState::Uploaded,
+            };
+            commit_move_mutation(
+                &runtime,
+                &account_id,
+                PlanMutation::CheckpointAttachmentMove {
+                    operation_id: operation_id.clone(),
+                    expected_intent_fingerprint: preparation.intent_fingerprint,
+                    expected: pending,
+                    next: needs_upload.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            commit_move_mutation(
+                &runtime,
+                &account_id,
+                PlanMutation::CheckpointAttachmentMove {
+                    operation_id: operation_id.clone(),
+                    expected_intent_fingerprint: preparation.intent_fingerprint,
+                    expected: needs_upload,
+                    next: uploaded,
+                },
+            )
+            .await
+            .unwrap();
+            commit_move_mutation(
+                &runtime,
+                &account_id,
+                PlanMutation::PromoteAttachmentMovePreparation {
+                    operation_id: operation_id.clone(),
+                    expected_intent_fingerprint: preparation.intent_fingerprint,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let mut rescheduled =
+            runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
+        rescheduled.scheduling.attempt_count = 9;
+        rescheduled.scheduling.not_before_ms = 42_000;
+        commit_move_mutation(
+            &runtime,
+            &account_id,
+            PlanMutation::RescheduleOperation(rescheduled.clone()),
+        )
+        .await
+        .unwrap();
+        let durable_rescheduled =
+            runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
+        drop(runtime);
+
+        let restarted = Runtime::with_serialized_replica_executor(executor);
+        restarted
+            .replica()
+            .load(&account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        restarted.unlock_account(&account_id).await.unwrap();
+        assert_eq!(
+            restarted
+                .replica()
+                .snapshot(&account_id)
+                .unwrap()
+                .operations,
+            vec![durable_rescheduled]
+        );
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_acceptance_has_one_atomic_crash_boundary() {
+    let failed_executor = RecordingExecutor::seeded_with_item(false);
+    let (failed_runtime, account_id) = unlocked_runtime(failed_executor.clone()).await;
+    failed_executor.fail_commits.store(true, Ordering::SeqCst);
+    assert!(failed_runtime
+        .request(
+            RemainingKindCase::Move.request(account_id.clone()),
+            RequestCancellation::new(),
+        )
+        .await
+        .is_err());
+    let unchanged = failed_runtime.replica().snapshot(&account_id).unwrap();
+    assert!(unchanged.attachment_move_preparations.is_empty());
+    assert!(unchanged.operations.is_empty());
+    assert!(unchanged.items.is_empty());
+
+    let committed_executor = RecordingExecutor::seeded_with_item(false);
+    let (committed_runtime, account_id) = unlocked_runtime(committed_executor.clone()).await;
+    let cancellation = RequestCancellation::new();
+    *committed_executor.cancel_after_commit.lock().unwrap() = Some(cancellation.clone());
+    let error = committed_runtime
+        .request(
+            RemainingKindCase::Move.request(account_id.clone()),
+            cancellation,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    let committed = committed_runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(committed.attachment_move_preparations.len(), 1);
+    assert!(committed.operations.is_empty());
+    assert_eq!(committed.items.len(), 1);
+    assert_eq!(
+        committed.items[0].operation_id,
+        committed.attachment_move_preparations[0].operation_id
+    );
+}
+
+#[tokio::test]
 async fn remaining_item_acceptance_never_infers_an_active_account() {
     let executor = RecordingExecutor::seeded_with_item(false);
     let (runtime, account_id) = unlocked_runtime(executor).await;
@@ -1302,34 +1993,52 @@ async fn a_second_pending_operation_for_one_item_is_refused_without_changing_sta
 }
 
 #[tokio::test]
-async fn attachment_bearing_move_refuses_before_writing_and_preserves_authority() {
+async fn attachment_bearing_move_accepts_without_mutating_source_authority() {
     let executor = RecordingExecutor::seeded_with_item(false);
     let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
     let before_snapshot = runtime.replica().snapshot(&account_id).unwrap();
     let before_projection = visible(&runtime, &account_id);
 
-    let error = runtime
+    let response = runtime
         .request(
             RemainingKindCase::Move.request(account_id.clone()),
             RequestCancellation::new(),
         )
         .await
-        .unwrap_err();
-    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
-    assert_eq!(
-        runtime.replica().snapshot(&account_id).unwrap(),
-        before_snapshot
-    );
-    assert_eq!(visible(&runtime, &account_id), before_projection);
+        .unwrap();
+    let _ = accepted(response);
+    let after = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(after.bootstrap, before_snapshot.bootstrap);
+    assert_eq!(after.attachment_move_preparations.len(), 1);
+    assert!(after.operations.is_empty());
+    let pending = visible(&runtime, &account_id);
+    assert_eq!(pending.items[0].vault_id, "vault-2");
+    assert_eq!(pending.items[0].status, ItemProjectionStatus::Pending);
+    assert_eq!(pending.items[0].attachments.len(), 1);
+    assert_eq!(pending.items[0].attachments[0].name, ATTACHMENT_NAME);
     assert_eq!(before_projection.items[0].attachments.len(), 1);
     assert_eq!(
         before_projection.items[0].attachments[0].name,
         ATTACHMENT_NAME
     );
-    assert!(!executor
+    assert!(executor
         .recorded()
         .iter()
         .any(|request| request.contains("\"type\":\"commit\"")));
+
+    drop(runtime);
+    let restarted = Runtime::with_serialized_replica_executor(executor);
+    restarted
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    restarted.unlock_account(&account_id).await.unwrap();
+    let restored = visible(&restarted, &account_id);
+    assert_eq!(restored.items[0].status, ItemProjectionStatus::Pending);
+    assert_eq!(restored.items[0].attachments.len(), 1);
+    assert_eq!(restored.items[0].attachments[0].name, ATTACHMENT_NAME);
 }
 
 #[tokio::test]

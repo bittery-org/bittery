@@ -44,6 +44,32 @@ impl GuardedCommitPlan {
 pub(crate) enum PlanMutation {
     PutOptimisticItem(ReplicaItemRecord),
     AcceptOperation(OperationRecord),
+    AcceptAttachmentMovePreparation(AttachmentMovePreparationRecord),
+    RescheduleAttachmentMovePreparation(AttachmentMovePreparationRecord),
+    CheckpointAttachmentMove {
+        operation_id: String,
+        expected_intent_fingerprint: Sha256Fingerprint,
+        expected: AttachmentMoveProgress,
+        next: AttachmentMoveProgress,
+    },
+    ResetAttachmentMoveUpload {
+        operation_id: String,
+        expected_intent_fingerprint: Sha256Fingerprint,
+        attachment_id: String,
+    },
+    FreezeAttachmentMoveRejection {
+        operation_id: String,
+        expected_intent_fingerprint: Sha256Fingerprint,
+    },
+    PromoteAttachmentMovePreparation {
+        operation_id: String,
+        expected_intent_fingerprint: Sha256Fingerprint,
+    },
+    /// Returns a promoted Move to preparation after a nonterminal staging-incomplete response.
+    ReactivateAttachmentMovePreparation {
+        operation_id: String,
+        expected_request_fingerprint: Sha256Fingerprint,
+    },
     /// Records one dispatch attempt's diagnostic count and next eligible time.
     ///
     /// The whole record travels so the Replica can prove the immutable half did not move. No
@@ -206,7 +232,177 @@ pub(crate) struct OperationRecord {
     /// Covers the request, never the Operation ID. A Server outcome that carries this Operation ID
     /// with another fingerprint is therefore a detectable identity reuse, not a replay.
     pub request_fingerprint: Sha256Fingerprint,
+    /// Opaque restart material retained by a prepared or stale-authority Attachment Move request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_move_recovery: Option<AttachmentMoveRecovery>,
     pub scheduling: OperationSchedulingState,
+}
+
+/// One accepted Attachment-bearing Move before its final HTTP request can exist.
+///
+/// This lives outside `operations`, so the ordinary dispatcher cannot observe incomplete work.
+/// Every field is encrypted Server authority or opaque identity; transient credentials are absent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMovePreparationRecord {
+    pub account_id: AccountId,
+    pub operation_id: String,
+    pub item_id: String,
+    pub source_vault_id: String,
+    pub target_vault_id: String,
+    pub expected_item_version: i32,
+    pub target_encrypted_data: String,
+    pub target_encryption_algorithm: String,
+    pub target_encryption_iv: String,
+    pub source_attachments: Vec<AuthorityAttachmentRecord>,
+    pub progress: Vec<AttachmentMoveProgress>,
+    pub intent_fingerprint: Sha256Fingerprint,
+    pub scheduling: OperationSchedulingState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AttachmentMoveRecovery {
+    Prepared {
+        preparation: Box<AttachmentMovePreparationRecord>,
+    },
+    RejectStaleAuthority {
+        preparation: Box<AttachmentMovePreparationRecord>,
+    },
+}
+
+impl AttachmentMoveRecovery {
+    fn preparation(&self) -> &AttachmentMovePreparationRecord {
+        match self {
+            Self::Prepared { preparation } | Self::RejectStaleAuthority { preparation } => {
+                preparation
+            }
+        }
+    }
+
+    fn preparation_mut(&mut self) -> &mut AttachmentMovePreparationRecord {
+        match self {
+            Self::Prepared { preparation } | Self::RejectStaleAuthority { preparation } => {
+                preparation
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AttachmentMoveProgress {
+    Pending {
+        attachment_id: String,
+        expected_envelope_version: i32,
+    },
+    Encrypted {
+        attachment_id: String,
+        expected_envelope_version: i32,
+        artifact: AttachmentMoveArtifactRef,
+        payload: Box<PreparedMoveAttachment>,
+        upload: AttachmentMoveUploadState,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveArtifactRef {
+    pub artifact_id: String,
+    pub ciphertext_sha256: String,
+    #[serde(with = "decimal_u64")]
+    pub byte_length: u64,
+}
+
+pub(crate) fn attachment_move_artifact_ref(
+    account_id: &AccountId,
+    operation_id: &str,
+    attachment_id: &str,
+    ciphertext_sha256: &str,
+    byte_length: u64,
+) -> Result<AttachmentMoveArtifactRef, RuntimeError> {
+    use sha2::{Digest, Sha256};
+    if operation_id.is_empty()
+        || attachment_id.is_empty()
+        || byte_length == 0
+        || !valid_ciphertext_digest(ciphertext_sha256)
+    {
+        return Err(replica_invariant(
+            "Attachment Move artifact identity is invalid",
+        ));
+    }
+    let mut hasher = Sha256::new();
+    let byte_length_bytes = byte_length.to_be_bytes();
+    for part in [
+        b"bittery.attachment-move-artifact.v1".as_slice(),
+        account_id.as_str().as_bytes(),
+        operation_id.as_bytes(),
+        attachment_id.as_bytes(),
+        ciphertext_sha256.as_bytes(),
+        &byte_length_bytes,
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Ok(AttachmentMoveArtifactRef {
+        artifact_id: format!("{:x}", hasher.finalize()),
+        ciphertext_sha256: ciphertext_sha256.to_owned(),
+        byte_length,
+    })
+}
+
+impl AttachmentMoveProgress {
+    pub(crate) fn attachment_id(&self) -> &str {
+        match self {
+            Self::Pending { attachment_id, .. } | Self::Encrypted { attachment_id, .. } => {
+                attachment_id
+            }
+        }
+    }
+
+    pub(crate) fn expected_envelope_version(&self) -> i32 {
+        match self {
+            Self::Pending {
+                expected_envelope_version,
+                ..
+            }
+            | Self::Encrypted {
+                expected_envelope_version,
+                ..
+            } => *expected_envelope_version,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AttachmentMoveUploadState {
+    NeedsUpload,
+    Uploaded,
+}
+
+/// The target-scoped encrypted metadata that becomes part of the final Move body.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PreparedMoveAttachment {
+    pub encrypted_name: String,
+    pub encryption_iv: String,
+    pub encryption_algorithm: String,
+    pub encrypted_attachment_key: String,
+    pub attachment_key_iv: String,
+    pub attachment_key_algorithm: String,
+    pub encrypted_content_type: String,
+    pub encrypted_content_type_iv: String,
 }
 
 /// One encrypted optimistic Item overlay, keyed by the Item and the Operation that owes it.
@@ -758,6 +954,7 @@ pub(crate) struct ReplicaSnapshot {
     pub lock_epoch: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
+    pub attachment_move_preparations: Vec<AttachmentMovePreparationRecord>,
     pub receipts: Vec<OperationReceiptRecord>,
     pub failure: Option<RuntimeErrorCode>,
     #[serde(skip)]
@@ -790,6 +987,7 @@ pub(super) struct AccountReplica {
     pub(super) lock_epoch: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
+    pub(super) attachment_move_preparations: HashMap<String, AttachmentMovePreparationRecord>,
     pub(super) receipts: HashMap<String, OperationReceiptRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
     pub(super) bootstrap: BootstrapAuthority,
@@ -813,6 +1011,11 @@ impl AccountReplica {
                 .into_iter()
                 .map(|operation| (operation.operation_id.clone(), operation))
                 .collect(),
+            attachment_move_preparations: snapshot
+                .attachment_move_preparations
+                .into_iter()
+                .map(|preparation| (preparation.operation_id.clone(), preparation))
+                .collect(),
             receipts: snapshot
                 .receipts
                 .into_iter()
@@ -821,6 +1024,51 @@ impl AccountReplica {
             failure: snapshot.failure,
             bootstrap: snapshot.bootstrap,
         }
+    }
+
+    pub(super) fn validate_durable_work(&self) -> Result<(), RuntimeError> {
+        let mut operation_ids = HashSet::new();
+        let mut item_ids = HashSet::new();
+        for operation in self.operations.values() {
+            check_immutable_request(operation)?;
+            if let Some(recovery) = &operation.attachment_move_recovery {
+                let preparation = recovery.preparation();
+                self.check_attachment_move_preparation(preparation, false)?;
+                let reconstructed = match recovery {
+                    AttachmentMoveRecovery::Prepared { .. } => {
+                        prepared_move_operation(preparation)?
+                    }
+                    AttachmentMoveRecovery::RejectStaleAuthority { .. } => {
+                        rejection_operation(preparation)?
+                    }
+                };
+                if reconstructed != *operation {
+                    return Err(replica_invariant(
+                        "Attachment Move recovery does not match its immutable request",
+                    ));
+                }
+            }
+            if !operation_ids.insert(operation.operation_id.clone())
+                || !item_ids.insert(operation.item_id.clone())
+                || self.receipts.contains_key(&operation.operation_id)
+            {
+                return Err(replica_invariant(
+                    "Replica active Operation identity is inconsistent",
+                ));
+            }
+        }
+        for preparation in self.attachment_move_preparations.values() {
+            self.check_attachment_move_preparation(preparation, false)?;
+            if !operation_ids.insert(preparation.operation_id.clone())
+                || !item_ids.insert(preparation.item_id.clone())
+                || self.receipts.contains_key(&preparation.operation_id)
+            {
+                return Err(replica_invariant(
+                    "Replica Attachment Move identity is inconsistent",
+                ));
+            }
+        }
+        Ok(())
     }
 
     #[allow(dead_code, reason = "the persistence wire invokes this model next")]
@@ -1248,7 +1496,11 @@ impl AccountReplica {
                 self.items.insert(item.item_id.clone(), item);
             }
             PlanMutation::AcceptOperation(operation) => {
-                if self.operations.contains_key(&operation.operation_id) {
+                if self.operations.contains_key(&operation.operation_id)
+                    || self
+                        .attachment_move_preparations
+                        .contains_key(&operation.operation_id)
+                {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "operation identity was reused",
@@ -1264,6 +1516,10 @@ impl AccountReplica {
                     .operations
                     .values()
                     .any(|active| active.item_id == operation.item_id)
+                    || self
+                        .attachment_move_preparations
+                        .values()
+                        .any(|active| active.item_id == operation.item_id)
                 {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
@@ -1273,7 +1529,145 @@ impl AccountReplica {
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
             }
-            PlanMutation::RescheduleOperation(operation) => {
+            PlanMutation::AcceptAttachmentMovePreparation(preparation) => {
+                self.check_attachment_move_preparation(&preparation, true)?;
+                if self.operations.contains_key(&preparation.operation_id)
+                    || self
+                        .attachment_move_preparations
+                        .contains_key(&preparation.operation_id)
+                    || self.receipts.contains_key(&preparation.operation_id)
+                {
+                    return Err(replica_invariant(
+                        "Attachment Move operation identity was reused",
+                    ));
+                }
+                if self
+                    .operations
+                    .values()
+                    .any(|active| active.item_id == preparation.item_id)
+                    || self
+                        .attachment_move_preparations
+                        .values()
+                        .any(|active| active.item_id == preparation.item_id)
+                {
+                    return Err(replica_invariant(
+                        "another active Operation already owns this Item",
+                    ));
+                }
+                self.attachment_move_preparations
+                    .insert(preparation.operation_id.clone(), preparation);
+            }
+            PlanMutation::RescheduleAttachmentMovePreparation(preparation) => {
+                let existing = self
+                    .attachment_move_preparations
+                    .get(&preparation.operation_id)
+                    .ok_or_else(|| {
+                        replica_invariant("cannot reschedule an unknown Attachment Move")
+                    })?;
+                let mut expected = existing.clone();
+                expected.scheduling = preparation.scheduling;
+                if expected != preparation
+                    || preparation.scheduling.attempt_count < existing.scheduling.attempt_count
+                {
+                    return Err(replica_invariant(
+                        "rescheduling cannot change accepted Attachment Move intent or progress",
+                    ));
+                }
+                self.attachment_move_preparations
+                    .insert(preparation.operation_id.clone(), preparation);
+            }
+            PlanMutation::CheckpointAttachmentMove {
+                operation_id,
+                expected_intent_fingerprint,
+                expected,
+                next,
+            } => {
+                let preparation = self
+                    .attachment_move_preparation_mut(&operation_id, expected_intent_fingerprint)?;
+                validate_checkpoint_transition(&expected, &next)?;
+                if let AttachmentMoveProgress::Encrypted {
+                    attachment_id,
+                    artifact,
+                    ..
+                } = &next
+                {
+                    validate_artifact_ref(
+                        artifact,
+                        &preparation.account_id,
+                        &operation_id,
+                        attachment_id,
+                    )?;
+                }
+                let progress = preparation
+                    .progress
+                    .iter_mut()
+                    .find(|progress| progress.attachment_id() == expected.attachment_id())
+                    .ok_or_else(|| replica_invariant("Attachment Move checkpoint is foreign"))?;
+                if progress != &expected {
+                    return Err(replica_invariant(
+                        "Attachment Move checkpoint does not match durable progress",
+                    ));
+                }
+                *progress = next;
+            }
+            PlanMutation::ResetAttachmentMoveUpload {
+                operation_id,
+                expected_intent_fingerprint,
+                attachment_id,
+            } => {
+                let preparation = self
+                    .attachment_move_preparation_mut(&operation_id, expected_intent_fingerprint)?;
+                let progress = preparation
+                    .progress
+                    .iter_mut()
+                    .find(|progress| progress.attachment_id() == attachment_id)
+                    .ok_or_else(|| replica_invariant("Attachment Move reset is foreign"))?;
+                if let AttachmentMoveProgress::Encrypted { upload, .. } = progress {
+                    *upload = AttachmentMoveUploadState::NeedsUpload;
+                }
+            }
+            PlanMutation::FreezeAttachmentMoveRejection {
+                operation_id,
+                expected_intent_fingerprint,
+            } => {
+                let preparation = self
+                    .take_attachment_move_preparation(&operation_id, expected_intent_fingerprint)?;
+                let operation = rejection_operation(&preparation)?;
+                self.operations.insert(operation_id, operation);
+            }
+            PlanMutation::PromoteAttachmentMovePreparation {
+                operation_id,
+                expected_intent_fingerprint,
+            } => {
+                let preparation = self
+                    .take_attachment_move_preparation(&operation_id, expected_intent_fingerprint)?;
+                let operation = prepared_move_operation(&preparation)?;
+                self.operations.insert(operation_id, operation);
+            }
+            PlanMutation::ReactivateAttachmentMovePreparation {
+                operation_id,
+                expected_request_fingerprint,
+            } => {
+                let operation = self.operations.get(&operation_id).ok_or_else(|| {
+                    replica_invariant("cannot reactivate an unknown Attachment Move")
+                })?;
+                if operation.request_fingerprint != expected_request_fingerprint {
+                    return Err(replica_invariant(
+                        "Attachment Move reactivation fingerprint changed",
+                    ));
+                }
+                let preparation = operation
+                    .attachment_move_recovery
+                    .as_ref()
+                    .ok_or_else(|| replica_invariant("Operation has no Attachment Move recovery"))?
+                    .preparation()
+                    .clone();
+                self.check_attachment_move_preparation(&preparation, false)?;
+                self.operations.remove(&operation_id);
+                self.attachment_move_preparations
+                    .insert(operation_id, preparation);
+            }
+            PlanMutation::RescheduleOperation(mut operation) => {
                 let existing = self
                     .operations
                     .get(&operation.operation_id)
@@ -1283,10 +1677,14 @@ impl AccountReplica {
                     || existing.vault_id != operation.vault_id
                     || existing.request != operation.request
                     || existing.request_fingerprint != operation.request_fingerprint
+                    || existing.attachment_move_recovery != operation.attachment_move_recovery
                 {
                     return Err(replica_invariant(
                         "rescheduling cannot change accepted Operation bytes",
                     ));
+                }
+                if let Some(recovery) = &mut operation.attachment_move_recovery {
+                    recovery.preparation_mut().scheduling = operation.scheduling;
                 }
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
@@ -1346,6 +1744,137 @@ impl AccountReplica {
             }
         }
         Ok(())
+    }
+
+    fn check_attachment_move_preparation(
+        &self,
+        preparation: &AttachmentMovePreparationRecord,
+        require_current_authority: bool,
+    ) -> Result<(), RuntimeError> {
+        if preparation.account_id != self.account_id
+            || preparation.operation_id.is_empty()
+            || preparation.item_id.is_empty()
+            || preparation.source_vault_id.is_empty()
+            || preparation.target_vault_id.is_empty()
+            || preparation.source_vault_id == preparation.target_vault_id
+            || preparation.expected_item_version <= 0
+            || preparation.target_encrypted_data.is_empty()
+            || preparation.target_encryption_iv.is_empty()
+        {
+            return Err(replica_invariant(
+                "Attachment Move preparation intent is invalid",
+            ));
+        }
+        if preparation.source_attachments.is_empty()
+            || preparation.source_attachments.len() != preparation.progress.len()
+        {
+            return Err(replica_invariant(
+                "Attachment Move preparation is not a complete Attachment set",
+            ));
+        }
+        let mut identities = HashSet::new();
+        let mut previous_id: Option<&str> = None;
+        for (index, source) in preparation.source_attachments.iter().enumerate() {
+            if source.item_id != preparation.item_id
+                || source.vault_id != preparation.source_vault_id
+                || source.envelope_version <= 0
+                || previous_id.is_some_and(|previous| previous >= source.id.as_str())
+                || !identities.insert(source.id.clone())
+            {
+                return Err(replica_invariant(
+                    "Attachment Move preparation contains foreign or duplicate authority",
+                ));
+            }
+            previous_id = Some(&source.id);
+            let matching = &preparation.progress[index];
+            if matching.attachment_id() != source.id
+                || matching.expected_envelope_version() != source.envelope_version
+                || matches!(matching, AttachmentMoveProgress::Encrypted {
+                    artifact,
+                    payload,
+                    ..
+                } if validate_artifact_ref(
+                    artifact,
+                    &preparation.account_id,
+                    &preparation.operation_id,
+                    &source.id,
+                ).is_err()
+                    || !valid_prepared_attachment(payload))
+            {
+                return Err(replica_invariant(
+                    "Attachment Move progress does not match source authority",
+                ));
+            }
+        }
+        if !require_current_authority {
+            return if attachment_move_intent_fingerprint(preparation)?
+                == preparation.intent_fingerprint
+            {
+                Ok(())
+            } else {
+                Err(replica_invariant(
+                    "Attachment Move intent fingerprint does not match its durable authority",
+                ))
+            };
+        }
+        let generation = self
+            .bootstrap
+            .active_generation
+            .as_ref()
+            .ok_or_else(|| replica_invariant("Attachment Move acceptance has no authority"))?;
+        let authority = self
+            .bootstrap
+            .items
+            .get(&(generation.clone(), preparation.item_id.clone()))
+            .ok_or_else(|| replica_invariant("Attachment Move Item authority is missing"))?;
+        let mut authoritative_attachments = authority.attachments.clone();
+        authoritative_attachments.sort_by(|left, right| left.id.cmp(&right.id));
+        if authority.vault_id != preparation.source_vault_id
+            || authority.version != preparation.expected_item_version
+            || authoritative_attachments != preparation.source_attachments
+        {
+            return Err(replica_invariant(
+                "Attachment Move intent does not match current Item authority",
+            ));
+        }
+        if attachment_move_intent_fingerprint(preparation)? != preparation.intent_fingerprint {
+            return Err(replica_invariant(
+                "Attachment Move intent fingerprint does not match its durable authority",
+            ));
+        }
+        Ok(())
+    }
+
+    fn attachment_move_preparation_mut(
+        &mut self,
+        operation_id: &str,
+        expected_intent_fingerprint: Sha256Fingerprint,
+    ) -> Result<&mut AttachmentMovePreparationRecord, RuntimeError> {
+        let preparation = self
+            .attachment_move_preparations
+            .get_mut(operation_id)
+            .ok_or_else(|| replica_invariant("Attachment Move preparation is missing"))?;
+        if preparation.intent_fingerprint != expected_intent_fingerprint {
+            return Err(replica_invariant("Attachment Move intent changed"));
+        }
+        Ok(preparation)
+    }
+
+    fn take_attachment_move_preparation(
+        &mut self,
+        operation_id: &str,
+        expected_intent_fingerprint: Sha256Fingerprint,
+    ) -> Result<AttachmentMovePreparationRecord, RuntimeError> {
+        let preparation = self
+            .attachment_move_preparations
+            .get(operation_id)
+            .ok_or_else(|| replica_invariant("Attachment Move preparation is missing"))?;
+        if preparation.intent_fingerprint != expected_intent_fingerprint {
+            return Err(replica_invariant("Attachment Move intent changed"));
+        }
+        self.attachment_move_preparations
+            .remove(operation_id)
+            .ok_or_else(|| replica_invariant("Attachment Move preparation disappeared"))
     }
 
     /// Answers the accepted Operation this outcome belongs to, or refuses to guess.
@@ -1462,13 +1991,27 @@ impl AccountReplica {
 
     /// An overlay is the visible half of one accepted Operation, so it cannot outlive or precede it.
     fn check_overlay(&self, item: &ReplicaItemRecord) -> Result<(), RuntimeError> {
-        let Some(operation) = self.operations.get(&item.operation_id) else {
+        let identity = self
+            .operations
+            .get(&item.operation_id)
+            .map(|operation| (&operation.item_id, &operation.vault_id))
+            .or_else(|| {
+                self.attachment_move_preparations
+                    .get(&item.operation_id)
+                    .map(|preparation| (&preparation.item_id, &preparation.target_vault_id))
+            })
+            .or_else(|| {
+                self.receipts
+                    .get(&item.operation_id)
+                    .map(|receipt| (&receipt.item_id, &receipt.vault_id))
+            });
+        let Some((operation_item_id, operation_vault_id)) = identity else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "optimistic overlay has no accepted Operation",
             ));
         };
-        if operation.item_id != item.item_id || operation.vault_id != item.vault_id {
+        if operation_item_id != &item.item_id || operation_vault_id != &item.vault_id {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "optimistic overlay does not match its Operation",
@@ -1488,6 +2031,12 @@ impl AccountReplica {
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut operations: Vec<_> = self.operations.values().cloned().collect();
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+        let mut attachment_move_preparations: Vec<_> = self
+            .attachment_move_preparations
+            .values()
+            .cloned()
+            .collect();
+        attachment_move_preparations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         let mut receipts: Vec<_> = self.receipts.values().cloned().collect();
         receipts.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         ReplicaSnapshot {
@@ -1498,11 +2047,286 @@ impl AccountReplica {
             lock_epoch: self.lock_epoch,
             items,
             operations,
+            attachment_move_preparations,
             receipts,
             failure: self.failure,
             bootstrap: self.bootstrap.clone(),
         }
     }
+}
+
+fn validate_checkpoint_transition(
+    expected: &AttachmentMoveProgress,
+    next: &AttachmentMoveProgress,
+) -> Result<(), RuntimeError> {
+    if expected.attachment_id() != next.attachment_id()
+        || expected.expected_envelope_version() != next.expected_envelope_version()
+    {
+        return Err(replica_invariant(
+            "Attachment Move checkpoint changed Attachment authority",
+        ));
+    }
+    let valid = match (expected, next) {
+        (
+            AttachmentMoveProgress::Pending { .. },
+            AttachmentMoveProgress::Encrypted {
+                upload,
+                artifact,
+                payload,
+                ..
+            },
+        ) => {
+            *upload == AttachmentMoveUploadState::NeedsUpload
+                && artifact.byte_length > 0
+                && valid_ciphertext_digest(&artifact.ciphertext_sha256)
+                && valid_ciphertext_digest(&artifact.artifact_id)
+                && valid_prepared_attachment(payload)
+        }
+        (
+            AttachmentMoveProgress::Encrypted {
+                artifact: old_artifact,
+                payload: old_payload,
+                upload: AttachmentMoveUploadState::NeedsUpload,
+                ..
+            },
+            AttachmentMoveProgress::Encrypted {
+                artifact: new_artifact,
+                payload: new_payload,
+                upload: AttachmentMoveUploadState::Uploaded,
+                ..
+            },
+        ) => old_artifact == new_artifact && old_payload == new_payload,
+        _ => expected == next,
+    };
+    if !valid {
+        return Err(replica_invariant(
+            "Attachment Move checkpoint is not a valid next state",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_ciphertext_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_artifact_ref(
+    artifact: &AttachmentMoveArtifactRef,
+    account_id: &AccountId,
+    operation_id: &str,
+    attachment_id: &str,
+) -> Result<(), RuntimeError> {
+    let expected = attachment_move_artifact_ref(
+        account_id,
+        operation_id,
+        attachment_id,
+        &artifact.ciphertext_sha256,
+        artifact.byte_length,
+    )?;
+    if expected == *artifact {
+        Ok(())
+    } else {
+        Err(replica_invariant(
+            "Attachment Move artifact reference is not canonical for its owner",
+        ))
+    }
+}
+
+fn valid_prepared_attachment(value: &PreparedMoveAttachment) -> bool {
+    !value.encrypted_name.is_empty()
+        && !value.encryption_iv.is_empty()
+        && !value.encryption_algorithm.is_empty()
+        && !value.encrypted_attachment_key.is_empty()
+        && !value.attachment_key_iv.is_empty()
+        && !value.attachment_key_algorithm.is_empty()
+        && !value.encrypted_content_type.is_empty()
+        && !value.encrypted_content_type_iv.is_empty()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentMoveIntentFingerprint<'a> {
+    account_id: &'a AccountId,
+    operation_id: &'a str,
+    item_id: &'a str,
+    source_vault_id: &'a str,
+    target_vault_id: &'a str,
+    expected_item_version: i32,
+    target_encrypted_data: &'a str,
+    target_encryption_algorithm: &'a str,
+    target_encryption_iv: &'a str,
+    source_attachments: &'a [AuthorityAttachmentRecord],
+}
+
+pub(crate) fn attachment_move_intent_fingerprint(
+    preparation: &AttachmentMovePreparationRecord,
+) -> Result<Sha256Fingerprint, RuntimeError> {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(&AttachmentMoveIntentFingerprint {
+        account_id: &preparation.account_id,
+        operation_id: &preparation.operation_id,
+        item_id: &preparation.item_id,
+        source_vault_id: &preparation.source_vault_id,
+        target_vault_id: &preparation.target_vault_id,
+        expected_item_version: preparation.expected_item_version,
+        target_encrypted_data: &preparation.target_encrypted_data,
+        target_encryption_algorithm: &preparation.target_encryption_algorithm,
+        target_encryption_iv: &preparation.target_encryption_iv,
+        source_attachments: &preparation.source_attachments,
+    })
+    .map_err(|_| replica_invariant("Attachment Move intent could not be serialized"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"bittery.attachment-move-intent.v1");
+    hasher.update((bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+    Ok(Sha256Fingerprint(hasher.finalize().into()))
+}
+
+fn rejection_operation(
+    preparation: &AttachmentMovePreparationRecord,
+) -> Result<OperationRecord, RuntimeError> {
+    use crate::server_contract::{MoveAttachmentIntentBody, MoveItemBody};
+    let attachments = preparation
+        .source_attachments
+        .iter()
+        .map(|attachment| MoveAttachmentIntentBody {
+            attachment_id: attachment.id.clone(),
+            expected_envelope_version: attachment.envelope_version,
+        })
+        .collect();
+    let body = serde_json::to_vec(&MoveItemBody::RejectStaleAuthority {
+        attachments,
+        source_vault_id: preparation.source_vault_id.clone(),
+        target_vault_id: preparation.target_vault_id.clone(),
+    })
+    .map_err(|_| replica_invariant("Attachment Move rejection could not be frozen"))?;
+    let mut operation = move_operation(preparation, body)?;
+    operation.attachment_move_recovery = Some(AttachmentMoveRecovery::RejectStaleAuthority {
+        preparation: Box::new(preparation.clone()),
+    });
+    Ok(operation)
+}
+
+fn prepared_move_operation(
+    preparation: &AttachmentMovePreparationRecord,
+) -> Result<OperationRecord, RuntimeError> {
+    use crate::server_contract::{MoveAttachmentBody, MoveItemBody};
+    let mut attachments = Vec::with_capacity(preparation.progress.len());
+    for progress in &preparation.progress {
+        let AttachmentMoveProgress::Encrypted {
+            attachment_id,
+            expected_envelope_version,
+            payload,
+            upload: AttachmentMoveUploadState::Uploaded,
+            ..
+        } = progress
+        else {
+            return Err(replica_invariant(
+                "Attachment Move cannot promote before every upload is complete",
+            ));
+        };
+        attachments.push(MoveAttachmentBody {
+            attachment_id: attachment_id.clone(),
+            attachment_key_algorithm: payload.attachment_key_algorithm.clone(),
+            attachment_key_iv: payload.attachment_key_iv.clone(),
+            encrypted_attachment_key: payload.encrypted_attachment_key.clone(),
+            encrypted_content_type: payload.encrypted_content_type.clone(),
+            encrypted_content_type_iv: payload.encrypted_content_type_iv.clone(),
+            encrypted_name: payload.encrypted_name.clone(),
+            encryption_algorithm: payload.encryption_algorithm.clone(),
+            encryption_iv: payload.encryption_iv.clone(),
+            expected_envelope_version: *expected_envelope_version,
+        });
+    }
+    let body = serde_json::to_vec(&MoveItemBody::Prepared {
+        attachments: Some(attachments),
+        encrypted_data: preparation.target_encrypted_data.clone(),
+        encryption_algorithm: preparation.target_encryption_algorithm.clone(),
+        encryption_iv: preparation.target_encryption_iv.clone(),
+        source_vault_id: preparation.source_vault_id.clone(),
+        target_vault_id: preparation.target_vault_id.clone(),
+    })
+    .map_err(|_| replica_invariant("Attachment Move request could not be frozen"))?;
+    let mut operation = move_operation(preparation, body)?;
+    operation.attachment_move_recovery = Some(AttachmentMoveRecovery::Prepared {
+        preparation: Box::new(preparation.clone()),
+    });
+    Ok(operation)
+}
+
+fn move_operation(
+    preparation: &AttachmentMovePreparationRecord,
+    body: Vec<u8>,
+) -> Result<OperationRecord, RuntimeError> {
+    let request_fingerprint = item_operation_fingerprint(
+        OperationKind::MoveItem,
+        "POST /api/v1/items/{itemId}/moves",
+        &preparation.item_id,
+        &body,
+        preparation.expected_item_version,
+    );
+    let operation = OperationRecord {
+        operation_id: preparation.operation_id.clone(),
+        kind: OperationKind::MoveItem,
+        item_id: preparation.item_id.clone(),
+        vault_id: preparation.target_vault_id.clone(),
+        request: ImmutableHttpRequest {
+            method: HttpMethod::Post,
+            path: format!("/api/v1/items/{}/moves", preparation.item_id),
+            headers: vec![
+                HttpHeader {
+                    name: "Content-Type".into(),
+                    value: "application/json".into(),
+                },
+                HttpHeader {
+                    name: "If-Match".into(),
+                    value: format!("\"{}\"", preparation.expected_item_version),
+                },
+            ],
+            body,
+        },
+        request_fingerprint,
+        attachment_move_recovery: None,
+        scheduling: preparation.scheduling,
+    };
+    check_immutable_request(&operation)?;
+    Ok(operation)
+}
+
+pub(crate) fn item_operation_fingerprint(
+    kind: OperationKind,
+    route: &str,
+    item_id: &str,
+    body: &[u8],
+    expected_version: i32,
+) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+    let kind = match kind {
+        OperationKind::CreateItem => "create_item",
+        OperationKind::UpdateItem => "update_item",
+        OperationKind::SetItemFavorite => "set_item_favorite",
+        OperationKind::TrashItem => "trash_item",
+        OperationKind::RestoreItem => "restore_item",
+        OperationKind::MoveItem => "move_item",
+        OperationKind::PermanentlyDeleteItem => "permanently_delete_item",
+    };
+    let expected_version = expected_version.to_string();
+    let mut hasher = Sha256::new();
+    for part in [
+        b"bittery.operation.v1".as_slice(),
+        kind.as_bytes(),
+        route.as_bytes(),
+        item_id.as_bytes(),
+        body,
+        expected_version.as_bytes(),
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256Fingerprint(hasher.finalize().into())
 }
 
 /// Durable request bytes never carry a credential, and a durable route is never ambiguous.

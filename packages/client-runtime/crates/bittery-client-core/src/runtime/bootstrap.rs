@@ -601,6 +601,10 @@ impl Runtime {
                 .operations
                 .iter()
                 .any(|operation| operation.operation_id == overlay.operation_id)
+                || snapshot
+                    .attachment_move_preparations
+                    .iter()
+                    .any(|preparation| preparation.operation_id == overlay.operation_id)
             {
                 ItemProjectionStatus::Pending
             } else {
@@ -632,11 +636,12 @@ impl Runtime {
                 tags: projection.tags,
                 favorite: overlay.favorite,
                 deleted_at: overlay.deleted_at.clone(),
-                attachments: decrypt_attachment_projections(
+                attachments: decrypt_attachment_projections_by_authority(
                     account_id,
                     &muk,
                     &snapshot.user_id,
-                    vault,
+                    &snapshot,
+                    &generation_id,
                     &overlay.attachments,
                 ),
                 // The instant this Device accepted the create, kept durable with the overlay so
@@ -1160,6 +1165,35 @@ fn decrypt_attachment_projections(
                 uploaded_by: attachment.uploaded_by.clone(),
                 created_at: attachment.created_at.clone(),
             })
+        })
+        .collect()
+}
+
+fn decrypt_attachment_projections_by_authority(
+    account_id: &AccountId,
+    muk: &[u8; 32],
+    user_id: &str,
+    snapshot: &ReplicaSnapshot,
+    generation_id: &BootstrapGenerationId,
+    attachments: &[AuthorityAttachmentRecord],
+) -> Vec<AttachmentProjection> {
+    attachments
+        .iter()
+        .flat_map(|attachment| {
+            snapshot
+                .bootstrap
+                .vaults
+                .get(&(generation_id.clone(), attachment.vault_id.clone()))
+                .map(|vault| {
+                    decrypt_attachment_projections(
+                        account_id,
+                        muk,
+                        user_id,
+                        vault,
+                        std::slice::from_ref(attachment),
+                    )
+                })
+                .unwrap_or_default()
         })
         .collect()
 }

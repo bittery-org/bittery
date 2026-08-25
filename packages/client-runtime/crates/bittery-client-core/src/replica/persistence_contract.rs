@@ -1,8 +1,9 @@
 use super::domain::{
-    apply_plan, AccountReplica, AuthorityItemRecord, AuthorityVaultRecord, BootstrapAuthority,
-    BootstrapGenerationId, BootstrapGenerationRecord, BootstrapPageReceipt, GuardedCommitPlan,
-    ObservedOutcome, OperationReceiptRecord, OperationRecord, PlanMutation, PlanResult,
-    ReplicaItemRecord, ReplicaSnapshot, ReplicaState, SyncCursor,
+    apply_plan, AccountReplica, AttachmentMovePreparationRecord, AuthorityItemRecord,
+    AuthorityVaultRecord, BootstrapAuthority, BootstrapGenerationId, BootstrapGenerationRecord,
+    BootstrapPageReceipt, GuardedCommitPlan, ObservedOutcome, OperationReceiptRecord,
+    OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
+    SyncCursor,
 };
 use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
@@ -27,6 +28,7 @@ mod required_option {
 pub(crate) enum ReplicaStore {
     OptimisticItems,
     Operations,
+    AttachmentMovePreparations,
     OperationReceipts,
     ReplicaMetadata,
     BootstrapGenerations,
@@ -371,6 +373,54 @@ pub(super) fn prepare_commit(
             // The failure lives in the head, and no row moves because of it.
             continue;
         }
+        if let PlanMutation::FreezeAttachmentMoveRejection { operation_id, .. }
+        | PlanMutation::PromoteAttachmentMovePreparation { operation_id, .. } = mutation
+        {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: ReplicaStore::AttachmentMovePreparations,
+                key: ReplicaRowKey {
+                    account_id: plan.account_id.clone(),
+                    record_id: operation_id.clone(),
+                },
+            });
+            let operation = next
+                .operations
+                .iter()
+                .find(|operation| operation.operation_id == *operation_id)
+                .ok_or_else(|| replica_invariant("promoted Attachment Move disappeared"))?;
+            writes.push(PreparedReplicaWrite::Put {
+                row: stored_row(
+                    ReplicaStore::Operations,
+                    &plan.account_id,
+                    operation_id,
+                    operation,
+                )?,
+            });
+            continue;
+        }
+        if let PlanMutation::ReactivateAttachmentMovePreparation { operation_id, .. } = mutation {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: ReplicaStore::Operations,
+                key: ReplicaRowKey {
+                    account_id: plan.account_id.clone(),
+                    record_id: operation_id.clone(),
+                },
+            });
+            let preparation = next
+                .attachment_move_preparations
+                .iter()
+                .find(|preparation| preparation.operation_id == *operation_id)
+                .ok_or_else(|| replica_invariant("reactivated Attachment Move disappeared"))?;
+            writes.push(PreparedReplicaWrite::Put {
+                row: stored_row(
+                    ReplicaStore::AttachmentMovePreparations,
+                    &plan.account_id,
+                    operation_id,
+                    preparation,
+                )?,
+            });
+            continue;
+        }
         writes.push(match mutation {
             PlanMutation::PutOptimisticItem(item) => PreparedReplicaWrite::Put {
                 row: stored_row(
@@ -388,14 +438,63 @@ pub(super) fn prepare_commit(
                     operation,
                 )?,
             },
-            PlanMutation::RescheduleOperation(operation) => PreparedReplicaWrite::Put {
-                row: stored_row(
-                    ReplicaStore::Operations,
-                    &plan.account_id,
-                    &operation.operation_id,
-                    operation,
-                )?,
-            },
+            PlanMutation::AcceptAttachmentMovePreparation(preparation) => {
+                let operation_id = &preparation.operation_id;
+                let preparation = next
+                    .attachment_move_preparations
+                    .iter()
+                    .find(|preparation| preparation.operation_id == *operation_id)
+                    .ok_or_else(|| replica_invariant("prepared Attachment Move row disappeared"))?;
+                PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::AttachmentMovePreparations,
+                        &plan.account_id,
+                        operation_id,
+                        preparation,
+                    )?,
+                }
+            }
+            PlanMutation::RescheduleAttachmentMovePreparation(preparation) => {
+                PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::AttachmentMovePreparations,
+                        &plan.account_id,
+                        &preparation.operation_id,
+                        preparation,
+                    )?,
+                }
+            }
+            PlanMutation::CheckpointAttachmentMove { operation_id, .. }
+            | PlanMutation::ResetAttachmentMoveUpload { operation_id, .. } => {
+                let preparation = next
+                    .attachment_move_preparations
+                    .iter()
+                    .find(|preparation| preparation.operation_id == *operation_id)
+                    .ok_or_else(|| replica_invariant("prepared Attachment Move row disappeared"))?;
+                PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::AttachmentMovePreparations,
+                        &plan.account_id,
+                        operation_id,
+                        preparation,
+                    )?,
+                }
+            }
+            PlanMutation::RescheduleOperation(operation) => {
+                let synchronized = next
+                    .operations
+                    .iter()
+                    .find(|candidate| candidate.operation_id == operation.operation_id)
+                    .ok_or_else(|| replica_invariant("rescheduled Operation disappeared"))?;
+                PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::Operations,
+                        &plan.account_id,
+                        &operation.operation_id,
+                        synchronized,
+                    )?,
+                }
+            }
             PlanMutation::RemoveOperation { operation_id } => PreparedReplicaWrite::Delete {
                 store: ReplicaStore::Operations,
                 key: ReplicaRowKey {
@@ -405,7 +504,10 @@ pub(super) fn prepare_commit(
             },
             PlanMutation::ReconcileAppliedCreate { .. }
             | PlanMutation::RetainRejection { .. }
-            | PlanMutation::FailAccount { .. } => {
+            | PlanMutation::FailAccount { .. }
+            | PlanMutation::FreezeAttachmentMoveRejection { .. }
+            | PlanMutation::PromoteAttachmentMovePreparation { .. }
+            | PlanMutation::ReactivateAttachmentMovePreparation { .. } => {
                 unreachable!("completion and failure writes are collected above")
             }
         });
@@ -516,6 +618,7 @@ pub(super) fn snapshot_rows(
     let mut rows = Vec::with_capacity(
         snapshot.items.len()
             + snapshot.operations.len()
+            + snapshot.attachment_move_preparations.len()
             + snapshot.receipts.len()
             + snapshot.bootstrap.row_count(),
     );
@@ -533,6 +636,14 @@ pub(super) fn snapshot_rows(
             &snapshot.account_id,
             &operation.operation_id,
             &operation,
+        )?);
+    }
+    for preparation in snapshot.attachment_move_preparations {
+        rows.push(stored_row(
+            ReplicaStore::AttachmentMovePreparations,
+            &snapshot.account_id,
+            &preparation.operation_id,
+            &preparation,
         )?);
     }
     for receipt in snapshot.receipts {
@@ -586,6 +697,7 @@ pub(super) fn reconstruct_snapshot(
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
+    let mut attachment_move_preparations = HashMap::new();
     let mut receipts = HashMap::new();
     let mut bootstrap = BootstrapAuthority::default();
     let mut saw_metadata = false;
@@ -621,6 +733,27 @@ pub(super) fn reconstruct_snapshot(
                     .is_some()
                 {
                     return Err(replica_invariant("Replica operation row key is duplicated"));
+                }
+            }
+            ReplicaStore::AttachmentMovePreparations => {
+                let preparation: AttachmentMovePreparationRecord =
+                    serde_json::from_str(&row.payload_json).map_err(|_| {
+                        replica_invariant("Replica Attachment Move preparation payload is invalid")
+                    })?;
+                if preparation.account_id != head.account_id
+                    || preparation.operation_id != row.key.record_id
+                {
+                    return Err(replica_invariant(
+                        "Replica Attachment Move preparation key does not match its payload",
+                    ));
+                }
+                if attachment_move_preparations
+                    .insert(preparation.operation_id.clone(), preparation)
+                    .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica Attachment Move preparation key is duplicated",
+                    ));
                 }
             }
             ReplicaStore::OperationReceipts => {
@@ -751,21 +884,21 @@ pub(super) fn reconstruct_snapshot(
         .validate()
         .map_err(|_| replica_invariant("Replica Bootstrap authority is inconsistent"))?;
 
-    Ok(Some(
-        AccountReplica {
-            account_id: head.account_id,
-            user_id: head.user_id,
-            incarnation: head.incarnation,
-            revision: head.replica_revision,
-            lock_epoch: head.lock_epoch,
-            items,
-            operations,
-            receipts,
-            failure: head.failure,
-            bootstrap,
-        }
-        .snapshot(),
-    ))
+    let account = AccountReplica {
+        account_id: head.account_id,
+        user_id: head.user_id,
+        incarnation: head.incarnation,
+        revision: head.replica_revision,
+        lock_epoch: head.lock_epoch,
+        items,
+        operations,
+        attachment_move_preparations,
+        receipts,
+        failure: head.failure,
+        bootstrap,
+    };
+    account.validate_durable_work()?;
+    Ok(Some(account.snapshot()))
 }
 
 pub(super) fn replica_invariant(message: impl Into<String>) -> RuntimeError {

@@ -347,3 +347,67 @@ AWS and MinIO evidence supports the signing construction, but the repository fak
 canonical inputs and does not verify real provider enforcement. Provider verification is therefore
 a recorded release gate rather than an inferred code guarantee or an expansion of this Server
 slice into Web fixtures or deployment infrastructure.
+
+### 2026-08-25 — Runtime Move preparation split at the durable Replica seam
+
+Runtime Move preparation is two independently verifiable, path-disjoint commits:
+
+1. **Replica-owned durable preparation contract:** the Replica and create paths atomically accept an
+   Attachment-bearing Move outside the ready Operation collection, retain its immutable intent and
+   optimistic projection, checkpoint or reset closed per-Attachment progress, freeze the stale-
+   authority rejection request, and atomically promote only a complete preparation into the ordinary
+   ready Operation record.
+2. **Preparation worker:** a new Runtime preparation module owns manifest transport, streaming
+   download/decrypt/target-AAD re-encrypt/upload work, retry scheduling, and classification of the
+   Server's preparation responses while consuming the Replica contract without editing its files.
+
+One pass cannot independently fault-inject both the Replica's atomic durable transitions and the
+streaming transport/crypto lifecycle: combining them would make persistence tests depend on network
+and worker fixtures, while transport tests could bypass the exact crash boundaries that make an
+accepted intent durable. The first commit therefore proves the storage state machine and promotion
+boundary without network calls; the second proves restart-safe transport and crypto against that
+already-committed seam.
+
+### 2026-08-25 — promoted Move retains single-record staging recovery
+
+Promotion moves the complete preparation into an opaque recovery field owned by the one dispatch-
+ready Operation record; it does not leave a second preparation writer. The retained artifact contains
+the accepted source authority, canonical progress, ciphertext digest, and exact encrypted blob bytes,
+but no plaintext or transient upload credentials. A nonterminal `ATTACHMENT_STAGING_INCOMPLETE`
+response can therefore atomically replace that Operation with its original preparation under the
+same Operation identity so manifest lease and upload work resumes without repeating random-IV
+encryption. Semantic Operation removal removes the embedded recovery artifact with the Operation.
+
+This is an internal durability consequence of the already-decided nonterminal staging-incomplete
+response, not a new product protocol choice: at every boundary exactly one durable record owns the
+accepted Move and its optimistic overlay.
+
+### 2026-08-25 — binary Attachment Move artifact store and three-slice Runtime split
+
+The maintainer chose a dedicated binary chunk store. Rust owns the artifact reference, digest, byte-
+length, and chunk semantics. Web and MV3 hosts persist binary `ArrayBuffer` chunks through short
+IndexedDB transactions; native hosts persist SQLite `BLOB` chunks. Replica JSON contains only the
+immutable artifact reference, ciphertext length, and digest, never ciphertext bytes or Base64.
+
+Artifact bytes commit before the guarded Replica checkpoint that first references them. A crash in
+between can therefore leave an unreferenced artifact, but can never leave a committed reference to
+partially durable bytes. Such orphan chunks are safe and are swept later. A semantic Operation
+outcome removes the one owning Operation and makes its artifacts unreferenced for the same cleanup
+mechanism; the Replica does not synchronously delete artifact bytes at the outcome boundary.
+
+Runtime preparation is refined into three independently verifiable and path-disjoint slices:
+
+1. **Replica reference and recovery state (A):** the current Replica/create paths accept preparation,
+   validate immutable artifact references, checkpoint progress, promote or reactivate the single
+   durable owner, and remove references with semantic outcomes. It stores no artifact bytes.
+2. **Artifact-store protocol and adapters (B):** new protocol and adapter paths define Rust-owned
+   chunk writes, complete-artifact publication, reads, and orphan sweeping for IndexedDB binary
+   chunks and native SQLite BLOB chunks. This consumes A's reference contract without editing A's
+   files.
+3. **Preparation worker, transport, and wiring (C):** new Runtime worker paths stream download,
+   crypto, artifact-store writes/reads, manifest calls, and upload work through A and B without
+   redefining either durable contract.
+
+The former two-slice note remains useful history but is superseded by this split: binary artifact
+durability must be verified independently from both Replica JSON transitions and streaming network/
+crypto behavior.

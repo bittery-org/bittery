@@ -2,9 +2,11 @@ use super::*;
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
     replica::{
-        AuthorityItemCategory, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
-        ImmutableHttpRequest, OperationKind, OperationSchedulingState, ReplicaSnapshot,
-        ReplicaState, Sha256Fingerprint,
+        attachment_move_intent_fingerprint,
+        item_operation_fingerprint as shared_item_operation_fingerprint,
+        AttachmentMovePreparationRecord, AttachmentMoveProgress, AuthorityItemCategory,
+        AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, ImmutableHttpRequest,
+        OperationKind, OperationSchedulingState, ReplicaSnapshot, ReplicaState, Sha256Fingerprint,
     },
     server_contract::{CreateItemBody, FavoriteBody, ItemCategory, MoveItemBody, UpdateItemBody},
     LoginItemDraft,
@@ -70,30 +72,7 @@ pub(super) fn item_operation_fingerprint(
     body: &[u8],
     expected_version: i32,
 ) -> Sha256Fingerprint {
-    use sha2::{Digest, Sha256};
-    let kind = match kind {
-        OperationKind::CreateItem => "create_item",
-        OperationKind::UpdateItem => "update_item",
-        OperationKind::SetItemFavorite => "set_item_favorite",
-        OperationKind::TrashItem => "trash_item",
-        OperationKind::RestoreItem => "restore_item",
-        OperationKind::MoveItem => "move_item",
-        OperationKind::PermanentlyDeleteItem => "permanently_delete_item",
-    };
-    let expected_version = expected_version.to_string();
-    let mut hasher = Sha256::new();
-    for part in [
-        OPERATION_DISCRIMINATOR,
-        kind.as_bytes(),
-        route.as_bytes(),
-        item_id.as_bytes(),
-        body,
-        expected_version.as_bytes(),
-    ] {
-        hasher.update((part.len() as u64).to_be_bytes());
-        hasher.update(part);
-    }
-    Sha256Fingerprint(hasher.finalize().into())
+    shared_item_operation_fingerprint(kind, route, item_id, body, expected_version)
 }
 
 /// Everything one accepted create owes, computed before any durable write.
@@ -112,9 +91,15 @@ pub(super) enum ExistingItemIntent {
     PermanentlyDelete,
 }
 
-struct PreparedExistingItemOperation {
-    operation: OperationRecord,
-    overlay: ReplicaItemRecord,
+enum PreparedExistingItemOperation {
+    Ready {
+        operation: OperationRecord,
+        overlay: ReplicaItemRecord,
+    },
+    AttachmentMove {
+        preparation: AttachmentMovePreparationRecord,
+        overlay: ReplicaItemRecord,
+    },
 }
 
 impl Runtime {
@@ -363,7 +348,25 @@ impl Runtime {
         let accepted_at = rfc3339(self.clock.now_ms()?)?;
         let prepared =
             self.prepare_existing_item_operation(&snapshot, &item_id, intent, &accepted_at)?;
-        let operation_id = prepared.operation.operation_id.clone();
+        let (operation_id, mutations) = match prepared {
+            PreparedExistingItemOperation::Ready { operation, overlay } => (
+                operation.operation_id.clone(),
+                vec![
+                    PlanMutation::AcceptOperation(operation),
+                    PlanMutation::PutOptimisticItem(overlay),
+                ],
+            ),
+            PreparedExistingItemOperation::AttachmentMove {
+                preparation,
+                overlay,
+            } => (
+                preparation.operation_id.clone(),
+                vec![
+                    PlanMutation::AcceptAttachmentMovePreparation(preparation),
+                    PlanMutation::PutOptimisticItem(overlay),
+                ],
+            ),
+        };
         let result = self
             .replica
             .execute_recomputing(GuardedCommitPlan::new(
@@ -371,10 +374,7 @@ impl Runtime {
                 snapshot.incarnation,
                 snapshot.revision,
                 lock_epoch,
-                vec![
-                    PlanMutation::AcceptOperation(prepared.operation),
-                    PlanMutation::PutOptimisticItem(prepared.overlay),
-                ],
+                mutations,
             ))
             .await?;
         let (replica_revision, next_snapshot) = match result {
@@ -594,6 +594,7 @@ impl Runtime {
                     body,
                 },
                 request_fingerprint,
+                attachment_move_recovery: None,
                 scheduling: OperationSchedulingState::default(),
             },
             overlay: ReplicaItemRecord {
@@ -693,12 +694,6 @@ impl Runtime {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "the selected Item's Vault is read only",
-            ));
-        }
-        if matches!(&intent, ExistingItemIntent::Move { .. }) && !item.attachments.is_empty() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Attachment-bearing Move requires durable Attachment staging",
             ));
         }
         let master_unlock_key = self
@@ -900,6 +895,39 @@ impl Runtime {
                 overlay.encryption_algorithm = sealed.algorithm.clone();
                 overlay.encryption_version = overlay.version;
                 overlay.encrypted_by_user_id = snapshot.user_id.clone();
+                if !item.attachments.is_empty() {
+                    let mut source_attachments = item.attachments.clone();
+                    source_attachments.sort_by(|left, right| left.id.cmp(&right.id));
+                    let progress = source_attachments
+                        .iter()
+                        .map(|attachment| AttachmentMoveProgress::Pending {
+                            attachment_id: attachment.id.clone(),
+                            expected_envelope_version: attachment.envelope_version,
+                        })
+                        .collect();
+                    let mut preparation = AttachmentMovePreparationRecord {
+                        account_id: snapshot.account_id.clone(),
+                        operation_id: operation_id.clone(),
+                        item_id: item.id.clone(),
+                        source_vault_id: item.vault_id.clone(),
+                        target_vault_id: target_vault_id.clone(),
+                        expected_item_version: expected_version,
+                        target_encrypted_data: sealed.ciphertext,
+                        target_encryption_algorithm: sealed.algorithm,
+                        target_encryption_iv: sealed.iv,
+                        source_attachments,
+                        progress,
+                        intent_fingerprint: Sha256Fingerprint([0; 32]),
+                        scheduling: OperationSchedulingState::default(),
+                    };
+                    preparation.intent_fingerprint =
+                        attachment_move_intent_fingerprint(&preparation)?;
+                    drop(master_unlock_key);
+                    return Ok(PreparedExistingItemOperation::AttachmentMove {
+                        preparation,
+                        overlay,
+                    });
+                }
                 let body = serde_json::to_vec(&MoveItemBody::Prepared {
                     attachments: Some(Vec::new()),
                     encrypted_data: sealed.ciphertext,
@@ -936,7 +964,7 @@ impl Runtime {
         headers.push(if_match);
         let request_fingerprint =
             item_operation_fingerprint(kind, route, item_id, &body, expected_version);
-        Ok(PreparedExistingItemOperation {
+        Ok(PreparedExistingItemOperation::Ready {
             operation: OperationRecord {
                 operation_id,
                 kind,
@@ -949,6 +977,7 @@ impl Runtime {
                     body,
                 },
                 request_fingerprint,
+                attachment_move_recovery: None,
                 scheduling: OperationSchedulingState::default(),
             },
             overlay,

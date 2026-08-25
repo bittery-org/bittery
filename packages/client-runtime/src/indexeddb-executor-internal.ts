@@ -24,13 +24,14 @@ const DATABASE_NAME = "bittery_replica";
  * until an authoritative outcome, and a receipt is what refuses a completed Operation ID a
  * second time. Ticket 22 gates release on replacing this with an additive migration.
  */
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
 const STORE_NAMES = [
 	"heads",
 	"optimistic_items",
 	"operations",
+	"attachment_move_preparations",
 	"operation_receipts",
 	"replica_metadata",
 	"bootstrap_generations",
@@ -158,6 +159,7 @@ async function load(
 		const stores: ReplicaStore[] = [
 			"optimisticItems",
 			"operations",
+			"attachmentMovePreparations",
 			"operationReceipts",
 			"replicaMetadata",
 			"bootstrapGenerations",
@@ -515,6 +517,8 @@ function mapStore(store: ReplicaStore): DatabaseStore {
 			return "optimistic_items";
 		case "operations":
 			return "operations";
+		case "attachmentMovePreparations":
+			return "attachment_move_preparations";
 		case "operationReceipts":
 			return "operation_receipts";
 		case "replicaMetadata":

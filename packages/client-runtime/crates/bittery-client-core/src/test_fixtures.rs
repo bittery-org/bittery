@@ -67,6 +67,7 @@ pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationReco
             body: body.clone(),
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
+        attachment_move_recovery: None,
         scheduling: OperationSchedulingState::default(),
     }
 }

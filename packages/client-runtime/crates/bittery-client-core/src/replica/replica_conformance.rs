@@ -6,6 +6,7 @@
 //! resulting requests and checkpoints, so neither reference adapter can certify itself.
 
 use super::{
+    attachment_move_artifact_ref, attachment_move_intent_fingerprint,
     domain::AccountReplica,
     persistence_contract::{
         apply_prepared_writes_to_rows, prepare_bootstrap_commit, prepare_commit, prepare_install,
@@ -13,13 +14,14 @@ use super::{
         PreparedLockEpochAdvance, ReplicaHead, ReplicaInstallResult, ReplicaPersistenceRequest,
         ReplicaPersistenceResponse, ReplicaStore, StoredReplicaRow,
     },
-    AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole,
-    AuthorityVaultType, BeginBootstrapPlan, BootstrapContinuation, BootstrapGenerationId,
-    BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity, CursorAdvance, GuardedCommitPlan,
-    ImmutableHttpRequest, ObservedOutcome, OperationKind, OperationOutcomeResult, OperationRecord,
-    OperationRejectionCode, OperationSchedulingState, PlanMutation, PlanResult,
-    PromoteBootstrapPlan, ReplicaItemRecord, ReplicaSnapshot, Sha256Fingerprint,
-    StageBootstrapPagePlan, SyncCursor,
+    AttachmentMovePreparationRecord, AttachmentMoveProgress, AttachmentMoveUploadState,
+    AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
+    AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapContinuation,
+    BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity,
+    CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest, ObservedOutcome, OperationKind,
+    OperationOutcomeResult, OperationRecord, OperationRejectionCode, OperationSchedulingState,
+    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan, ReplicaItemRecord,
+    ReplicaSnapshot, Sha256Fingerprint, StageBootstrapPagePlan, SyncCursor,
 };
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
@@ -393,6 +395,7 @@ fn row_key(row: &StoredReplicaRow) -> (u8, &str, &str) {
         ReplicaStore::BootstrapPages => 5,
         ReplicaStore::AuthorityVaults => 6,
         ReplicaStore::AuthorityItems => 7,
+        ReplicaStore::AttachmentMovePreparations => 8,
     };
     (store, row.key.account_id.as_str(), &row.key.record_id)
 }
@@ -423,6 +426,7 @@ fn operation(operation_id: &str, item_id: &str) -> OperationRecord {
             body: body.clone(),
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
+        attachment_move_recovery: None,
         scheduling: OperationSchedulingState::default(),
     }
 }
@@ -477,8 +481,66 @@ fn authority_item(account_id: &str, item_id: &str, version: i32) -> AuthorityIte
         created_at: "2026-08-24T00:00:00Z".to_owned(),
         updated_at: "2026-08-24T00:01:00Z".to_owned(),
         deleted_at: None,
-        attachments: Vec::new(),
+        attachments: (item_id == "existing-item")
+            .then(|| authority_attachment(account_id, item_id))
+            .into_iter()
+            .collect(),
     }
+}
+
+fn authority_attachment(account_id: &str, item_id: &str) -> AuthorityAttachmentRecord {
+    AuthorityAttachmentRecord {
+        id: "attachment-1".into(),
+        item_id: item_id.into(),
+        vault_id: "vault-1".into(),
+        storage_key: "opaque/source/storage-key".into(),
+        encrypted_name: "opaque-source-name".into(),
+        encryption_iv: "source-name-iv".into(),
+        encryption_algorithm: "AES-GCM-AAD-V1".into(),
+        encrypted_attachment_key: "opaque-source-wrapped-key".into(),
+        attachment_key_iv: "source-key-iv".into(),
+        attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+        encrypted_content_type: "opaque-source-content-type".into(),
+        encrypted_content_type_iv: "source-content-type-iv".into(),
+        envelope_version: 1,
+        file_size: 42,
+        uploaded_by: format!("user-{account_id}"),
+        created_at: "2026-08-24T00:00:00Z".into(),
+    }
+}
+
+fn attachment_move_preparation() -> AttachmentMovePreparationRecord {
+    let mut preparation = AttachmentMovePreparationRecord {
+        account_id: AccountId::from("account-operations"),
+        operation_id: "operation-attachment-move".into(),
+        item_id: "existing-item".into(),
+        source_vault_id: "vault-1".into(),
+        target_vault_id: "vault-2".into(),
+        expected_item_version: 1,
+        target_encrypted_data: "opaque-target-item".into(),
+        target_encryption_algorithm: "AES-GCM-AAD-V1".into(),
+        target_encryption_iv: "target-item-iv".into(),
+        source_attachments: vec![authority_attachment("account-operations", "existing-item")],
+        progress: vec![AttachmentMoveProgress::Pending {
+            attachment_id: "attachment-1".into(),
+            expected_envelope_version: 1,
+        }],
+        intent_fingerprint: Sha256Fingerprint([0; 32]),
+        scheduling: OperationSchedulingState::default(),
+    };
+    preparation.intent_fingerprint = attachment_move_intent_fingerprint(&preparation).unwrap();
+    preparation
+}
+
+fn attachment_move_overlay() -> ReplicaItemRecord {
+    let mut value = overlay(
+        "account-operations",
+        "operation-attachment-move",
+        "existing-item",
+    );
+    value.vault_id = "vault-2".into();
+    value.attachments = vec![authority_attachment("account-operations", "existing-item")];
+    value
 }
 
 fn guard(account_id: &str, revision: u64, lock_epoch: u64) -> BootstrapGuard {
@@ -735,6 +797,7 @@ fn operation_history() -> Result<History, RuntimeError> {
             "attempt count beyond five and exact replay",
             "applied outcome and receipt reconciliation",
             "rejected outcome retains encrypted overlay",
+            "Attachment Move preparation checkpoint and atomic promotion",
             "known plaintext marker absent from durable rows",
         ],
         &["account-operations"],
@@ -846,6 +909,174 @@ fn operation_history() -> Result<History, RuntimeError> {
             }],
         ),
     )?;
+
+    let preparation = attachment_move_preparation();
+    history.commit_plan(
+        "accept Attachment Move preparation outside ready Operations",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            7,
+            0,
+            vec![
+                PlanMutation::AcceptAttachmentMovePreparation(preparation.clone()),
+                PlanMutation::PutOptimisticItem(attachment_move_overlay()),
+            ],
+        ),
+    )?;
+    let pending = preparation.progress[0].clone();
+    let encrypted = AttachmentMoveProgress::Encrypted {
+        attachment_id: "attachment-1".into(),
+        expected_envelope_version: 1,
+        artifact: attachment_move_artifact_ref(
+            &AccountId::from("account-operations"),
+            "operation-attachment-move",
+            "attachment-1",
+            "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+            4,
+        )?,
+        payload: Box::new(PreparedMoveAttachment {
+            encrypted_name: "opaque-target-name".into(),
+            encryption_iv: "target-name-iv".into(),
+            encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            encrypted_attachment_key: "opaque-target-key".into(),
+            attachment_key_iv: "target-key-iv".into(),
+            attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+            encrypted_content_type: "opaque-target-content-type".into(),
+            encrypted_content_type_iv: "target-content-type-iv".into(),
+        }),
+        upload: AttachmentMoveUploadState::NeedsUpload,
+    };
+    history.commit_plan(
+        "checkpoint one encrypted Attachment without a ready Operation",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            8,
+            0,
+            vec![PlanMutation::CheckpointAttachmentMove {
+                operation_id: preparation.operation_id.clone(),
+                expected_intent_fingerprint: preparation.intent_fingerprint,
+                expected: pending,
+                next: encrypted.clone(),
+            }],
+        ),
+    )?;
+    let uploaded = match encrypted.clone() {
+        AttachmentMoveProgress::Encrypted {
+            attachment_id,
+            expected_envelope_version,
+            artifact,
+            payload,
+            ..
+        } => AttachmentMoveProgress::Encrypted {
+            attachment_id,
+            expected_envelope_version,
+            artifact,
+            payload,
+            upload: AttachmentMoveUploadState::Uploaded,
+        },
+        AttachmentMoveProgress::Pending { .. } => unreachable!(),
+    };
+    history.commit_plan(
+        "checkpoint the stable ciphertext upload",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            9,
+            0,
+            vec![PlanMutation::CheckpointAttachmentMove {
+                operation_id: preparation.operation_id.clone(),
+                expected_intent_fingerprint: preparation.intent_fingerprint,
+                expected: encrypted,
+                next: uploaded,
+            }],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically promote complete preparation into immutable ready Operation",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            10,
+            0,
+            vec![PlanMutation::PromoteAttachmentMovePreparation {
+                operation_id: preparation.operation_id,
+                expected_intent_fingerprint: preparation.intent_fingerprint,
+            }],
+        ),
+    )?;
+    let promoted_fingerprint =
+        history.snapshot("account-operations").unwrap().operations[0].request_fingerprint;
+    let mut promoted_reschedule =
+        history.snapshot("account-operations").unwrap().operations[0].clone();
+    promoted_reschedule.scheduling.attempt_count = 3;
+    promoted_reschedule.scheduling.not_before_ms = 3_000;
+    history.commit_plan(
+        "reschedule promoted Attachment Move and synchronize its recovery",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            11,
+            0,
+            vec![PlanMutation::RescheduleOperation(promoted_reschedule)],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically reactivate promoted Attachment Move recovery after staging incomplete",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            12,
+            0,
+            vec![PlanMutation::ReactivateAttachmentMovePreparation {
+                operation_id: "operation-attachment-move".into(),
+                expected_request_fingerprint: promoted_fingerprint,
+            }],
+        ),
+    )?;
+    history.commit_plan(
+        "freeze stale-authority request with single-record recovery",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            13,
+            0,
+            vec![PlanMutation::FreezeAttachmentMoveRejection {
+                operation_id: "operation-attachment-move".into(),
+                expected_intent_fingerprint: preparation.intent_fingerprint,
+            }],
+        ),
+    )?;
+    let rejected_fingerprint =
+        history.snapshot("account-operations").unwrap().operations[0].request_fingerprint;
+    let mut rejection_reschedule =
+        history.snapshot("account-operations").unwrap().operations[0].clone();
+    rejection_reschedule.scheduling.attempt_count = 4;
+    rejection_reschedule.scheduling.not_before_ms = 4_000;
+    history.commit_plan(
+        "reschedule stale-authority request and synchronize its recovery",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            14,
+            0,
+            vec![PlanMutation::RescheduleOperation(rejection_reschedule)],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically reactivate stale-authority recovery after staging incomplete",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            15,
+            0,
+            vec![PlanMutation::ReactivateAttachmentMovePreparation {
+                operation_id: "operation-attachment-move".into(),
+                expected_request_fingerprint: rejected_fingerprint,
+            }],
+        ),
+    )?;
     Ok(history.finish())
 }
 
@@ -948,6 +1179,7 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
         lock_epoch: 0,
         items: Vec::new(),
         operations: Vec::new(),
+        attachment_move_preparations: Vec::new(),
         receipts: Vec::new(),
         failure: None,
         bootstrap: BootstrapAuthority::default(),
@@ -988,6 +1220,7 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
                     body,
                 },
                 request_fingerprint,
+                attachment_move_recovery: None,
                 scheduling: OperationSchedulingState::default(),
             }),
             PlanMutation::PutOptimisticItem(ReplicaItemRecord {

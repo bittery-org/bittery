@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
