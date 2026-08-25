@@ -527,3 +527,37 @@ atomically increments a durable count in the same metadata/chunk transaction; un
 make equality with the immutable expected count an exact O(1) completeness proof. Failed count
 updates roll back with their chunk, premature publication remains writable across restart, and no
 publication transaction materializes the artifact's key set or ciphertext.
+
+### 2026-08-25 — preparation worker split at crypto, workflow, adapter, and composition seams
+
+Slice C cannot be implemented and independently verified in one pass. The persisted Attachment blob
+format is one JSON/Base64 AES-GCM envelope, while self-hosted Attachment size is unbounded. Mixing a
+format-preserving incremental cryptographic implementation with Replica checkpoints, remote manifest
+and object-store behavior, browser streaming, and Runtime lifecycle would make a green fixture at one
+seam stand in for four different failure domains. Slice C is therefore split before implementation:
+
+1. **Format-preserving Attachment Move cryptography (C1):** new crypto-core paths incrementally
+   authenticate the existing source envelope and produce the byte-for-byte compatible target envelope
+   under the existing Attachment AAD model. Fixed vectors prove unchanged algorithms and persisted
+   formats, corrupted input releases no result, and plaintext is zeroized rather than persisted or
+   logged. This slice owns no Runtime, Replica, artifact-store, or transport paths.
+2. **Deep preparation workflow module (C2):** new Client Runtime preparation paths expose one small
+   drive interface and hide manifest renewal, source-download progression, artifact publication before
+   checkpoint, upload progression, stale-authority freezing, final promotion, persisted unbounded
+   backoff, restart, and Account/Operation scope. It consumes C1 and the committed A/B interfaces with
+   in-memory transfer adapters, without editing their implementations or any host composition path.
+3. **Web and MV3 binary transfer adapter (C3):** new generated transfer-contract, WASM adapter, and
+   TypeScript host paths implement bounded download and one hash-bound streaming PUT through the C2
+   transfer port. Browser tests own cancellation, CORS/header preservation, termination, response
+   bounds, and binary-only ciphertext; production exposes no credential, fault-injection, or direct
+   workflow surface. It does not edit the preparation implementation.
+4. **Runtime scheduling and Web composition (C4):** Runtime lifecycle and Web Worker composition paths
+   inject the committed Replica, artifact, HTTP-control, and binary-transfer adapters, sweep orphans
+   only under exclusive startup, resume every accepted preparation after restart/unlock, and hand only
+   complete immutable requests to ordinary dispatch. End-to-end tests prove more than five transient
+   failures, dropped/renewed credentials, and no second writer for one Account.
+
+These commits are sequential and keep their implementation path sets disjoint. C1 makes the legacy
+cryptographic format a tested implementation detail behind the preparation module; C2 tests the owned
+Server protocol with an in-memory adapter; C3 tests browser mechanics without faking workflow
+durability; and C4 alone owns production reachability and lifecycle wiring.
