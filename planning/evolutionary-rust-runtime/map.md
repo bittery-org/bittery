@@ -110,7 +110,9 @@ or rollout order.
   [tickets 15 through 23](issues/15-binding-compile-spike.md), with the host binding
   architecture split out into [tickets 25 through 27](issues/25-runtime-protocol-contract.md).
   The remaining Item write kinds follow in
-  [ticket 28](issues/28-remaining-item-write-kinds.md), which ends the Web cutover.
+  [ticket 28](issues/28-remaining-item-write-kinds.md), which ends the Web cutover. Its C4 review
+  split the committed shared-Attachment uploader-AAD correction into
+  [ticket 43](issues/43-attachment-move-uploader-aad.md).
 - The eleven remaining response-cache call sites are inventoried in
   [ticket 24](issues/24-remaining-server-operation-outcomes.md), now resolved and narrowed to the six
   Item routes, and [ticket 29](issues/29-rotation-operation-outcomes.md) for the five Rotation

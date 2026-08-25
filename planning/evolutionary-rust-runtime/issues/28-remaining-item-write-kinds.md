@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22, 24, 31, 32
+Blocked by: 22, 24, 31, 32, 43
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -850,3 +850,16 @@ C4a may add a new facade and lifecycle hooks in `runtime.rs`; it must not widen 
 or make its worker a host-callable policy surface. C4b may construct those ports only through the
 facade. The previously recorded C4 omissions remain unchanged: Server Share, ordinary cross-kind
 dispatch/outcome widening, the general Attachment service, and final Web host cutover follow later.
+
+### 2026-08-26 — C4a review filed the shared-uploader C2 blocker
+
+Production secret-resolution review proved that the Server preserves an Attachment's original
+`uploaded_by` identity when Move finalization switches its Vault and storage object, and ordinary
+reads use that retained identity in Attachment AAD. Committed C2 instead used the User performing the
+Move for both source and target blob scopes. A shared Attachment uploaded by another authorised User
+therefore fails source authentication and would remain unreadable after finalization.
+
+[Ticket 43](43-attachment-move-uploader-aad.md) is claimed as the path-disjoint C2 correction and now
+blocks this ticket. It owns only blob-scope construction and its shared-uploader vector. The paused
+C4a slice retains its own reviewed companion correction: target encrypted metadata uses the retained
+uploader, and the target-wrapped Attachment key binds the Server's incremented envelope version.
