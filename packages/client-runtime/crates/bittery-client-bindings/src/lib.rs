@@ -1128,6 +1128,18 @@ mod observation_slots;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::WebClientRuntime;
+#[cfg(any(target_arch = "wasm32", feature = "artifact-control-contract-schema"))]
+mod web_attachment_artifact_control;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_attachment_artifact_policy;
+
+#[cfg(feature = "artifact-control-contract-schema")]
+#[doc(hidden)]
+pub use web_attachment_artifact_control::{
+    artifact_control_contract_fixture, artifact_control_contract_schema,
+};
+#[cfg(target_arch = "wasm32")]
+mod web_attachment_artifact_store;
 
 #[cfg(test)]
 mod tests {

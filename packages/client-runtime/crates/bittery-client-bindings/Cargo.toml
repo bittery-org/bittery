@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Shallow native and Web bindings for the Bittery Client Runtime"
 
+[features]
+default = []
+artifact-control-contract-schema = ["dep:schemars"]
+
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]
 
@@ -12,6 +16,8 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 bittery-client-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "=0.10.9"
+schemars = { version = "=1.2.2", optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 uniffi.workspace = true
@@ -24,3 +30,8 @@ js-sys = "=0.3.103"
 wasm-bindgen.workspace = true
 wasm-bindgen-futures = "=0.4.76"
 zeroize.workspace = true
+
+[[bin]]
+name = "generate-artifact-control-contract-schema"
+path = "src/bin/generate_artifact_control_contract_schema.rs"
+required-features = ["artifact-control-contract-schema"]

@@ -453,3 +453,77 @@ publication hashing, and every published read validate both the fixed maximum le
 SQLite length is checked before incremental `BLOB` I/O allocates the bounded buffer; publication still
 streams one fixed-size chunk at a time outside a long transaction and retains the overall artifact
 digest as final authority.
+
+### 2026-08-25 — B2 Web and MV3 binary artifact adapter delivered
+
+The Web binding now projects the Rust-owned canonical owner, fixed 256 KiB chunk policy, per-chunk
+SHA-256, total digest and length verification, closed publication states, bounded published reads,
+explicit Account deletion, and exclusive-startup orphan sweep across the WASM boundary. Ciphertext
+crosses only as bounded `Uint8Array` chunks; metadata and results remain closed primitives.
+
+The browser executor persists each chunk as an IndexedDB `ArrayBuffer` and uses one short transaction
+for each write, publication transition, or bounded Account/orphan deletion step. Tests exercise restart
+at every durable publication state, exact replay and conflict, two-executor publication, same-length
+corruption detection, deterministic rollback, and resumable partial sweep progress. This slice
+deliberately leaves Runtime worker construction, crypto/network streaming, manifest upload, and
+startup wiring to Slice C.
+
+### 2026-08-25 — B2 review kept incomplete artifacts writable
+
+Primary review found a product defect: the first browser publication transition entered durable
+`verifying` before proving that every expected chunk key existed. A premature publish could therefore
+fail during Rust hashing while leaving the missing chunk permanently unwritable. `beginPublish` now
+checks the exact contiguous chunk-key set in its short IndexedDB transaction before changing state;
+it does not materialize ciphertext or hash while that transaction is open. The review fixture proves
+that premature publication stays incomplete, restart writes the missing chunk, and later publication
+succeeds.
+
+### 2026-08-25 — B2 review closed production test and policy surfaces
+
+Closure review found two real module-boundary defects. First, generated production WASM exported the
+artifact owner and policy store, allowing ordinary JavaScript to call publication transitions that
+belong only to Rust. The store is now crate-internal, implements the Core artifact port directly, and
+has a sibling-visible constructor for Runtime composition; generated WASM exposes neither policy
+type. Second, the production IndexedDB executor accepted database redirection and deterministic
+failure options. Those seams now live only in an internal configurable executor reached through the
+testing export, while the public executor has a fixed zero-argument constructor.
+
+Rust boundary tests also reject an invalid maximum chunk index without overflow and reject malformed
+or oversized host chunk lengths before copying them into Rust. IndexedDB necessarily performs its
+structured clone before the callback returns, but every durable value written through the trusted
+Rust path was already capped at the canonical chunk size.
+
+### 2026-08-25 — B2 closure generated the browser control contract
+
+Final closure review found that the first internal port still handwrote owner fields, executor method
+names, and result spellings independently in Rust and TypeScript. Rust now owns one generated tagged
+artifact-control request/response contract. The WASM adapter calls one stable primitive
+`invoke(controlRequestJson, optionalBinaryChunk)` function; TypeScript validates every control request
+and response with the generated validator before dispatching IndexedDB primitives. Ciphertext remains
+an independently bounded `Uint8Array`/`ArrayBuffer` side channel and never enters control JSON.
+
+The generated schema, TypeScript types, standalone validator, and Rust-produced fixture are checked
+for drift. The fixture drives the real TypeScript executor through write, publication, and binary
+read boundaries and compares its closed responses with Rust-produced expectations, so a one-sided
+owner-field, variant, or result rename fails generation, typing, or execution instead of surviving
+parallel handwritten tests. Rust's actual read boundary uses the same digest validator whose
+behavioral test rejects a same-length ciphertext mutation.
+
+### 2026-08-25 — B2 closure hid primitive execution behind control invocation
+
+Primary verification found that the fixed production executor still inherited every configurable
+primitive and test inspection method. Ordinary JavaScript could therefore bypass the generated
+control validator and call chunk/publication transitions directly. The production executor now uses
+private composition and exposes only `invoke(controlRequestJson, optionalBinaryChunk)`; primitive
+methods, database selection, failure injection, and raw-store inspection remain available only on
+the internal configurable executor reached through testing exports.
+
+### 2026-08-25 — B2 closure bounded completeness proof and unsigned controls
+
+Review found two real defects. The generated validator accepted numbers above Rust's `u32` range,
+so every generated chunk count and index now closes the range at 4,294,967,295. Publication also
+enumerated every durable chunk key in one IndexedDB transaction. Each exact new chunk write now
+atomically increments a durable count in the same metadata/chunk transaction; unique in-range keys
+make equality with the immutable expected count an exact O(1) completeness proof. Failed count
+updates roll back with their chunk, premature publication remains writable across restart, and no
+publication transaction materializes the artifact's key set or ciphertext.

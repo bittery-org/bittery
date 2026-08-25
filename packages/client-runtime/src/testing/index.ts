@@ -10,9 +10,19 @@ import type {
 import type { RuntimeTransport, Schedule } from "../client";
 import { RuntimeRequestError } from "../client";
 import {
+	ConfigurableIndexedDbAttachmentArtifactExecutor,
+	type IndexedDbAttachmentArtifactExecutorOptions,
+} from "../indexeddb-attachment-artifact-executor-internal.ts";
+import {
 	ConfigurableIndexedDbReplicaExecutor,
 	type IndexedDbReplicaExecutorTestOptions,
 } from "../indexeddb-executor-internal.ts";
+
+export function createTestIndexedDbAttachmentArtifactExecutor(
+	options: IndexedDbAttachmentArtifactExecutorOptions,
+): ConfigurableIndexedDbAttachmentArtifactExecutor {
+	return new ConfigurableIndexedDbAttachmentArtifactExecutor(options);
+}
 
 export interface TestIndexedDbReplicaExecutor {
 	invoke(requestJson: string): Promise<string>;

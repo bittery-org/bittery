@@ -152,3 +152,13 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 
 	assert.deepEqual(productionWasm, [resolve(combinedRoot, "index_bg.wasm")]);
 });
+
+test("artifact policy stays internal to the Rust Runtime", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+	assert.equal(bindings.WebAttachmentArtifactOwner, undefined);
+	assert.equal(bindings.WebAttachmentArtifactStore, undefined);
+});

@@ -1,0 +1,379 @@
+{
+  "$defs": {
+    "ArtifactChunkWriteControl": {
+      "enum": [
+        "stored",
+        "alreadyStored"
+      ],
+      "type": "string"
+    },
+    "ArtifactControlRequest": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "chunkSha256": {
+              "type": "string"
+            },
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "writeChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner",
+            "chunkIndex",
+            "chunkSha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "beginPublish",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "readVerifyingChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner",
+            "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "finishPublish",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "readPublishedChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner",
+            "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "deleteAccount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "listArtifactIds",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "deleteArtifact",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "artifactId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ArtifactControlResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ArtifactChunkWriteControl"
+            },
+            "type": {
+              "const": "chunkWritten",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "$ref": "#/$defs/ArtifactPublicationStateControl"
+            },
+            "type": {
+              "const": "publicationStarted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkSha256": {
+              "type": "string"
+            },
+            "type": {
+              "const": "chunkRead",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "chunkSha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ArtifactPublicationControl"
+            },
+            "type": {
+              "const": "publicationFinished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "accountDeleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "artifactIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "artifactIds",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "artifactIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ArtifactDeletionControl"
+            },
+            "type": {
+              "const": "artifactDeleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ArtifactDeletionControl": {
+      "enum": [
+        "progress",
+        "deleted",
+        "missing"
+      ],
+      "type": "string"
+    },
+    "ArtifactOwnerControl": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "byteLength": {
+          "type": "string"
+        },
+        "chunkCount": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ciphertextSha256": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "artifactId",
+        "operationId",
+        "attachmentId",
+        "ciphertextSha256",
+        "byteLength",
+        "chunkCount"
+      ],
+      "type": "object"
+    },
+    "ArtifactPublicationControl": {
+      "enum": [
+        "published",
+        "alreadyPublished"
+      ],
+      "type": "string"
+    },
+    "ArtifactPublicationStateControl": {
+      "enum": [
+        "verifying",
+        "published"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/ArtifactControlRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/ArtifactControlResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "title": "ArtifactControlContract",
+  "type": "object",
+  "$id": "urn:bittery:client-runtime:artifact-control"
+}

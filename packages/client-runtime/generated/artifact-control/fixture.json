@@ -1,0 +1,79 @@
+{
+  "steps": [
+    {
+      "request": {
+        "chunkIndex": 0,
+        "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "owner": {
+          "accountId": "account-1",
+          "artifactId": "artifact-1",
+          "attachmentId": "attachment-1",
+          "byteLength": "3",
+          "chunkCount": 1,
+          "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+          "operationId": "operation-1"
+        },
+        "type": "writeChunk"
+      },
+      "response": {
+        "result": "stored",
+        "type": "chunkWritten"
+      }
+    },
+    {
+      "request": {
+        "owner": {
+          "accountId": "account-1",
+          "artifactId": "artifact-1",
+          "attachmentId": "attachment-1",
+          "byteLength": "3",
+          "chunkCount": 1,
+          "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+          "operationId": "operation-1"
+        },
+        "type": "beginPublish"
+      },
+      "response": {
+        "state": "verifying",
+        "type": "publicationStarted"
+      }
+    },
+    {
+      "request": {
+        "owner": {
+          "accountId": "account-1",
+          "artifactId": "artifact-1",
+          "attachmentId": "attachment-1",
+          "byteLength": "3",
+          "chunkCount": 1,
+          "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+          "operationId": "operation-1"
+        },
+        "type": "finishPublish"
+      },
+      "response": {
+        "result": "published",
+        "type": "publicationFinished"
+      }
+    },
+    {
+      "request": {
+        "chunkIndex": 0,
+        "owner": {
+          "accountId": "account-1",
+          "artifactId": "artifact-1",
+          "attachmentId": "attachment-1",
+          "byteLength": "3",
+          "chunkCount": 1,
+          "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+          "operationId": "operation-1"
+        },
+        "type": "readPublishedChunk"
+      },
+      "response": {
+        "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "type": "chunkRead"
+      }
+    }
+  ]
+}
