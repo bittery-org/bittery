@@ -261,3 +261,25 @@ A competing manifest for an Attachment with another live owner returns HTTP `409
 code `attachment_staging_busy` and retains no Operation outcome. The later accepted Runtime Operation
 waits and retries after the owner finalizes or its 24-hour lease expires; it is never rejected,
 discarded, or allowed to replace the first Operation's preparation.
+
+### 2026-08-25 — pre-staging stale authority and Finalize mismatch resolved
+
+If the Server proves before the first manifest that the accepted Attachment set or envelope versions
+are already stale, the manifest route returns a closed stale-authority preparation signal but retains
+no outcome itself. Runtime then freezes a deterministic rejection-finalization request from the
+immutable accepted Move intent. This is a distinct closed body variant on the existing Move route: it
+carries the accepted source, target, Item validator, and complete Attachment identity/version set,
+but no fabricated re-encrypted payload or staged object reference.
+
+Only the existing Move Operation transaction may answer that variant. It independently compares the
+accepted identity/version set with current Server authority and retains
+`attachment_state_conflict` with audit, Sync, and Operation outcome only when the stale fact is true.
+If authority still matches, the rejection-finalization request retains nothing and returns the
+preparation-needed response. This keeps one outcome/fingerprint path and prevents an accepted
+Operation from retrying manifest creation forever after authority becomes irreparably stale.
+
+A prepared Finalize request whose Item, source Vault, target Vault, or Attachment intent does not
+match its Operation manifest is not stale Server authority. It returns HTTP `409` with the closed
+code `attachment_staging_mismatch`, retains no outcome, and leaves the accepted Operation durable.
+Runtime treats it as a local invariant failure; corrected software may resume from the immutable
+intent, while retry count or elapsed time still cannot discard or terminalize it.
