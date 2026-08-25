@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22, 24, 31, 32, 43
+Blocked by: 22, 24, 31, 32, 43, 45
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -62,6 +62,18 @@ than five transient failures, forced duplicate dispatch, and dropped-response ca
 already passes. `pnpm check:ci` and `pnpm check:ci:rust` pass.
 
 ## Comments
+
+### 2026-08-26 — Web Attachment Move composition exposed a Core authority blocker
+
+The C4b Web-composition implementer stopped before editing or writing a test because the committed
+C4a facade still requires the host to implement `renew_manifest`. The Server URL, current Session,
+one-refresh policy, durable Session replacement, and HTTP response classification are private Rust
+Runtime authorities. Implementing C4b as scoped would therefore move authenticated route policy into
+bindings or TypeScript, contrary to the binding Rust-network-ownership decision.
+
+Ticket 45 owns the missing Core seam and is split into two independently verifiable, path-disjoint
+slices before C4b resumes. It deliberately makes no new product-protocol choice. C4b remains limited
+to Web binary primitives, per-Account Worker composition, and exclusive lifecycle ownership.
 
 ### 2026-08-24 — ticket 23 added acceptance prerequisites
 
