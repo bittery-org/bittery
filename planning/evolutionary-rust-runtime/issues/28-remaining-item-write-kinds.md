@@ -561,3 +561,19 @@ These commits are sequential and keep their implementation path sets disjoint. C
 cryptographic format a tested implementation detail behind the preparation module; C2 tests the owned
 Server protocol with an in-memory adapter; C3 tests browser mechanics without faking workflow
 durability; and C4 alone owns production reachability and lifecycle wiring.
+
+### 2026-08-25 — Attachment Move source envelopes use a two-pass download
+
+The maintainer selected a two-pass source download. Existing Attachment blob envelopes place the
+unbounded Base64 ciphertext before the IV, so a one-pass AES-GCM transcryptor cannot begin without
+buffering the whole object. The first pass therefore scans and validates the complete closed JSON
+envelope with bounded memory, discards ciphertext bytes, and retains only the bounded IV and algorithm.
+The second pass downloads the object again, requires the same bounded metadata, and incrementally
+authenticates and transforms its ciphertext. Only successful source-tag verification grants authority
+to publish the provisional target artifact.
+
+This deliberately doubles source-download bandwidth. It preserves every JSON field order accepted by
+the existing parser, requires no canonical-tail assumption or Range support, and introduces no local
+ciphertext spool, schema, quota, or crash-cleanup lifecycle. A network failure in either pass remains
+retryable preparation work; credential renewal, retry count, and restart never discard the accepted
+Operation or change its immutable intent.
