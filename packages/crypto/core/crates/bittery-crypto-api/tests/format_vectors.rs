@@ -80,6 +80,7 @@ fn fixed_aes_256_gcm_aad_vector_is_stable_and_opens_through_both_layers() {
 fn attachment_move_transcrypt_preserves_the_existing_envelope_format() {
     use core::attachment_move::{
         AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor,
+        AttachmentPublicationIdentity,
     };
 
     // Produced independently with Node's `crypto.createCipheriv("aes-256-gcm", ...)`.
@@ -93,12 +94,19 @@ fn attachment_move_transcrypt_preserves_the_existing_envelope_format() {
     for chunk in SOURCE.chunks(7) {
         scanner.push(chunk).unwrap();
     }
-    let mut transcryptor = AttachmentMoveTranscryptor::new_with_test_iv(
+    let mut transcryptor = AttachmentMoveTranscryptor::new_with_test_iv_and_identity(
         scanner.finish().unwrap(),
         [0x11; 32],
         scope("vault-source"),
         [0x22; 32],
         scope("vault-target"),
+        AttachmentPublicationIdentity::new(
+            "account-vector".into(),
+            "user-9".into(),
+            "operation-vector".into(),
+            "attachment-7".into(),
+        )
+        .unwrap(),
         [0x44; 12],
     )
     .unwrap();

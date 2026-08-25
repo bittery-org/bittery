@@ -634,3 +634,32 @@ implementation so native and browser persistence do not stand in for each other:
 Deliberately rejected: buffering an unbounded target envelope in memory, and a third source download
 with a reusable internal target nonce. Neither is needed once provisional ciphertext has a durable but
 unpublished home.
+
+### 2026-08-25 — B3 delivered the native provisional artifact boundary
+
+The Rust-owned provisional protocol and native SQLite adapter now write fixed-size ciphertext chunks
+under one Account-, Operation-, Attachment-, and generation-scoped writer before the final digest and
+length exist. C1 itself hashes and counts every exact target-envelope byte it emits and returns those
+values only inside a one-use publication proof bound to Account/User, Operation, and Attachment. The
+store accepts no caller-supplied replacement digest, length, or identity. It durably seals that proof,
+verifies chunks outside a long transaction, and publishes by one atomic metadata mapping to the stable
+physical generation; it neither copies nor Base64-encodes unbounded BLOBs.
+
+Authenticated state survives actual process restart through a closed recovery token. State-1 `Begin`
+and explicit recovery expose no writable handle, and `ResumeRecovered` returns only the final canonical
+owner after exact durable state-1/state-2 validation. Unauthenticated, malformed, random, wrong-scope,
+or swept tokens cannot write, finalize, or publish. A new nonce attempt may coexist with an earlier
+unreferenced published artifact until exclusive startup sweep, while generation fencing prevents an
+old writer or cleanup step from touching the new attempt. Existing B1 SQLite files gain the nullable
+physical-generation mapping idempotently without losing their canonical metadata or chunks.
+
+Independent review findings were all real product, durability, security, or integration defects, not
+fixture defects. Review corrected an unbounded final BLOB copy, same-scope retry blockage, missing B1
+schema evolution, destruction of an authenticated seal by `Begin`, restart fixtures that retained the
+writer in memory, an unbound publication proof, a recovery API that the external Web bindings crate
+could not implement, and a public enum path that exposed a state-0 writer before durable validation.
+Each now has a behavioral regression test, including tests compiled outside the Core crate.
+
+Deliberately left open: B3 provides no IndexedDB implementation, browser control-contract variants,
+Runtime preparation worker, network transport, scheduling, or host composition. B4 owns the Web/MV3
+adapter for this exact token and physical-generation protocol; C2 follows only after B4 is committed.

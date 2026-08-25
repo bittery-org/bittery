@@ -167,9 +167,66 @@ impl AttachmentBlobScope {
     }
 }
 
+pub struct AttachmentPublicationIdentity {
+    account_id: String,
+    user_id: String,
+    operation_id: String,
+    attachment_id: String,
+}
+
+impl AttachmentPublicationIdentity {
+    pub fn new(
+        account_id: String,
+        user_id: String,
+        operation_id: String,
+        attachment_id: String,
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        if [&account_id, &user_id, &operation_id, &attachment_id]
+            .into_iter()
+            .any(|value| value.is_empty() || value.contains('\0'))
+        {
+            return Err(AttachmentMoveCryptoError::InvalidEnvelope);
+        }
+        Ok(Self {
+            account_id,
+            user_id,
+            operation_id,
+            attachment_id,
+        })
+    }
+}
+
 /// Unforgeable authority granted only after source authentication succeeds.
 pub struct AttachmentPublicationProof {
-    _private: (),
+    ciphertext_sha256: String,
+    byte_length: u64,
+    identity: AttachmentPublicationIdentity,
+}
+
+impl AttachmentPublicationProof {
+    pub fn ciphertext_sha256(&self) -> &str {
+        &self.ciphertext_sha256
+    }
+
+    pub fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+
+    pub fn account_id(&self) -> &str {
+        &self.identity.account_id
+    }
+
+    pub fn user_id(&self) -> &str {
+        &self.identity.user_id
+    }
+
+    pub fn operation_id(&self) -> &str {
+        &self.identity.operation_id
+    }
+
+    pub fn attachment_id(&self) -> &str {
+        &self.identity.attachment_id
+    }
 }
 
 pub struct AttachmentTranscryptFinish {
@@ -190,6 +247,9 @@ pub struct AttachmentMoveTranscryptor {
     expected_envelope_hash: [u8; 32],
     envelope_hash: Sha256,
     plaintext_utf8: Utf8Validator,
+    target_envelope_hash: Sha256,
+    target_envelope_length: u64,
+    publication_identity: Option<AttachmentPublicationIdentity>,
 }
 
 struct MoveTargetNonce([u8; IV_LENGTH]);
@@ -238,6 +298,7 @@ impl AttachmentMoveTranscryptor {
         source_scope: AttachmentBlobScope,
         target_key: [u8; 32],
         target_scope: AttachmentBlobScope,
+        publication_identity: AttachmentPublicationIdentity,
     ) -> Result<Self, AttachmentMoveCryptoError> {
         let target_nonce = MoveTargetNonce::generate(&scan.source_iv, &source_key, &target_key);
         Self::new_with_nonce(
@@ -246,17 +307,19 @@ impl AttachmentMoveTranscryptor {
             source_scope,
             target_key,
             target_scope,
+            publication_identity,
             target_nonce,
         )
     }
 
     #[cfg(any(test, feature = "attachment-move-test-vectors"))]
-    pub fn new_with_test_iv(
+    pub fn new_with_test_iv_and_identity(
         scan: AttachmentEnvelopeScan,
         source_key: [u8; 32],
         source_scope: AttachmentBlobScope,
         target_key: [u8; 32],
         target_scope: AttachmentBlobScope,
+        publication_identity: AttachmentPublicationIdentity,
         target_iv: [u8; IV_LENGTH],
     ) -> Result<Self, AttachmentMoveCryptoError> {
         if source_key.ct_eq(&target_key).unwrap_u8() == 1
@@ -270,7 +333,33 @@ impl AttachmentMoveTranscryptor {
             source_scope,
             target_key,
             target_scope,
+            publication_identity,
             MoveTargetNonce::from_test_bytes(target_iv),
+        )
+    }
+
+    #[cfg(test)]
+    fn new_with_test_iv(
+        scan: AttachmentEnvelopeScan,
+        source_key: [u8; 32],
+        source_scope: AttachmentBlobScope,
+        target_key: [u8; 32],
+        target_scope: AttachmentBlobScope,
+        target_iv: [u8; IV_LENGTH],
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        Self::new_with_test_iv_and_identity(
+            scan,
+            source_key,
+            source_scope,
+            target_key,
+            target_scope,
+            AttachmentPublicationIdentity::new(
+                "account-test".into(),
+                "user-9".into(),
+                "operation-test".into(),
+                "attachment-7".into(),
+            )?,
+            target_iv,
         )
     }
 
@@ -280,8 +369,14 @@ impl AttachmentMoveTranscryptor {
         source_scope: AttachmentBlobScope,
         target_key: [u8; 32],
         target_scope: AttachmentBlobScope,
+        publication_identity: AttachmentPublicationIdentity,
         target_nonce: MoveTargetNonce,
     ) -> Result<Self, AttachmentMoveCryptoError> {
+        if publication_identity.user_id != target_scope.user_id
+            || publication_identity.attachment_id != target_scope.attachment_id
+        {
+            return Err(AttachmentMoveCryptoError::InvalidEnvelope);
+        }
         let target_iv = target_nonce.0;
         let source_key = Zeroizing::new(source_key);
         let target_key = Zeroizing::new(target_key);
@@ -302,6 +397,9 @@ impl AttachmentMoveTranscryptor {
             expected_envelope_hash: scan.envelope_hash,
             envelope_hash: Sha256::new(),
             plaintext_utf8: Utf8Validator::new(),
+            target_envelope_hash: Sha256::new(),
+            target_envelope_length: 0,
+            publication_identity: Some(publication_identity),
         })
     }
 
@@ -354,6 +452,11 @@ impl AttachmentMoveTranscryptor {
             plaintext.zeroize();
             self.target_base64.push(target_ciphertext, &mut output);
         }
+        self.target_envelope_hash.update(&output);
+        self.target_envelope_length = self
+            .target_envelope_length
+            .checked_add(output.len() as u64)
+            .ok_or(AttachmentMoveCryptoError::AttachmentTooLarge)?;
         Ok(output)
     }
 
@@ -404,9 +507,21 @@ impl AttachmentMoveTranscryptor {
         final_chunk.extend_from_slice(br#"","iv":""#);
         final_chunk.extend_from_slice(BASE64.encode(self.target_iv).as_bytes());
         final_chunk.extend_from_slice(br#"","algorithm":"AES-GCM-AAD-V1"}"#);
+        self.target_envelope_hash.update(&final_chunk);
+        self.target_envelope_length = self
+            .target_envelope_length
+            .checked_add(final_chunk.len() as u64)
+            .ok_or(AttachmentMoveCryptoError::AttachmentTooLarge)?;
         Ok(AttachmentTranscryptFinish {
             final_chunk,
-            publication_proof: AttachmentPublicationProof { _private: () },
+            publication_proof: AttachmentPublicationProof {
+                ciphertext_sha256: hex::encode(self.target_envelope_hash.clone().finalize()),
+                byte_length: self.target_envelope_length,
+                identity: self
+                    .publication_identity
+                    .take()
+                    .ok_or(AttachmentMoveCryptoError::InvalidEnvelope)?,
+            },
         })
     }
 
@@ -1031,14 +1146,15 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 mod tests {
     use super::{
         AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveCryptoError,
-        AttachmentMoveTranscryptor, GcmStream, MoveTargetNonce, ATTACHMENT_ENCRYPTION_ALGORITHM,
-        MAX_GCM_TEXT_LENGTH,
+        AttachmentMoveTranscryptor, AttachmentPublicationIdentity, GcmStream, MoveTargetNonce,
+        ATTACHMENT_ENCRYPTION_ALGORITHM, MAX_GCM_TEXT_LENGTH,
     };
     use aes_gcm::{
         aead::{Aead, KeyInit, Payload},
         Aes256Gcm, Nonce,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use sha2::Digest;
 
     const SOURCE_KEY: [u8; 32] = [0x11; 32];
     const TARGET_KEY: [u8; 32] = [0x22; 32];
@@ -1113,6 +1229,81 @@ mod tests {
         }
         output.extend(transcryptor.finish().unwrap().final_chunk);
         output
+    }
+
+    #[test]
+    fn publication_proof_owns_the_exact_emitted_bytes_and_explicit_identity() {
+        let source = envelope(b"bound output", &SOURCE_KEY, SOURCE_IV, "vault-source");
+        let scan = scan_chunks(&source, &[3, 5]);
+        let identity = AttachmentPublicationIdentity::new(
+            "account-1".into(),
+            "user-9".into(),
+            "operation-1".into(),
+            "attachment-7".into(),
+        )
+        .unwrap();
+        let mut transcryptor = AttachmentMoveTranscryptor::new_with_test_iv_and_identity(
+            scan,
+            SOURCE_KEY,
+            scope("vault-source"),
+            TARGET_KEY,
+            scope("vault-target"),
+            identity,
+            TARGET_IV,
+        )
+        .unwrap();
+        let mut output = transcryptor.push(&source).unwrap();
+        let finished = transcryptor.finish().unwrap();
+        output.extend_from_slice(&finished.final_chunk);
+
+        assert_eq!(
+            finished.publication_proof.ciphertext_sha256(),
+            hex::encode(sha2::Sha256::digest(&output))
+        );
+        assert_eq!(
+            finished.publication_proof.byte_length(),
+            output.len() as u64
+        );
+        assert_eq!(finished.publication_proof.account_id(), "account-1");
+        assert_eq!(finished.publication_proof.user_id(), "user-9");
+        assert_eq!(finished.publication_proof.operation_id(), "operation-1");
+        assert_eq!(finished.publication_proof.attachment_id(), "attachment-7");
+    }
+
+    #[test]
+    fn publication_identity_must_match_target_attachment_and_user_scope() {
+        let source = envelope(b"scope binding", &SOURCE_KEY, SOURCE_IV, "vault-source");
+        for identity in [
+            AttachmentPublicationIdentity::new(
+                "account-1".into(),
+                "other-user".into(),
+                "operation-1".into(),
+                "attachment-7".into(),
+            )
+            .unwrap(),
+            AttachmentPublicationIdentity::new(
+                "account-1".into(),
+                "user-9".into(),
+                "operation-1".into(),
+                "other-attachment".into(),
+            )
+            .unwrap(),
+        ] {
+            assert_eq!(
+                AttachmentMoveTranscryptor::new_with_test_iv_and_identity(
+                    scan_chunks(&source, &[source.len()]),
+                    SOURCE_KEY,
+                    scope("vault-source"),
+                    TARGET_KEY,
+                    scope("vault-target"),
+                    identity,
+                    TARGET_IV,
+                )
+                .err()
+                .unwrap(),
+                AttachmentMoveCryptoError::InvalidEnvelope
+            );
+        }
     }
 
     #[test]
@@ -1375,6 +1566,13 @@ mod tests {
                 scope("vault-source"),
                 TARGET_KEY,
                 scope("vault-target"),
+                AttachmentPublicationIdentity::new(
+                    "account-test".into(),
+                    "user-9".into(),
+                    "operation-test".into(),
+                    "attachment-7".into(),
+                )
+                .unwrap(),
             )
             .unwrap();
             let mut output = transcryptor.push(&source).unwrap();

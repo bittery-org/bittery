@@ -55,6 +55,9 @@ pub use attachment_artifact_store::SqliteAttachmentArtifactStore;
 pub use attachment_artifact_store::{
     ArtifactChunkWrite, ArtifactPublication, AttachmentArtifactOwner, AttachmentArtifactStore,
     AttachmentArtifactStoreRequest, AttachmentArtifactStoreResponse, ExclusiveStartupBoundary,
+    ProvisionalAttachmentArtifactRecovery, ProvisionalAttachmentArtifactScope,
+    ProvisionalAttachmentArtifactStore, ProvisionalAttachmentArtifactStoreRequest,
+    ProvisionalAttachmentArtifactStoreResponse, ProvisionalAttachmentArtifactWriter,
     PublishedArtifactChunk, ARTIFACT_CHUNK_BYTES,
 };
 #[cfg(feature = "platform-storage-contract-schema")]
