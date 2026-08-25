@@ -1,3 +1,10 @@
+#[allow(
+    dead_code,
+    reason = "Ticket 28 C2 lands the preparation worker before C4 composes its production ports"
+)]
+mod attachment_move_preparation;
+#[cfg(test)]
+mod attachment_move_preparation_tests;
 mod bootstrap;
 mod create;
 #[cfg(test)]

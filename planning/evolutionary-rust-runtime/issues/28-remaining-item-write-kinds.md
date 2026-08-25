@@ -698,3 +698,29 @@ and proves both the maximum and overflow cases.
 Deliberately left open: B4 adds no preparation worker, network transfer, retry policy, scheduling,
 Replica checkpoint, or production host composition. C2 now owns consumption of the authenticated
 provisional writer and C1 transcryption through the in-memory Runtime ports.
+
+### 2026-08-25 — C2 delivered the deep Attachment Move preparation workflow
+
+One explicitly Account- and Operation-scoped Rust drive interface now owns manifest renewal, the
+two-pass source download, authenticated transcryption into bounded provisional chunks, publication
+before the guarded Replica checkpoint, canonical artifact upload, stale-authority freezing, final
+promotion, persisted unbounded retry, restart, and staging-incomplete reactivation. It consumes the
+committed Replica, crypto, and artifact-store contracts through in-memory ports without editing their
+implementations or any host-composition path. Download or authenticated-envelope failure remains
+retryable work rather than a semantic outcome; unexpected local secret or artifact-store failure is
+surfaced and never converted into transport backoff.
+
+Independent review found a real product defect: the first worker resolved target key material and
+prepared metadata twice, so ciphertext produced by one bundle could be checkpointed with another.
+Fresh work now resolves exactly one coherent bundle. Recovery of an already-published owner uses a
+separate metadata-only seam that re-seals the same durable Attachment key from immutable authority and
+validates the canonical owner; it cannot mint a second key bundle. Review also found a real fixture
+defect: the restart test retained the first provider's metadata in RAM. Restart now creates a fresh
+provider, reconstructs owner-bound metadata without transient state, and proves it decrypts the
+existing published artifact. Behavioral coverage includes malformed manifests, failures after actual
+download and upload progress, every local store boundary, more than five persisted retries, credential
+renewal, exact uploaded digest and length, Account isolation, and one live writer.
+
+Deliberately left open: C2 provides only in-memory transfer and secret ports. C3 owns the generated
+Web/MV3 bounded binary transport adapter and its cancellation/header/CORS behavior; C4 alone owns
+production scheduling, Worker composition, exclusive startup sweep, and reachability.
