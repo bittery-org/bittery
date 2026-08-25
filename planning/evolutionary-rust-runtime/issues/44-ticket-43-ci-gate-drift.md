@@ -77,3 +77,16 @@ byte-for-byte identical to the five-line checked-in delta. The worktree Server c
 Independent review found no product or fixture defect and confirmed no package, version, checksum,
 or manifest changed. Deliberately left open: this ticket and Ticket 43 remain claimed until both full
 repository gates pass from the now-clean tree.
+
+### 2026-08-26 — Rust gate added a path-disjoint Desktop lockfile slice
+
+The subsequent clean-tree `pnpm check:ci:rust` completed successfully but updated
+`apps/desktop/src-tauri/Cargo.lock` with the same five committed crypto-core dependency edges as the
+Server lockfile. A successful command that dirties the tree does not satisfy the release gate.
+
+Ticket 44 therefore gains a third sequential slice, **Desktop lockfile closure (C)**, owning only
+that lockfile. A fresh implementer and reviewer must reproduce the committed Desktop `--locked`
+failure in an isolated snapshot, prove minimal offline reconciliation is byte-identical to the gate
+delta, and pass the worktree Desktop locked check without further changes. No manifest, source,
+generated binding, Server lockfile, or dependency version belongs to this slice. Both full gates are
+rerun from a clean tree afterwards.
