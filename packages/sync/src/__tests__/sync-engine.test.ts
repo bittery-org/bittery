@@ -2161,7 +2161,7 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(queue.getPendingCount()).toBe(0);
 	});
 
-	test("omits server-derived encryption context from ciphertext update and move HTTP requests", async () => {
+	test("sends the closed prepared Move body without server-derived encryption context", async () => {
 		const acknowledgements: Array<{
 			type: string;
 			baseVersion: number;
@@ -2231,6 +2231,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			encryptionAlgorithm: "AES-GCM-AAD-V1",
 		});
 		expect(requests.get("moved_item")?.input).toEqual({
+			mode: "prepared",
 			sourceVaultId: "vault_1",
 			targetVaultId: "vault_2",
 			encryptedData: "new_ciphertext",

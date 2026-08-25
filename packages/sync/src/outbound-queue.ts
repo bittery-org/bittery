@@ -968,6 +968,7 @@ export class ItemSyncEngine {
 				const response = await client.items.move(
 					mutation.entityId,
 					{
+						mode: "prepared",
 						sourceVaultId: mutation.vaultId,
 						targetVaultId: mutation.targetVaultId,
 						encryptedData: payload.encryptedData,

@@ -53,3 +53,15 @@ The failing `pnpm check:ci` log named the missing prepared `mode` at
 `packages/sync/src/outbound-queue.ts:970`. The same run generated five Server lockfile dependency
 edges and no manifest edit. These are recorded as gate defects from earlier committed slices, not as
 Ticket 43 uploader-AAD findings.
+
+### 2026-08-26 — Slice A delivered the prepared Move caller contract
+
+The transitional Sync queue now sends the generated closed prepared variant with
+`mode: "prepared"` and its existing encrypted Item fields. It deliberately omits `attachments`:
+the prepared contract defaults that optional field to an empty set, and the Server rejects an
+attachment-bearing Item with `attachment_state_conflict` rather than silently moving unstaged blobs.
+A behavioral test captures the actual `client.items.move` input and asserts the exact request.
+
+Independent review found no product or fixture defect and confirmed this changes no retry, discard,
+logging, Account scope, or writer behavior. Deliberately left open: Ticket 28 will delete this
+transitional queue at Web cutover; Slice B still owns only the stale generated Server lockfile.
