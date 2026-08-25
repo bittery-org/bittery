@@ -42,11 +42,23 @@ pub(crate) fn validate_chunk_digest(
     Ok(())
 }
 
+pub(crate) fn validate_complete_artifact(
+    actual_byte_length: u64,
+    expected_byte_length: u64,
+    actual_sha256: &str,
+    expected_sha256: &str,
+) -> Result<(), &'static str> {
+    if actual_byte_length != expected_byte_length || actual_sha256 != expected_sha256 {
+        return Err("Provisional Attachment artifact bytes do not match publication authority");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         copy_validated_chunk, validate_chunk_digest, validate_chunk_index,
-        validate_received_chunk_length,
+        validate_complete_artifact, validate_received_chunk_length,
     };
     use std::cell::Cell;
 
@@ -76,5 +88,14 @@ mod tests {
         let expected = "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81";
         assert!(validate_chunk_digest(&[1, 2, 3], expected).is_ok());
         assert!(validate_chunk_digest(&[1, 2, 4], expected).is_err());
+    }
+
+    #[test]
+    fn publication_authority_rejects_missing_length_and_digest_or_different_bytes() {
+        let digest = "7e592b7a2d9533c24af5c82a173f3f5d41290375a07dfac281b9b787277a5295";
+        assert!(validate_complete_artifact(5, 5, digest, digest).is_ok());
+        assert!(validate_complete_artifact(4, 5, digest, digest).is_err());
+        assert!(validate_complete_artifact(5, 5, "missing", digest).is_err());
+        assert!(validate_complete_artifact(5, 5, digest, "different").is_err());
     }
 }

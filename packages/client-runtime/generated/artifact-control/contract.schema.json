@@ -12,6 +12,172 @@
         {
           "additionalProperties": false,
           "properties": {
+            "type": {
+              "const": "beginProvisional",
+              "type": "string"
+            },
+            "writer": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            }
+          },
+          "required": [
+            "type",
+            "writer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "chunkSha256": {
+              "type": "string"
+            },
+            "type": {
+              "const": "writeProvisionalChunk",
+              "type": "string"
+            },
+            "writer": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            }
+          },
+          "required": [
+            "type",
+            "writer",
+            "chunkIndex",
+            "chunkSha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "type": {
+              "const": "sealProvisional",
+              "type": "string"
+            },
+            "writer": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            }
+          },
+          "required": [
+            "type",
+            "writer",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "token": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            },
+            "type": {
+              "const": "readSealedProvisionalChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "token",
+            "owner",
+            "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "token": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            },
+            "type": {
+              "const": "finishProvisional",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "token",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/ProvisionalArtifactScopeControl"
+            },
+            "type": {
+              "const": "recoverProvisional",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "recovery": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            },
+            "type": {
+              "const": "resumeRecoveredProvisional",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "recovery"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "resumeProvisionalFinalization",
+              "type": "string"
+            },
+            "writer": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            }
+          },
+          "required": [
+            "type",
+            "writer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "chunkIndex": {
               "format": "uint32",
               "maximum": 4294967295,
@@ -173,11 +339,92 @@
             "artifactId"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "token": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            },
+            "type": {
+              "const": "deleteProvisionalGeneration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "token"
+          ],
+          "type": "object"
         }
       ]
     },
     "ArtifactControlResponse": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "provisionalBegun",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "recovery": {
+              "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+            },
+            "type": {
+              "const": "provisionalRecoveryAvailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "recovery"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ArtifactOwnerControl"
+            },
+            "state": {
+              "$ref": "#/$defs/ProvisionalPublicationStateControl"
+            },
+            "type": {
+              "const": "provisionalBinding",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "provisionalFinished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -268,6 +515,12 @@
               },
               "type": "array"
             },
+            "provisional": {
+              "items": {
+                "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+              },
+              "type": "array"
+            },
             "type": {
               "const": "artifactIds",
               "type": "string"
@@ -275,7 +528,8 @@
           },
           "required": [
             "type",
-            "artifactIds"
+            "artifactIds",
+            "provisional"
           ],
           "type": "object"
         },
@@ -355,6 +609,58 @@
     "ArtifactPublicationStateControl": {
       "enum": [
         "verifying",
+        "published"
+      ],
+      "type": "string"
+    },
+    "ProvisionalArtifactScopeControl": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "operationId",
+        "attachmentId"
+      ],
+      "type": "object"
+    },
+    "ProvisionalArtifactTokenControl": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "operationId",
+        "attachmentId",
+        "generation"
+      ],
+      "type": "object"
+    },
+    "ProvisionalPublicationStateControl": {
+      "enum": [
+        "sealed",
         "published"
       ],
       "type": "string"

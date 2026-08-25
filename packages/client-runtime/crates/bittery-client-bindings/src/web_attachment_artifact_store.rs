@@ -1,12 +1,16 @@
 use crate::web_attachment_artifact_control::{
     ArtifactChunkWriteControl, ArtifactControlRequest, ArtifactControlResponse,
     ArtifactDeletionControl, ArtifactOwnerControl, ArtifactPublicationControl,
-    ArtifactPublicationStateControl,
+    ArtifactPublicationStateControl, ProvisionalArtifactScopeControl,
+    ProvisionalArtifactTokenControl, ProvisionalPublicationStateControl,
 };
 use crate::web_attachment_artifact_policy::{
-    copy_validated_chunk, validate_chunk_digest, validate_chunk_index,
+    copy_validated_chunk, validate_chunk_digest, validate_chunk_index, validate_complete_artifact,
 };
-use bittery_client_core::{AccountId, AttachmentArtifactOwner, ARTIFACT_CHUNK_BYTES};
+use bittery_client_core::{
+    AccountId, AttachmentArtifactOwner, ProvisionalAttachmentArtifactRecovery,
+    ProvisionalAttachmentArtifactScope, ProvisionalAttachmentArtifactWriter, ARTIFACT_CHUNK_BYTES,
+};
 use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::{JsCast, JsValue};
@@ -23,6 +27,20 @@ const _: fn(
     JsValue,
 ) -> Result<std::sync::Arc<dyn bittery_client_core::AttachmentArtifactStore>, JsValue> =
     construct_core_artifact_port;
+
+fn construct_core_provisional_artifact_port(
+    executor: JsValue,
+) -> Result<std::sync::Arc<dyn bittery_client_core::ProvisionalAttachmentArtifactStore>, JsValue> {
+    Ok(std::sync::Arc::new(JsAttachmentArtifactStore::new(
+        executor,
+    )?))
+}
+const _: fn(
+    JsValue,
+) -> Result<
+    std::sync::Arc<dyn bittery_client_core::ProvisionalAttachmentArtifactStore>,
+    JsValue,
+> = construct_core_provisional_artifact_port;
 
 pub(crate) struct JsAttachmentArtifactStore {
     executor: JsValue,
@@ -61,6 +79,126 @@ impl JsAttachmentArtifactStore {
                 "IndexedDB artifact chunk write returned an invalid result",
             )),
         }
+    }
+
+    async fn begin_provisional(
+        &self,
+        writer: &ProvisionalAttachmentArtifactWriter,
+    ) -> Result<ArtifactControlResponse, JsValue> {
+        Ok(control(
+            &self.executor,
+            ArtifactControlRequest::BeginProvisional {
+                writer: writer_control(writer),
+            },
+            None,
+        )
+        .await?
+        .response)
+    }
+
+    async fn write_provisional_chunk(
+        &self,
+        writer: &ProvisionalAttachmentArtifactWriter,
+        chunk_index: u32,
+        bytes: &[u8],
+    ) -> Result<ArtifactChunkWriteControl, JsValue> {
+        if bytes.is_empty() || bytes.len() > ARTIFACT_CHUNK_BYTES {
+            return Err(error(
+                "Provisional Attachment artifact chunk length is invalid",
+            ));
+        }
+        let response = control(
+            &self.executor,
+            ArtifactControlRequest::WriteProvisionalChunk {
+                writer: writer_control(writer),
+                chunk_index,
+                chunk_sha256: hex(bytes),
+            },
+            Some(bytes),
+        )
+        .await?;
+        match response.response {
+            ArtifactControlResponse::ChunkWritten { result } => Ok(result),
+            _ => Err(error(
+                "IndexedDB provisional chunk write returned an invalid result",
+            )),
+        }
+    }
+
+    async fn verify_and_finish_provisional(
+        &self,
+        token: ProvisionalArtifactTokenControl,
+        owner: AttachmentArtifactOwner,
+        state: ProvisionalPublicationStateControl,
+    ) -> Result<AttachmentArtifactOwner, JsValue> {
+        ensure_token_owner(&token, &owner)?;
+        let shape = shape(&owner)?;
+        if state == ProvisionalPublicationStateControl::Published {
+            return Ok(owner);
+        }
+        let owner_control = owner_control(&owner, shape.chunk_count);
+        let mut hasher = Sha256::new();
+        let mut total = 0_u64;
+        for chunk_index in 0..shape.chunk_count {
+            let response = control(
+                &self.executor,
+                ArtifactControlRequest::ReadSealedProvisionalChunk {
+                    token: token.clone(),
+                    owner: owner_control.clone(),
+                    chunk_index,
+                },
+                None,
+            )
+            .await?;
+            let bytes = control_chunk(response, shape.chunk_length(chunk_index)?)?;
+            total = total
+                .checked_add(bytes.len() as u64)
+                .ok_or_else(|| error("Attachment artifact byte length overflowed"))?;
+            hasher.update(bytes);
+        }
+        validate_complete_artifact(
+            total,
+            owner.byte_length(),
+            &format!("{:x}", hasher.finalize()),
+            owner.ciphertext_sha256(),
+        )
+        .map_err(error)?;
+        let response = control(
+            &self.executor,
+            ArtifactControlRequest::FinishProvisional {
+                token,
+                owner: owner_control,
+            },
+            None,
+        )
+        .await?;
+        match response.response {
+            ArtifactControlResponse::ProvisionalFinished => Ok(owner),
+            _ => Err(error(
+                "IndexedDB provisional publication returned an invalid result",
+            )),
+        }
+    }
+
+    async fn resume_provisional(
+        &self,
+        request: ArtifactControlRequest,
+        expected_token: ProvisionalArtifactTokenControl,
+    ) -> Result<AttachmentArtifactOwner, JsValue> {
+        let response = control(&self.executor, request, None).await?;
+        let ArtifactControlResponse::ProvisionalBinding { owner, state } = response.response else {
+            return Err(error(
+                "IndexedDB provisional recovery returned an invalid result",
+            ));
+        };
+        let owner = owner_from_control(&owner)?;
+        if expected_token != token_for_owner(&expected_token.generation, &owner) {
+            return Err(error(
+                "IndexedDB provisional recovery returned the wrong scope",
+            ));
+        }
+        self.verify_and_finish_provisional(expected_token, owner, state)
+            .await
     }
 
     async fn publish(
@@ -111,13 +249,13 @@ impl JsAttachmentArtifactStore {
                 .ok_or_else(|| error("Attachment artifact byte length overflowed"))?;
             hasher.update(&bytes);
         }
-        if total != owner.byte_length()
-            || format!("{:x}", hasher.finalize()) != owner.ciphertext_sha256()
-        {
-            return Err(error(
-                "Attachment artifact bytes do not match their immutable reference",
-            ));
-        }
+        validate_complete_artifact(
+            total,
+            owner.byte_length(),
+            &format!("{:x}", hasher.finalize()),
+            owner.ciphertext_sha256(),
+        )
+        .map_err(error)?;
         let finish = control(
             &self.executor,
             ArtifactControlRequest::FinishPublish {
@@ -195,6 +333,7 @@ impl JsAttachmentArtifactStore {
         .await?;
         let ArtifactControlResponse::ArtifactIds {
             artifact_ids: listed,
+            provisional,
         } = listed.response
         else {
             return Err(error(
@@ -224,6 +363,34 @@ impl JsAttachmentArtifactStore {
                         result: ArtifactDeletionControl::Deleted,
                     } => break,
                     _ => return Err(error("Attachment artifact sweep lost an orphaned record")),
+                }
+            }
+            deleted = deleted
+                .checked_add(1)
+                .ok_or_else(|| error("Attachment artifact sweep count overflowed"))?;
+        }
+        for token in provisional {
+            loop {
+                let result = control(
+                    &self.executor,
+                    ArtifactControlRequest::DeleteProvisionalGeneration {
+                        token: token.clone(),
+                    },
+                    None,
+                )
+                .await?;
+                match result.response {
+                    ArtifactControlResponse::ArtifactDeleted {
+                        result: ArtifactDeletionControl::Progress,
+                    } => continue,
+                    ArtifactControlResponse::ArtifactDeleted {
+                        result: ArtifactDeletionControl::Deleted,
+                    } => break,
+                    _ => {
+                        return Err(error(
+                            "Attachment artifact sweep lost a provisional generation",
+                        ))
+                    }
                 }
             }
             deleted = deleted
@@ -305,6 +472,147 @@ impl bittery_client_core::AttachmentArtifactStore for JsAttachmentArtifactStore 
     }
 }
 
+#[async_trait::async_trait(?Send)]
+impl bittery_client_core::ProvisionalAttachmentArtifactStore for JsAttachmentArtifactStore {
+    async fn invoke_provisional(
+        &self,
+        request: bittery_client_core::ProvisionalAttachmentArtifactStoreRequest,
+    ) -> Result<
+        bittery_client_core::ProvisionalAttachmentArtifactStoreResponse,
+        bittery_client_core::RuntimeError,
+    > {
+        use bittery_client_core::{
+            ArtifactChunkWrite, ProvisionalAttachmentArtifactStoreRequest as Request,
+            ProvisionalAttachmentArtifactStoreResponse as Response,
+        };
+        match request {
+            Request::Begin { writer } => {
+                match self.begin_provisional(&writer).await.map_err(js_error)? {
+                    ArtifactControlResponse::ProvisionalBegun => Ok(Response::Begun(writer)),
+                    ArtifactControlResponse::ProvisionalRecoveryAvailable { recovery } => {
+                        let recovery = recovery_from_control(recovery).map_err(js_error)?;
+                        ensure_same_writer_scope(&writer, &recovery).map_err(js_error)?;
+                        Ok(Response::RecoveryAvailable(recovery))
+                    }
+                    _ => Err(runtime_error(
+                        "IndexedDB provisional Begin returned an invalid result",
+                    )),
+                }
+            }
+            Request::WriteChunk {
+                writer,
+                chunk_index,
+                bytes,
+            } => {
+                let result = self
+                    .write_provisional_chunk(&writer, chunk_index, &bytes)
+                    .await
+                    .map_err(js_error)?;
+                Ok(Response::ChunkWritten(match result {
+                    ArtifactChunkWriteControl::Stored => ArtifactChunkWrite::Stored,
+                    ArtifactChunkWriteControl::AlreadyStored => ArtifactChunkWrite::AlreadyStored,
+                }))
+            }
+            Request::Finalize {
+                writer,
+                publication_proof,
+            } => {
+                let owner =
+                    AttachmentArtifactOwner::from_publication_proof(&writer, publication_proof)?;
+                let shape = shape(&owner).map_err(js_error)?;
+                let token = writer_control(&writer);
+                let response = control(
+                    &self.executor,
+                    ArtifactControlRequest::SealProvisional {
+                        writer: token.clone(),
+                        owner: owner_control(&owner, shape.chunk_count),
+                    },
+                    None,
+                )
+                .await
+                .map_err(js_error)?;
+                let ArtifactControlResponse::ProvisionalBinding {
+                    owner: returned_owner,
+                    state,
+                } = response.response
+                else {
+                    return Err(runtime_error(
+                        "IndexedDB provisional seal returned an invalid result",
+                    ));
+                };
+                let returned_owner = owner_from_control(&returned_owner).map_err(js_error)?;
+                if returned_owner.artifact_id() != owner.artifact_id()
+                    || returned_owner.ciphertext_sha256() != owner.ciphertext_sha256()
+                    || returned_owner.byte_length() != owner.byte_length()
+                {
+                    return Err(runtime_error(
+                        "IndexedDB provisional seal changed publication authority",
+                    ));
+                }
+                Ok(Response::Finalized(
+                    self.verify_and_finish_provisional(token, owner, state)
+                        .await
+                        .map_err(js_error)?,
+                ))
+            }
+            Request::Recover { scope } => {
+                let response = control(
+                    &self.executor,
+                    ArtifactControlRequest::RecoverProvisional {
+                        scope: scope_control(&scope),
+                    },
+                    None,
+                )
+                .await
+                .map_err(js_error)?;
+                let ArtifactControlResponse::ProvisionalRecoveryAvailable { recovery } =
+                    response.response
+                else {
+                    return Err(runtime_error(
+                        "IndexedDB provisional Recover returned an invalid result",
+                    ));
+                };
+                let recovery = recovery_from_control(recovery).map_err(js_error)?;
+                if recovery.account_id() != scope.account_id()
+                    || recovery.operation_id() != scope.operation_id()
+                    || recovery.attachment_id() != scope.attachment_id()
+                {
+                    return Err(runtime_error(
+                        "IndexedDB provisional Recover returned the wrong scope",
+                    ));
+                }
+                Ok(Response::RecoveryAvailable(recovery))
+            }
+            Request::ResumeRecovered { recovery } => {
+                let token = recovery_control(&recovery);
+                let owner = self
+                    .resume_provisional(
+                        ArtifactControlRequest::ResumeRecoveredProvisional {
+                            recovery: token.clone(),
+                        },
+                        token,
+                    )
+                    .await
+                    .map_err(js_error)?;
+                Ok(Response::Finalized(owner))
+            }
+            Request::ResumeFinalization { writer } => {
+                let token = writer_control(&writer);
+                let owner = self
+                    .resume_provisional(
+                        ArtifactControlRequest::ResumeProvisionalFinalization {
+                            writer: token.clone(),
+                        },
+                        token,
+                    )
+                    .await
+                    .map_err(js_error)?;
+                Ok(Response::Finalized(owner))
+            }
+        }
+    }
+}
+
 struct Shape {
     byte_length: u64,
     chunk_count: u32,
@@ -346,6 +654,113 @@ fn owner_control(owner: &AttachmentArtifactOwner, chunk_count: u32) -> ArtifactO
         byte_length: owner.byte_length().to_string(),
         chunk_count,
     }
+}
+
+fn scope_control(scope: &ProvisionalAttachmentArtifactScope) -> ProvisionalArtifactScopeControl {
+    ProvisionalArtifactScopeControl {
+        account_id: scope.account_id().as_str().to_owned(),
+        operation_id: scope.operation_id().to_owned(),
+        attachment_id: scope.attachment_id().to_owned(),
+    }
+}
+
+fn writer_control(writer: &ProvisionalAttachmentArtifactWriter) -> ProvisionalArtifactTokenControl {
+    ProvisionalArtifactTokenControl {
+        scope: ProvisionalArtifactScopeControl {
+            account_id: writer.account_id().as_str().to_owned(),
+            operation_id: writer.operation_id().to_owned(),
+            attachment_id: writer.attachment_id().to_owned(),
+        },
+        generation: writer.generation().to_owned(),
+    }
+}
+
+fn recovery_control(
+    recovery: &ProvisionalAttachmentArtifactRecovery,
+) -> ProvisionalArtifactTokenControl {
+    ProvisionalArtifactTokenControl {
+        scope: ProvisionalArtifactScopeControl {
+            account_id: recovery.account_id().as_str().to_owned(),
+            operation_id: recovery.operation_id().to_owned(),
+            attachment_id: recovery.attachment_id().to_owned(),
+        },
+        generation: recovery.generation().to_owned(),
+    }
+}
+
+fn recovery_from_control(
+    recovery: ProvisionalArtifactTokenControl,
+) -> Result<ProvisionalAttachmentArtifactRecovery, JsValue> {
+    let scope = ProvisionalAttachmentArtifactScope::new(
+        AccountId::from(recovery.scope.account_id),
+        recovery.scope.operation_id,
+        recovery.scope.attachment_id,
+    )
+    .map_err(|_| error("IndexedDB provisional recovery scope is invalid"))?;
+    ProvisionalAttachmentArtifactRecovery::new(scope, recovery.generation)
+        .map_err(|_| error("IndexedDB provisional recovery token is invalid"))
+}
+
+fn ensure_same_writer_scope(
+    writer: &ProvisionalAttachmentArtifactWriter,
+    recovery: &ProvisionalAttachmentArtifactRecovery,
+) -> Result<(), JsValue> {
+    if writer.account_id() != recovery.account_id()
+        || writer.operation_id() != recovery.operation_id()
+        || writer.attachment_id() != recovery.attachment_id()
+    {
+        return Err(error(
+            "IndexedDB provisional recovery returned the wrong scope",
+        ));
+    }
+    Ok(())
+}
+
+fn token_for_owner(
+    generation: &str,
+    owner: &AttachmentArtifactOwner,
+) -> ProvisionalArtifactTokenControl {
+    ProvisionalArtifactTokenControl {
+        scope: ProvisionalArtifactScopeControl {
+            account_id: owner.account_id().as_str().to_owned(),
+            operation_id: owner.operation_id().to_owned(),
+            attachment_id: owner.attachment_id().to_owned(),
+        },
+        generation: generation.to_owned(),
+    }
+}
+
+fn ensure_token_owner(
+    token: &ProvisionalArtifactTokenControl,
+    owner: &AttachmentArtifactOwner,
+) -> Result<(), JsValue> {
+    if token != &token_for_owner(&token.generation, owner) {
+        return Err(error(
+            "IndexedDB provisional publication has the wrong scope",
+        ));
+    }
+    Ok(())
+}
+
+fn owner_from_control(owner: &ArtifactOwnerControl) -> Result<AttachmentArtifactOwner, JsValue> {
+    let byte_length = owner
+        .byte_length
+        .parse::<u64>()
+        .map_err(|_| error("IndexedDB provisional byte length is invalid"))?;
+    let result = AttachmentArtifactOwner::from_reference_parts(
+        AccountId::from(owner.account_id.clone()),
+        owner.operation_id.clone(),
+        owner.attachment_id.clone(),
+        owner.artifact_id.clone(),
+        owner.ciphertext_sha256.clone(),
+        byte_length,
+    )
+    .map_err(|_| error("IndexedDB provisional owner is invalid"))?;
+    let expected = shape(&result)?;
+    if expected.chunk_count != owner.chunk_count {
+        return Err(error("IndexedDB provisional owner chunk count is invalid"));
+    }
+    Ok(result)
 }
 
 struct ControlResult {

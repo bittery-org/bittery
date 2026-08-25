@@ -676,3 +676,25 @@ tests assert the exact canonical identity and reject every cross-scope proof.
 
 Deliberately left open: this correction adds no new writer authority or persistence behavior. B4 still
 owns the IndexedDB control protocol, restart and fault behavior, and orphan semantics.
+
+### 2026-08-25 — B4 delivered the Web and MV3 provisional artifact boundary
+
+The generated closed artifact-control contract and IndexedDB v2 adapter now implement the same
+Rust-owned provisional protocol as native SQLite. Browser hosts persist bounded binary ciphertext
+chunks under the opaque Account-, Operation-, Attachment-, and generation-scoped token; Rust verifies
+each chunk and the complete authenticated artifact before one atomic mapping makes the canonical owner
+readable. State-0 writing, state-1 authenticated recovery, state-2 restart, exact concurrent
+finalization, rollback boundaries, Account deletion, resumable orphan cleanup, and the B2 database
+upgrade are covered by behavioral tests. Raw recovery tokens never reconstruct a writable Rust handle,
+and mapped physical generations survive cleanup.
+
+Independent review found one real product defect and one fixture defect. The product cleanup path had
+compared only generation instead of the full Account-filtered Operation, Attachment, and generation
+identity, which could hide a deliberately colliding orphan; the adapter and regression tests now use
+the complete identity. The generated bounds test had become positional after a new fixture step and
+was rejecting unknown fields rather than testing u32 limits; it now selects the request by behavior
+and proves both the maximum and overflow cases.
+
+Deliberately left open: B4 adds no preparation worker, network transfer, retry policy, scheduling,
+Replica checkpoint, or production host composition. C2 now owns consumption of the authenticated
+provisional writer and C1 transcryption through the in-memory Runtime ports.

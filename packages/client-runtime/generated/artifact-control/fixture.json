@@ -2,6 +2,20 @@
   "steps": [
     {
       "request": {
+        "type": "beginProvisional",
+        "writer": {
+          "accountId": "account-1",
+          "attachmentId": "attachment-1",
+          "generation": "9f20db4b-2cf0-4b73-a2a4-ad93c3615c4d",
+          "operationId": "operation-1"
+        }
+      },
+      "response": {
+        "type": "provisionalBegun"
+      }
+    },
+    {
+      "request": {
         "chunkIndex": 0,
         "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
         "owner": {

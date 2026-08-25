@@ -22,21 +22,43 @@ test("generated artifact control stays closed and keeps ciphertext binary", asyn
 		validateArtifactControlRequest({ type: "futureControl", bytes: [1] }),
 		false,
 	);
+	const chunkRequest = fixture.steps.find(
+		({ request }) => request.type === "writeChunk",
+	)?.request;
+	assert.ok(chunkRequest, "fixture must exercise a chunk-index control");
+	assert.equal(validateArtifactControlRequest(chunkRequest), true);
 	assert.equal(
 		validateArtifactControlRequest({
-			...fixture.steps[0].request,
+			...chunkRequest,
 			chunkIndex: 4_294_967_296,
 		}),
 		false,
 	);
 	assert.equal(
 		validateArtifactControlRequest({
-			...fixture.steps[0].request,
+			...chunkRequest,
+			chunkIndex: 4_294_967_295,
+		}),
+		true,
+	);
+	assert.equal(
+		validateArtifactControlRequest({
+			...chunkRequest,
 			owner: {
-				...fixture.steps[0].request.owner,
+				...chunkRequest.owner,
 				chunkCount: 4_294_967_296,
 			},
 		}),
 		false,
+	);
+	assert.equal(
+		validateArtifactControlRequest({
+			...chunkRequest,
+			owner: {
+				...chunkRequest.owner,
+				chunkCount: 4_294_967_295,
+			},
+		}),
+		true,
 	);
 });
