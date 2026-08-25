@@ -5,6 +5,9 @@
 mod attachment_move_preparation;
 #[cfg(test)]
 mod attachment_move_preparation_tests;
+mod attachment_move_scheduler;
+#[cfg(test)]
+mod attachment_move_scheduler_tests;
 mod bootstrap;
 mod create;
 #[cfg(test)]
@@ -21,6 +24,18 @@ mod outcome;
 #[cfg(test)]
 mod outcome_tests;
 
+#[cfg(test)]
+use attachment_move_scheduler::AttachmentMovePreparationDriver;
+#[doc(hidden)]
+pub use attachment_move_scheduler::{
+    AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
+    AttachmentMoveManifest, AttachmentMoveManifestEntry, AttachmentMoveManifestRequest,
+    AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
+    AttachmentMoveUpload, AttachmentMoveUploadGrant,
+};
+use attachment_move_scheduler::{
+    AttachmentMovePreparationScheduler, PreparationCandidate, SchedulerPass,
+};
 use dispatch::DispatchLeases;
 use lock::AccessRetirement;
 
@@ -400,7 +415,7 @@ pub struct Runtime {
     publication: Mutex<()>,
     unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
     live_master_unlock_keys:
-        Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>,
+        Arc<Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
     recovery_accounts: Mutex<HashMap<AccountId, RecoveryAccountStatus>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
@@ -414,6 +429,37 @@ pub struct Runtime {
     /// accepted, a Session arrived, or the Runtime is closing.
     dispatch_wake: tokio::sync::Notify,
     dispatch_leases: Arc<DispatchLeases>,
+    attachment_move_scheduler: Mutex<Option<Arc<AttachmentMovePreparationScheduler>>>,
+    attachment_move_lifecycle_active: AtomicBool,
+}
+
+struct AttachmentMoveLifecycleLease {
+    runtime: Arc<Runtime>,
+}
+
+impl AttachmentMoveLifecycleLease {
+    fn acquire(runtime: &Arc<Runtime>) -> Result<Self, RuntimeError> {
+        runtime
+            .attachment_move_lifecycle_active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "Attachment Move preparation lifecycle is already running",
+                )
+            })?;
+        Ok(Self {
+            runtime: Arc::clone(runtime),
+        })
+    }
+}
+
+impl Drop for AttachmentMoveLifecycleLease {
+    fn drop(&mut self) {
+        self.runtime
+            .attachment_move_lifecycle_active
+            .store(false, Ordering::SeqCst);
+    }
 }
 
 impl Runtime {
@@ -431,6 +477,7 @@ impl Runtime {
             persistence,
             Arc::new(PlatformStorage::unavailable()),
             Arc::new(HttpTransport::unavailable()),
+            None,
             None,
             true,
             Arc::new(SystemClock),
@@ -458,6 +505,7 @@ impl Runtime {
             persistence,
             Arc::new(PlatformStorage::unavailable()),
             Arc::new(HttpTransport::unavailable()),
+            None,
             None,
             true,
             Arc::new(SystemClock),
@@ -498,6 +546,7 @@ impl Runtime {
             Arc::new(PlatformStorage::new(platform)),
             Arc::new(HttpTransport::new(http)),
             auth_config,
+            None,
             false,
             Arc::new(SystemClock),
             Arc::new(SystemDeviceTimer),
@@ -522,11 +571,40 @@ impl Runtime {
             Arc::new(PlatformStorage::new(platform)),
             Arc::new(HttpTransport::new(http)),
             Some(auth_config),
+            None,
             true,
             clock,
             device_timer,
             None,
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_preparation_environment(
+        persistence: Arc<InMemoryReplica>,
+        driver: Arc<dyn AttachmentMovePreparationDriver>,
+        clock: Arc<dyn Clock>,
+        device_timer: Arc<dyn DeviceTimer>,
+    ) -> Arc<Self> {
+        let replica_persistence: Arc<dyn ReplicaPersistence> = persistence.clone();
+        let runtime = Self::with_persistence(
+            replica_persistence,
+            Arc::new(PlatformStorage::unavailable()),
+            Arc::new(HttpTransport::unavailable()),
+            None,
+            None,
+            true,
+            clock,
+            device_timer,
+            Some(persistence),
+        );
+        *runtime
+            .attachment_move_scheduler
+            .lock()
+            .expect("Attachment Move scheduler lock poisoned") = Some(Arc::new(
+            AttachmentMovePreparationScheduler::new_for_test(driver),
+        ));
+        runtime
     }
 
     #[doc(hidden)]
@@ -551,6 +629,37 @@ impl Runtime {
         )
     }
 
+    #[doc(hidden)]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(
+            clippy::arc_with_non_send_sync,
+            reason = "the configured Web preparation ports and Runtime share one single-threaded Worker"
+        )
+    )]
+    pub fn with_configured_serialized_executors_and_attachment_move_preparation(
+        replica: Arc<dyn SerializedReplicaExecutor>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        http: Arc<dyn SerializedHttpExecutor>,
+        auth_config: AuthClientConfig,
+        preparation: AttachmentMovePreparationFacade,
+    ) -> Arc<Self> {
+        let persistence: Arc<dyn ReplicaPersistence> =
+            Arc::new(SerializedReplicaPersistence::new(replica));
+        Self::with_persistence(
+            persistence,
+            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(HttpTransport::new(http)),
+            Some(auth_config),
+            Some(preparation),
+            false,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
+            #[cfg(test)]
+            None,
+        )
+    }
+
     #[cfg_attr(
         target_arch = "wasm32",
         allow(
@@ -567,13 +676,23 @@ impl Runtime {
         platform_storage: Arc<PlatformStorage>,
         http_transport: Arc<HttpTransport>,
         auth_client_config: Option<AuthClientConfig>,
+        attachment_move_preparation: Option<AttachmentMovePreparationFacade>,
         ready: bool,
         clock: Arc<dyn Clock>,
         device_timer: Arc<dyn DeviceTimer>,
         #[cfg(test)] test_persistence: Option<Arc<InMemoryReplica>>,
     ) -> Arc<Self> {
+        let replica = Arc::new(Replica::new(persistence));
+        let live_master_unlock_keys = Arc::new(Mutex::new(HashMap::new()));
+        let attachment_move_scheduler = attachment_move_preparation.map(|facade| {
+            Arc::new(AttachmentMovePreparationScheduler::new(
+                Arc::clone(&replica),
+                Arc::clone(&live_master_unlock_keys),
+                facade,
+            ))
+        });
         Arc::new(Self {
-            replica: Arc::new(Replica::new(persistence)),
+            replica,
             platform_storage,
             http_transport,
             auth_client_config,
@@ -590,7 +709,7 @@ impl Runtime {
             catalog_transition: tokio::sync::Mutex::new(()),
             publication: Mutex::new(()),
             unlocked_items: Mutex::new(HashMap::new()),
-            live_master_unlock_keys: Mutex::new(HashMap::new()),
+            live_master_unlock_keys,
             account_access: Mutex::new(HashMap::new()),
             recovery_accounts: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
@@ -602,7 +721,119 @@ impl Runtime {
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
             dispatch_leases: Arc::new(DispatchLeases::default()),
+            attachment_move_scheduler: Mutex::new(attachment_move_scheduler),
+            attachment_move_lifecycle_active: AtomicBool::new(false),
         })
+    }
+
+    /// Runs the one core-owned preparation scheduler until the Runtime closes.
+    ///
+    /// Hosts drive this future beside ordinary dispatch after `open`. Restart and unlock state are
+    /// read from durable Replica truth on every pass; no accepted preparation lives in this future.
+    #[doc(hidden)]
+    pub async fn run_attachment_move_preparation(self: Arc<Self>) -> Result<(), RuntimeError> {
+        let _lifecycle_lease = AttachmentMoveLifecycleLease::acquire(&self)?;
+        let Some(scheduler) = self
+            .attachment_move_scheduler
+            .lock()
+            .expect("Attachment Move scheduler lock poisoned")
+            .as_ref()
+            .cloned()
+        else {
+            return Ok(());
+        };
+        loop {
+            if self.is_closed() {
+                return Ok(());
+            }
+            let mut wake = std::pin::pin!(self.dispatch_wake.notified());
+            wake.as_mut().enable();
+            if !self.ready.load(Ordering::SeqCst) {
+                tokio::select! {
+                    () = wake => {}
+                    () = self.device_timer.sleep_ms(1) => {}
+                }
+                continue;
+            }
+            let now_ms = self.clock.now_ms()?;
+            let unlocked_accounts: HashSet<_> = self
+                .account_access
+                .lock()
+                .expect("Account access lock poisoned")
+                .iter()
+                .filter(|(_, access)| **access == AccountAccessState::Unlocked)
+                .map(|(account_id, _)| account_id.clone())
+                .collect();
+            let mut candidates: Vec<_> = self
+                .replica
+                .snapshots()
+                .into_iter()
+                .filter(|snapshot| snapshot.failure.is_none())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .attachment_move_preparations
+                        .into_iter()
+                        .map(move |preparation| PreparationCandidate {
+                            account_id: snapshot.account_id.clone(),
+                            operation_id: preparation.operation_id,
+                            not_before_ms: preparation.scheduling.not_before_ms,
+                        })
+                })
+                .collect();
+            candidates.sort_by(|left, right| {
+                left.account_id
+                    .as_str()
+                    .cmp(right.account_id.as_str())
+                    .then_with(|| left.operation_id.cmp(&right.operation_id))
+            });
+            let due_account = candidates
+                .iter()
+                .find(|candidate| {
+                    unlocked_accounts.contains(&candidate.account_id)
+                        && candidate.not_before_ms <= now_ms
+                })
+                .map(|candidate| candidate.account_id.clone());
+            let execution_guard = if let Some(account_id) = due_account {
+                let execution_lock = self.account_execution_lock(&account_id)?;
+                let guard = execution_lock.lock_owned().await;
+                if self.is_closed() {
+                    return Ok(());
+                }
+                if self
+                    .account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .get(&account_id)
+                    != Some(&AccountAccessState::Unlocked)
+                {
+                    drop(guard);
+                    continue;
+                }
+                Some(guard)
+            } else {
+                None
+            };
+            let pass = scheduler
+                .drive_eligible(candidates, &unlocked_accounts, now_ms)
+                .await?;
+            drop(execution_guard);
+            if self.is_closed() {
+                return Ok(());
+            }
+            match pass {
+                SchedulerPass::Progressed => continue,
+                SchedulerPass::DispatchReady => {
+                    self.wake_dispatch();
+                }
+                SchedulerPass::Parked => wake.await,
+                SchedulerPass::WaitFor { milliseconds } => {
+                    tokio::select! {
+                        () = wake => {}
+                        () = self.device_timer.sleep_ms(milliseconds) => {}
+                    }
+                }
+            }
+        }
     }
 
     #[cfg(test)]
@@ -1256,6 +1487,24 @@ impl Runtime {
                     crate::test_fixtures::TEST_MASTER_UNLOCK_KEY,
                 )),
             );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_unlocked_preparation_account(&self, account_id: &AccountId) {
+        let snapshot = self
+            .replica
+            .snapshot(account_id)
+            .expect("preparation Account is loaded");
+        self.seed_live_master_unlock_key(account_id, &snapshot.incarnation);
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id.clone(), snapshot.lock_epoch);
+        self.wake_dispatch();
     }
 
     fn clear_live_master_unlock_keys_for_account(&self, account_id: &AccountId) {

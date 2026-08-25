@@ -86,4 +86,11 @@ pub use replica::SerializedReplicaExecutor;
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
 pub use replica::SqliteReplica;
+#[doc(hidden)]
+pub use runtime::{
+    AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
+    AttachmentMoveManifest, AttachmentMoveManifestEntry, AttachmentMoveManifestRequest,
+    AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
+    AttachmentMoveUpload, AttachmentMoveUploadGrant,
+};
 pub use runtime::{ObservationHandle, Runtime};

@@ -863,3 +863,34 @@ therefore fails source authentication and would remain unreadable after finaliza
 blocks this ticket. It owns only blob-scope construction and its shared-uploader vector. The paused
 C4a slice retains its own reviewed companion correction: target encrypted metadata uses the retained
 uploader, and the target-wrapped Attachment key binds the Server's incremented envelope version.
+
+### 2026-08-26 — C4a delivered the Core preparation scheduler and facade
+
+Client Core now owns one resettable Attachment Move preparation lifecycle and a narrow facade whose
+only external authorities are the committed artifact stores and Account-scoped binary/manifest
+transfer. Core privately resolves the live MUK, source and target Vault keys, the existing durable
+Attachment key, and target metadata; bindings receive no secret-policy surface. The lifecycle scans
+durable Replica candidates, runs only unlocked explicit Accounts under the existing Account execution
+lock, respects C2's persisted unbounded deadlines, wakes ordinary dispatch only after C2 promotion,
+and rejects a duplicate lifecycle runner before it can scan stale work. Normal close, cancellation,
+or an observable error releases that runner lease so the host can restart it without discarding the
+accepted preparation.
+
+Runtime tests close and recreate the Runtime while an attempt-count-seven preparation remains pending,
+prove it stays idle while locked, resume it on explicit unlock, observe no dispatch-ready Operation
+before promotion, and prove a later restart cannot prepare it again. Held-drive tests prove Lock and
+close wait until plaintext/credential work releases the Account boundary. Fixed crypto vectors keep
+the original uploader as Attachment AAD authority, retain the same Attachment key, bind its target
+wrap to Server envelope version `N + 1`, and reject the mover identity, version `N`, and overflow.
+
+Independent review found real product defects in the initial slice: a binding-supplied secret provider
+would have moved crypto authority out of Core; preparation did not share Lock/close fencing; clock
+failure parked invisibly; target metadata used mover/version `N`; and two lifecycle futures could
+drive one stale Operation. It also found fixture defects where restart occurred only after promotion
+and the first metadata vector made mover equal uploader. Each is now behaviorally covered. Review
+also found the committed C2 shared-uploader blob defect fixed separately in Ticket 43.
+
+Deliberately left open: C4a constructs no Web binding, IndexedDB/OPFS executor, browser-wide writer
+lock, exclusive orphan sweep, or Worker lifecycle/error surface. C4b owns those production-reachability
+properties and must await this lifecycle `Result`; Server Share, ordinary cross-kind dispatch/outcome,
+the general Attachment service, and final Web host cutover remain later Ticket 28 slices.
