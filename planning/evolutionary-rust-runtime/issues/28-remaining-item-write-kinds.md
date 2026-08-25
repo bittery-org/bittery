@@ -243,3 +243,21 @@ preparation state, renews the manifest, and resumes upload. This is distinct fro
 `attachment_state_conflict`, which proves that accepted Item or Attachment authority became stale.
 No UI cancellation, retry count, Account removal, or elapsed lease may turn either prepared staging
 or the accepted Operation into a false terminal result.
+
+### 2026-08-25 — Attachment Move staging quota and parallel ownership resolved
+
+The manifest never accepts a client-declared staged object size. Server authority supplies each
+Attachment's exact current encrypted storage size, and the presigned upload fixes that size. The
+encrypted staging media type is always `application/octet-stream`; plaintext filename or content type
+is neither accepted nor persisted by this workflow.
+
+Staged duplicate bytes do not consume additional product Attachment quota, so a team at its storage
+limit can still move its existing Attachments. Instead, exactly one live Move manifest may own a
+given source Attachment at a time. This bounds renewable staging amplification to one prepared copy
+per committed Attachment without adding a second product quota. An expired owner is atomically
+queued for cleanup and releases the Attachment before a new manifest takes ownership.
+
+A competing manifest for an Attachment with another live owner returns HTTP `409` with the closed
+code `attachment_staging_busy` and retains no Operation outcome. The later accepted Runtime Operation
+waits and retries after the owner finalizes or its 24-hour lease expires; it is never rejected,
+discarded, or allowed to replace the first Operation's preparation.
