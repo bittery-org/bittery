@@ -663,3 +663,16 @@ Each now has a behavioral regression test, including tests compiled outside the 
 Deliberately left open: B3 provides no IndexedDB implementation, browser control-contract variants,
 Runtime preparation worker, network transport, scheduling, or host composition. B4 owns the Web/MV3
 adapter for this exact token and physical-generation protocol; C2 follows only after B4 is committed.
+
+### 2026-08-25 — B3 integration seam corrected before B4
+
+B4's first real WASM integration exposed a missing public Core seam: an external persistence adapter
+could hold the provisional writer and the one-use publication proof but could not derive the canonical
+owner without duplicating Core's artifact-ID protocol. This was a real integration defect, not a
+fixture defect. Core now consumes the proof through a constructor bound directly to the provisional
+writer, validates Account, Operation, and Attachment against that writer, and exclusively owns the
+digest, length, and artifact-ID derivation. Native SQLite uses the same constructor. External API
+tests assert the exact canonical identity and reject every cross-scope proof.
+
+Deliberately left open: this correction adds no new writer authority or persistence behavior. B4 still
+owns the IndexedDB control protocol, restart and fault behavior, and orphan semantics.

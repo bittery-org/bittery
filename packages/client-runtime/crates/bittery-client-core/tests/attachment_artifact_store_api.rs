@@ -15,6 +15,138 @@ fn native_host_can_select_an_artifact_database_and_share_rust_chunk_policy() {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn external_host_derives_the_canonical_owner_only_from_a_publication_proof() {
+    use bittery_client_core::AttachmentArtifactOwner;
+
+    let proof = publication_proof_for("account-1", "operation-1", "attachment-1");
+    let expected_digest = proof.ciphertext_sha256().to_owned();
+    let expected_length = proof.byte_length();
+    let expected_artifact_id = independently_derived_artifact_id(
+        "account-1",
+        "operation-1",
+        "attachment-1",
+        &expected_digest,
+        expected_length,
+    );
+    let writer = provisional_writer_for("account-1", "operation-1", "attachment-1");
+    let owner = AttachmentArtifactOwner::from_publication_proof(&writer, proof).unwrap();
+
+    assert_eq!(owner.account_id().as_str(), "account-1");
+    assert_eq!(owner.operation_id(), "operation-1");
+    assert_eq!(owner.attachment_id(), "attachment-1");
+    assert_eq!(owner.ciphertext_sha256(), expected_digest);
+    assert_eq!(owner.byte_length(), expected_length);
+    assert_eq!(owner.artifact_id(), expected_artifact_id);
+}
+
+#[test]
+fn external_host_cannot_apply_a_publication_proof_across_owner_scope() {
+    use bittery_client_core::AttachmentArtifactOwner;
+
+    for (account_id, operation_id, attachment_id) in [
+        ("account-other", "operation-1", "attachment-1"),
+        ("account-1", "operation-other", "attachment-1"),
+        ("account-1", "operation-1", "attachment-other"),
+    ] {
+        let proof = publication_proof_for("account-1", "operation-1", "attachment-1");
+        let writer = provisional_writer_for(account_id, operation_id, attachment_id);
+        assert!(AttachmentArtifactOwner::from_publication_proof(&writer, proof).is_err());
+    }
+}
+
+fn provisional_writer_for(
+    account_id: &str,
+    operation_id: &str,
+    attachment_id: &str,
+) -> bittery_client_core::ProvisionalAttachmentArtifactWriter {
+    use bittery_client_core::{
+        AccountId, ProvisionalAttachmentArtifactScope, ProvisionalAttachmentArtifactWriter,
+    };
+
+    ProvisionalAttachmentArtifactWriter::new(
+        ProvisionalAttachmentArtifactScope::new(
+            AccountId::from(account_id),
+            operation_id,
+            attachment_id,
+        )
+        .unwrap(),
+    )
+}
+
+fn independently_derived_artifact_id(
+    account_id: &str,
+    operation_id: &str,
+    attachment_id: &str,
+    ciphertext_sha256: &str,
+    byte_length: u64,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    let byte_length_bytes = byte_length.to_be_bytes();
+    for part in [
+        b"bittery.attachment-move-artifact.v1".as_slice(),
+        account_id.as_bytes(),
+        operation_id.as_bytes(),
+        attachment_id.as_bytes(),
+        ciphertext_sha256.as_bytes(),
+        byte_length_bytes.as_slice(),
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn publication_proof_for(
+    account_id: &str,
+    operation_id: &str,
+    attachment_id: &str,
+) -> bittery_crypto_core::attachment_move::AttachmentPublicationProof {
+    use bittery_crypto_core::{
+        attachment_move::{
+            AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor,
+            AttachmentPublicationIdentity,
+        },
+        encrypt_with_aad, AadContext,
+    };
+
+    let user_id = "user-1";
+    let source_key = [31_u8; 32];
+    let target_key = [47_u8; 32];
+    let source_context = AadContext {
+        vault_id: "vault-source".into(),
+        entity_id: attachment_id.into(),
+        entity_type: "attachment_blob".into(),
+        version: 1,
+        user_id: user_id.into(),
+    };
+    let source = serde_json::to_vec(
+        &encrypt_with_aad("proof-owned ciphertext", &source_key, &source_context).unwrap(),
+    )
+    .unwrap();
+    let mut scanner = AttachmentEnvelopeScanner::new();
+    scanner.push(&source).unwrap();
+    let mut transcryptor = AttachmentMoveTranscryptor::new(
+        scanner.finish().unwrap(),
+        source_key,
+        AttachmentBlobScope::new("vault-source".into(), attachment_id.into(), user_id.into()),
+        target_key,
+        AttachmentBlobScope::new("vault-target".into(), attachment_id.into(), user_id.into()),
+        AttachmentPublicationIdentity::new(
+            account_id.into(),
+            user_id.into(),
+            operation_id.into(),
+            attachment_id.into(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    transcryptor.push(&source).unwrap();
+    transcryptor.finish().unwrap().publication_proof
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
 async fn external_host_can_resume_an_exact_durable_generation_without_receiving_a_writer() {

@@ -261,6 +261,33 @@ impl AttachmentArtifactOwner {
         Self::new(account_id, operation_id, attachment_id, artifact)
     }
 
+    pub fn from_publication_proof(
+        writer: &ProvisionalAttachmentArtifactWriter,
+        publication_proof: AttachmentPublicationProof,
+    ) -> Result<Self, RuntimeError> {
+        if publication_proof.account_id() != writer.account_id().as_str()
+            || publication_proof.operation_id() != writer.operation_id()
+            || publication_proof.attachment_id() != writer.attachment_id()
+        {
+            return Err(artifact_error(
+                "Attachment publication proof has the wrong owner scope",
+            ));
+        }
+        let artifact = attachment_move_artifact_ref(
+            writer.account_id(),
+            writer.operation_id(),
+            writer.attachment_id(),
+            publication_proof.ciphertext_sha256(),
+            publication_proof.byte_length(),
+        )?;
+        Self::new(
+            writer.account_id().clone(),
+            writer.operation_id(),
+            writer.attachment_id(),
+            artifact,
+        )
+    }
+
     pub fn account_id(&self) -> &AccountId {
         &self.account_id
     }

@@ -422,27 +422,7 @@ impl SqliteAttachmentArtifactStore {
         writer: &ProvisionalAttachmentArtifactWriter,
         publication_proof: AttachmentPublicationProof,
     ) -> Result<AttachmentArtifactOwner, RuntimeError> {
-        if publication_proof.account_id() != writer.scope.account_id.as_str()
-            || publication_proof.operation_id() != writer.scope.operation_id
-            || publication_proof.attachment_id() != writer.scope.attachment_id
-        {
-            return Err(artifact_error(
-                "Attachment publication proof has the wrong writer scope",
-            ));
-        }
-        let artifact = attachment_move_artifact_ref(
-            &writer.scope.account_id,
-            &writer.scope.operation_id,
-            &writer.scope.attachment_id,
-            publication_proof.ciphertext_sha256(),
-            publication_proof.byte_length(),
-        )?;
-        let owner = AttachmentArtifactOwner::new(
-            writer.scope.account_id.clone(),
-            writer.scope.operation_id.clone(),
-            writer.scope.attachment_id.clone(),
-            artifact,
-        )?;
+        let owner = AttachmentArtifactOwner::from_publication_proof(writer, publication_proof)?;
         let expected = ValidatedOwner::new(&owner)?;
         let mut connection = self.connection()?;
 
