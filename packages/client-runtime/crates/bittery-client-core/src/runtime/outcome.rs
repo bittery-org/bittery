@@ -417,7 +417,7 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
     })
 }
 
-fn rejection_code(code: WireOperationRejectionCode) -> OperationRejectionCode {
+pub(super) fn rejection_code(code: WireOperationRejectionCode) -> OperationRejectionCode {
     match code {
         WireOperationRejectionCode::InvalidCiphertext => OperationRejectionCode::InvalidCiphertext,
         WireOperationRejectionCode::VaultAccessDenied => OperationRejectionCode::VaultAccessDenied,
@@ -437,6 +437,9 @@ fn rejection_code(code: WireOperationRejectionCode) -> OperationRejectionCode {
         }
         WireOperationRejectionCode::TargetVaultReadOnly => {
             OperationRejectionCode::TargetVaultReadOnly
+        }
+        WireOperationRejectionCode::AttachmentStateConflict => {
+            OperationRejectionCode::AttachmentStateConflict
         }
     }
 }

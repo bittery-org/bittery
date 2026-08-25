@@ -560,6 +560,7 @@ pub enum OperationRejectionCode {
     SourceVaultMismatch,
     TargetVaultAccessDenied,
     TargetVaultReadOnly,
+    AttachmentStateConflict,
 }
 
 closed_enum!(OperationRejectionCode, "operation_rejection_code", {
@@ -574,6 +575,7 @@ closed_enum!(OperationRejectionCode, "operation_rejection_code", {
     SourceVaultMismatch => "source_vault_mismatch",
     TargetVaultAccessDenied => "target_vault_access_denied",
     TargetVaultReadOnly => "target_vault_read_only",
+    AttachmentStateConflict => "attachment_state_conflict",
 });
 
 #[cfg(test)]

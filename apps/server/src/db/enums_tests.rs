@@ -156,7 +156,8 @@ fn closed_sets_keep_their_wire_strings() {
             "item_not_trashed",
             "source_vault_mismatch",
             "target_vault_access_denied",
-            "target_vault_read_only"
+            "target_vault_read_only",
+            "attachment_state_conflict"
         ]
     );
 }

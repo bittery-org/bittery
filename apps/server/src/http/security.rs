@@ -69,6 +69,7 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("trashItem", OperationSecurity::Bearer),
     ("updateItem", OperationSecurity::Bearer),
     ("createAttachmentUpload", OperationSecurity::Bearer),
+    ("createAttachmentMoveManifest", OperationSecurity::Bearer),
     ("listAttachments", OperationSecurity::Bearer),
     ("createAttachment", OperationSecurity::Bearer),
     ("setItemFavorite", OperationSecurity::Bearer),

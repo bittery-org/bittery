@@ -175,8 +175,8 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 91);
-        assert_eq!(operation_count, 105);
+        assert_eq!(paths.len(), 92);
+        assert_eq!(operation_count, 106);
     }
 
     /// Every `ToSchema` type reaches the document under its short Rust name, so two types that
@@ -409,7 +409,7 @@ mod tests {
             .count();
 
         assert_eq!(public, 17);
-        assert_eq!(bearer, 88);
+        assert_eq!(bearer, 89);
         assert_eq!(public + bearer, operations.len());
 
         for operation_id in [

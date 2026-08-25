@@ -75,6 +75,7 @@ fn registered_bounds() -> BTreeSet<u64> {
         SUPPORTED_MAJORS as u64,
         u64::from(MAX_AUDIT_EVENTS),
         MAX_AUDIT_SEARCH_BYTES as u64,
+        CIPHERTEXT_SHA256_HEX_CHARS as u64,
     ])
 }
 

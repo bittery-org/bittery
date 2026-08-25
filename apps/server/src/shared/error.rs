@@ -16,6 +16,10 @@ pub enum AppErrorCode {
     Conflict,
     #[serde(rename = "CONFLICT")]
     RetryableConflict,
+    AttachmentStagingBusy,
+    AttachmentStagingIncomplete,
+    AttachmentStagingMismatch,
+    AttachmentAuthorityStale,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
@@ -78,6 +82,34 @@ impl AppError {
     pub(crate) fn retryable_conflict(message: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::RetryableConflict,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_staging_busy(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingBusy,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_staging_incomplete(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingIncomplete,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_staging_mismatch(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingMismatch,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_authority_stale(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentAuthorityStale,
             message: message.into(),
         }
     }

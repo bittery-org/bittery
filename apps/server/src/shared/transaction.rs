@@ -13,6 +13,40 @@ pub(crate) async fn acquire_advisory_lock<'e>(
     Ok(())
 }
 
+pub(crate) async fn acquire_operation_lock<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    user_id: &str,
+    operation_id: &str,
+    context: &'static str,
+) -> Result<(), AppError> {
+    acquire_advisory_lock(
+        executor,
+        &format!(
+            "operation:{}:{}:{}{}",
+            user_id.len(),
+            operation_id.len(),
+            user_id,
+            operation_id
+        ),
+        context,
+    )
+    .await
+}
+
+/// Serializes every writer of one Item's Attachment set, including Move finalization.
+pub(crate) async fn acquire_item_attachment_writer_lock<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    item_id: &str,
+    context: &'static str,
+) -> Result<(), AppError> {
+    acquire_advisory_lock(
+        executor,
+        &format!("item-attachment-writer:{}:{}", item_id.len(), item_id),
+        context,
+    )
+    .await
+}
+
 pub(crate) fn is_retryable_transaction_error(error: &sqlx::Error) -> bool {
     error
         .as_database_error()

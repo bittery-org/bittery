@@ -35,7 +35,7 @@ fn validate_operation_id(value: &HeaderValue) -> Result<String, ApiError> {
     validate_operation_id_str(value)
 }
 
-fn validate_operation_id_str(value: &str) -> Result<String, ApiError> {
+pub(crate) fn validate_operation_id_str(value: &str) -> Result<String, ApiError> {
     if value.is_empty()
         || value.len() > 255
         || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))

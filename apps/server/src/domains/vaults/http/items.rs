@@ -477,6 +477,113 @@ pub(super) async fn move_item(
     ApiJsonBytes { value: body, bytes }: ApiJsonBytes<MoveItemBody, ITEM_BODY_LIMIT_BYTES>,
 ) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let retained = crate::domains::operations::get_operation_outcome(
+        &state.db_pool,
+        &auth.session.user_id,
+        &operation_id,
+    )
+    .await?
+    .is_some();
+    #[cfg(test)]
+    crate::test_support::pause_attachment_move_preflight(&operation_id).await;
+    let (source_vault_id, target_vault_id, finalization) = match body {
+        MoveItemBody::Prepared {
+            source_vault_id,
+            target_vault_id,
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        } => {
+            if !retained {
+                let expected_attachments = attachments
+                    .iter()
+                    .map(|entry| (entry.attachment_id.clone(), entry.expected_envelope_version))
+                    .collect::<Vec<_>>();
+                match vault::verify_attachment_move_staging(
+                    &state.db_pool,
+                    state.object_storage.as_ref(),
+                    &auth.session.user_id,
+                    &operation_id,
+                    vault::AttachmentMoveFinalizeIntent {
+                        item_id: &item_id,
+                        source_vault_id: &source_vault_id,
+                        target_vault_id: &target_vault_id,
+                        attachments: &expected_attachments,
+                    },
+                )
+                .await?
+                {
+                    vault::AttachmentMoveStagingStatus::Ready => {}
+                    vault::AttachmentMoveStagingStatus::Absent if attachments.is_empty() => {}
+                    vault::AttachmentMoveStagingStatus::Absent
+                    | vault::AttachmentMoveStagingStatus::Incomplete
+                        if crate::domains::operations::get_operation_outcome(
+                            &state.db_pool,
+                            &auth.session.user_id,
+                            &operation_id,
+                        )
+                        .await?
+                        .is_some() => {}
+                    vault::AttachmentMoveStagingStatus::Absent
+                    | vault::AttachmentMoveStagingStatus::Incomplete => {
+                        return Err(ApiError::conflict(
+                            ErrorCode::AttachmentStagingIncomplete,
+                            "Attachment Move staging is missing, expired, or incomplete.",
+                        ));
+                    }
+                    vault::AttachmentMoveStagingStatus::Mismatch => {
+                        return Err(ApiError::conflict(
+                            ErrorCode::AttachmentStagingMismatch,
+                            "Attachment Move Finalize intent does not match its manifest.",
+                        ));
+                    }
+                }
+            }
+            (
+                source_vault_id,
+                target_vault_id,
+                vault::MoveItemFinalizationInput::Prepared {
+                    encrypted_data,
+                    encryption_iv,
+                    encryption_algorithm,
+                    attachments: attachments
+                        .into_iter()
+                        .map(|entry| vault::MoveAttachmentEffectInput {
+                            attachment_id: entry.attachment_id,
+                            expected_envelope_version: entry.expected_envelope_version,
+                            encrypted_attachment_key: entry.encrypted_attachment_key,
+                            attachment_key_iv: entry.attachment_key_iv,
+                            attachment_key_algorithm: entry.attachment_key_algorithm,
+                            encrypted_name: entry.encrypted_name,
+                            encrypted_content_type: entry.encrypted_content_type,
+                            encryption_iv: entry.encryption_iv,
+                            encrypted_content_type_iv: entry.encrypted_content_type_iv,
+                            encryption_algorithm: entry.encryption_algorithm,
+                        })
+                        .collect(),
+                },
+            )
+        }
+        MoveItemBody::RejectStaleAuthority {
+            source_vault_id,
+            target_vault_id,
+            attachments,
+        } => (
+            source_vault_id,
+            target_vault_id,
+            vault::MoveItemFinalizationInput::RejectStaleAuthority {
+                attachments: attachments
+                    .into_iter()
+                    .map(|entry| vault::MoveAttachmentIntentInput {
+                        attachment_id: entry.attachment_id,
+                        expected_envelope_version: entry.expected_envelope_version,
+                    })
+                    .collect(),
+            },
+        ),
+    };
     let client_id = auth.effective_client_id();
     run_item_operation(
         &state,
@@ -484,18 +591,66 @@ pub(super) async fn move_item(
         auth.session.user_id,
         bytes,
         ItemOperationEffect::Move(vault::MoveItemEffectInput {
+            operation_id,
             item_id,
-            source_vault_id: body.source_vault_id,
-            target_vault_id: body.target_vault_id,
-            encrypted_data: body.encrypted_data,
-            encryption_iv: body.encryption_iv,
-            encryption_algorithm: body.encryption_algorithm,
+            source_vault_id,
+            target_vault_id,
             expected_version,
             client_id,
             ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
+            finalization,
         }),
     )
     .await
+}
+
+#[utoipa::path(put, path = "/operations/{operationId}/attachment-move-manifest", operation_id = "createAttachmentMoveManifest", tag = "attachments", params(("operationId" = String, Path)), request_body = AttachmentMoveManifestBody, responses((status = 200, description = "Stable staging identities and renewed upload credentials", body = AttachmentMoveManifestResponse), VaultErrorResponses))]
+pub(super) async fn create_attachment_move_manifest(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    Path(operation_id): Path<String>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<
+        AttachmentMoveManifestBody,
+        ITEM_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<AttachmentMoveManifestResponse>, ApiError> {
+    let operation_id = crate::domains::operations::http::validate_operation_id_str(&operation_id)?;
+    let response = vault::create_attachment_move_manifest(
+        &state.db_pool,
+        state.object_storage.as_ref(),
+        state.config.server.mode,
+        &auth.session.user_id,
+        vault::AttachmentMoveManifestInput {
+            operation_id,
+            item_id: body.item_id,
+            source_vault_id: body.source_vault_id,
+            target_vault_id: body.target_vault_id,
+            attachments: body
+                .attachments
+                .into_iter()
+                .map(|entry| vault::AttachmentMoveManifestEntryInput {
+                    attachment_id: entry.attachment_id,
+                    envelope_version: entry.envelope_version,
+                    ciphertext_sha256: entry.ciphertext_sha256,
+                })
+                .collect(),
+            request_bytes: bytes,
+        },
+    )
+    .await?;
+    Ok(Json(AttachmentMoveManifestResponse {
+        operation_id: response.operation_id,
+        expires_at: response.expires_at,
+        attachments: response
+            .attachments
+            .into_iter()
+            .map(|entry| AttachmentMoveUploadResponse {
+                attachment_id: entry.attachment_id,
+                storage_key: entry.storage_key,
+                upload_url: entry.upload_url,
+            })
+            .collect(),
+    }))
 }
 
 #[utoipa::path(delete, path = "/items/{itemId}/permanent", operation_id = "permanentlyDeleteItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]

@@ -32,7 +32,7 @@ use crate::{
         MoveItemEffectInput, UpdateItemEffectInput,
     },
     error::AppError,
-    shared::transaction::{acquire_advisory_lock, database_error},
+    shared::transaction::{acquire_operation_lock, database_error},
 };
 
 /// Pins every fingerprint to this protocol, so bytes hashed under a later one can never collide.
@@ -337,15 +337,10 @@ pub(crate) async fn execute_item_operation(
     let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start Operation transaction"))?;
-    acquire_advisory_lock(
+    acquire_operation_lock(
         &mut *transaction,
-        &format!(
-            "operation:{}:{}:{}{}",
-            input.user_id.len(),
-            input.operation_id.len(),
-            input.user_id,
-            input.operation_id
-        ),
+        &input.user_id,
+        &input.operation_id,
         "Failed to serialize Operation",
     )
     .await?;

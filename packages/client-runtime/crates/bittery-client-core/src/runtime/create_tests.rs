@@ -852,6 +852,8 @@ struct ExpectedUpdateBody<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExpectedMoveBody<'a> {
+    mode: &'a str,
+    attachments: &'a [()],
     encrypted_data: &'a str,
     encryption_algorithm: &'a str,
     encryption_iv: &'a str,
@@ -991,8 +993,8 @@ fn each_existing_kind_fingerprint_matches_a_hard_coded_server_golden() {
         (
             OperationKind::MoveItem,
             "POST /api/v1/items/{itemId}/moves",
-            br#"{"encryptedData":"ciphertext","encryptionAlgorithm":"AES-GCM-AAD-V1","encryptionIv":"iv","sourceVaultId":"vault-1","targetVaultId":"vault-2"}"#.as_slice(),
-            "1cce9553bfbed1b25663b564f56ecfe9f2334e5117f02d4ffc780e249a942006",
+            br#"{"mode":"prepared","attachments":[],"encryptedData":"ciphertext","encryptionAlgorithm":"AES-GCM-AAD-V1","encryptionIv":"iv","sourceVaultId":"vault-1","targetVaultId":"vault-2"}"#.as_slice(),
+            "cc7a4ffb43607c650da7c16a94df1910844f230b51d4edb2518bd6f2edb0ce58",
         ),
         (
             OperationKind::PermanentlyDeleteItem,
@@ -1121,6 +1123,8 @@ async fn remaining_item_kinds_are_durably_accepted_under_explicit_account_scope(
                 assert_eq!(
                     operation.request.body,
                     serde_json::to_vec(&ExpectedMoveBody {
+                        mode: "prepared",
+                        attachments: &[],
                         encrypted_data: &overlay.encrypted_data,
                         encryption_algorithm: &overlay.encryption_algorithm,
                         encryption_iv: &overlay.encryption_iv,

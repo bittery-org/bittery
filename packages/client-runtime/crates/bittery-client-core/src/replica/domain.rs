@@ -107,6 +107,7 @@ pub(crate) enum OperationRejectionCode {
     SourceVaultMismatch,
     TargetVaultAccessDenied,
     TargetVaultReadOnly,
+    AttachmentStateConflict,
 }
 
 /// What the Server decided about one Operation. Transport status is deliberately absent.

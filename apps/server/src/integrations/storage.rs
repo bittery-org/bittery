@@ -32,6 +32,7 @@ pub trait ObjectStorage: Send + Sync {
         key: &str,
         content_type: &str,
         content_length: Option<i64>,
+        payload_sha256: Option<&str>,
         expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError>;
     async fn presign_download(
@@ -141,6 +142,7 @@ async fn create_presigned_upload(
     key: &str,
     content_type: &str,
     content_length: Option<i64>,
+    payload_sha256: Option<&str>,
     expires_in_seconds: Option<u64>,
 ) -> Result<PresignedUploadResult, StorageError> {
     let config = &storage.config;
@@ -150,6 +152,7 @@ async fn create_presigned_upload(
         key,
         Some(content_type),
         content_length,
+        payload_sha256,
         Duration::from_secs(expires_in_seconds.unwrap_or(300)),
     )?;
 
@@ -186,6 +189,7 @@ async fn create_presigned_download(
         config,
         "GET",
         key,
+        None,
         None,
         None,
         Duration::from_secs(expires_in_seconds.unwrap_or(300)),
@@ -248,6 +252,7 @@ fn presigned_url(
     key: &str,
     content_type: Option<&str>,
     content_length: Option<i64>,
+    payload_sha256: Option<&str>,
     expires_in: Duration,
 ) -> Result<String, StorageError> {
     let mut url = object_url(config, key)?;
@@ -262,6 +267,12 @@ fn presigned_url(
     }
     if let Some(content_length) = content_length {
         headers.push(("content-length".to_string(), content_length.to_string()));
+    }
+    if let Some(payload_sha256) = payload_sha256 {
+        headers.push((
+            "x-amz-content-sha256".to_string(),
+            payload_sha256.to_string(),
+        ));
     }
     headers.sort_by(|left, right| left.0.cmp(&right.0));
     let signed_headers = headers
@@ -290,7 +301,7 @@ fn presigned_url(
         &canonical_query,
         &headers,
         &signed_headers,
-        UNSIGNED_PAYLOAD,
+        payload_sha256.unwrap_or(UNSIGNED_PAYLOAD),
     );
     let signature = signature(
         &config.secret_access_key,
@@ -360,9 +371,18 @@ impl ObjectStorage for S3CompatibleStorage {
         key: &str,
         content_type: &str,
         content_length: Option<i64>,
+        payload_sha256: Option<&str>,
         expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError> {
-        create_presigned_upload(self, key, content_type, content_length, expires_in_seconds).await
+        create_presigned_upload(
+            self,
+            key,
+            content_type,
+            content_length,
+            payload_sha256,
+            expires_in_seconds,
+        )
+        .await
     }
     async fn presign_download(
         &self,
@@ -389,6 +409,7 @@ impl ObjectStorage for UnavailableObjectStorage {
         _key: &str,
         _content_type: &str,
         _content_length: Option<i64>,
+        _payload_sha256: Option<&str>,
         _expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError> {
         Err(StorageError::MissingConfig)
@@ -552,8 +573,9 @@ mod tests {
     };
 
     use super::{
-        create_team_image_key, create_vault_image_key, object_storage_from_config, ObjectStorage,
-        StorageError, UnavailableObjectStorage,
+        canonical_request, create_team_image_key, create_vault_image_key,
+        object_storage_from_config, ObjectStorage, StorageError, UnavailableObjectStorage,
+        UNSIGNED_PAYLOAD,
     };
     use crate::config::{S3Config, StorageConfig};
 
@@ -612,7 +634,13 @@ mod tests {
     #[tokio::test]
     async fn presigned_upload_uses_path_style_bucket_and_signed_content_type() {
         let result = storage("https://storage.example.invalid")
-            .presign_upload("vaults/user_123/avatar file.png", "image/png", None, None)
+            .presign_upload(
+                "vaults/user_123/avatar file.png",
+                "image/png",
+                None,
+                None,
+                None,
+            )
             .await
             .expect("presigned upload should be created");
         let url = Url::parse(&result.upload_url).expect("upload URL should parse");
@@ -637,6 +665,50 @@ mod tests {
             Some("content-type;host"),
         );
         assert!(params.iter().any(|(key, _)| key == "X-Amz-Signature"));
+    }
+
+    #[tokio::test]
+    async fn presigned_upload_binds_the_ciphertext_payload_sha256() {
+        let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let result = storage("https://storage.example.invalid")
+            .presign_upload(
+                "attachments/staging/ciphertext",
+                "application/octet-stream",
+                Some(128),
+                Some(digest),
+                Some(300),
+            )
+            .await
+            .expect("hash-bound presigned upload should be created");
+        let url = Url::parse(&result.upload_url).expect("upload URL should parse");
+        let signed_headers = url
+            .query_pairs()
+            .find(|(key, _)| key == "X-Amz-SignedHeaders")
+            .map(|(_, value)| value.into_owned());
+
+        assert_eq!(
+            signed_headers.as_deref(),
+            Some("content-length;content-type;host;x-amz-content-sha256")
+        );
+        let headers = vec![
+            ("content-length".to_string(), "128".to_string()),
+            (
+                "content-type".to_string(),
+                "application/octet-stream".to_string(),
+            ),
+            ("host".to_string(), "storage.example.invalid".to_string()),
+            ("x-amz-content-sha256".to_string(), digest.to_string()),
+        ];
+        let canonical = canonical_request(
+            "PUT",
+            "/bittery-test/attachments/staging/ciphertext",
+            "query",
+            &headers,
+            signed_headers.as_deref().unwrap(),
+            digest,
+        );
+        assert!(canonical.ends_with(digest));
+        assert!(!canonical.contains(UNSIGNED_PAYLOAD));
     }
 
     #[tokio::test]

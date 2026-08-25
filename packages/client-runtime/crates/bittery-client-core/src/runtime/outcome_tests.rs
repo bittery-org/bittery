@@ -11,6 +11,16 @@ use crate::replica::{
     OperationOutcomeResult, OperationRejectionCode, ReplicaItemRecord, ReplicaSnapshot,
 };
 
+#[test]
+fn attachment_state_conflict_remains_a_terminal_rejection_across_the_server_contract() {
+    assert_eq!(
+        super::outcome::rejection_code(
+            crate::server_contract::OperationRejectionCode::AttachmentStateConflict,
+        ),
+        OperationRejectionCode::AttachmentStateConflict
+    );
+}
+
 impl Harness {
     fn snapshot(&self) -> ReplicaSnapshot {
         self.runtime

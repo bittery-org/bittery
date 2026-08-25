@@ -58,6 +58,9 @@ pub const DEFAULT_AUDIT_EVENTS: u16 = crate::domains::teams::audit::DEFAULT_LIMI
 /// Maximum bytes in an audit search term.
 pub const MAX_AUDIT_SEARCH_BYTES: usize = 200;
 
+/// Exact lowercase hexadecimal character length of one SHA-256 ciphertext digest.
+pub const CIPHERTEXT_SHA256_HEX_CHARS: usize = 64;
+
 #[cfg(test)]
 #[path = "limits_tests.rs"]
 mod tests;

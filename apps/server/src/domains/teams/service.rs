@@ -338,7 +338,7 @@ pub(crate) async fn create_team_image_upload(
 
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
     object_storage
-        .presign_upload(&key, &input.content_type, None, None)
+        .presign_upload(&key, &input.content_type, None, None, None)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");

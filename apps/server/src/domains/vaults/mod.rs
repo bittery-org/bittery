@@ -27,8 +27,10 @@ pub(crate) mod shapes;
 pub(crate) mod travel_mode;
 
 pub(crate) use attachments::{
-    create_vault_attachment, create_vault_attachment_upload, delete_vault_attachment,
-    get_attachment_download_url, list_vault_attachments_page, update_vault_attachment,
+    create_attachment_move_manifest, create_vault_attachment, create_vault_attachment_upload,
+    delete_vault_attachment, get_attachment_download_url, list_vault_attachments_page,
+    update_vault_attachment, verify_attachment_move_staging, AttachmentMoveFinalizeIntent,
+    AttachmentMoveStagingStatus,
 };
 pub(crate) use catalog::{
     convert_vault_type, create_vault, create_vault_image_upload, delete_vault, get_vault,
@@ -127,15 +129,44 @@ pub(crate) struct ItemEffectInput {
 }
 
 pub(crate) struct MoveItemEffectInput {
+    pub(crate) operation_id: String,
     pub(crate) item_id: String,
     pub(crate) source_vault_id: String,
     pub(crate) target_vault_id: String,
-    pub(crate) encrypted_data: String,
-    pub(crate) encryption_iv: String,
-    pub(crate) encryption_algorithm: String,
     pub(crate) expected_version: i32,
     pub(crate) client_id: Option<String>,
     pub(crate) ciphertext_limit: usize,
+    pub(crate) finalization: MoveItemFinalizationInput,
+}
+
+pub(crate) enum MoveItemFinalizationInput {
+    Prepared {
+        encrypted_data: String,
+        encryption_iv: String,
+        encryption_algorithm: String,
+        attachments: Vec<MoveAttachmentEffectInput>,
+    },
+    RejectStaleAuthority {
+        attachments: Vec<MoveAttachmentIntentInput>,
+    },
+}
+
+pub(crate) struct MoveAttachmentIntentInput {
+    pub(crate) attachment_id: String,
+    pub(crate) expected_envelope_version: i32,
+}
+
+pub(crate) struct MoveAttachmentEffectInput {
+    pub(crate) attachment_id: String,
+    pub(crate) expected_envelope_version: i32,
+    pub(crate) encrypted_attachment_key: String,
+    pub(crate) attachment_key_iv: String,
+    pub(crate) attachment_key_algorithm: String,
+    pub(crate) encrypted_name: String,
+    pub(crate) encrypted_content_type: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encrypted_content_type_iv: String,
+    pub(crate) encryption_algorithm: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -196,6 +227,41 @@ pub struct CreateAttachmentUploadResponse {
     pub attachment_id: String,
     pub storage_key: String,
     pub upload_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestInput {
+    pub(crate) operation_id: String,
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestEntryInput>,
+    pub(crate) request_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestEntryInput {
+    pub(crate) attachment_id: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) ciphertext_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestResponse {
+    pub(crate) operation_id: String,
+    pub(crate) expires_at: String,
+    pub(crate) attachments: Vec<AttachmentMoveUploadResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveUploadResponse {
+    pub(crate) attachment_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) upload_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

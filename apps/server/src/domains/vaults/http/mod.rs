@@ -215,14 +215,91 @@ struct FavoriteBody {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(
+    tag = "mode",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum MoveItemBody {
+    Prepared {
+        #[serde(rename = "sourceVaultId")]
+        source_vault_id: String,
+        #[serde(rename = "targetVaultId")]
+        target_vault_id: String,
+        #[serde(rename = "encryptedData")]
+        #[schema(max_length = 1048576)]
+        encrypted_data: String,
+        #[serde(rename = "encryptionIv")]
+        encryption_iv: String,
+        #[serde(rename = "encryptionAlgorithm")]
+        encryption_algorithm: String,
+        #[serde(default)]
+        attachments: Vec<MoveAttachmentBody>,
+    },
+    RejectStaleAuthority {
+        #[serde(rename = "sourceVaultId")]
+        source_vault_id: String,
+        #[serde(rename = "targetVaultId")]
+        target_vault_id: String,
+        attachments: Vec<MoveAttachmentIntentBody>,
+    },
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MoveItemBody {
+struct MoveAttachmentBody {
+    attachment_id: String,
+    expected_envelope_version: i32,
+    encrypted_attachment_key: String,
+    attachment_key_iv: String,
+    attachment_key_algorithm: String,
+    encrypted_name: String,
+    encrypted_content_type: String,
+    encryption_iv: String,
+    encrypted_content_type_iv: String,
+    encryption_algorithm: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MoveAttachmentIntentBody {
+    attachment_id: String,
+    expected_envelope_version: i32,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentMoveManifestBody {
+    item_id: String,
     source_vault_id: String,
     target_vault_id: String,
-    #[schema(max_length = 1048576)]
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
+    attachments: Vec<AttachmentMoveManifestEntryBody>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentMoveManifestEntryBody {
+    attachment_id: String,
+    envelope_version: i32,
+    #[schema(min_length = 64, max_length = 64, pattern = "^[0-9a-f]{64}$")]
+    ciphertext_sha256: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentMoveManifestResponse {
+    operation_id: String,
+    expires_at: String,
+    attachments: Vec<AttachmentMoveUploadResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentMoveUploadResponse {
+    attachment_id: String,
+    storage_key: String,
+    upload_url: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -671,6 +748,12 @@ enum ItemMutationOperationErrorResponses {
     )]
     Unauthorized(ProblemDetails),
     #[response(
+        status = 409,
+        description = "Attachment Move staging is incomplete",
+        content_type = "application/problem+json"
+    )]
+    Conflict(ProblemDetails),
+    #[response(
         status = 413,
         description = "Payload too large",
         content_type = "application/problem+json"
@@ -737,6 +820,7 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(items::create_item))
         .routes(routes!(items::update_item))
         .routes(routes!(items::move_item))
+        .routes(routes!(items::create_attachment_move_manifest))
         .route_layer(DefaultBodyLimit::max(ITEM_BODY_LIMIT_BYTES));
     let bulk = OpenApiRouter::new()
         .routes(routes!(items::bulk_import_items))
@@ -1065,7 +1149,7 @@ mod tests {
         let rendered = openapi["paths"].to_string();
         // Counted over `paths` alone: the retained Operation outcome schema carries an
         // `operationId` property of its own, and that is a field name, not a route.
-        assert_eq!(rendered.matches("operationId").count(), 31);
+        assert_eq!(rendered.matches("operationId").count(), 34);
         assert!(rendered.contains("listAllTrashedItems"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));

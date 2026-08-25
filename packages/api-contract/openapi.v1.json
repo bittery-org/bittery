@@ -2503,6 +2503,16 @@
               }
             }
           },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Payload too large",
             "content": {
@@ -2626,6 +2636,16 @@
           },
           "401": {
             "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3292,6 +3312,16 @@
               }
             }
           },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Payload too large",
             "content": {
@@ -3425,6 +3455,16 @@
               }
             }
           },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Payload too large",
             "content": {
@@ -3548,6 +3588,16 @@
               }
             }
           },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Payload too large",
             "content": {
@@ -3663,6 +3713,16 @@
           },
           "401": {
             "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4044,6 +4104,179 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/attachment-move-manifest": {
+      "put": {
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "createAttachmentMoveManifest",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentMoveManifestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stable staging identities and renewed upload credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentMoveManifestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13119,6 +13352,98 @@
           }
         }
       },
+      "AttachmentMoveManifestBody": {
+        "type": "object",
+        "required": [
+          "itemId",
+          "sourceVaultId",
+          "targetVaultId",
+          "attachments"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMoveManifestEntryBody"
+            }
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "sourceVaultId": {
+            "type": "string"
+          },
+          "targetVaultId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentMoveManifestEntryBody": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "envelopeVersion",
+          "ciphertextSha256"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "ciphertextSha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "envelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentMoveManifestResponse": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "expiresAt",
+          "attachments"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMoveUploadResponse"
+            }
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          }
+        }
+      },
+      "AttachmentMoveUploadResponse": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "storageKey",
+          "uploadUrl"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadUrl": {
+            "type": "string"
+          }
+        }
+      },
       "AttachmentUploadBody": {
         "type": "object",
         "required": [
@@ -15468,6 +15793,10 @@
           "INVALID_OPERATION_ID",
           "OPERATION_ID_REUSED",
           "OPERATION_OUTCOME_NOT_FOUND",
+          "ATTACHMENT_STAGING_INCOMPLETE",
+          "ATTACHMENT_STAGING_MISMATCH",
+          "ATTACHMENT_STAGING_BUSY",
+          "ATTACHMENT_AUTHORITY_STALE",
           "ROTATION_STALE_VAULT_VERSION",
           "ROTATION_STALE_MEMBER_SET",
           "ROTATION_STALE_ITEM_STATE",
@@ -16230,19 +16559,41 @@
           }
         }
       },
-      "MoveItemBody": {
+      "MoveAttachmentBody": {
         "type": "object",
         "required": [
-          "sourceVaultId",
-          "targetVaultId",
-          "encryptedData",
+          "attachmentId",
+          "expectedEnvelopeVersion",
+          "encryptedAttachmentKey",
+          "attachmentKeyIv",
+          "attachmentKeyAlgorithm",
+          "encryptedName",
+          "encryptedContentType",
           "encryptionIv",
+          "encryptedContentTypeIv",
           "encryptionAlgorithm"
         ],
         "properties": {
-          "encryptedData": {
-            "type": "string",
-            "maxLength": 1048576
+          "attachmentId": {
+            "type": "string"
+          },
+          "attachmentKeyAlgorithm": {
+            "type": "string"
+          },
+          "attachmentKeyIv": {
+            "type": "string"
+          },
+          "encryptedAttachmentKey": {
+            "type": "string"
+          },
+          "encryptedContentType": {
+            "type": "string"
+          },
+          "encryptedContentTypeIv": {
+            "type": "string"
+          },
+          "encryptedName": {
+            "type": "string"
           },
           "encryptionAlgorithm": {
             "type": "string"
@@ -16250,14 +16601,103 @@
           "encryptionIv": {
             "type": "string"
           },
-          "sourceVaultId": {
-            "type": "string"
-          },
-          "targetVaultId": {
-            "type": "string"
+          "expectedEnvelopeVersion": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
+      },
+      "MoveAttachmentIntentBody": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "expectedEnvelopeVersion"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "expectedEnvelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MoveItemBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "sourceVaultId",
+              "targetVaultId",
+              "encryptedData",
+              "encryptionIv",
+              "encryptionAlgorithm",
+              "mode"
+            ],
+            "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MoveAttachmentBody"
+                }
+              },
+              "encryptedData": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "encryptionAlgorithm": {
+                "type": "string"
+              },
+              "encryptionIv": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "prepared"
+                ]
+              },
+              "sourceVaultId": {
+                "type": "string"
+              },
+              "targetVaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sourceVaultId",
+              "targetVaultId",
+              "attachments",
+              "mode"
+            ],
+            "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MoveAttachmentIntentBody"
+                }
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "reject_stale_authority"
+                ]
+              },
+              "sourceVaultId": {
+                "type": "string"
+              },
+              "targetVaultId": {
+                "type": "string"
+              }
+            }
+          }
+        ]
       },
       "OperationOutcome": {
         "oneOf": [
@@ -16432,7 +16872,8 @@
           "item_not_trashed",
           "source_vault_mismatch",
           "target_vault_access_denied",
-          "target_vault_read_only"
+          "target_vault_read_only",
+          "attachment_state_conflict"
         ]
       },
       "PageCursor": {

@@ -307,8 +307,9 @@ still-matching authority returns `ATTACHMENT_STAGING_INCOMPLETE` with no outcome
 
 The stable staging identity is logical: `(User, Operation, Attachment)` never changes. Its physical
 object key is stable throughout one live manifest generation, so ordinary credential renewal and
-retry continue to address the same object. After lease expiry or an indeterminate cleanup boundary,
-the Server atomically advances a durable generation and any resumed upload uses a new physical key.
+retry continue to address the same object. After an expired lease has been atomically converted to
+cleanup, or after an indeterminate cleanup boundary, the Server advances a durable generation and
+any resumed upload uses a new physical key.
 
 Cleanup rows always name one immutable old-generation key. A delayed Object-store delete from a
 crashed or superseded cleanup worker can therefore delete only that old generation; it can never
@@ -317,3 +318,32 @@ because it cannot recall an external delete already sent before the claim expire
 survives manifest cleanup until the Operation resolves or the User is deleted. This clarification
 supersedes interpreting "stable staging location" as one physical key for the entire lifetime of an
 accepted Operation.
+
+### 2026-08-25 — generated Move contract compatibility correction
+
+The Server staging slice necessarily includes the narrow handwritten Runtime correction forced by
+its generated contract. Server schemas change in place and no old Move protocol is retained, so the
+existing attachment-free Move acceptance path now constructs the generated `prepared` body variant,
+including its discriminator and empty Attachment set. The Runtime also maps the generated terminal
+`attachment_state_conflict` rejection explicitly. This correction changes neither dispatch nor
+Attachment preparation ownership; those remain in their separately planned Runtime slices.
+
+### 2026-08-25 — staged ciphertext digest binding
+
+Each manifest Attachment carries `ciphertextSha256` as exactly 64 lowercase hexadecimal
+characters. The Server binds the presigned PUT's SigV4 payload to that SHA-256 digest, while the
+authoritative encrypted byte length and `application/octet-stream` media type remain Server-owned.
+The staged physical key may therefore safely become authoritative: every still-valid replay of its
+upload credentials can write only identical ciphertext, never a different payload under the same
+key. The digest is ciphertext authority and contains no plaintext metadata.
+
+### Release gate — exercise hash-bound uploads against each deployment provider
+
+Attachment Move must not be enabled on a deployment's S3-compatible provider until one generated
+hash-bound upload URL has been exercised end to end with all required headers: exact
+`content-length`, `application/octet-stream` content type, and `x-amz-content-sha256`. The correct
+ciphertext must be accepted, while different same-length bytes must be rejected for that same URL.
+AWS and MinIO evidence supports the signing construction, but the repository fake records the
+canonical inputs and does not verify real provider enforcement. Provider verification is therefore
+a recorded release gate rather than an inferred code guarantee or an expansion of this Server
+slice into Web fixtures or deployment infrastructure.

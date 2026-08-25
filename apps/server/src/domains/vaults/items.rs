@@ -938,6 +938,30 @@ pub(crate) async fn apply_restore_item(
     })
 }
 
+async fn reject_move_operation(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    operation_id: &str,
+    has_staging: bool,
+    item_id: &str,
+    vault_id: Option<&str>,
+    code: OperationRejectionCode,
+) -> Result<ItemEffect, AppError> {
+    if has_staging {
+        enqueue_attachment_move_staging_cleanup(transaction, user_id, operation_id).await?;
+    }
+    delete_attachment_move_generation(transaction, user_id, operation_id).await?;
+    reject_item_operation(
+        transaction,
+        "item_move_rejected",
+        item_id,
+        user_id,
+        vault_id,
+        code,
+    )
+    .await
+}
+
 /// Moves one Item between Vaults inside the caller's Operation transaction, or proves why it cannot.
 ///
 /// A move is the one Item Operation with two Vaults, so the destination keeps its own refusals.
@@ -947,46 +971,79 @@ pub(crate) async fn apply_move_item(
     user_id: &str,
     input: MoveItemEffectInput,
 ) -> Result<ItemEffect, AppError> {
-    const REJECTED: &str = "item_move_rejected";
-    if oversized(Some(&input.encrypted_data), input.ciphertext_limit) {
-        return reject_item_operation(
+    crate::shared::transaction::acquire_item_attachment_writer_lock(
+        &mut **transaction,
+        &input.item_id,
+        "Failed to lock Item Attachment writer",
+    )
+    .await?;
+    let has_staging = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to inspect Attachment Move staging"))?;
+    let prepared = match &input.finalization {
+        super::MoveItemFinalizationInput::Prepared {
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        } => Some((
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        )),
+        super::MoveItemFinalizationInput::RejectStaleAuthority { .. } => None,
+    };
+    if prepared.is_some_and(|(encrypted_data, _, _, _)| {
+        oversized(Some(encrypted_data), input.ciphertext_limit)
+    }) {
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             None,
             OperationRejectionCode::InvalidCiphertext,
         )
         .await;
     }
     let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             None,
             OperationRejectionCode::ItemNotFound,
         )
         .await;
     };
     if existing_item.vault_id != input.source_vault_id {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             Some(&existing_item.vault_id),
             OperationRejectionCode::SourceVaultMismatch,
         )
         .await;
     }
     if existing_item.deleted_at.is_some() {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             Some(&existing_item.vault_id),
             OperationRejectionCode::ItemTrashed,
         )
@@ -1001,11 +1058,12 @@ pub(crate) async fn apply_move_item(
     )
     .await?
     {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             Some(&input.source_vault_id),
             code,
         )
@@ -1020,24 +1078,137 @@ pub(crate) async fn apply_move_item(
     )
     .await?
     {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             Some(&input.target_vault_id),
             code,
         )
         .await;
     }
 
+    let current_attachments = query_as::<_, (String, i32, String)>(
+        "SELECT id, envelope_version, storage_key FROM item_attachment WHERE item_id = $1 ORDER BY id FOR UPDATE",
+    )
+    .bind(&input.item_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to lock Move Attachments"))?;
+    let mut expected_attachments = match &input.finalization {
+        super::MoveItemFinalizationInput::Prepared { attachments, .. } => attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    attachment.attachment_id.clone(),
+                    attachment.expected_envelope_version,
+                )
+            })
+            .collect::<Vec<_>>(),
+        super::MoveItemFinalizationInput::RejectStaleAuthority { attachments } => attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    attachment.attachment_id.clone(),
+                    attachment.expected_envelope_version,
+                )
+            })
+            .collect::<Vec<_>>(),
+    };
+    expected_attachments.sort();
+    let current_identity = current_attachments
+        .iter()
+        .map(|(id, version, _)| (id.clone(), *version))
+        .collect::<Vec<_>>();
+    if matches!(
+        &input.finalization,
+        super::MoveItemFinalizationInput::RejectStaleAuthority { .. }
+    ) {
+        if existing_item.version != input.expected_version {
+            return reject_move_operation(
+                transaction,
+                user_id,
+                &input.operation_id,
+                has_staging,
+                &input.item_id,
+                Some(&input.source_vault_id),
+                OperationRejectionCode::ItemVersionConflict,
+            )
+            .await;
+        }
+        if current_identity != expected_attachments {
+            return reject_move_operation(
+                transaction,
+                user_id,
+                &input.operation_id,
+                has_staging,
+                &input.item_id,
+                Some(&input.source_vault_id),
+                OperationRejectionCode::AttachmentStateConflict,
+            )
+            .await;
+        }
+        return Err(AppError::attachment_staging_incomplete(
+            "Attachment Move preparation is still required.",
+        ));
+    }
+    let manifest = query_as::<_, (String, String, String)>(
+        "SELECT item_id, source_vault_id, target_vault_id FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2 AND expires_at > $3",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .bind(OffsetDateTime::now_utc())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to validate Attachment Move manifest"))?;
+    let (_, _, _, attachments) = prepared.expect("prepared Move checked above");
+    if !attachments.is_empty() {
+        let manifest_attachments = query_as::<_, (String, i32)>(
+            "SELECT attachment_id, expected_envelope_version FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ORDER BY attachment_id",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to validate Attachment Move intent"))?;
+        let Some((manifest_item_id, manifest_source_id, manifest_target_id)) = manifest else {
+            return Err(AppError::attachment_staging_incomplete(
+                "Attachment Move staging is missing, expired, or incomplete.",
+            ));
+        };
+        let manifest_intent_matches = manifest_item_id == input.item_id
+            && manifest_source_id == input.source_vault_id
+            && manifest_target_id == input.target_vault_id
+            && manifest_attachments == expected_attachments;
+        if !manifest_intent_matches {
+            return Err(AppError::attachment_staging_mismatch(
+                "Attachment Move Finalize intent does not match its manifest.",
+            ));
+        }
+    }
+    if current_identity != expected_attachments {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&input.source_vault_id),
+            OperationRejectionCode::AttachmentStateConflict,
+        )
+        .await;
+    }
+    let (encrypted_data, encryption_iv, encryption_algorithm, attachments) =
+        prepared.expect("prepared Move checked above");
     let new_version = query_scalar::<_, i32>(
 		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = $4, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(&input.target_vault_id)
-	.bind(&input.encrypted_data)
-	.bind(&input.encryption_iv)
-	.bind(&input.encryption_algorithm)
+	.bind(encrypted_data)
+	.bind(encryption_iv)
+	.bind(encryption_algorithm)
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
@@ -1046,16 +1217,83 @@ pub(crate) async fn apply_move_item(
 	.await
 	.map_err(|error| database_error(error, "Failed to move item"))?;
     let Some(new_version) = new_version else {
-        return reject_item_operation(
+        return reject_move_operation(
             transaction,
-            REJECTED,
-            &input.item_id,
             user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
             Some(&input.source_vault_id),
             OperationRejectionCode::ItemVersionConflict,
         )
         .await;
     };
+    for attachment in attachments {
+        let staged = query_as::<_, (String, i64)>(
+            "SELECT storage_key, storage_size FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 AND attachment_id = $3 AND expected_envelope_version = $4",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(&attachment.attachment_id)
+        .bind(attachment.expected_envelope_version)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to resolve staged Attachment"))?;
+        let Some((staged_storage_key, staged_storage_size)) = staged else {
+            return Err(AppError::internal(
+                "Verified Attachment Move staging disappeared",
+            ));
+        };
+        let updated = query(
+            "UPDATE item_attachment SET vault_id = $1, storage_key = $2, encrypted_attachment_key = $3, attachment_key_iv = $4, attachment_key_algorithm = $5, envelope_version = envelope_version + 1, encrypted_name = $6, encrypted_content_type = $7, encryption_iv = $8, encrypted_content_type_iv = $9, encryption_algorithm = $10, storage_size = $11 WHERE id = $12 AND item_id = $13 AND envelope_version = $14",
+        )
+        .bind(&input.target_vault_id)
+        .bind(staged_storage_key)
+        .bind(&attachment.encrypted_attachment_key)
+        .bind(&attachment.attachment_key_iv)
+        .bind(&attachment.attachment_key_algorithm)
+        .bind(&attachment.encrypted_name)
+        .bind(&attachment.encrypted_content_type)
+        .bind(&attachment.encryption_iv)
+        .bind(&attachment.encrypted_content_type_iv)
+        .bind(&attachment.encryption_algorithm)
+        .bind(staged_storage_size)
+        .bind(&attachment.attachment_id)
+        .bind(&input.item_id)
+        .bind(attachment.expected_envelope_version)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to finalize staged Attachment"))?;
+        if updated.rows_affected() != 1 {
+            return Err(AppError::internal(
+                "Locked Attachment Move authority changed",
+            ));
+        }
+    }
+    for (_, _, old_storage_key) in &current_attachments {
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .bind(old_storage_key)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to enqueue old Attachment cleanup"))?;
+    }
+    if !attachments.is_empty() {
+        query("DELETE FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to consume Attachment Move staging"))?;
+        query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to close Attachment Move manifest"))?;
+    }
+    delete_attachment_move_generation(transaction, user_id, &input.operation_id).await?;
     insert_item_sync_event_with_metadata(
         transaction,
         SyncEventType::ItemMoved,
@@ -1084,6 +1322,44 @@ pub(crate) async fn apply_move_item(
         item_id: input.item_id,
         version: new_version,
     })
+}
+
+async fn delete_attachment_move_generation(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    operation_id: &str,
+) -> Result<(), AppError> {
+    query(
+        "DELETE FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to close Attachment Move generation"))?;
+    Ok(())
+}
+
+async fn enqueue_attachment_move_staging_cleanup(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    operation_id: &str,
+) -> Result<(), AppError> {
+    query(
+        "INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to enqueue staged Attachment cleanup"))?;
+    query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+        .bind(user_id)
+        .bind(operation_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to close rejected Attachment Move"))?;
+    Ok(())
 }
 
 /// Deletes one trashed Item forever inside the caller's Operation transaction, or proves why it cannot.

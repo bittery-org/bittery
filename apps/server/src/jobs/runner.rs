@@ -11,8 +11,8 @@ use tokio::{
 use tracing::{error, info};
 
 use super::sql::{
-    cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
-    prune_rate_limit_state, prune_sync_events,
+    cleanup_attachment_move_staging, cleanup_expired_sessions, cleanup_pending_attachment_uploads,
+    cleanup_tombstones, prune_rate_limit_state, prune_sync_events,
 };
 use crate::domains::vaults::{
     fetch_and_store_favicon, list_domains_to_refresh,
@@ -273,6 +273,7 @@ fn run_sync_event_pruning(context: JobContext) -> JobFuture {
 fn run_pending_attachment_cleanup(context: JobContext) -> JobFuture {
     Box::pin(async move {
         cleanup_pending_attachment_uploads(&context.pool, context.storage.as_ref()).await?;
+        cleanup_attachment_move_staging(&context.pool, context.storage.as_ref()).await?;
         Ok(())
     })
 }

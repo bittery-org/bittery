@@ -900,7 +900,8 @@ impl Runtime {
                 overlay.encryption_algorithm = sealed.algorithm.clone();
                 overlay.encryption_version = overlay.version;
                 overlay.encrypted_by_user_id = snapshot.user_id.clone();
-                let body = serde_json::to_vec(&MoveItemBody {
+                let body = serde_json::to_vec(&MoveItemBody::Prepared {
+                    attachments: Some(Vec::new()),
                     encrypted_data: sealed.ciphertext,
                     encryption_algorithm: sealed.algorithm,
                     encryption_iv: sealed.iv,

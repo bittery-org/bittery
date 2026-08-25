@@ -516,6 +516,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/operations/{operationId}/attachment-move-manifest": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put: operations["createAttachmentMoveManifest"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/public/share-links/{token}": {
         readonly parameters: {
             readonly query?: never;
@@ -1530,6 +1546,28 @@ export interface components {
             /** Format: int32 */
             readonly fileSize: number;
         };
+        readonly AttachmentMoveManifestBody: {
+            readonly attachments: readonly components["schemas"]["AttachmentMoveManifestEntryBody"][];
+            readonly itemId: string;
+            readonly sourceVaultId: string;
+            readonly targetVaultId: string;
+        };
+        readonly AttachmentMoveManifestEntryBody: {
+            readonly attachmentId: string;
+            readonly ciphertextSha256: string;
+            /** Format: int32 */
+            readonly envelopeVersion: number;
+        };
+        readonly AttachmentMoveManifestResponse: {
+            readonly attachments: readonly components["schemas"]["AttachmentMoveUploadResponse"][];
+            readonly expiresAt: string;
+            readonly operationId: string;
+        };
+        readonly AttachmentMoveUploadResponse: {
+            readonly attachmentId: string;
+            readonly storageKey: string;
+            readonly uploadUrl: string;
+        };
         readonly AttachmentUploadBody: {
             readonly contentType: string;
             readonly fileName: string;
@@ -2054,7 +2092,7 @@ export interface components {
          * @description A stable, machine-readable Bittery error code.
          * @enum {string}
          */
-        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "INVALID_OPERATION_ID" | "OPERATION_ID_REUSED" | "OPERATION_OUTCOME_NOT_FOUND" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
+        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "INVALID_OPERATION_ID" | "OPERATION_ID_REUSED" | "OPERATION_OUTCOME_NOT_FOUND" | "ATTACHMENT_STAGING_INCOMPLETE" | "ATTACHMENT_STAGING_MISMATCH" | "ATTACHMENT_STAGING_BUSY" | "ATTACHMENT_AUTHORITY_STALE" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
         /** @enum {string} */
         readonly EventSource: "audit_log" | "share_access_log";
         readonly FavoriteBody: {
@@ -2252,10 +2290,37 @@ export interface components {
             readonly role: components["schemas"]["VaultRole"];
             readonly vaultType: components["schemas"]["VaultType"];
         };
+        readonly MoveAttachmentBody: {
+            readonly attachmentId: string;
+            readonly attachmentKeyAlgorithm: string;
+            readonly attachmentKeyIv: string;
+            readonly encryptedAttachmentKey: string;
+            readonly encryptedContentType: string;
+            readonly encryptedContentTypeIv: string;
+            readonly encryptedName: string;
+            readonly encryptionAlgorithm: string;
+            readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly expectedEnvelopeVersion: number;
+        };
+        readonly MoveAttachmentIntentBody: {
+            readonly attachmentId: string;
+            /** Format: int32 */
+            readonly expectedEnvelopeVersion: number;
+        };
         readonly MoveItemBody: {
+            readonly attachments?: readonly components["schemas"]["MoveAttachmentBody"][];
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** @enum {string} */
+            readonly mode: "prepared";
+            readonly sourceVaultId: string;
+            readonly targetVaultId: string;
+        } | {
+            readonly attachments: readonly components["schemas"]["MoveAttachmentIntentBody"][];
+            /** @enum {string} */
+            readonly mode: "reject_stale_authority";
             readonly sourceVaultId: string;
             readonly targetVaultId: string;
         };
@@ -2305,7 +2370,7 @@ export interface components {
          *     handler -- not the wire type -- decides which subset it can ever prove.
          * @enum {string}
          */
-        readonly OperationRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict" | "item_not_found" | "item_version_conflict" | "item_trashed" | "item_not_trashed" | "source_vault_mismatch" | "target_vault_access_denied" | "target_vault_read_only";
+        readonly OperationRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict" | "item_not_found" | "item_version_conflict" | "item_trashed" | "item_not_trashed" | "source_vault_mismatch" | "target_vault_access_denied" | "target_vault_read_only" | "attachment_state_conflict";
         readonly PageCursor: string;
         readonly PageRequest: {
             readonly cursor?: null | components["schemas"]["PageCursor"];
@@ -4751,6 +4816,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Payload too large */
             readonly 413: {
                 headers: {
@@ -4838,6 +4912,15 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5346,6 +5429,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Payload too large */
             readonly 413: {
                 headers: {
@@ -5433,6 +5525,15 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5530,6 +5631,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Payload too large */
             readonly 413: {
                 headers: {
@@ -5613,6 +5723,15 @@ export interface operations {
             };
             /** @description Authentication required */
             readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Attachment Move staging is incomplete */
+            readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5905,6 +6024,142 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly createAttachmentMoveManifest: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly operationId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["AttachmentMoveManifestBody"];
+            };
+        };
+        readonly responses: {
+            /** @description Stable staging identities and renewed upload credentials */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AttachmentMoveManifestResponse"];
+                };
+            };
+            /** @description Bad request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Item version does not match */
+            readonly 412: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Payload too large */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is required */
+            readonly 428: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

@@ -7,6 +7,7 @@ use crate::{
     db::events::{begin_sync_event_transaction, lock_sync_event_order},
     db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate},
     integrations::storage,
+    shared::transaction::acquire_operation_lock,
 };
 
 const EXPIRED_SESSION_BATCH_SIZE: i64 = 1000;
@@ -149,6 +150,158 @@ pub async fn cleanup_pending_attachment_uploads(
     }
 
     Ok(total_deleted)
+}
+
+pub async fn cleanup_attachment_move_staging(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    let now = OffsetDateTime::now_utc();
+    let expired = query_as::<_, (String, String)>(
+        "SELECT user_id, operation_id FROM attachment_move_manifest WHERE expires_at <= $1 ORDER BY expires_at, user_id, operation_id LIMIT 100",
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+    for (user_id, operation_id) in &expired {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            user_id,
+            operation_id,
+            "Failed to lock expired Attachment Move",
+        )
+        .await?;
+        let still_expired = query_scalar::<_, String>(
+            "SELECT operation_id FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2 AND expires_at <= $3 FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(operation_id)
+        .bind(now)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if still_expired.is_none() {
+            transaction.rollback().await?;
+            continue;
+        }
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ON CONFLICT DO NOTHING")
+            .bind(user_id)
+            .bind(operation_id)
+            .execute(&mut *transaction)
+            .await?;
+        query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(operation_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+    }
+
+    let queued = query_as::<_, (i64, String, String, String)>(
+        "SELECT id, user_id, operation_id, storage_key FROM (SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NULL UNION ALL SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NOT NULL AND claimed_at <= NOW() - INTERVAL '5 minutes') eligible ORDER BY id LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut deleted = 0;
+    for (id, user_id, operation_id, storage_key) in queued {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            &user_id,
+            &operation_id,
+            "Failed to lock Attachment Move cleanup",
+        )
+        .await?;
+        let live = query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM attachment_move_staging s INNER JOIN attachment_move_manifest m USING (user_id, operation_id) WHERE s.user_id = $1 AND s.operation_id = $2 AND s.storage_key = $3 AND m.expires_at > $4)",
+        )
+        .bind(&user_id)
+        .bind(&operation_id)
+        .bind(&storage_key)
+        .bind(OffsetDateTime::now_utc())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if live {
+            query("DELETE FROM attachment_move_cleanup WHERE id = $1")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            transaction.commit().await?;
+            continue;
+        }
+        let claim_token = format!("{:032x}", rand::random::<u128>());
+        let claimed = query_scalar::<_, i64>(
+            "UPDATE attachment_move_cleanup SET claim_token = $1, claimed_at = NOW() WHERE id = $2 AND (claim_token IS NULL OR claimed_at <= NOW() - INTERVAL '5 minutes') RETURNING id",
+        )
+        .bind(&claim_token)
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if claimed.is_none() {
+            transaction.rollback().await?;
+            continue;
+        }
+        transaction.commit().await?;
+
+        if let Err(error) = object_storage.delete(&storage_key).await {
+            let mut release = pool.begin().await?;
+            acquire_operation_lock(
+                &mut *release,
+                &user_id,
+                &operation_id,
+                "Failed to lock failed Attachment Move cleanup",
+            )
+            .await?;
+            query("UPDATE attachment_move_cleanup SET claim_token = NULL, claimed_at = NULL WHERE id = $1 AND claim_token = $2")
+                .bind(id)
+                .bind(&claim_token)
+                .execute(&mut *release)
+                .await?;
+            release.commit().await?;
+            error!(%error, "attachment-move-cleanup will retry object deletion");
+            continue;
+        }
+
+        let mut finalize = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *finalize,
+            &user_id,
+            &operation_id,
+            "Failed to lock completed Attachment Move cleanup",
+        )
+        .await?;
+        let finalized =
+            query("DELETE FROM attachment_move_cleanup WHERE id = $1 AND claim_token = $2")
+                .bind(id)
+                .bind(&claim_token)
+                .execute(&mut *finalize)
+                .await;
+        match finalized {
+            Ok(result) => {
+                finalize.commit().await?;
+                deleted += result.rows_affected();
+            }
+            Err(error) => {
+                finalize.rollback().await?;
+                let mut release = pool.begin().await?;
+                acquire_operation_lock(
+                    &mut *release,
+                    &user_id,
+                    &operation_id,
+                    "Failed to unlock incomplete Attachment Move cleanup",
+                )
+                .await?;
+                query("UPDATE attachment_move_cleanup SET claim_token = NULL, claimed_at = NULL WHERE id = $1 AND claim_token = $2")
+                    .bind(id)
+                    .bind(&claim_token)
+                    .execute(&mut *release)
+                    .await?;
+                release.commit().await?;
+                return Err(error.into());
+            }
+        }
+    }
+    Ok(deleted)
 }
 
 pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {

@@ -1,16 +1,69 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
-use sqlx::{query, query_scalar};
+use sqlx::{query, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
 
 use super::{
-    cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
-    prune_rate_limit_state, prune_sync_events,
+    cleanup_attachment_move_staging, cleanup_expired_sessions, cleanup_pending_attachment_uploads,
+    cleanup_tombstones, prune_rate_limit_state, prune_sync_events,
 };
 use crate::domains::vaults::rotation::plans::cleanup_rotation_plans;
+use crate::integrations::storage::{
+    ObjectStorage, PresignedUploadResult, StorageError, StorageObjectHead,
+};
 use crate::test_support::{
     seed_item, seed_team, seed_user, seed_vault, with_api_test_app, RecordingObjectStorage,
 };
+
+struct ClaimObservingStorage {
+    pool: PgPool,
+    saw_committed_claim: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl ObjectStorage for ClaimObservingStorage {
+    async fn presign_upload(
+        &self,
+        _key: &str,
+        _content_type: &str,
+        _content_length: Option<i64>,
+        _payload_sha256: Option<&str>,
+        _expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+
+    async fn presign_download(
+        &self,
+        _key: &str,
+        _expires_in_seconds: Option<u64>,
+    ) -> Result<String, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+
+    async fn head(&self, _key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
+        Err(StorageError::MissingConfig)
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        let committed = query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM attachment_move_cleanup WHERE storage_key = $1 AND claim_token IS NOT NULL)",
+        )
+        .bind(key)
+        .fetch_one(&self.pool)
+        .await
+        .expect("cleanup claim should be independently observable");
+        self.saw_committed_claim.store(committed, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn public_url(&self, _key: &str) -> Option<String> {
+        None
+    }
+}
 
 #[tokio::test]
 async fn time_based_pruning_deletes_only_expired_database_rows() {
@@ -97,6 +150,375 @@ async fn time_based_pruning_deletes_only_expired_database_rows() {
         .await
         .unwrap();
         assert_eq!(limiter_keys, ["recent", "still-locked"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_cleanup_keeps_failed_work_and_replays_idempotently() {
+    with_api_test_app("jobs_attachment_move_cleanup", |app| async move {
+        seed_user(
+            &app.pool,
+            "user_jobs_move",
+            "Jobs Move",
+            "jobs-move@example.com",
+        )
+        .await;
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ($1, $2, $3)")
+            .bind("user_jobs_move")
+            .bind("move-operation")
+            .bind("attachments/staging/replay")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO attachment_move_manifest (user_id, operation_id, item_id, source_vault_id, target_vault_id, request_fingerprint, expires_at) VALUES ($1, $2, 'item-live', 'vault-source', 'vault-target', 'fingerprint', NOW() + INTERVAL '1 hour')")
+            .bind("user_jobs_move")
+            .bind("live-move-operation")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO attachment_move_staging (user_id, operation_id, attachment_id, expected_envelope_version, ciphertext_sha256, storage_key, storage_size) VALUES ($1, $2, 'attachment-live', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'attachments/staging/live', 1)")
+            .bind("user_jobs_move")
+            .bind("live-move-operation")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ($1, $2, 'attachments/staging/live')")
+            .bind("user_jobs_move")
+            .bind("live-move-operation")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+
+        let failing = RecordingObjectStorage::failing();
+        assert_eq!(
+            cleanup_attachment_move_staging(&app.pool, &failing)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM attachment_move_cleanup"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE claim_token IS NOT NULL"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            0,
+            "a failed external deletion must clear its durable claim for unbounded retry"
+        );
+
+        query(
+            r#"CREATE FUNCTION reject_attachment_move_cleanup_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'cleanup delete rejected by test';
+            END;
+            $$"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query("CREATE TRIGGER reject_attachment_move_cleanup_delete BEFORE DELETE ON attachment_move_cleanup FOR EACH ROW EXECUTE FUNCTION reject_attachment_move_cleanup_delete()")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let delete_boundary = RecordingObjectStorage::succeeding(None);
+        assert!(
+            cleanup_attachment_move_staging(&app.pool, &delete_boundary)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM attachment_move_cleanup"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            1
+        );
+        query("DROP TRIGGER reject_attachment_move_cleanup_delete ON attachment_move_cleanup")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("DROP FUNCTION reject_attachment_move_cleanup_delete()")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+
+        let succeeding = RecordingObjectStorage::succeeding(None);
+        assert_eq!(
+            cleanup_attachment_move_staging(&app.pool, &succeeding)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            cleanup_attachment_move_staging(&app.pool, &succeeding)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            succeeding.calls(),
+            ["delete:attachments/staging/replay"]
+        );
+        assert_eq!(
+            delete_boundary.calls(),
+            ["delete:attachments/staging/replay"]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_cleanup_commits_claim_before_external_deletion() {
+    with_api_test_app("jobs_attachment_move_committed_claim", |app| async move {
+        seed_user(
+            &app.pool,
+            "user_jobs_claim",
+            "Jobs Claim",
+            "jobs-claim@example.com",
+        )
+        .await;
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ('user_jobs_claim', 'claimed-operation', 'attachments/staging/claimed')")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let storage = ClaimObservingStorage {
+            pool: app.pool.clone(),
+            saw_committed_claim: AtomicBool::new(false),
+        };
+
+        assert_eq!(
+            cleanup_attachment_move_staging(&app.pool, &storage)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(storage.saw_committed_claim.load(Ordering::SeqCst));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_cleanup_claim_boundaries_keep_work_durable() {
+    for (case, when_clause, failing_storage) in [
+        (
+            "claim",
+            "NEW.claim_token IS NOT NULL AND OLD.claim_token IS NULL",
+            false,
+        ),
+        (
+            "release",
+            "OLD.claim_token IS NOT NULL AND NEW.claim_token IS NULL",
+            true,
+        ),
+    ] {
+        with_api_test_app(
+            &format!("jobs_attachment_move_cleanup_{case}_boundary"),
+            |app| async move {
+                seed_user(
+                    &app.pool,
+                    "user_jobs_claim_boundary",
+                    "Jobs Claim Boundary",
+                    "jobs-claim-boundary@example.com",
+                )
+                .await;
+                query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ('user_jobs_claim_boundary', 'claim-boundary', 'attachments/staging/claim-boundary')")
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+                query(
+                    r#"CREATE FUNCTION reject_attachment_move_claim_boundary() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'cleanup claim boundary rejected by test';
+                    END;
+                    $$"#,
+                )
+                .execute(&app.pool)
+                .await
+                .unwrap();
+                query(&format!("CREATE TRIGGER reject_attachment_move_claim_boundary BEFORE UPDATE ON attachment_move_cleanup FOR EACH ROW WHEN ({when_clause}) EXECUTE FUNCTION reject_attachment_move_claim_boundary()"))
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+
+                let storage = if failing_storage {
+                    RecordingObjectStorage::failing()
+                } else {
+                    RecordingObjectStorage::succeeding(None)
+                };
+                assert!(
+                    cleanup_attachment_move_staging(&app.pool, &storage)
+                        .await
+                        .is_err()
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>(
+                        "SELECT COUNT(*)::bigint FROM attachment_move_cleanup"
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    query_scalar::<_, bool>(
+                        "SELECT claim_token IS NOT NULL FROM attachment_move_cleanup"
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    failing_storage
+                );
+                assert_eq!(
+                    storage.calls(),
+                    if failing_storage {
+                        vec!["delete:attachments/staging/claim-boundary".to_string()]
+                    } else {
+                        Vec::new()
+                    }
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_expiry_conversion_boundaries_are_atomic() {
+    for (case, table, event) in [
+        ("queue", "attachment_move_cleanup", "INSERT"),
+        ("release", "attachment_move_manifest", "DELETE"),
+    ] {
+        with_api_test_app(
+            &format!("jobs_attachment_move_expiry_{case}"),
+            |app| async move {
+                seed_user(
+                    &app.pool,
+                    "user_jobs_expired_move",
+                    "Jobs Expired Move",
+                    "jobs-expired-move@example.com",
+                )
+                .await;
+                query("INSERT INTO attachment_move_manifest (user_id, operation_id, item_id, source_vault_id, target_vault_id, request_fingerprint, expires_at) VALUES ('user_jobs_expired_move', 'expired-move', 'item', 'source', 'target', 'fingerprint', NOW() - INTERVAL '1 second')")
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+                query("INSERT INTO attachment_move_staging (user_id, operation_id, attachment_id, expected_envelope_version, ciphertext_sha256, storage_key, storage_size) VALUES ('user_jobs_expired_move', 'expired-move', 'expired-attachment', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'attachments/staging/expired-move', 1)")
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+                query(
+                    r#"CREATE FUNCTION reject_attachment_move_expiry_step() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'expiry step rejected by test';
+                    END;
+                    $$"#,
+                )
+                .execute(&app.pool)
+                .await
+                .unwrap();
+                query(&format!("CREATE TRIGGER reject_attachment_move_expiry_step BEFORE {event} ON {table} FOR EACH ROW EXECUTE FUNCTION reject_attachment_move_expiry_step()"))
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+
+                let storage = RecordingObjectStorage::succeeding(None);
+                assert!(
+                    cleanup_attachment_move_staging(&app.pool, &storage)
+                        .await
+                        .is_err()
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE operation_id = 'expired-move'")
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging WHERE operation_id = 'expired-move'")
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup")
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    0
+                );
+                assert!(storage.calls().is_empty());
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_live_cleanup_cancellation_delete_is_atomic() {
+    with_api_test_app("jobs_attachment_move_live_cancel_boundary", |app| async move {
+        seed_user(
+            &app.pool,
+            "user_jobs_live_cancel",
+            "Jobs Live Cancel",
+            "jobs-live-cancel@example.com",
+        )
+        .await;
+        query("INSERT INTO attachment_move_manifest (user_id, operation_id, item_id, source_vault_id, target_vault_id, request_fingerprint, expires_at) VALUES ('user_jobs_live_cancel', 'live-cancel', 'item', 'source', 'target', 'fingerprint', NOW() + INTERVAL '1 hour')")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO attachment_move_staging (user_id, operation_id, attachment_id, expected_envelope_version, ciphertext_sha256, storage_key, storage_size) VALUES ('user_jobs_live_cancel', 'live-cancel', 'live-cancel-attachment', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'attachments/staging/live-cancel', 1)")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ('user_jobs_live_cancel', 'live-cancel', 'attachments/staging/live-cancel')")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query(
+            r#"CREATE FUNCTION reject_live_cleanup_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'live cleanup cancellation rejected by test';
+            END;
+            $$"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query("CREATE TRIGGER reject_live_cleanup_cancel BEFORE DELETE ON attachment_move_cleanup FOR EACH ROW EXECUTE FUNCTION reject_live_cleanup_cancel()")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+
+        let storage = RecordingObjectStorage::succeeding(None);
+        assert!(
+            cleanup_attachment_move_staging(&app.pool, &storage)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup")
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(storage.calls().is_empty());
     })
     .await;
 }

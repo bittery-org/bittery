@@ -4,17 +4,21 @@ use super::{
 };
 use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
+use crate::jobs::sql::cleanup_attachment_move_staging;
 use crate::test_support::{
-    assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
+    assign_user_to_team, authenticated_json_headers, install_attachment_move_preflight_hook,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    with_api_test_app_state, with_test_config, RecordingObjectStorage,
 };
 use axum::http::{
     header::{CONTENT_TYPE, ETAG, IF_MATCH},
     HeaderMap, HeaderValue, Method, StatusCode,
 };
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
+
+use std::sync::Arc;
 
 fn with_if_match(mut headers: HeaderMap, version: impl std::fmt::Display) -> HeaderMap {
     headers.insert(
@@ -434,6 +438,123 @@ async fn install_operation_step_failure_trigger(pool: &PgPool, table: &str, when
     .expect("Operation failure trigger should install");
 }
 
+async fn install_attachment_move_failure_trigger(
+    pool: &PgPool,
+    table: &str,
+    event: &str,
+    when_clause: &str,
+) {
+    query(
+        r#"CREATE FUNCTION reject_attachment_move_step() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'Attachment Move step rejected by test';
+        END;
+        $$"#,
+    )
+    .execute(pool)
+    .await
+    .expect("Attachment Move failure function should install");
+    query(&format!(
+        "CREATE TRIGGER reject_attachment_move_step BEFORE {event} ON {table} FOR EACH ROW {when_clause} EXECUTE FUNCTION reject_attachment_move_step()"
+    ))
+    .execute(pool)
+    .await
+    .expect("Attachment Move failure trigger should install");
+}
+
+fn attachment_move_manifest_body(fixture: &VaultRouterFixture) -> Value {
+    json!({
+        "itemId": fixture.movable_item_id,
+        "sourceVaultId": fixture.main_vault_id,
+        "targetVaultId": fixture.target_vault_id,
+        "attachments": [{
+            "attachmentId": "move_attachment",
+            "envelopeVersion": 1,
+            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }]
+    })
+}
+
+#[tokio::test]
+async fn attachment_move_maintenance_queries_have_supporting_indexes() {
+    with_api_test_app("attachment_move_maintenance_indexes", |app| async move {
+        let index_names = query_scalar::<_, String>(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1) ORDER BY indexname",
+        )
+        .bind(vec![
+            "attachment_move_cleanup_claim_expiry_idx",
+            "attachment_move_cleanup_unclaimed_idx",
+            "attachment_move_manifest_expiry_idx",
+        ])
+        .fetch_all(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            index_names,
+            vec![
+                "attachment_move_cleanup_claim_expiry_idx".to_string(),
+                "attachment_move_cleanup_unclaimed_idx".to_string(),
+                "attachment_move_manifest_expiry_idx".to_string(),
+            ]
+        );
+        let mut transaction = app.pool.begin().await.unwrap();
+        query("SET LOCAL enable_seqscan = off")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        let expiry_plan = query_scalar::<_, String>(
+            "EXPLAIN (COSTS OFF) SELECT user_id, operation_id FROM attachment_move_manifest WHERE expires_at <= NOW() ORDER BY expires_at, user_id, operation_id LIMIT 100",
+        )
+        .fetch_all(&mut *transaction)
+        .await
+        .unwrap()
+        .join("\n");
+        assert!(
+            expiry_plan.contains("attachment_move_manifest_expiry_idx"),
+            "{expiry_plan}"
+        );
+        let cleanup_plan = query_scalar::<_, String>(
+            "EXPLAIN (COSTS OFF) SELECT id, user_id, operation_id, storage_key FROM (SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NULL UNION ALL SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NOT NULL AND claimed_at <= NOW() - INTERVAL '5 minutes') eligible ORDER BY id LIMIT 100",
+        )
+        .fetch_all(&mut *transaction)
+        .await
+        .unwrap()
+        .join("\n");
+        assert!(
+            cleanup_plan.contains("attachment_move_cleanup_unclaimed_idx"),
+            "{cleanup_plan}"
+        );
+        assert!(
+            cleanup_plan.contains("attachment_move_cleanup_claim_expiry_idx"),
+            "{cleanup_plan}"
+        );
+    })
+    .await;
+}
+
+fn attachment_move_final_body(fixture: &VaultRouterFixture) -> Value {
+    json!({
+        "mode": "prepared",
+        "sourceVaultId": fixture.main_vault_id,
+        "targetVaultId": fixture.target_vault_id,
+        "encryptedData": "target-item-ciphertext",
+        "encryptionIv": "target-item-iv",
+        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+        "attachments": [{
+            "attachmentId": "move_attachment",
+            "expectedEnvelopeVersion": 1,
+            "encryptedAttachmentKey": "target-wrapped-key",
+            "attachmentKeyIv": "target-key-iv",
+            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+            "encryptedName": "target-name",
+            "encryptedContentType": "target-content-type",
+            "encryptionIv": "target-blob-iv",
+            "encryptedContentTypeIv": "target-type-iv",
+            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+        }]
+    })
+}
+
 async fn seed_attachment(
     pool: &PgPool,
     attachment_id: &str,
@@ -464,6 +585,2353 @@ async fn seed_attachment(
 		.execute(pool)
 		.await
 		.expect("attachment should seed");
+}
+
+async fn wait_for_advisory_waiters(pool: &PgPool, expected: i64) {
+    for _ in 0..200 {
+        let waiters = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if waiters >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("expected {expected} advisory-lock waiters");
+}
+
+async fn acquire_test_item_attachment_writer_lock(
+    pool: &PgPool,
+    item_id: &str,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut transaction = pool.begin().await.unwrap();
+    query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!(
+            "item-attachment-writer:{}:{}",
+            item_id.len(),
+            item_id
+        ))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_fixes_stable_operation_scoped_uploads() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    let observed_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_manifest_stable_uploads",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/move-with-attachments/attachment-move-manifest";
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            first.assert_contract_status();
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(first.body["operationId"], json!("move-with-attachments"));
+            assert_eq!(
+                first.body["attachments"][0]["attachmentId"],
+                json!("move_attachment")
+            );
+            let stable_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .expect("manifest should return a storage key")
+                .to_string();
+
+            let second = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(body),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            second.assert_contract_status();
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(
+                second.body["attachments"][0]["storageKey"],
+                json!(stable_key)
+            );
+            assert_eq!(
+                observed_storage.calls(),
+                vec![
+                    format!("presign_upload:{stable_key}"),
+                    format!("presign_upload:{stable_key}")
+                ]
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_rejects_malformed_ciphertext_sha256() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_bad_ciphertext_digest",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            for malformed in [
+                "abc",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            ] {
+                let response = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/bad-ciphertext-digest/attachment-move-manifest",
+                        Some(json!({
+                            "itemId": fixture.movable_item_id,
+                            "sourceVaultId": fixture.main_vault_id,
+                            "targetVaultId": fixture.target_vault_id,
+                            "attachments": [{
+                                "attachmentId": "move_attachment",
+                                "envelopeVersion": 1,
+                                "ciphertextSha256": malformed
+                            }]
+                        })),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(
+                    response.status,
+                    StatusCode::BAD_REQUEST,
+                    "{}",
+                    response.body
+                );
+            }
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_does_not_require_plaintext_content_type() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_opaque_upload",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/opaque-upload/attachment-move-manifest",
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_derives_current_encrypted_storage_size() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    let observed_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_manifest_derived_size",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/derived-size/attachment-move-manifest",
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT storage_size::bigint FROM attachment_move_staging WHERE user_id = $1 AND operation_id = 'derived-size'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                128
+            );
+            assert_eq!(
+                observed_storage.upload_requests(),
+                vec![(
+                    response.body["attachments"][0]["storageKey"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                    "application/octet-stream".to_string(),
+                    Some(128),
+                    Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
+                )]
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_serializes_live_ownership_and_allows_expired_takeover() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_ownership",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/first-owner/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let busy = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/second-owner/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            busy.assert_contract_status();
+            assert_eq!(busy.status, StatusCode::CONFLICT, "{}", busy.body);
+            assert_eq!(busy.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, "second-owner").await,
+                0
+            );
+
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'first-owner'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let takeover = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/second-owner/attachment-move-manifest",
+                    Some(body),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(takeover.status, StatusCode::OK, "{}", takeover.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'first-owner' AND storage_key = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT operation_id FROM attachment_move_manifest WHERE user_id = $1")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                "second-owner"
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_resume_after_expired_cleanup_advances_physical_generation() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_generation_resume",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/generation-resume/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'generation-resume'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                cleanup_attachment_move_staging(
+                    &app.pool,
+                    &RecordingObjectStorage::failing()
+                )
+                .await
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = 'generation-resume'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::OK, "{}", resumed.body);
+            let resumed_key = resumed.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap();
+            assert_ne!(resumed_key, first_key);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE storage_key = $1")
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn delayed_old_generation_delete_cannot_remove_resumed_attachment_move_upload() {
+    let delete_started = Arc::new(tokio::sync::Notify::new());
+    let delete_release = Arc::new(tokio::sync::Notify::new());
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_delayed_delete(
+        128,
+        delete_started.clone(),
+        delete_release.clone(),
+    ));
+    let cleanup_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_delayed_old_delete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "delayed-generation-delete";
+            let path = format!(
+                "/api/v1/operations/{operation_id}/attachment-move-manifest"
+            );
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = $2")
+                .bind(&fixture.owner_user_id)
+                .bind(operation_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+
+            let cleanup_pool = app.pool.clone();
+            let cleanup = tokio::spawn(async move {
+                cleanup_attachment_move_staging(&cleanup_pool, cleanup_storage.as_ref()).await
+            });
+            delete_started.notified().await;
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::OK, "{}", resumed.body);
+            let resumed_key = resumed.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_ne!(resumed_key, first_key);
+
+            delete_release.notify_one();
+            assert_eq!(cleanup.await.unwrap().unwrap(), 1);
+            assert_eq!(
+                query_scalar::<_, String>("SELECT storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                resumed_key
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                2
+            );
+
+            let finalized = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(finalized.status, StatusCode::OK, "{}", finalized.body);
+            assert_applied(&finalized.body, "move_item", &fixture.movable_item_id, 2);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_generation_advance_failure_preserves_old_cleanup_and_generation() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_generation_advance_boundary",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/generation-boundary/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'generation-boundary'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            cleanup_attachment_move_staging(&app.pool, &RecordingObjectStorage::failing())
+                .await
+                .unwrap();
+            install_attachment_move_failure_trigger(
+                &app.pool,
+                "attachment_move_staging_generation",
+                "UPDATE",
+                "",
+            )
+            .await;
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = 'generation-boundary'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE operation_id = 'generation-boundary'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE operation_id = 'generation-boundary'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_does_not_reuse_staging_during_active_cleanup_claim() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_active_cleanup_claim",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/claimed-cleanup/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let storage_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap();
+            query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key, claim_token, claimed_at) VALUES ($1, 'claimed-cleanup', $2, 'active-claim', NOW())")
+                .bind(&fixture.owner_user_id)
+                .bind(storage_key)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn deleting_user_durably_queues_attachment_move_staging_cleanup() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_user_delete_cleanup",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            seed_vault_key(
+                &app.pool,
+                "vault_key_target_deleted_admin",
+                &fixture.target_vault_id,
+                &fixture.admin_user_id,
+                "target-admin-key",
+                "admin",
+            )
+            .await;
+            let session = app.issue_session(&fixture.admin_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/user-delete-cleanup/attachment-move-manifest",
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            let storage_key = response.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            query("DELETE FROM \"user\" WHERE id = $1")
+                .bind(&fixture.admin_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE operation_id = 'user-delete-cleanup'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE operation_id = 'user-delete-cleanup'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'user-delete-cleanup' AND storage_key = $2")
+                    .bind(&fixture.admin_user_id)
+                    .bind(storage_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_ownership_is_global_across_authorized_users() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_cross_user_ownership",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_vault_key(
+                &app.pool,
+                "vault_key_target_admin",
+                &fixture.target_vault_id,
+                &fixture.admin_user_id,
+                "target-admin-key",
+                "admin",
+            )
+            .await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let owner = app.issue_session(&fixture.owner_user_id).await;
+            let admin = app.issue_session(&fixture.admin_user_id).await;
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/owner-preparation/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&owner.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let busy = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/admin-preparation/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&admin.token),
+                )
+                .await;
+            busy.assert_contract_status();
+            assert_eq!(busy.status, StatusCode::CONFLICT, "{}", busy.body);
+            assert_eq!(busy.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.admin_user_id, "admin-preparation").await,
+                0
+            );
+
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'owner-preparation'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let takeover = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/admin-preparation/attachment-move-manifest",
+                    Some(body),
+                    authenticated_json_headers(&admin.token),
+                )
+                .await;
+            assert_eq!(takeover.status, StatusCode::OK, "{}", takeover.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'owner-preparation' AND storage_key = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT user_id FROM attachment_move_manifest WHERE operation_id = 'admin-preparation'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                fixture.admin_user_id
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_reports_pre_staging_stale_authority_without_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_stale_authority",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/pre-staging-stale/attachment-move-manifest",
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_AUTHORITY_STALE"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, "pre-staging-stale")
+                    .await,
+                0
+            );
+
+            let rejection_body = json!({
+                "mode": "reject_stale_authority",
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "expectedEnvelopeVersion": 1
+                }]
+            });
+            let rejected = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(rejection_body.clone()),
+                    idempotent_item_headers(&session.token, 1, "pre-staging-stale"),
+                )
+                .await;
+            rejected.assert_contract_status();
+            assert_eq!(rejected.status, StatusCode::OK, "{}", rejected.body);
+            assert_rejected(&rejected.body, "move_item", "attachment_state_conflict");
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(rejection_body),
+                    idempotent_item_headers(&session.token, 1, "pre-staging-stale"),
+                )
+                .await;
+            assert_eq!(replay.status, StatusCode::OK, "{}", replay.body);
+            assert_eq!(replay.body, rejected.body);
+            assert_eq!(
+                entity_event_count(&app.pool, "pre-staging-stale", "operation_resolved").await,
+                1
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &fixture.movable_item_id, "item_moved").await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_stale_rejection_probe_requires_preparation_when_authority_matches() {
+    with_api_test_app("attachment_move_false_stale_probe", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        seed_attachment(
+            &app.pool,
+            "move_attachment",
+            &fixture.movable_item_id,
+            &fixture.main_vault_id,
+            &fixture.owner_user_id,
+        )
+        .await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                Some(json!({
+                    "mode": "reject_stale_authority",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "attachments": [{
+                        "attachmentId": "move_attachment",
+                        "expectedEnvelopeVersion": 1
+                    }]
+                })),
+                idempotent_item_headers(&session.token, 1, "false-stale-probe"),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+        assert_eq!(
+            response.body["code"],
+            json!("ATTACHMENT_STAGING_INCOMPLETE")
+        );
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, "false-stale-probe").await,
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, String>("SELECT vault_id FROM item WHERE id = $1")
+                .bind(&fixture.movable_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            fixture.main_vault_id
+        );
+
+        let semantic_rejection = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                Some(json!({
+                    "mode": "reject_stale_authority",
+                    "sourceVaultId": fixture.target_vault_id,
+                    "targetVaultId": fixture.main_vault_id,
+                    "attachments": [{
+                        "attachmentId": "move_attachment",
+                        "expectedEnvelopeVersion": 1
+                    }]
+                })),
+                idempotent_item_headers(&session.token, 1, "stale-probe-source-mismatch"),
+            )
+            .await;
+        assert_eq!(
+            semantic_rejection.status,
+            StatusCode::OK,
+            "{}",
+            semantic_rejection.body
+        );
+        assert_rejected(
+            &semantic_rejection.body,
+            "move_item",
+            "source_vault_mismatch",
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_treats_attachment_order_as_non_semantic() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_order_independent",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            for attachment_id in ["move_attachment_a", "move_attachment_b"] {
+                seed_attachment(
+                    &app.pool,
+                    attachment_id,
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "order-independent-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [
+                            { "attachmentId": "move_attachment_a", "envelopeVersion": 1, "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                            { "attachmentId": "move_attachment_b", "envelopeVersion": 1, "ciphertextSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+                        ]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let final_attachment = |attachment_id: &str| json!({
+                "attachmentId": attachment_id,
+                "expectedEnvelopeVersion": 1,
+                "encryptedAttachmentKey": format!("target-key-{attachment_id}"),
+                "attachmentKeyIv": "target-key-iv",
+                "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                "encryptedName": "target-name",
+                "encryptedContentType": "target-content-type",
+                "encryptionIv": "target-blob-iv",
+                "encryptedContentTypeIv": "target-type-iv",
+                "encryptionAlgorithm": "AES-GCM-AAD-V1"
+            });
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [
+                            final_attachment("move_attachment_b"),
+                            final_attachment("move_attachment_a")
+                        ]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_applied(&response.body, "move_item", &fixture.movable_item_id, 2);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE item_id = $1 AND vault_id = $2")
+                    .bind(&fixture.movable_item_id)
+                    .bind(&fixture.target_vault_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                2
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_switches_all_authority_and_retains_one_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_atomic_finalization",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "atomic-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1,
+                            "encryptedAttachmentKey": "target-wrapped-key",
+                            "attachmentKeyIv": "target-key-iv",
+                            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                            "encryptedName": "target-name",
+                            "encryptedContentType": "target-content-type",
+                            "encryptionIv": "target-blob-iv",
+                            "encryptedContentTypeIv": "target-type-iv",
+                            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_applied(&response.body, "move_item", &fixture.movable_item_id, 2);
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(replay.status, StatusCode::OK, "{}", replay.body);
+            assert_eq!(replay.body, response.body);
+
+            let authority = query_as::<_, (String, String, i32, String)>(
+                "SELECT vault_id, storage_key, envelope_version, encrypted_attachment_key FROM item_attachment WHERE id = 'move_attachment'",
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                authority,
+                (fixture.target_vault_id, staged_key, 2, "target-wrapped-key".into())
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = 'attachments/move_attachment'")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_identical_attachment_move_finalizers_both_replay_retained_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_concurrent_finalization",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "concurrent-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let headers = idempotent_item_headers(&session.token, 1, operation_id);
+            let body = attachment_move_final_body(&fixture);
+            let preflight = install_attachment_move_preflight_hook(operation_id);
+            let loser = app.api_json(Method::POST, &path, Some(body.clone()), headers.clone());
+            let winner_then_release = async {
+                preflight.wait_until_entered().await;
+                let winner = app.api_json(Method::POST, &path, Some(body), headers).await;
+                preflight.release();
+                winner
+            };
+            let (first, second) = tokio::join!(loser, winner_then_release);
+
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(first.body, second.body);
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn empty_prepared_attachment_set_mismatches_nonempty_manifest_without_consuming_staging() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_empty_prepared_set_mismatch",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "empty-prepared-set-mismatch";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["attachments"] = json!([]);
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_MISMATCH"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_stale_source_attachment_update_without_aad_overwrite() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_serializes_update",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-before-stale-update";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let update_done = competing_done.clone();
+            let update_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::PATCH, "/api/v1/attachments/move_attachment", Some(json!({
+                    "encryptedName": "stale-source-name",
+                    "encryptionIv": "stale-source-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                })), authenticated_json_headers(&session.token)).await;
+                update_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, updated, ()) = tokio::join!(move_request, update_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(updated.status, StatusCode::CONFLICT, "{}", updated.body);
+            assert_eq!(query_as::<_, (String, String)>("SELECT vault_id, encrypted_name FROM item_attachment WHERE id = 'move_attachment'").fetch_one(&app.pool).await.unwrap(), (fixture.target_vault_id, "target-name".into()));
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn rename_committed_before_move_advances_attachment_authority_and_move_rejects() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_rename_before_move",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "rename-before-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let blocker = acquire_test_item_attachment_writer_lock(
+                &app.pool,
+                &fixture.movable_item_id,
+            )
+            .await;
+            let rename = app.api_json(
+                Method::PATCH,
+                "/api/v1/attachments/move_attachment",
+                Some(json!({
+                    "encryptedName": "newer-source-name",
+                    "encryptionIv": "newer-source-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                })),
+                authenticated_json_headers(&session.token),
+            );
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let finalize = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                app.api_json(
+                    Method::POST,
+                    &move_path,
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await
+            };
+            let release = async {
+                wait_for_advisory_waiters(&app.pool, 2).await;
+                blocker.commit().await.unwrap();
+            };
+            let (renamed, moved, ()) = tokio::join!(rename, finalize, release);
+
+            assert_eq!(renamed.status, StatusCode::OK, "{}", renamed.body);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_rejected(&moved.body, "move_item", "attachment_state_conflict");
+            assert_eq!(
+                query_as::<_, (String, i32, String, String)>(
+                    "SELECT vault_id, envelope_version, encrypted_name, encryption_iv FROM item_attachment WHERE id = 'move_attachment'",
+                )
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (
+                    fixture.main_vault_id.clone(),
+                    2,
+                    "newer-source-name".into(),
+                    "newer-source-iv".into(),
+                )
+            );
+            let projection = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/items/{}/attachments", fixture.movable_item_id),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(projection.status, StatusCode::OK, "{}", projection.body);
+            assert_eq!(projection.body["items"][0]["envelopeVersion"], json!(2));
+            assert_eq!(
+                projection.body["items"][0]["encryptedName"],
+                json!("newer-source-name")
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE event_type = 'item_updated'::sync_event_type AND entity_id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_stale_source_attachment_delete_without_row_loss() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_serializes_delete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-before-stale-delete";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let delete_done = competing_done.clone();
+            let delete_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::DELETE, "/api/v1/attachments/move_attachment", None, authenticated_json_headers(&session.token)).await;
+                delete_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, deleted, ()) = tokio::join!(move_request, delete_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(deleted.status, StatusCode::CONFLICT, "{}", deleted.body);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE id = 'move_attachment' AND vault_id = $1").bind(&fixture.target_vault_id).fetch_one(&app.pool).await.unwrap(), 1);
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_concurrent_attachment_create_without_source_phantom() {
+    let storage_size = i64::from(encrypted_attachment_storage_size(16));
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(
+        storage_size,
+    ));
+    with_api_test_app_state(
+        "attachment_move_serializes_create",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            query("UPDATE item_attachment SET storage_size = $1 WHERE id = 'move_attachment'")
+                .bind(storage_size)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let upload = app.api_json(Method::POST, &format!("/api/v1/items/{}/attachment-uploads", fixture.movable_item_id), Some(json!({"fileName":"new.enc","contentType":"application/octet-stream","fileSize":16})), authenticated_json_headers(&session.token)).await;
+            assert_eq!(upload.status, StatusCode::OK, "{}", upload.body);
+            let operation_id = "move-before-phantom-create";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let create_done = competing_done.clone();
+            let create_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.movable_item_id), Some(json!({
+                    "attachmentId": upload.body["attachmentId"], "storageKey": upload.body["key"],
+                    "encryptedAttachmentKey":"new-key", "attachmentKeyIv":"new-key-iv", "attachmentKeyAlgorithm":"AES-GCM-AAD-V1",
+                    "envelopeVersion":1, "encryptedName":"new-name", "encryptedContentType":"new-type",
+                    "encryptionIv":"new-iv", "encryptedContentTypeIv":"new-type-iv", "encryptionAlgorithm":"AES-GCM-AAD-V1", "fileSize":16
+                })), authenticated_json_headers(&session.token)).await;
+                create_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, created, ()) = tokio::join!(move_request, create_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(created.status, StatusCode::CONFLICT, "{}", created.body);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE item_id = $1 AND vault_id = $2").bind(&fixture.movable_item_id).bind(&fixture.main_vault_id).fetch_one(&app.pool).await.unwrap(), 0);
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_preserves_server_file_size_without_client_input() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_preserves_file_size",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-preserves-file-size";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["attachments"][0]
+                .as_object_mut()
+                .expect("Attachment Finalize body should be an object")
+                .remove("fileSize");
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(
+                query_scalar::<_, i32>(
+                    "SELECT file_size FROM item_attachment WHERE id = 'move_attachment'"
+                )
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                128
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_rejects_manifest_intent_mismatch_without_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_manifest_mismatch",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-manifest-mismatch";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["targetVaultId"] = json!(fixture.main_vault_id);
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_MISMATCH"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn incomplete_attachment_move_staging_is_non_terminal_and_retains_no_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(1));
+    with_api_test_app_state(
+        "attachment_move_staging_incomplete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "incomplete-attachment-move";
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1,
+                            "encryptedAttachmentKey": "target-wrapped-key",
+                            "attachmentKeyIv": "target-key-iv",
+                            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                            "encryptedName": "target-name",
+                            "encryptedContentType": "target-content-type",
+                            "encryptionIv": "target-blob-iv",
+                            "encryptedContentTypeIv": "target-type-iv",
+                            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(
+                response.body["code"],
+                json!("ATTACHMENT_STAGING_INCOMPLETE")
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT vault_id FROM item WHERE id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                fixture.main_vault_id
+            );
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let expired = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(expired.status, StatusCode::CONFLICT, "{}", expired.body);
+            assert_eq!(expired.body["code"], json!("ATTACHMENT_STAGING_INCOMPLETE"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+
+            let incomplete_operation = "incomplete-object-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{incomplete_operation}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let incomplete = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, incomplete_operation),
+                )
+                .await;
+            assert_eq!(
+                incomplete.status,
+                StatusCode::CONFLICT,
+                "{}",
+                incomplete.body
+            );
+            assert_eq!(
+                incomplete.body["code"],
+                json!("ATTACHMENT_STAGING_INCOMPLETE")
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, incomplete_operation)
+                    .await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_database_boundaries_leave_no_partial_authority() {
+    for (case, table, event, when_clause, during_manifest) in [
+        (
+            "generation_create",
+            "attachment_move_staging_generation",
+            "INSERT",
+            "",
+            true,
+        ),
+        ("manifest", "attachment_move_manifest", "INSERT", "", true),
+        ("staging", "attachment_move_staging", "INSERT", "", true),
+        ("item", "item", "UPDATE", "", false),
+        ("attachment", "item_attachment", "UPDATE", "", false),
+        ("cleanup", "attachment_move_cleanup", "INSERT", "", false),
+        (
+            "staging_consume",
+            "attachment_move_staging",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "manifest_close",
+            "attachment_move_manifest",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "generation_close",
+            "attachment_move_staging_generation",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "audit",
+            "audit_log",
+            "INSERT",
+            "WHEN (NEW.action = 'item_moved')",
+            false,
+        ),
+        (
+            "item_sync",
+            "sync_event",
+            "INSERT",
+            "WHEN (NEW.event_type = 'item_moved')",
+            false,
+        ),
+        (
+            "operation_sync",
+            "sync_event",
+            "INSERT",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+            false,
+        ),
+        ("outcome", "operation_outcome", "INSERT", "", false),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+        with_api_test_app_state(
+            &format!("attachment_move_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("boundary-{case}");
+                if during_manifest {
+                    install_attachment_move_failure_trigger(&app.pool, table, event, when_clause).await;
+                }
+                let manifest = app
+                    .api_json(
+                        Method::PUT,
+                        &format!(
+                            "/api/v1/operations/{operation_id}/attachment-move-manifest"
+                        ),
+                        Some(attachment_move_manifest_body(&fixture)),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                if during_manifest {
+                    assert_eq!(manifest.status, StatusCode::INTERNAL_SERVER_ERROR);
+                    assert_eq!(
+                        query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest")
+                            .fetch_one(&app.pool)
+                            .await
+                            .unwrap(),
+                        0
+                    );
+                    assert_eq!(
+                        query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging")
+                            .fetch_one(&app.pool)
+                            .await
+                            .unwrap(),
+                        0
+                    );
+                    return;
+                }
+                assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+                install_attachment_move_failure_trigger(&app.pool, table, event, when_clause).await;
+                let response = app
+                    .api_json(
+                        Method::POST,
+                        &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                        Some(attachment_move_final_body(&fixture)),
+                        idempotent_item_headers(&session.token, 1, &operation_id),
+                    )
+                    .await;
+                assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_as::<_, (String, i32)>(
+                        "SELECT vault_id, version FROM item WHERE id = $1"
+                    )
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    (fixture.main_vault_id.clone(), 1)
+                );
+                assert_eq!(
+                    query_as::<_, (String, String, i32)>(
+                        "SELECT vault_id, storage_key, envelope_version FROM item_attachment WHERE id = 'move_attachment'"
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    (
+                        fixture.main_vault_id,
+                        "attachments/move_attachment".into(),
+                        1
+                    )
+                );
+                assert_eq!(
+                    retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                    0
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_renewal_boundaries_are_atomic() {
+    for (case, table, event, seed_obsolete_cleanup) in [
+        ("lease", "attachment_move_manifest", "UPDATE", false),
+        (
+            "obsolete_cleanup",
+            "attachment_move_cleanup",
+            "DELETE",
+            true,
+        ),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        with_api_test_app_state(
+            &format!("attachment_move_renewal_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("renewal-boundary-{case}");
+                let path = format!(
+                    "/api/v1/operations/{operation_id}/attachment-move-manifest"
+                );
+                let body = attachment_move_manifest_body(&fixture);
+                let first = app
+                    .api_json(
+                        Method::PUT,
+                        &path,
+                        Some(body.clone()),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+                let original_expiry: OffsetDateTime = query_scalar(
+                    "SELECT expires_at FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2",
+                )
+                .bind(&fixture.owner_user_id)
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap();
+                if seed_obsolete_cleanup {
+                    query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .execute(&app.pool)
+                        .await
+                        .unwrap();
+                }
+                install_attachment_move_failure_trigger(&app.pool, table, event, "").await;
+                let renewal = app
+                    .api_json(
+                        Method::PUT,
+                        &path,
+                        Some(body),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(renewal.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_scalar::<_, OffsetDateTime>("SELECT expires_at FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    original_expiry
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    if seed_obsolete_cleanup { 1 } else { 0 }
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_final_lease_renewal_failure_retains_no_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_final_lease_boundary",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "final-lease-boundary";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            install_attachment_move_failure_trigger(
+                &app.pool,
+                "attachment_move_manifest",
+                "UPDATE",
+                "",
+            )
+            .await;
+            let final_response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(final_response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_as::<_, (String, i32)>("SELECT vault_id, version FROM item WHERE id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                (fixture.main_vault_id, 1)
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_expired_takeover_boundaries_are_atomic() {
+    for (case, table, event) in [
+        ("queue", "attachment_move_cleanup", "INSERT"),
+        ("release", "attachment_move_manifest", "DELETE"),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        with_api_test_app_state(
+            &format!("attachment_move_takeover_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let body = attachment_move_manifest_body(&fixture);
+                let first = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/expired-owner/attachment-move-manifest",
+                        Some(body.clone()),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+                query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'expired-owner'")
+                    .bind(&fixture.owner_user_id)
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+                install_attachment_move_failure_trigger(&app.pool, table, event, "").await;
+                let takeover = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/new-owner/attachment-move-manifest",
+                        Some(body),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(takeover.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = 'expired-owner'")
+                        .bind(&fixture.owner_user_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = 'new-owner'")
+                        .bind(&fixture.owner_user_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    0
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup")
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    0
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn stale_attachment_authority_is_terminal_and_queues_staging_cleanup() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_stale_authority",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "stale-attachment-authority";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "move_item", "attachment_state_conflict");
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = $3")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .bind(staged_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn reject_stale_authority_consumes_existing_staging_and_queues_its_key() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_reject_stale_cleans_existing_staging",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "reject-stale-cleans-preparation";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "reject_stale_authority",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "move_item", "attachment_state_conflict");
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = $3")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .bind(staged_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
 }
 
 async fn mark_item_deleted(pool: &PgPool, item_id: &str) {
@@ -1390,7 +3858,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(restored_deleted_at.is_none());
 
             let move_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "lifecycle-move-item"))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "lifecycle-move-item"))
                 .await;
             move_response.assert_contract_status();
             assert_applied(&move_response.body, "move_item", &fixture.movable_item_id, 2);
@@ -1813,7 +4281,7 @@ async fn move_item_requires_source_vault_write_access() {
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
 
             let response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&readonly_session.token, 1, "move-readonly-source"))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&readonly_session.token, 1, "move-readonly-source"))
                 .await;
 
             response.assert_contract_status();
@@ -2406,7 +4874,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let wrong_source_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "move-wrong-source"))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "move-wrong-source"))
                 .await;
             wrong_source_response.assert_contract_status();
             assert_rejected(
@@ -2505,6 +4973,7 @@ async fn item_operation_cases(
     }
     let move_body = |ciphertext: &str| {
         json!({
+            "mode": "prepared",
             "sourceVaultId": fixture.main_vault_id,
             "targetVaultId": fixture.target_vault_id,
             "encryptedData": ciphertext,
@@ -3031,6 +5500,7 @@ async fn item_operations_prove_their_closed_rejection_sets() {
                 Method::POST,
                 format!("/api/v1/items/{missing}/moves"),
                 Some(json!({
+                    "mode": "prepared",
                     "sourceVaultId": fixture.main_vault_id,
                     "targetVaultId": fixture.target_vault_id,
                     "encryptedData": "enc",
@@ -3130,6 +5600,7 @@ async fn item_operations_prove_their_closed_rejection_sets() {
                 Method::POST,
                 &format!("/api/v1/items/{}/moves", fixture.active_item_id),
                 Some(json!({
+                    "mode": "prepared",
                     "sourceVaultId": fixture.main_vault_id,
                     "targetVaultId": fixture.target_vault_id,
                     "encryptedData": "enc",
@@ -3147,6 +5618,7 @@ async fn item_operations_prove_their_closed_rejection_sets() {
                 Method::POST,
                 &format!("/api/v1/items/{}/moves", fixture.active_item_id),
                 Some(json!({
+                    "mode": "prepared",
                     "sourceVaultId": fixture.main_vault_id,
                     "targetVaultId": fixture.owner_personal_vault_id,
                     "encryptedData": "enc",
@@ -3169,6 +5641,7 @@ async fn item_operations_prove_their_closed_rejection_sets() {
                 Method::POST,
                 &format!("/api/v1/items/{}/moves", fixture.deleted_item_id),
                 Some(json!({
+                    "mode": "prepared",
                     "sourceVaultId": fixture.main_vault_id,
                     "targetVaultId": fixture.target_vault_id,
                     "encryptedData": "enc",
@@ -3199,6 +5672,7 @@ async fn item_operations_prove_their_closed_rejection_sets() {
                 Method::POST,
                 &format!("/api/v1/items/{}/moves", fixture.active_item_id),
                 Some(json!({
+                    "mode": "prepared",
                     "sourceVaultId": fixture.main_vault_id,
                     "targetVaultId": fixture.target_vault_id,
                     "encryptedData": oversized,
