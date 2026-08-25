@@ -24,6 +24,7 @@ use std::{
 use zeroize::Zeroizing;
 
 const USER: &str = "user-prep";
+const ORIGINAL_UPLOADER: &str = "user-original-uploader";
 const OP: &str = "operation-prep";
 const ITEM: &str = "item-prep";
 const ATT: &str = "attachment-prep";
@@ -502,6 +503,47 @@ async fn one_coherent_secret_bundle_owns_target_ciphertext_and_checkpointed_meta
 }
 
 #[tokio::test]
+async fn shared_attachment_move_retains_the_original_uploader_blob_scope() {
+    let f = Fixture::new_with_uploader(ORIGINAL_UPLOADER).await;
+
+    assert_eq!(
+        f.drive(0).await.unwrap(),
+        PreparationDriveResult::Progressed
+    );
+    let snapshot = f.snapshot();
+    let AttachmentMoveProgress::Encrypted {
+        artifact, payload, ..
+    } = &snapshot.attachment_move_preparations[0].progress[0]
+    else {
+        panic!("the original uploader scope must authenticate the source")
+    };
+    let target_key: [u8; 32] = BASE64
+        .decode(&payload.encrypted_attachment_key)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let bytes = f.artifacts.bytes.lock().unwrap()[&artifact.artifact_id].clone();
+    let envelope: EncryptedData = serde_json::from_slice(&bytes).unwrap();
+    let uploader_scope = AadContext {
+        vault_id: TARGET.into(),
+        entity_id: ATT.into(),
+        entity_type: "attachment_blob".into(),
+        version: 1,
+        user_id: ORIGINAL_UPLOADER.into(),
+    };
+    let mover_scope = AadContext {
+        user_id: USER.into(),
+        ..uploader_scope.clone()
+    };
+
+    assert_eq!(
+        decrypt_with_aad(&envelope, &target_key, &uploader_scope).unwrap(),
+        PLAINTEXT
+    );
+    assert!(decrypt_with_aad(&envelope, &target_key, &mover_scope).is_err());
+}
+
+#[tokio::test]
 async fn published_metadata_recovery_rejects_a_foreign_canonical_owner() {
     let f = Fixture::new().await;
     assert_eq!(
@@ -549,13 +591,17 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::new_with_uploader(USER).await
+    }
+
+    async fn new_with_uploader(uploaded_by: &str) -> Self {
         let account = AccountId::from("account-main");
         let persistence = Arc::new(InMemoryReplica::default());
-        seed(&persistence, account.clone(), OP);
+        seed_with_uploader(&persistence, account.clone(), OP, uploaded_by);
         let replica = Arc::new(Replica::new(persistence.clone()));
         replica.load(&account).await.unwrap();
         let artifacts = Arc::new(Artifacts::default());
-        let transfer = Arc::new(Transfer::new(envelope()));
+        let transfer = Arc::new(Transfer::new(envelope_for_uploader(PLAINTEXT, uploaded_by)));
         let secrets = Arc::new(Secrets::default());
         let worker = AttachmentMovePreparationWorker::new(
             replica.clone(),
@@ -600,11 +646,11 @@ impl Fixture {
     }
 }
 
-fn envelope() -> Vec<u8> {
-    envelope_for(PLAINTEXT)
+fn envelope_for(plaintext: &str) -> Vec<u8> {
+    envelope_for_uploader(plaintext, USER)
 }
 
-fn envelope_for(plaintext: &str) -> Vec<u8> {
+fn envelope_for_uploader(plaintext: &str, uploaded_by: &str) -> Vec<u8> {
     serde_json::to_vec(
         &encrypt_with_aad(
             plaintext,
@@ -614,14 +660,14 @@ fn envelope_for(plaintext: &str) -> Vec<u8> {
                 entity_id: ATT.into(),
                 entity_type: "attachment_blob".into(),
                 version: 1,
-                user_id: USER.into(),
+                user_id: uploaded_by.into(),
             },
         )
         .unwrap(),
     )
     .unwrap()
 }
-fn attachment() -> AuthorityAttachmentRecord {
+fn attachment_with_uploader(uploaded_by: &str) -> AuthorityAttachmentRecord {
     AuthorityAttachmentRecord {
         id: ATT.into(),
         item_id: ITEM.into(),
@@ -637,11 +683,20 @@ fn attachment() -> AuthorityAttachmentRecord {
         encrypted_content_type_iv: "type-iv".into(),
         envelope_version: 1,
         file_size: 73,
-        uploaded_by: USER.into(),
+        uploaded_by: uploaded_by.into(),
         created_at: "2026-08-25T00:00:00Z".into(),
     }
 }
 fn seed(inner: &InMemoryReplica, account: AccountId, operation: &str) {
+    seed_with_uploader(inner, account, operation, USER)
+}
+
+fn seed_with_uploader(
+    inner: &InMemoryReplica,
+    account: AccountId,
+    operation: &str,
+    uploaded_by: &str,
+) {
     inner
         .install(
             account.clone(),
@@ -649,7 +704,7 @@ fn seed(inner: &InMemoryReplica, account: AccountId, operation: &str) {
             crate::protocol::Incarnation::from(format!("incarnation-{}", account.as_str())),
         )
         .unwrap();
-    let source = attachment();
+    let source = attachment_with_uploader(uploaded_by);
     inner
         .seed_ready_authority(
             &account,

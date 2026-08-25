@@ -50,3 +50,15 @@ Independent review classified this as a product defect in the committed C2 depen
 fixture choice. It is split into this ticket so the C2 implementation remains independently reviewed
 and committed before C4a consumes the corrected invariant. No maintainer decision is open: current
 read behavior and Server finalization already make `uploaded_by` the durable AAD identity.
+
+### 2026-08-26 — shared-uploader blob scope delivered
+
+C2 now derives the source blob scope, target blob scope, and authenticated publication identity from
+the exact accepted source Attachment `uploaded_by`. A behavioral shared-Vault vector uses a different
+mover, authenticates the source, opens the target only under the retained uploader, and rejects the
+mover scope. Independent review confirmed the old mover-bound scope was a product defect rather than
+a fixture mismatch and found no retry, persistence, scope, ordering, or format regression.
+
+Deliberately left open: C4a still owns target encrypted-metadata AAD and the Server-incremented target
+envelope version. Browser composition and host reachability remain C4b. This ticket remains claimed
+until its required clean-tree CI and Rust gates run after the paused, path-disjoint C4a work closes.

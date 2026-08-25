@@ -297,10 +297,7 @@ impl AttachmentMovePreparationWorker {
                 .source_attachments
                 .get(index)
                 .ok_or_else(|| invariant("Attachment Move source authority is incomplete"))?;
-            return match self
-                .prepare_artifact(&snapshot, &preparation, source, pending)
-                .await
-            {
+            return match self.prepare_artifact(&preparation, source, pending).await {
                 Ok(next) => {
                     self.commit(
                         &snapshot,
@@ -421,7 +418,6 @@ impl AttachmentMovePreparationWorker {
 
     async fn prepare_artifact(
         &self,
-        snapshot: &ReplicaSnapshot,
         preparation: &AttachmentMovePreparationRecord,
         source: &AuthorityAttachmentRecord,
         pending: &AttachmentMoveProgress,
@@ -442,7 +438,7 @@ impl AttachmentMovePreparationWorker {
             .map_err(PreparationFailure::Local)?
         {
             ProvisionalAttachmentArtifactStoreResponse::Begun(writer) => {
-                self.transcrypt_into_writer(snapshot, preparation, source, writer)
+                self.transcrypt_into_writer(preparation, source, writer)
                     .await?
             }
             ProvisionalAttachmentArtifactStoreResponse::RecoveryAvailable(recovery) => {
@@ -484,7 +480,6 @@ impl AttachmentMovePreparationWorker {
 
     async fn transcrypt_into_writer(
         &self,
-        snapshot: &ReplicaSnapshot,
         preparation: &AttachmentMovePreparationRecord,
         source: &AuthorityAttachmentRecord,
         writer: ProvisionalAttachmentArtifactWriter,
@@ -520,7 +515,7 @@ impl AttachmentMovePreparationWorker {
         } = secrets;
         let identity = AttachmentPublicationIdentity::new(
             preparation.account_id.as_str().to_owned(),
-            snapshot.user_id.clone(),
+            source.uploaded_by.clone(),
             preparation.operation_id.clone(),
             source.id.clone(),
         )
@@ -531,13 +526,13 @@ impl AttachmentMovePreparationWorker {
             AttachmentBlobScope::new(
                 preparation.source_vault_id.clone(),
                 source.id.clone(),
-                snapshot.user_id.clone(),
+                source.uploaded_by.clone(),
             ),
             *target_key,
             AttachmentBlobScope::new(
                 preparation.target_vault_id.clone(),
                 source.id.clone(),
-                snapshot.user_id.clone(),
+                source.uploaded_by.clone(),
             ),
             identity,
         )
