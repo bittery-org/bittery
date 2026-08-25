@@ -819,3 +819,34 @@ the production WASM graph is compiled and the fixed JavaScript boundary runs in 
 Deliberately left open: C3b does not schedule accepted preparation, construct production C2 ports,
 sweep under startup authority, or expose a host workflow API. C4 alone owns that composition and the
 end-to-end retry/restart reachability proof.
+
+### 2026-08-25 — C4 split at the core scheduler and browser ownership boundary
+
+Pre-implementation scoping found that C2 intentionally keeps its preparation driver and port types
+inside Client Core, while C3 intentionally keeps its binary-transfer primitives inside the Web
+bindings crate. Neither slice exposes a production composition surface. The browser artifact sweep
+also assumes a caller-proved exclusive startup boundary, which an in-process Rust mutex or one
+module-scoped Worker cannot prove across tabs and MV3 worker restarts. Treating those independent
+facts as one fixture would let a fake core port stand in for browser reachability, or let a browser
+lock test stand in for restart-safe scheduling.
+
+C4 is therefore split before implementation into two sequential, path-disjoint commits:
+
+1. **Core preparation scheduler and composition facade (C4a):** new Client Core scheduler paths and
+   their Runtime lifecycle hooks consume C2 through crate-internal types without editing the C2
+   implementation. A narrow adapter-neutral facade accepts explicit Account-scoped artifact,
+   manifest/binary-transfer, and secret authority. Deterministic tests prove restart and unlock
+   resumption, persisted unbounded backoff beyond five transient failures, renewed credentials,
+   promotion before ordinary dispatch eligibility, and one scheduler writer per Account. No Web,
+   IndexedDB, OPFS, binding, or worker-composition file belongs to this slice.
+2. **Web binding and exclusive Worker composition (C4b):** new binding bridge paths consume C4a and
+   the already-committed B2/B4/C3 primitives, while Web Worker composition constructs the fixed
+   Replica, artifact, HTTP-control, and binary-transfer executors. A browser-wide Account Web Lock
+   grants startup/sweep and writer authority across tabs and MV3 restarts; actual browser fixtures
+   prove orphan sweep ordering, restart/unlock reachability, one reachable writer, and production
+   executor use. This slice does not edit C2, C3, artifact-store, or core scheduler implementations.
+
+C4a may add a new facade and lifecycle hooks in `runtime.rs`; it must not widen C2's existing types
+or make its worker a host-callable policy surface. C4b may construct those ports only through the
+facade. The previously recorded C4 omissions remain unchanged: Server Share, ordinary cross-kind
+dispatch/outcome widening, the general Attachment service, and final Web host cutover follow later.
