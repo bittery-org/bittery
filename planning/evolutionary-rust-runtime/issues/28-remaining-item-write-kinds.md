@@ -600,3 +600,37 @@ for deterministic drift.
 Deliberately left open: C1 owns no Replica checkpoint, remote manifest, blob transport, artifact-store,
 retry, scheduling, Account selection, or host composition behavior. Those remain sequenced in C2, C3,
 and C4.
+
+### 2026-08-25 — target artifacts use an authenticated provisional writer
+
+The maintainer selected an Account-, Operation-, and Attachment-bound provisional artifact writer.
+C1 emits target-envelope chunks during the authenticated second source download, but the canonical
+artifact identity binds a digest and byte length that cannot be known before those chunks exist.
+Requiring the final identity before the first write would otherwise force either a third complete
+source download or unbounded in-memory buffering.
+
+The provisional writer persists only bounded ciphertext chunks under an opaque writer generation.
+It carries no plaintext, final Replica reference, or publication authority. A new generation prevents
+a delayed writer from changing a later attempt; a crash before finalization can therefore leave only
+an unreferenced generation eligible for the existing exclusive-startup sweep. After C1 has consumed
+the complete second pass and authenticated the source tag, Runtime supplies the opaque publication
+proof, final ciphertext digest, and byte length. The store verifies the complete generation and makes
+the canonical `AttachmentMoveArtifactRef` readable in one final durable publication transition before
+Replica may checkpoint that reference.
+
+This newly discovered durability seam changes the remaining preparation order. It is split before
+implementation so native and browser persistence do not stand in for each other:
+
+1. **Provisional writer protocol and native SQLite adapter (B3):** add the Rust-owned bounded draft
+   protocol, opaque generation fencing, authenticated final binding, restart behavior, and native
+   SQLite fault boundaries without editing Replica, browser, transport, or host-composition paths.
+2. **Web and MV3 provisional writer adapter (B4):** extend the generated closed control contract and
+   IndexedDB binary adapter with the same generation, verification, publication, restart, and orphan
+   semantics without editing the native implementation.
+3. **Deep preparation workflow (C2):** consume B3/B4 and C1 through in-memory ports and retain the
+   previously recorded workflow scope. C3 transfer mechanics and C4 production scheduling/composition
+   remain unchanged and follow C2.
+
+Deliberately rejected: buffering an unbounded target envelope in memory, and a third source download
+with a reusable internal target nonce. Neither is needed once provisional ciphertext has a durable but
+unpublished home.
