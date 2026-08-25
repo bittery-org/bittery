@@ -65,3 +65,15 @@ A behavioral test captures the actual `client.items.move` input and asserts the 
 Independent review found no product or fixture defect and confirmed this changes no retry, discard,
 logging, Account scope, or writer behavior. Deliberately left open: Ticket 28 will delete this
 transitional queue at Web cutover; Slice B still owns only the stale generated Server lockfile.
+
+### 2026-08-26 — Slice B delivered the Server lockfile closure
+
+The Server lockfile now records the direct `aes` and `ghash` dependencies already declared by
+crypto-core and the `zeroize` feature edges already selected for `aes`, `ghash`, and `polyval`.
+An isolated committed snapshot fails `cargo check --locked`; minimal offline Cargo reconciliation is
+byte-for-byte identical to the five-line checked-in delta. The worktree Server check passes under
+`--locked` without changing the lockfile hash.
+
+Independent review found no product or fixture defect and confirmed no package, version, checksum,
+or manifest changed. Deliberately left open: this ticket and Ticket 43 remain claimed until both full
+repository gates pass from the now-clean tree.
