@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 24
+Blocked by: 24, 44
 Spec: ../spec.md#replica-contract
 
 ## Outcome
@@ -62,3 +62,11 @@ a fixture mismatch and found no retry, persistence, scope, ordering, or format r
 Deliberately left open: C4a still owns target encrypted-metadata AAD and the Server-incremented target
 envelope version. Browser composition and host reachability remain C4b. This ticket remains claimed
 until its required clean-tree CI and Rust gates run after the paused, path-disjoint C4a work closes.
+
+### 2026-08-26 — clean-tree gate filed Ticket 44
+
+The first clean-tree `pnpm check:ci` run reached committed integration drift before Ticket 43's own
+paths: the transitional Sync Move caller omits the required prepared-mode discriminator, and checking
+the Server updates its stale lockfile for already-committed crypto-core dependencies. Ticket 44 owns
+those two independently reviewed gate repairs. Ticket 43 remains claimed and blocked until both CI
+commands pass from a clean tree.

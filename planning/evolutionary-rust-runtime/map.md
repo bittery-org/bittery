@@ -112,7 +112,8 @@ or rollout order.
   The remaining Item write kinds follow in
   [ticket 28](issues/28-remaining-item-write-kinds.md), which ends the Web cutover. Its C4 review
   split the committed shared-Attachment uploader-AAD correction into
-  [ticket 43](issues/43-attachment-move-uploader-aad.md).
+  [ticket 43](issues/43-attachment-move-uploader-aad.md); its first clean-tree gate recorded earlier
+  integration drift in [ticket 44](issues/44-ticket-43-ci-gate-drift.md).
 - The eleven remaining response-cache call sites are inventoried in
   [ticket 24](issues/24-remaining-server-operation-outcomes.md), now resolved and narrowed to the six
   Item routes, and [ticket 29](issues/29-rotation-operation-outcomes.md) for the five Rotation
