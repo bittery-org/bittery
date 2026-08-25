@@ -302,3 +302,18 @@ commits its rejection audit, retained outcome, and `operation_resolved` event at
 `item_moved` entity event because no entity moved. The applied `prepared` path continues to commit
 both `item_moved` and `operation_resolved` with its effect and outcome. A rejection probe against
 still-matching authority returns `ATTACHMENT_STAGING_INCOMPLETE` with no outcome.
+
+### 2026-08-25 — staging object deletion is generation-fenced
+
+The stable staging identity is logical: `(User, Operation, Attachment)` never changes. Its physical
+object key is stable throughout one live manifest generation, so ordinary credential renewal and
+retry continue to address the same object. After lease expiry or an indeterminate cleanup boundary,
+the Server atomically advances a durable generation and any resumed upload uses a new physical key.
+
+Cleanup rows always name one immutable old-generation key. A delayed Object-store delete from a
+crashed or superseded cleanup worker can therefore delete only that old generation; it can never
+delete ciphertext uploaded after resume. A database claim token by itself is not sufficient fencing,
+because it cannot recall an external delete already sent before the claim expired. Generation state
+survives manifest cleanup until the Operation resolves or the User is deleted. This clarification
+supersedes interpreting "stable staging location" as one physical key for the entire lifetime of an
+accepted Operation.
