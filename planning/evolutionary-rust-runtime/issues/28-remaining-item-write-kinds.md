@@ -758,3 +758,32 @@ Deliberately rejected: weakening the signed upload contract merely to accommodat
 Server proxy or multipart assembly protocol. The deployment-provider enforcement exercise remains a
 recorded release gate; repository and Chromium fixtures prove request construction, not provider
 acceptance or rejection.
+
+### 2026-08-25 — C3a delivered the known-length OPFS upload spool
+
+The browser-internal spool now copies bounded published-ciphertext chunks into an opaque,
+Account/Operation/Attachment/artifact/generation-scoped OPFS file and exposes that `File` only inside
+an awaited lifecycle callback. One Account-wide Web Lock spans stale-file truncation, bounded writes,
+exact-length sealing, the complete future upload callback, and final cleanup. Explicit cleanup and
+exclusive Account orphan sweeping use the same lock, so another handle, generation, delayed cleanup,
+or sweep cannot rewrite or remove the backing entry while Fetch consumes it. Interrupted or stale
+files are rebuilt with `keepExistingData: false`; no plaintext, credential, capability, or Base64 is
+stored.
+
+Actual bundled Chromium running an MV3 service worker proves OPFS and Web Locks are available in that
+host, the user agent sends the exact `Content-Length` for the OPFS `File`, and the explicit media type
+and SHA-256 header survive without script setting the forbidden length header. The controlled endpoint
+also holds its response while a second context requests cleanup and proves cleanup remains blocked
+until the upload callback completes.
+
+Independent review found a real product defect: the first API returned a `File` after releasing all
+coordination, so another same-generation writer or cleanup could make it unreadable during upload.
+The lifecycle callback and shared Account lock close that race. Review also found fixture defects: the
+opacity assertion serialized `Map` as `{}`, the Chromium harness buffered the whole file to compute a
+digest that Rust already owns, and the restart test never recreated its root or retained stale bytes.
+Tests now inspect physical keys, pass a known digest without reading the File, and rebuild a faithful
+stale partial file through a new root.
+
+Deliberately left open: C3a performs no Fetch classification, download streaming, Rust control, or
+Runtime composition. C3b consumes this callback to deliver the paused generated Web/MV3 transfer
+adapter; C4 remains the sole production-composition owner.
