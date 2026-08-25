@@ -1,0 +1,270 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TransferHeaderControl {
+    #[cfg_attr(
+        feature = "transfer-control-contract-schema",
+        schemars(length(min = 1, max = 256))
+    )]
+    pub(crate) name: String,
+    #[cfg_attr(
+        feature = "transfer-control-contract-schema",
+        schemars(length(max = 4096))
+    )]
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum TransferControlRequest {
+    OpenDownload {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 8192))
+        )]
+        url: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(max = 64))
+        )]
+        headers: Vec<TransferHeaderControl>,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+        )]
+        max_response_bytes: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 1, max = 262_144_u32))
+        )]
+        max_chunk_bytes: u32,
+    },
+    ReadDownloadChunk {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+    },
+    BeginUpload {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 256))
+        )]
+        account_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 256))
+        )]
+        operation_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 256))
+        )]
+        attachment_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 256))
+        )]
+        artifact_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 256))
+        )]
+        generation: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 8192))
+        )]
+        url: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(max = 64))
+        )]
+        headers: Vec<TransferHeaderControl>,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^[0-9a-f]{64}$"))
+        )]
+        ciphertext_sha256: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+        )]
+        byte_length: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 1, max = 262_144_u32))
+        )]
+        max_chunk_bytes: u32,
+    },
+    WriteUploadChunk {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 1, max = 262_144_u32))
+        )]
+        byte_length: u32,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^[0-9a-f]{64}$"))
+        )]
+        chunk_sha256: String,
+    },
+    FinishUpload {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+    },
+    CancelTransfer {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(length(min = 1, max = 128))
+        )]
+        transfer_id: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum TransferControlResponse {
+    DownloadOpened,
+    DownloadChunk {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 1, max = 262_144_u32))
+        )]
+        byte_length: u32,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^[0-9a-f]{64}$"))
+        )]
+        chunk_sha256: String,
+    },
+    DownloadFinished,
+    UploadBegun,
+    UploadChunkAccepted,
+    UploadFinished,
+    Cancelled,
+    NetworkFailure,
+    ResponseTooLarge,
+    HttpFailure {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 0, max = 599_u16))
+        )]
+        status: u16,
+    },
+}
+
+#[cfg(feature = "transfer-control-contract-schema")]
+#[derive(schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct TransferControlContract {
+    request: TransferControlRequest,
+    response: TransferControlResponse,
+}
+
+#[cfg(feature = "transfer-control-contract-schema")]
+pub fn transfer_control_contract_schema() -> schemars::Schema {
+    schemars::schema_for!(TransferControlContract)
+}
+
+#[cfg(feature = "transfer-control-contract-schema")]
+pub fn transfer_control_contract_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "steps": [
+            {
+                "request": {
+                    "type": "openDownload",
+                    "transferId": "download-1",
+                    "url": "https://objects.example/source?opaque=credential",
+                    "headers": [{ "name": "x-signed", "value": "signed" }],
+                    "maxResponseBytes": "524288",
+                    "maxChunkBytes": 262144
+                },
+                "response": { "type": "downloadOpened" }
+            },
+            {
+                "request": { "type": "readDownloadChunk", "transferId": "download-1" },
+                "response": {
+                    "type": "downloadChunk",
+                    "byteLength": 3,
+                    "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+                }
+            },
+            {
+                "request": {
+                    "type": "beginUpload",
+                    "transferId": "upload-1",
+                    "accountId": "account-1",
+                    "operationId": "operation-1",
+                    "attachmentId": "attachment-1",
+                    "artifactId": "artifact-1",
+                    "generation": "generation-1",
+                    "url": "https://objects.example/target?opaque=credential",
+                    "headers": [
+                        { "name": "content-type", "value": "application/octet-stream" },
+                        { "name": "x-amz-content-sha256", "value": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81" }
+                    ],
+                    "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+                    "byteLength": "3",
+                    "maxChunkBytes": 262144
+                },
+                "response": { "type": "uploadBegun" }
+            },
+            {
+                "request": {
+                    "type": "writeUploadChunk",
+                    "transferId": "upload-1",
+                    "byteLength": 3,
+                    "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+                },
+                "response": { "type": "uploadChunkAccepted" }
+            },
+            {
+                "request": { "type": "finishUpload", "transferId": "upload-1" },
+                "response": { "type": "uploadFinished" }
+            }
+        ]
+    })
+}

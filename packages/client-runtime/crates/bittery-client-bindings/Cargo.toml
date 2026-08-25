@@ -8,6 +8,7 @@ description = "Shallow native and Web bindings for the Bittery Client Runtime"
 [features]
 default = []
 artifact-control-contract-schema = ["dep:schemars"]
+transfer-control-contract-schema = ["dep:schemars"]
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]
@@ -35,3 +36,8 @@ zeroize.workspace = true
 name = "generate-artifact-control-contract-schema"
 path = "src/bin/generate_artifact_control_contract_schema.rs"
 required-features = ["artifact-control-contract-schema"]
+
+[[bin]]
+name = "generate-transfer-control-contract-schema"
+path = "src/bin/generate_transfer_control_contract_schema.rs"
+required-features = ["transfer-control-contract-schema"]

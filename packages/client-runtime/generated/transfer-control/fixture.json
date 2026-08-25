@@ -1,0 +1,81 @@
+{
+  "steps": [
+    {
+      "request": {
+        "headers": [
+          {
+            "name": "x-signed",
+            "value": "signed"
+          }
+        ],
+        "maxChunkBytes": 262144,
+        "maxResponseBytes": "524288",
+        "transferId": "download-1",
+        "type": "openDownload",
+        "url": "https://objects.example/source?opaque=credential"
+      },
+      "response": {
+        "type": "downloadOpened"
+      }
+    },
+    {
+      "request": {
+        "transferId": "download-1",
+        "type": "readDownloadChunk"
+      },
+      "response": {
+        "byteLength": 3,
+        "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "type": "downloadChunk"
+      }
+    },
+    {
+      "request": {
+        "accountId": "account-1",
+        "artifactId": "artifact-1",
+        "attachmentId": "attachment-1",
+        "byteLength": "3",
+        "ciphertextSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "generation": "generation-1",
+        "headers": [
+          {
+            "name": "content-type",
+            "value": "application/octet-stream"
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "value": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+          }
+        ],
+        "maxChunkBytes": 262144,
+        "operationId": "operation-1",
+        "transferId": "upload-1",
+        "type": "beginUpload",
+        "url": "https://objects.example/target?opaque=credential"
+      },
+      "response": {
+        "type": "uploadBegun"
+      }
+    },
+    {
+      "request": {
+        "byteLength": 3,
+        "chunkSha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "transferId": "upload-1",
+        "type": "writeUploadChunk"
+      },
+      "response": {
+        "type": "uploadChunkAccepted"
+      }
+    },
+    {
+      "request": {
+        "transferId": "upload-1",
+        "type": "finishUpload"
+      },
+      "response": {
+        "type": "uploadFinished"
+      }
+    }
+  ]
+}

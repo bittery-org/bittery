@@ -787,3 +787,35 @@ stale partial file through a new root.
 Deliberately left open: C3a performs no Fetch classification, download streaming, Rust control, or
 Runtime composition. C3b consumes this callback to deliver the paused generated Web/MV3 transfer
 adapter; C4 remains the sole production-composition owner.
+
+### 2026-08-25 — C3b delivered the Web and MV3 binary transfer adapter
+
+Rust now owns a generated closed transfer-control contract, bounded chunk and whole-upload integrity
+policy, response classification, and crate-internal WASM handles. The fixed browser executor streams
+download bytes only through bounded binary side channels and copies canonical upload chunks into C3a;
+the resulting OPFS `File` is PUT while the Account lifecycle lock remains held. Script sets only
+`application/octet-stream` and the exact ciphertext SHA-256, never `Content-Length`. URLs and signed
+headers remain invocation-scoped and are neither persisted nor logged. Actual MV3 Chromium execution
+through the fixed exported executor and Rust-produced fixture controls proves cancellation, Account
+lock behavior, UA-owned length, and the observed request headers. Provider enforcement remains the
+separate recorded release gate.
+
+Independent review found real lifecycle defects. Rust handles initially had no abandonment cleanup,
+so C2 dropping a download after crypto failure or an upload after artifact-read failure could retain a
+browser session, presigned request, and OPFS lock. Handles now own a generated `cancelTransfer` guard,
+arm it before JavaScript open invocation begins, disarm only after a proved closed result, and emit one
+cancel on pending-open or handle drop. Review then found two same-ID races: old async read/finish work
+could delete a replacement session, and an Open future could be cancelled before its returned handle
+existed. Every async continuation is now fenced by captured session identity, and the pre-invocation
+guard closes the second gap. Held Fetch/read/PUT fixtures prove immediate same-ID reuse cannot be
+deleted, aborted, or fed bytes by stale work.
+
+Review also found a fixture defect: the first Chromium harness instantiated the configurable internal
+executor and handwrote controls, bypassing the fixed production TypeScript surface. It now imports the
+fixed executor and drives Rust-generated fixture controls. The crate-private Rust adapter remains
+unexported until C4 composition; native guard tests execute exact generated cancel serialization while
+the production WASM graph is compiled and the fixed JavaScript boundary runs in Chromium.
+
+Deliberately left open: C3b does not schedule accepted preparation, construct production C2 ports,
+sweep under startup authority, or expose a host workflow API. C4 alone owns that composition and the
+end-to-end retry/restart reachability proof.

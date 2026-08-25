@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "TransferControlRequest": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "headers": {
+              "items": {
+                "$ref": "#/$defs/TransferHeaderControl"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "maxChunkBytes": {
+              "format": "uint32",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxResponseBytes": {
+              "pattern": "^(0|[1-9][0-9]{0,19})$",
+              "type": "string"
+            },
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "openDownload",
+              "type": "string"
+            },
+            "url": {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId",
+            "url",
+            "headers",
+            "maxResponseBytes",
+            "maxChunkBytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "readDownloadChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "artifactId": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "attachmentId": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "byteLength": {
+              "pattern": "^(0|[1-9][0-9]{0,19})$",
+              "type": "string"
+            },
+            "ciphertextSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "generation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "headers": {
+              "items": {
+                "$ref": "#/$defs/TransferHeaderControl"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "maxChunkBytes": {
+              "format": "uint32",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "operationId": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "beginUpload",
+              "type": "string"
+            },
+            "url": {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId",
+            "accountId",
+            "operationId",
+            "attachmentId",
+            "artifactId",
+            "generation",
+            "url",
+            "headers",
+            "ciphertextSha256",
+            "byteLength",
+            "maxChunkBytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "byteLength": {
+              "format": "uint32",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "chunkSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "writeUploadChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId",
+            "byteLength",
+            "chunkSha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "finishUpload",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "transferId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "cancelTransfer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transferId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TransferControlResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "downloadOpened",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "byteLength": {
+              "format": "uint32",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "chunkSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "type": {
+              "const": "downloadChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "byteLength",
+            "chunkSha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "downloadFinished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "uploadBegun",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "uploadChunkAccepted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "uploadFinished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "networkFailure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "responseTooLarge",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "maximum": 599,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "httpFailure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TransferHeaderControl": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 4096,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/TransferControlRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/TransferControlResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "title": "TransferControlContract",
+  "type": "object",
+  "$id": "urn:bittery:client-runtime:transfer-control"
+}

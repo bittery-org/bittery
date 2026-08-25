@@ -1132,11 +1132,31 @@ pub use web::WebClientRuntime;
 mod web_attachment_artifact_control;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_attachment_artifact_policy;
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested adapter.
+mod web_binary_transfer;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_binary_transfer_abandonment;
+#[cfg(any(
+    target_arch = "wasm32",
+    feature = "transfer-control-contract-schema",
+    test
+))]
+#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested contract.
+mod web_binary_transfer_control;
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested policy.
+mod web_binary_transfer_policy;
 
 #[cfg(feature = "artifact-control-contract-schema")]
 #[doc(hidden)]
 pub use web_attachment_artifact_control::{
     artifact_control_contract_fixture, artifact_control_contract_schema,
+};
+#[cfg(feature = "transfer-control-contract-schema")]
+#[doc(hidden)]
+pub use web_binary_transfer_control::{
+    transfer_control_contract_fixture, transfer_control_contract_schema,
 };
 #[cfg(target_arch = "wasm32")]
 mod web_attachment_artifact_store;
