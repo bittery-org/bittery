@@ -724,3 +724,37 @@ renewal, exact uploaded digest and length, Account isolation, and one live write
 Deliberately left open: C2 provides only in-memory transfer and secret ports. C3 owns the generated
 Web/MV3 bounded binary transport adapter and its cancellation/header/CORS behavior; C4 alone owns
 production scheduling, Worker composition, exclusive startup sweep, and reachability.
+
+### 2026-08-25 — browser uploads use a temporary OPFS ciphertext spool
+
+Real Chromium invalidated C3's original direct-streaming PUT assumption. The Fetch Standard makes
+`Content-Length` a forbidden request header, and Chromium removes a script-supplied value from a
+`ReadableStream` request even though Bun retains it. The original Bun header-preservation test was
+therefore a fixture false-green: Web and MV3 could not satisfy the recorded hash-bound upload contract
+with exact `Content-Length` through that request shape.
+
+The maintainer selected a deterministic temporary OPFS ciphertext spool. IndexedDB remains the
+canonical Web/MV3 artifact store; this does not reopen the SQLite-everywhere decision. The adapter
+copies only bounded, already-published ciphertext chunks into an Operation/Attachment/artifact-scoped
+OPFS file, validates its exact expected size while Rust retains digest policy, and uploads the resulting
+browser-known-size `File`. The user agent, rather than script, emits `Content-Length`; the signed
+`application/octet-stream` and `x-amz-content-sha256` headers remain explicit. Partial or completed
+spools carry no plaintext, capability, or credential and are restartable, generation-fenced, and
+idempotently removable after success or as exclusive-startup orphans.
+
+C3 is split before further implementation because OPFS durability and Fetch contract drift require
+independent browser evidence:
+
+1. **Known-length OPFS upload spool (C3a):** new browser-internal spool paths own bounded writes,
+   truncation/rebuild after interruption, exact length, immutable `File` handoff, cleanup, and actual
+   Chromium network evidence that the user agent sends the correct `Content-Length`. They do not edit
+   the generated Rust transfer contract or Runtime worker.
+2. **Web and MV3 binary transfer adapter (C3b):** the paused generated control/WASM/TypeScript adapter
+   consumes C3a, streams download chunks through the binary side channel, and performs the hash-bound
+   `File` PUT with cancellation, CORS/header, response-bound, and retry-classification coverage. It
+   does not edit the spool implementation or production composition.
+
+Deliberately rejected: weakening the signed upload contract merely to accommodate Fetch, and adding a
+Server proxy or multipart assembly protocol. The deployment-provider enforcement exercise remains a
+recorded release gate; repository and Chromium fixtures prove request construction, not provider
+acceptance or rejection.
