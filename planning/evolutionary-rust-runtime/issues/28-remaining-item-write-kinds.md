@@ -894,3 +894,13 @@ Deliberately left open: C4a constructs no Web binding, IndexedDB/OPFS executor, 
 lock, exclusive orphan sweep, or Worker lifecycle/error surface. C4b owns those production-reachability
 properties and must await this lifecycle `Result`; Server Share, ordinary cross-kind dispatch/outcome,
 the general Attachment service, and final Web host cutover remain later Ticket 28 slices.
+
+### 2026-08-26 — C4a and its review blockers passed the repository gates
+
+Ticket 43 resolved the committed C2 shared-uploader blob scope; Ticket 44 repaired the earlier
+prepared-Move caller and Server/Desktop lockfile drift that its first clean-tree gate exposed. From
+the resulting clean tree, both `pnpm check:ci` and `pnpm check:ci:rust` pass without changing a tracked
+file. C4a is therefore closed. Deliberately left open: C4b still owns browser-wide writer authority,
+exclusive orphan sweeping, fixed production adapter construction, Worker error observation, and
+actual browser reachability before Ticket 28 proceeds to its remaining Server/dispatch/outcome/
+Attachment-service/Web-cutover slices.

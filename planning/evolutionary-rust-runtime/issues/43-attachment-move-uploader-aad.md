@@ -1,7 +1,7 @@
 # Preserve Attachment uploader AAD through Move preparation
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 24, 44
 Spec: ../spec.md#replica-contract
 
@@ -70,3 +70,11 @@ paths: the transitional Sync Move caller omits the required prepared-mode discri
 the Server updates its stale lockfile for already-committed crypto-core dependencies. Ticket 44 owns
 those two independently reviewed gate repairs. Ticket 43 remains claimed and blocked until both CI
 commands pass from a clean tree.
+
+### 2026-08-26 — resolved after Ticket 44 and clean-tree gates
+
+Ticket 43 landed the C2 source/target blob uploader scope and authenticated publication identity in
+`4e185621`. Ticket 44 resolved every earlier integration drift exposed by its gates, after which both
+`pnpm check:ci` and `pnpm check:ci:rust` passed without dirtying the tree. Deliberately left open:
+C4a owns target metadata and envelope-version sealing; C4b owns browser composition and writer/sweep
+authority; the final Web cutover remains in Ticket 28.

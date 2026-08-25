@@ -1,7 +1,7 @@
 # Repair the clean-tree CI drift blocking Ticket 43
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 24
 Spec: ../spec.md#end-to-end
 
@@ -102,3 +102,12 @@ Independent review classified this as stale generated lockfile metadata, not a p
 and confirmed no package, version, source, checksum, manifest, or generated binding changed.
 Deliberately left open: the full clean-tree CI and Rust gates must now pass once more before Tickets 44
 and 43 resolve.
+
+### 2026-08-26 — resolved after clean-tree repository gates
+
+`pnpm check:ci` and `pnpm check:ci:rust` both pass from the same clean tree after Slices A, B, and C,
+and neither command changes a tracked file. Landed: the exact transitional prepared Move
+discriminator, the Server lockfile's five committed crypto dependency edges, and the identical
+Desktop lockfile closure. Deliberately left open: Ticket 28 still deletes the transitional Sync queue
+at Web cutover; no dependency version, manifest, staged Attachment behavior, or product protocol was
+changed here.
