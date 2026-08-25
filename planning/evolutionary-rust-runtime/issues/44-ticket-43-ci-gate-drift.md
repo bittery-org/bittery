@@ -90,3 +90,15 @@ failure in an isolated snapshot, prove minimal offline reconciliation is byte-id
 delta, and pass the worktree Desktop locked check without further changes. No manifest, source,
 generated binding, Server lockfile, or dependency version belongs to this slice. Both full gates are
 rerun from a clean tree afterwards.
+
+### 2026-08-26 — Slice C delivered the Desktop lockfile closure
+
+The Desktop lockfile now records the same five committed crypto-core dependency edges as the Server
+lockfile. An isolated committed snapshot fails its offline locked check; minimal targeted offline
+reconciliation is byte-for-byte identical to the checked-in delta. Repeated worktree locked checks
+leave the lockfile hash unchanged.
+
+Independent review classified this as stale generated lockfile metadata, not a product-code defect,
+and confirmed no package, version, source, checksum, manifest, or generated binding changed.
+Deliberately left open: the full clean-tree CI and Rust gates must now pass once more before Tickets 44
+and 43 resolve.
