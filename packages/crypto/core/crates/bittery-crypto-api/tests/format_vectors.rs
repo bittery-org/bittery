@@ -77,6 +77,41 @@ fn fixed_aes_256_gcm_aad_vector_is_stable_and_opens_through_both_layers() {
 }
 
 #[test]
+fn attachment_move_transcrypt_preserves_the_existing_envelope_format() {
+    use core::attachment_move::{
+        AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor,
+    };
+
+    // Produced independently with Node's `crypto.createCipheriv("aes-256-gcm", ...)`.
+    const SOURCE: &[u8] = br#"{"ciphertext":"4uwgK6vmWFzA3ZgI1V2KRmHobkD+uObElS9n8YPj5Vyz4YaqbrrJXQFo1qAWgGbq4Q==","iv":"MzMzMzMzMzMzMzMz","algorithm":"AES-GCM-AAD-V1"}"#;
+    const TARGET: &[u8] = br#"{"ciphertext":"9GDXDoNXzvLHwClFUKu+r3apkmO+x94YVjtMfhKvFAGTwySZr7tzjGWZggILfgXtCw==","iv":"RERERERERERERERE","algorithm":"AES-GCM-AAD-V1"}"#;
+    let scope = |vault_id: &str| {
+        AttachmentBlobScope::new(vault_id.into(), "attachment-7".into(), "user-9".into())
+    };
+
+    let mut scanner = AttachmentEnvelopeScanner::new();
+    for chunk in SOURCE.chunks(7) {
+        scanner.push(chunk).unwrap();
+    }
+    let mut transcryptor = AttachmentMoveTranscryptor::new_with_test_iv(
+        scanner.finish().unwrap(),
+        [0x11; 32],
+        scope("vault-source"),
+        [0x22; 32],
+        scope("vault-target"),
+        [0x44; 12],
+    )
+    .unwrap();
+    let mut target = Vec::new();
+    for chunk in SOURCE.chunks(11) {
+        target.extend(transcryptor.push(chunk).unwrap());
+    }
+    target.extend(transcryptor.finish().unwrap().final_chunk);
+
+    assert_eq!(target, TARGET);
+}
+
+#[test]
 fn srp_6a_api_and_core_complete_the_same_session() {
     let password = "correct horse battery staple";
     let registration = block_on(api::generate_srp_registration(password.into())).unwrap();

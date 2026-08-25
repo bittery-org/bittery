@@ -577,3 +577,26 @@ the existing parser, requires no canonical-tail assumption or Range support, and
 ciphertext spool, schema, quota, or crash-cleanup lifecycle. A network failure in either pass remains
 retryable preparation work; credential renewal, retry count, and restart never discard the accepted
 Operation or change its immutable intent.
+
+### 2026-08-25 — C1 delivered format-preserving two-pass cryptography
+
+Crypto Core now scans the complete closed Attachment envelope with bounded memory, binds the second
+download to the first by its exact envelope digest and IV, and incrementally authenticates and
+transcrypts the existing AES-256-GCM payload under the unchanged Attachment AAD. Production owns the
+fresh target nonce; only successful source authentication and authenticated UTF-8 validation return
+the opaque authority needed to publish the provisional target artifact. Independent Node-generated
+vectors prove the exact legacy JSON/Base64 envelope, field order, algorithm identifier, and AAD remain
+compatible across arbitrary chunk boundaries.
+
+Review found real product defects rather than fixture defects: the first implementation exposed a
+caller-provided production nonce, rejected authenticated non-UTF-8 plaintext at the wrong compatibility
+boundary, and then allowed unauthenticated plaintext validity to affect `push` before source-tag
+verification. Production nonce generation is now internal, invalid plaintext is latched until after
+authentication, and corruption can only report authentication failure after the complete second pass.
+Review also found a real integration defect in Client Runtime's exact `zeroize` pin; its native and
+combined WASM graphs now resolve the required 1.9.0 version, with the generated binding artifact checked
+for deterministic drift.
+
+Deliberately left open: C1 owns no Replica checkpoint, remote manifest, blob transport, artifact-store,
+retry, scheduling, Account selection, or host composition behavior. Those remain sequenced in C2, C3,
+and C4.

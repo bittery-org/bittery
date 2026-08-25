@@ -6,6 +6,7 @@
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 
+pub mod attachment_move;
 pub mod encryption;
 pub mod error;
 mod identity;
