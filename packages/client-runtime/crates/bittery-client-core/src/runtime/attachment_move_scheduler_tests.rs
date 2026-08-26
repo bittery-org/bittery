@@ -6,7 +6,7 @@ use super::attachment_move_scheduler::{
 use crate::{AccountId, RuntimeError};
 use async_trait::async_trait;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -64,7 +64,9 @@ impl crate::platform_storage::SerializedPlatformStorageExecutor for ManifestPlat
             .to_string(),
             "set" => {
                 let value = request["value"].as_str().unwrap().to_owned();
-                if value.contains("renewed-manifest-token") {
+                if value.contains("renewed-manifest-token")
+                    || value.contains("renewed-source-token")
+                {
                     self.renewed_session_stored.store(true, Ordering::SeqCst);
                 }
                 self.values.lock().unwrap().insert((area, key), value);
@@ -73,6 +75,626 @@ impl crate::platform_storage::SerializedPlatformStorageExecutor for ManifestPlat
             other => panic!("unexpected platform request {other}"),
         }))
     }
+}
+
+struct EmptyDownload;
+
+#[async_trait]
+impl super::attachment_move_scheduler::AttachmentMoveDownload for EmptyDownload {
+    async fn next_chunk(
+        &mut self,
+    ) -> Result<Option<Vec<u8>>, super::attachment_move_scheduler::AttachmentMoveTransferError>
+    {
+        Ok(None)
+    }
+}
+
+#[derive(Default)]
+struct RecordingBinaryTransfer {
+    requests: Mutex<Vec<super::attachment_move_scheduler::AttachmentMoveDownloadRequest>>,
+}
+
+#[async_trait]
+impl super::attachment_move_scheduler::AttachmentMoveTransferPort for RecordingBinaryTransfer {
+    async fn open_source(
+        &self,
+        request: super::attachment_move_scheduler::AttachmentMoveDownloadRequest,
+    ) -> Result<
+        Box<dyn super::attachment_move_scheduler::AttachmentMoveDownload>,
+        super::attachment_move_scheduler::AttachmentMoveTransferError,
+    > {
+        self.requests.lock().unwrap().push(request);
+        Ok(Box::new(EmptyDownload))
+    }
+
+    async fn open_upload(
+        &self,
+        _account_id: &AccountId,
+        _operation_id: &str,
+        _grant: &super::attachment_move_scheduler::AttachmentMoveUploadGrant,
+        _owner: &crate::attachment_artifact_store::AttachmentArtifactOwner,
+    ) -> Result<
+        Box<dyn super::attachment_move_scheduler::AttachmentMoveUpload>,
+        super::attachment_move_scheduler::AttachmentMoveTransferError,
+    > {
+        Err(super::attachment_move_scheduler::AttachmentMoveTransferError::Transient)
+    }
+}
+
+enum SourceGrantResponse {
+    Exact,
+    Unauthorized,
+    Stale,
+    Transient,
+    Mismatch(&'static str),
+    InvalidUrl,
+}
+
+struct SourceGrantHttp {
+    source: crate::replica::AuthorityAttachmentRecord,
+    responses: Mutex<VecDeque<SourceGrantResponse>>,
+    requests: Mutex<Vec<serde_json::Value>>,
+    renewed_session_stored: Arc<AtomicBool>,
+}
+
+impl SourceGrantHttp {
+    fn grant(&self, mismatch: Option<&str>) -> serde_json::Value {
+        let source = &self.source;
+        let mut grant = serde_json::json!({
+            "attachmentId": source.id,
+            "itemId": source.item_id,
+            "vaultId": source.vault_id,
+            "storageKey": source.storage_key,
+            "envelopeVersion": source.envelope_version,
+            "uploadedBy": source.uploaded_by,
+            "downloadUrl": "https://object.example.test/invocation-secret?signature=private",
+            "encryptedName": source.encrypted_name,
+            "encryptedContentType": source.encrypted_content_type,
+            "encryptionIv": source.encryption_iv,
+            "encryptedContentTypeIv": source.encrypted_content_type_iv,
+            "encryptionAlgorithm": source.encryption_algorithm,
+            "fileSize": source.file_size,
+        });
+        if let Some(field) = mismatch {
+            grant[field] = match field {
+                "envelopeVersion" | "fileSize" => serde_json::json!(99),
+                _ => serde_json::json!(format!("foreign-{field}")),
+            };
+        }
+        grant
+    }
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for SourceGrantHttp {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        let url = request["url"].as_str().unwrap();
+        let authorization = request["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|header| {
+                header["name"]
+                    .as_str()
+                    .unwrap()
+                    .eq_ignore_ascii_case("authorization")
+            })
+            .and_then(|header| header["value"].as_str())
+            .unwrap();
+        let response = if url.ends_with("/api/v1/sessions/current/refresh") {
+            assert_eq!(authorization, "Bearer source-token");
+            serde_json::json!({
+                "type": "completed",
+                "status": 200,
+                "headers": [{ "name": "content-type", "value": "application/json" }],
+                "body": serde_json::to_vec(&serde_json::json!({
+                    "token": "renewed-source-token",
+                    "sessionId": "renewed-source-session",
+                    "expiresAt": "2099-01-01T00:00:00Z",
+                })).unwrap(),
+            })
+        } else {
+            assert_eq!(
+                url,
+                "https://requested.example.test/api/v1/attachments/attachment-scheduler/download-urls"
+            );
+            let response = self.responses.lock().unwrap().pop_front().unwrap();
+            match response {
+                SourceGrantResponse::Exact => {
+                    if authorization == "Bearer renewed-source-token" {
+                        assert!(self.renewed_session_stored.load(Ordering::SeqCst));
+                    } else {
+                        assert_eq!(authorization, "Bearer source-token");
+                    }
+                    serde_json::json!({
+                        "type": "completed",
+                        "status": 200,
+                        "headers": [{ "name": "content-type", "value": "application/json" }],
+                        "body": serde_json::to_vec(&self.grant(None)).unwrap(),
+                    })
+                }
+                SourceGrantResponse::Mismatch(field) => serde_json::json!({
+                    "type": "completed",
+                    "status": 200,
+                    "headers": [{ "name": "content-type", "value": "application/json" }],
+                    "body": serde_json::to_vec(&self.grant(Some(field))).unwrap(),
+                }),
+                SourceGrantResponse::InvalidUrl => {
+                    let mut grant = self.grant(None);
+                    grant["downloadUrl"] = serde_json::json!("not a URL");
+                    serde_json::json!({
+                        "type": "completed",
+                        "status": 200,
+                        "headers": [{ "name": "content-type", "value": "application/json" }],
+                        "body": serde_json::to_vec(&grant).unwrap(),
+                    })
+                }
+                SourceGrantResponse::Unauthorized => serde_json::json!({
+                    "type": "completed", "status": 401, "headers": [], "body": [],
+                }),
+                SourceGrantResponse::Stale => serde_json::json!({
+                    "type": "completed", "status": 404, "headers": [], "body": [],
+                }),
+                SourceGrantResponse::Transient => serde_json::json!({
+                    "type": "completed", "status": 503, "headers": [], "body": [],
+                }),
+            }
+        };
+        self.requests.lock().unwrap().push(request);
+        Ok(response.to_string())
+    }
+
+    fn cancel(&self, _dispatch_id: &str) {}
+}
+
+struct SourceGrantHarness {
+    runtime: Arc<super::Runtime>,
+    account_id: AccountId,
+    persistence: Arc<crate::replica::InMemoryReplica>,
+    platform_executor: Arc<ManifestPlatform>,
+    http: Arc<SourceGrantHttp>,
+    binary: Arc<RecordingBinaryTransfer>,
+}
+
+async fn source_grant_harness(responses: Vec<SourceGrantResponse>) -> SourceGrantHarness {
+    source_grant_harness_with_file_size(responses, 1).await
+}
+
+async fn source_grant_harness_with_file_size(
+    responses: Vec<SourceGrantResponse>,
+    file_size: i32,
+) -> SourceGrantHarness {
+    use crate::{
+        auth_http::{AuthClientConfig, ClientPlatform},
+        platform_storage::{AccountMetadataDocument, CurrentSessionDocument, PlatformStorage},
+        protocol::Incarnation,
+        replica::{InMemoryReplica, ReplicaPersistence},
+    };
+
+    let account_id = AccountId::from("account-requested");
+    let incarnation = Incarnation::from("incarnation-account-requested");
+    let persistence = Arc::new(InMemoryReplica::default());
+    seed_promotable_preparation_with_file_size(
+        &persistence,
+        account_id.clone(),
+        "operation-requested",
+        7,
+        file_size,
+    );
+    let source = persistence
+        .snapshot(&account_id)
+        .unwrap()
+        .attachment_move_preparations[0]
+        .source_attachments[0]
+        .clone();
+    let stored = Arc::new(AtomicBool::new(false));
+    let platform_executor = Arc::new(ManifestPlatform {
+        values: Mutex::new(BTreeMap::new()),
+        renewed_session_stored: Arc::clone(&stored),
+    });
+    let platform = Arc::new(PlatformStorage::new(platform_executor.clone()));
+    platform
+        .store_account_metadata(
+            &AccountMetadataDocument::new(
+                account_id.clone(),
+                incarnation.clone(),
+                "user-scheduler".into(),
+                "requested@example.test".into(),
+                "Requested".into(),
+                "https://requested.example.test".into(),
+                None,
+                None,
+                "A3".into(),
+                1,
+                1,
+                false,
+                false,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    platform
+        .store_current_session(
+            &CurrentSessionDocument::new(
+                account_id.clone(),
+                incarnation,
+                "source-token".into(),
+                Some("source-session".into()),
+                2,
+                Some(2),
+                Vec::new(),
+                "encrypted-private-key".into(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let http = Arc::new(SourceGrantHttp {
+        source,
+        responses: Mutex::new(responses.into()),
+        requests: Mutex::new(Vec::new()),
+        renewed_session_stored: stored,
+    });
+    let runtime = super::Runtime::with_persistence(
+        persistence.clone() as Arc<dyn ReplicaPersistence>,
+        platform,
+        Arc::new(crate::http_transport::HttpTransport::new(http.clone())),
+        Some(AuthClientConfig::new("client".into(), ClientPlatform::Web, "1.0.0".into()).unwrap()),
+        None,
+        true,
+        Arc::new(crate::authentication_installation::FixedClock(0)),
+        Arc::new(NeverTimer),
+        Some(persistence.clone()),
+    );
+    runtime.replica().load(&account_id).await.unwrap();
+    SourceGrantHarness {
+        runtime,
+        account_id,
+        persistence,
+        platform_executor,
+        http,
+        binary: Arc::new(RecordingBinaryTransfer::default()),
+    }
+}
+
+fn source_request(
+    account_id: AccountId,
+    operation_id: &str,
+    attachment_id: &str,
+    storage_key: &str,
+    pass: super::attachment_move_preparation::DownloadPass,
+) -> super::attachment_move_preparation::SourceDownloadRequest {
+    super::attachment_move_preparation::SourceDownloadRequest {
+        account_id,
+        operation_id: operation_id.into(),
+        attachment_id: attachment_id.into(),
+        storage_key: storage_key.into(),
+        pass,
+    }
+}
+
+async fn source_error(
+    adapter: &super::attachment_move_scheduler::TransferAdapter,
+    request: super::attachment_move_preparation::SourceDownloadRequest,
+) -> super::attachment_move_preparation::PreparationTransportError {
+    use super::attachment_move_preparation::AttachmentMoveTransfer;
+    let result = adapter.open_source(request).await;
+    let Err(error) = result else {
+        panic!("source unexpectedly opened");
+    };
+    error
+}
+
+#[tokio::test]
+async fn source_grant_404_freezes_the_explicit_accepted_source_before_binary_execution() {
+    use super::attachment_move_preparation::{DownloadPass, PreparationTransportError};
+
+    let harness = source_grant_harness(vec![SourceGrantResponse::Stale]).await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+
+    assert_eq!(
+        source_error(
+            &adapter,
+            source_request(
+                harness.account_id.clone(),
+                "operation-requested",
+                "attachment-scheduler",
+                "source-object",
+                DownloadPass::Scan,
+            ),
+        )
+        .await,
+        PreparationTransportError::StaleAuthority
+    );
+    assert!(harness.binary.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        harness
+            .persistence
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .attachment_move_preparations
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn scan_and_transcrypt_each_mint_a_fresh_grant_and_expose_only_bounded_invocation_data() {
+    use super::attachment_move_preparation::{AttachmentMoveTransfer, DownloadPass};
+
+    let harness = source_grant_harness_with_file_size(
+        vec![SourceGrantResponse::Exact, SourceGrantResponse::Exact],
+        73,
+    )
+    .await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+
+    for pass in [DownloadPass::Scan, DownloadPass::Transcrypt] {
+        adapter
+            .open_source(source_request(
+                harness.account_id.clone(),
+                "operation-requested",
+                "attachment-scheduler",
+                "source-object",
+                pass,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let requests = harness.binary.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        assert_eq!(
+            request.download_url,
+            "https://object.example.test/invocation-secret?signature=private"
+        );
+        assert!(request.headers.is_empty());
+        assert_eq!(request.max_response_bytes, 226);
+        assert_eq!(request.max_chunk_bytes, 256 * 1024);
+    }
+    assert_eq!(harness.http.requests.lock().unwrap().len(), 2);
+    assert!(harness
+        .platform_executor
+        .values
+        .lock()
+        .unwrap()
+        .values()
+        .all(|value| !value.contains("invocation-secret") && !value.contains("signature=private")));
+    let durable = serde_json::to_string(
+        &harness
+            .persistence
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .attachment_move_preparations,
+    )
+    .unwrap();
+    assert!(!durable.contains("invocation-secret"));
+}
+
+#[tokio::test]
+async fn every_download_grant_authority_mismatch_is_stale_without_binary_execution() {
+    use super::attachment_move_preparation::{DownloadPass, PreparationTransportError};
+
+    let fields = [
+        "attachmentId",
+        "itemId",
+        "vaultId",
+        "storageKey",
+        "envelopeVersion",
+        "uploadedBy",
+        "encryptedName",
+        "encryptedContentType",
+        "encryptionIv",
+        "encryptedContentTypeIv",
+        "encryptionAlgorithm",
+        "fileSize",
+    ];
+    let harness = source_grant_harness(
+        fields
+            .iter()
+            .copied()
+            .map(SourceGrantResponse::Mismatch)
+            .collect(),
+    )
+    .await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+
+    for field in fields {
+        assert_eq!(
+            source_error(
+                &adapter,
+                source_request(
+                    harness.account_id.clone(),
+                    "operation-requested",
+                    "attachment-scheduler",
+                    "source-object",
+                    DownloadPass::Scan,
+                ),
+            )
+            .await,
+            PreparationTransportError::StaleAuthority,
+            "grant field {field} must be compared with accepted authority"
+        );
+    }
+    assert!(harness.binary.requests.lock().unwrap().is_empty());
+    assert_eq!(harness.http.requests.lock().unwrap().len(), fields.len());
+}
+
+#[tokio::test]
+async fn foreign_account_operation_attachment_or_storage_never_reaches_http_or_binary() {
+    use super::attachment_move_preparation::{DownloadPass, PreparationTransportError};
+
+    let harness = source_grant_harness(vec![SourceGrantResponse::Exact]).await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+    let requests = [
+        source_request(
+            AccountId::from("account-foreign"),
+            "operation-requested",
+            "attachment-scheduler",
+            "source-object",
+            DownloadPass::Scan,
+        ),
+        source_request(
+            harness.account_id.clone(),
+            "operation-foreign",
+            "attachment-scheduler",
+            "source-object",
+            DownloadPass::Scan,
+        ),
+        source_request(
+            harness.account_id.clone(),
+            "operation-requested",
+            "attachment-foreign",
+            "source-object",
+            DownloadPass::Scan,
+        ),
+        source_request(
+            harness.account_id.clone(),
+            "operation-requested",
+            "attachment-scheduler",
+            "storage-foreign",
+            DownloadPass::Scan,
+        ),
+    ];
+
+    for request in requests {
+        assert_eq!(
+            source_error(&adapter, request).await,
+            PreparationTransportError::Invariant
+        );
+    }
+    assert!(harness.http.requests.lock().unwrap().is_empty());
+    assert!(harness.binary.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn first_source_401_persists_refresh_before_one_replay() {
+    use super::attachment_move_preparation::{AttachmentMoveTransfer, DownloadPass};
+
+    let harness = source_grant_harness(vec![
+        SourceGrantResponse::Unauthorized,
+        SourceGrantResponse::Exact,
+    ])
+    .await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+
+    adapter
+        .open_source(source_request(
+            harness.account_id.clone(),
+            "operation-requested",
+            "attachment-scheduler",
+            "source-object",
+            DownloadPass::Scan,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(harness.http.requests.lock().unwrap().len(), 3);
+    assert_eq!(harness.binary.requests.lock().unwrap().len(), 1);
+    let snapshot = harness
+        .runtime
+        .replica
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let session = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.token.as_ref(), "renewed-source-token");
+}
+
+#[tokio::test]
+async fn second_source_401_or_transient_answer_is_retryable_without_discard_or_extra_replay() {
+    use super::attachment_move_preparation::{DownloadPass, PreparationTransportError};
+
+    for responses in [
+        vec![
+            SourceGrantResponse::Unauthorized,
+            SourceGrantResponse::Unauthorized,
+        ],
+        vec![SourceGrantResponse::Transient],
+    ] {
+        let harness = source_grant_harness(responses).await;
+        let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+            harness.binary.clone(),
+            Arc::downgrade(&harness.runtime),
+        );
+
+        assert_eq!(
+            source_error(
+                &adapter,
+                source_request(
+                    harness.account_id.clone(),
+                    "operation-requested",
+                    "attachment-scheduler",
+                    "source-object",
+                    DownloadPass::Scan,
+                ),
+            )
+            .await,
+            PreparationTransportError::Transient
+        );
+        assert!(harness.binary.requests.lock().unwrap().is_empty());
+        let snapshot = harness.persistence.snapshot(&harness.account_id).unwrap();
+        assert_eq!(snapshot.attachment_move_preparations.len(), 1);
+        assert_eq!(
+            snapshot.attachment_move_preparations[0]
+                .scheduling
+                .attempt_count,
+            7
+        );
+        assert!(harness.http.requests.lock().unwrap().len() <= 3);
+    }
+}
+
+#[tokio::test]
+async fn malformed_invocation_url_is_an_invariant_before_binary_execution() {
+    use super::attachment_move_preparation::{DownloadPass, PreparationTransportError};
+
+    let harness = source_grant_harness(vec![SourceGrantResponse::InvalidUrl]).await;
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        harness.binary.clone(),
+        Arc::downgrade(&harness.runtime),
+    );
+
+    assert_eq!(
+        source_error(
+            &adapter,
+            source_request(
+                harness.account_id.clone(),
+                "operation-requested",
+                "attachment-scheduler",
+                "source-object",
+                DownloadPass::Scan,
+            ),
+        )
+        .await,
+        PreparationTransportError::Invariant
+    );
+    assert!(harness.binary.requests.lock().unwrap().is_empty());
 }
 
 struct ManifestHttp {
@@ -839,6 +1461,22 @@ fn seed_promotable_preparation(
     operation_id: &str,
     attempt_count: u64,
 ) {
+    seed_promotable_preparation_with_file_size(
+        persistence,
+        account_id,
+        operation_id,
+        attempt_count,
+        1,
+    );
+}
+
+fn seed_promotable_preparation_with_file_size(
+    persistence: &crate::replica::InMemoryReplica,
+    account_id: AccountId,
+    operation_id: &str,
+    attempt_count: u64,
+    file_size: i32,
+) {
     use crate::replica::{
         attachment_move_artifact_ref, attachment_move_intent_fingerprint,
         AttachmentMovePreparationRecord, AttachmentMoveProgress, AttachmentMoveUploadState,
@@ -903,7 +1541,7 @@ fn seed_promotable_preparation(
         encrypted_content_type: encrypted_type.ciphertext,
         encrypted_content_type_iv: encrypted_type.iv,
         envelope_version: SOURCE_ENVELOPE_VERSION,
-        file_size: 1,
+        file_size,
         uploaded_by: UPLOADER.into(),
         created_at: "2026-08-26T00:00:00Z".into(),
     };

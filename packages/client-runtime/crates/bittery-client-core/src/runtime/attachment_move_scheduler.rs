@@ -6,7 +6,7 @@
 use super::{
     attachment_move_preparation::{
         AttachmentMovePreparationWorker, AttachmentMoveSecretProvider, AttachmentMoveSecrets,
-        AttachmentMoveTransfer, DownloadPass, Manifest, ManifestRequest, PreparationDriveRequest,
+        AttachmentMoveTransfer, Manifest, ManifestRequest, PreparationDriveRequest,
         PreparationDriveResult, PreparationTransportError, SourceDownload, SourceDownloadRequest,
         StagingUpload, UploadGrant,
     },
@@ -17,8 +17,9 @@ use crate::{
         AttachmentArtifactOwner, AttachmentArtifactStore, ProvisionalAttachmentArtifactStore,
     },
     auth_http::{
-        AttachmentMoveManifestAnswer, AttachmentMoveManifestHttpEntry,
-        AttachmentMoveManifestHttpRequest, AuthHttpClient, AuthenticatedOutcome,
+        AttachmentDownloadGrant, AttachmentDownloadGrantAnswer, AttachmentMoveManifestAnswer,
+        AttachmentMoveManifestHttpEntry, AttachmentMoveManifestHttpRequest, AuthHttpClient,
+        AuthenticatedOutcome,
     },
     replica::{
         AttachmentMovePreparationRecord, AuthorityAttachmentRecord, AuthorityVaultRecord,
@@ -44,16 +45,17 @@ pub enum AttachmentMoveDownloadPass {
     Transcrypt,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AttachmentMoveDownloadRequest {
-    pub account_id: AccountId,
-    pub operation_id: String,
-    pub attachment_id: String,
-    pub storage_key: String,
-    pub pass: AttachmentMoveDownloadPass,
+    /// Invocation-scoped capability. Implementations must not persist or log it.
+    pub download_url: String,
+    /// Invocation-scoped signed headers. The current Server route returns none.
+    pub headers: Vec<(String, String)>,
+    pub max_response_bytes: u64,
+    pub max_chunk_bytes: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AttachmentMoveUploadGrant {
     pub attachment_id: String,
     pub storage_key: String,
@@ -127,6 +129,7 @@ pub trait AttachmentMoveTransferPort {
     ) -> Result<Box<dyn AttachmentMoveUpload>, AttachmentMoveTransferError>;
 }
 
+#[derive(Clone)]
 pub struct AttachmentMovePreparationFacade {
     provisional_artifacts: Arc<dyn ProvisionalAttachmentArtifactStore>,
     artifacts: Arc<dyn AttachmentArtifactStore>,
@@ -144,6 +147,30 @@ impl AttachmentMovePreparationFacade {
             artifacts,
             transfer,
         }
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Ticket 46 Slice C composes the exclusive lifecycle"
+    )]
+    pub(crate) fn provisional_artifacts(&self) -> Arc<dyn ProvisionalAttachmentArtifactStore> {
+        Arc::clone(&self.provisional_artifacts)
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Ticket 46 Slice C composes the exclusive lifecycle"
+    )]
+    pub(crate) fn artifacts(&self) -> Arc<dyn AttachmentArtifactStore> {
+        Arc::clone(&self.artifacts)
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Ticket 46 Slice C composes the exclusive lifecycle"
+    )]
+    pub(crate) fn transfer(&self) -> Arc<dyn AttachmentMoveTransferPort> {
+        Arc::clone(&self.transfer)
     }
 }
 
@@ -193,6 +220,64 @@ impl TransferAdapter {
             }
         }
     }
+
+    fn source_grant_answer(
+        answer: AttachmentDownloadGrantAnswer,
+        source: &AuthorityAttachmentRecord,
+    ) -> Result<AttachmentDownloadGrant, PreparationTransportError> {
+        let grant = match answer {
+            AttachmentDownloadGrantAnswer::Grant(grant) => *grant,
+            AttachmentDownloadGrantAnswer::StaleAuthority => {
+                return Err(PreparationTransportError::StaleAuthority);
+            }
+        };
+        if grant.attachment_id != source.id
+            || grant.item_id != source.item_id
+            || grant.vault_id != source.vault_id
+            || grant.storage_key != source.storage_key
+            || grant.envelope_version != source.envelope_version
+            || grant.uploaded_by != source.uploaded_by
+            || grant.encrypted_name != source.encrypted_name
+            || grant.encrypted_content_type != source.encrypted_content_type
+            || grant.encryption_iv != source.encryption_iv
+            || grant.encrypted_content_type_iv != source.encrypted_content_type_iv
+            || grant.encryption_algorithm != source.encryption_algorithm
+            || grant.file_size != source.file_size
+        {
+            return Err(PreparationTransportError::StaleAuthority);
+        }
+        let invocation_url = url::Url::parse(&grant.download_url)
+            .map_err(|_| PreparationTransportError::Invariant)?;
+        if !matches!(invocation_url.scheme(), "http" | "https") {
+            return Err(PreparationTransportError::Invariant);
+        }
+        Ok(grant)
+    }
+
+    fn source_response_bound(file_size: i32) -> Result<u64, PreparationTransportError> {
+        let plaintext_bytes =
+            u64::try_from(file_size).map_err(|_| PreparationTransportError::Invariant)?;
+        let encoded_plaintext_bytes = base64_encoded_length(plaintext_bytes)?;
+        let ciphertext_bytes = encoded_plaintext_bytes
+            .checked_add(16)
+            .ok_or(PreparationTransportError::Invariant)?;
+        let encoded_ciphertext_bytes = base64_encoded_length(ciphertext_bytes)?;
+        let fixed_envelope_bytes = (r#"{"ciphertext":""#.len()
+            + r#"","iv":""#.len()
+            + 16
+            + r#"","algorithm":"AES-GCM-AAD-V1"}"#.len()) as u64;
+        encoded_ciphertext_bytes
+            .checked_add(fixed_envelope_bytes)
+            .ok_or(PreparationTransportError::Invariant)
+    }
+}
+
+fn base64_encoded_length(byte_length: u64) -> Result<u64, PreparationTransportError> {
+    byte_length
+        .checked_add(2)
+        .and_then(|bytes| bytes.checked_div(3))
+        .and_then(|groups| groups.checked_mul(4))
+        .ok_or(PreparationTransportError::Invariant)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -222,17 +307,109 @@ impl AttachmentMoveTransfer for TransferAdapter {
         &self,
         request: SourceDownloadRequest,
     ) -> Result<Box<dyn SourceDownload>, PreparationTransportError> {
-        let pass = match request.pass {
-            DownloadPass::Scan => AttachmentMoveDownloadPass::Scan,
-            DownloadPass::Transcrypt => AttachmentMoveDownloadPass::Transcrypt,
+        let runtime = self
+            .runtime
+            .upgrade()
+            .ok_or(PreparationTransportError::Transient)?;
+        let snapshot = runtime
+            .replica
+            .snapshot(&request.account_id)
+            .ok_or(PreparationTransportError::Invariant)?;
+        let mut preparations = snapshot
+            .attachment_move_preparations
+            .iter()
+            .filter(|preparation| preparation.operation_id == request.operation_id);
+        let preparation = preparations
+            .next()
+            .ok_or(PreparationTransportError::Invariant)?;
+        if preparations.next().is_some() || preparation.account_id != request.account_id {
+            return Err(PreparationTransportError::Invariant);
+        }
+        let mut sources = preparation
+            .source_attachments
+            .iter()
+            .filter(|source| source.id == request.attachment_id);
+        let source = sources.next().ok_or(PreparationTransportError::Invariant)?;
+        if sources.next().is_some()
+            || source.item_id != preparation.item_id
+            || source.vault_id != preparation.source_vault_id
+            || source.storage_key != request.storage_key
+        {
+            return Err(PreparationTransportError::Invariant);
+        }
+        let max_response_bytes = Self::source_response_bound(source.file_size)?;
+        let metadata = runtime
+            .platform_storage
+            .load_account_metadata(&request.account_id, &snapshot.incarnation)
+            .await
+            .map_err(source_grant_http_error)?
+            .ok_or(PreparationTransportError::Transient)?;
+        if metadata.user_id != snapshot.user_id {
+            return Err(PreparationTransportError::Invariant);
+        }
+        let session = runtime
+            .platform_storage
+            .load_current_session(&request.account_id, &snapshot.incarnation)
+            .await
+            .map_err(source_grant_http_error)?
+            .ok_or(PreparationTransportError::Transient)?;
+        let auth_config = runtime
+            .auth_client_config
+            .clone()
+            .ok_or(PreparationTransportError::Transient)?;
+        let http = AuthHttpClient::new(
+            &runtime.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        )
+        .map_err(|_| PreparationTransportError::Invariant)?;
+        let first = http
+            .create_attachment_download_grant(
+                session.token.as_ref(),
+                &source.id,
+                crate::RequestCancellation::new(),
+            )
+            .await
+            .map_err(source_grant_http_error)?;
+        let grant = match first {
+            AuthenticatedOutcome::Ok(answer) => Self::source_grant_answer(answer, source)?,
+            AuthenticatedOutcome::Transient => return Err(PreparationTransportError::Transient),
+            AuthenticatedOutcome::ReauthenticationRequired => {
+                let renewed = runtime
+                    .renew_session(
+                        &request.account_id,
+                        &session,
+                        &http,
+                        crate::RequestCancellation::new(),
+                    )
+                    .await
+                    .map_err(source_grant_http_error)?;
+                match http
+                    .create_attachment_download_grant(
+                        renewed.token.as_ref(),
+                        &source.id,
+                        crate::RequestCancellation::new(),
+                    )
+                    .await
+                    .map_err(source_grant_http_error)?
+                {
+                    AuthenticatedOutcome::Ok(answer) => Self::source_grant_answer(answer, source)?,
+                    AuthenticatedOutcome::ReauthenticationRequired
+                    | AuthenticatedOutcome::Transient => {
+                        return Err(PreparationTransportError::Transient);
+                    }
+                }
+            }
         };
         self.binary
             .open_source(AttachmentMoveDownloadRequest {
-                account_id: request.account_id,
-                operation_id: request.operation_id,
-                attachment_id: request.attachment_id,
-                storage_key: request.storage_key,
-                pass,
+                download_url: grant.download_url,
+                headers: Vec::new(),
+                max_response_bytes,
+                max_chunk_bytes:
+                    bittery_crypto_core::attachment_move::MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK
+                        as u32,
             })
             .await
             .map(|download| Box::new(DownloadAdapter(download)) as Box<dyn SourceDownload>)
@@ -362,6 +539,15 @@ impl AttachmentMoveTransfer for TransferAdapter {
             .await
             .map(|upload| Box::new(UploadAdapter(upload)) as Box<dyn StagingUpload>)
             .map_err(transfer_error)
+    }
+}
+
+fn source_grant_http_error(error: RuntimeError) -> PreparationTransportError {
+    match error.code {
+        RuntimeErrorCode::AuthenticationUnavailable | RuntimeErrorCode::InvariantViolation => {
+            PreparationTransportError::Invariant
+        }
+        _ => PreparationTransportError::Transient,
     }
 }
 
