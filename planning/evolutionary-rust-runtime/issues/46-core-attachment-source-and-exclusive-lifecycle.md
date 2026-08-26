@@ -80,3 +80,24 @@ adapters themselves are composable through one crate-visible store, but Core exp
 source URL grant nor an authorized producer of `SweepOrphans`. Deliberately left open: this ticket
 does not implement Web Locks, Worker construction, fixed browser executors, Server Share, ordinary
 cross-kind dispatch/outcome, the general Attachment service, or final Web cutover.
+
+### 2026-08-26 — source-download protocol resolved
+
+The maintainer selected the existing authenticated
+`POST /api/v1/attachments/{attachmentId}/download-urls` route. Client Core validates a successful
+response against the accepted Attachment identity, durable storage key, envelope version, encrypted
+metadata, and byte authority before handing its invocation-scoped URL to the binary port.
+
+An exact `200` is the only download grant. A `404`, or a successful response whose authority does
+not match the immutable accepted source, yields the local non-outcome `StaleAuthority` preparation
+signal. C2 may freeze its existing `reject_stale_authority` request, but only the existing Move
+finalization transaction may prove that fact and retain `attachment_state_conflict`; the download
+route never creates or implies an Operation outcome. This makes a concealed or concurrently changed
+Attachment safe: a false stale suspicion cannot commit a false rejection.
+
+One `401` uses the central durable Session refresh and one replay. `403`, rate limiting, network
+failure, response overflow, and Server failure remain nonterminal transport retry because access may
+return and accepted work has no attempt or elapsed-time owner. Malformed success authority is a local
+invariant. Extending the later manifest was rejected because C2 must download and transcrypt before
+it knows the target ciphertext digest that the manifest requires. A new Operation-specific source
+route was rejected as unnecessary protocol surface.
