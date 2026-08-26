@@ -1002,3 +1002,28 @@ application's ES2022 DOM compiler reach a pre-existing `Uint8Array<ArrayBufferLi
 `BufferSource` mismatch in the committed digest comparison. C4b2 excludes the binary implementation,
 so [Ticket 47](47-web-binary-buffer-source-compatibility.md) owns the minimal path-disjoint correction
 and its focused behavior/type proof. The C4b2 implementer did not edit that excluded path.
+
+### 2026-08-26 — C4b2 split at composition and authenticated browser acceptance
+
+Ticket 47 resolved the dependent Web compiler blocker. The resumed C4b2 audit then proved that its
+remaining claims span two independently reachable graphs and cannot be verified honestly in one
+package-level slice:
+
+1. **C4b2a — fixed Worker composition and browser lease:** TypeScript package paths construct the
+   production IndexedDB artifact executor, OPFS binary executor, and exact Account-only Web Locks
+   lease, call only the C4b1 constructor for an authenticated Runtime, and close/redact/reconstruct a
+   failed preparation runner without a finite restart limit. Unit tests exercise constructor and
+   lifecycle races; actual Chromium proves two same-origin contexts cannot hold one Account lease and
+   that release or context loss permits reacquisition.
+2. **C4b2b — authenticated real-Core browser acceptance:** after the dedicated Attachment Runtime
+   service exposes the required public host path, an `apps/web` E2E slice uses the production Worker,
+   generated Runtime, Server ceremony, and fixed browser executors to prove exclusive startup sweep
+   before preparation, restart and unlock reachability, actual artifact/binary invocation, and more
+   than five real preparation failures without durable discard. It lands before the final Web host
+   cutover and uses no production test hook.
+
+The package Chromium harness has no authenticated Server/crypto ceremony, while the generated Core
+starts preparation only for a valid installed and unlocked Account with live keys and a durable Move
+preparation. Fake WASM lifecycle tests prove only Worker policy and therefore do not satisfy C4b2b.
+The split records that acceptance gap rather than weakening it or exporting a fixture/install-key
+surface from production.
