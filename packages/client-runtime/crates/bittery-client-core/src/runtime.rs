@@ -29,7 +29,6 @@ use attachment_move_scheduler::AttachmentMovePreparationDriver;
 #[doc(hidden)]
 pub use attachment_move_scheduler::{
     AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
-    AttachmentMoveManifest, AttachmentMoveManifestEntry, AttachmentMoveManifestRequest,
     AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
     AttachmentMoveUpload, AttachmentMoveUploadGrant,
 };
@@ -684,14 +683,7 @@ impl Runtime {
     ) -> Arc<Self> {
         let replica = Arc::new(Replica::new(persistence));
         let live_master_unlock_keys = Arc::new(Mutex::new(HashMap::new()));
-        let attachment_move_scheduler = attachment_move_preparation.map(|facade| {
-            Arc::new(AttachmentMovePreparationScheduler::new(
-                Arc::clone(&replica),
-                Arc::clone(&live_master_unlock_keys),
-                facade,
-            ))
-        });
-        Arc::new(Self {
+        let runtime = Arc::new(Self {
             replica,
             platform_storage,
             http_transport,
@@ -721,9 +713,29 @@ impl Runtime {
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
             dispatch_leases: Arc::new(DispatchLeases::default()),
-            attachment_move_scheduler: Mutex::new(attachment_move_scheduler),
+            attachment_move_scheduler: Mutex::new(None),
             attachment_move_lifecycle_active: AtomicBool::new(false),
-        })
+        });
+        if let Some(facade) = attachment_move_preparation {
+            runtime.install_attachment_move_preparation(facade);
+        }
+        runtime
+    }
+
+    fn install_attachment_move_preparation(
+        self: &Arc<Self>,
+        facade: AttachmentMovePreparationFacade,
+    ) {
+        let scheduler = Arc::new(AttachmentMovePreparationScheduler::new(
+            Arc::clone(&self.replica),
+            Arc::clone(&self.live_master_unlock_keys),
+            facade,
+            Arc::downgrade(self),
+        ));
+        *self
+            .attachment_move_scheduler
+            .lock()
+            .expect("Attachment Move scheduler lock poisoned") = Some(scheduler);
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.

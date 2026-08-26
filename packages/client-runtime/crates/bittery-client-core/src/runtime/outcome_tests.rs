@@ -10,6 +10,31 @@ use super::*;
 use crate::replica::{
     OperationOutcomeResult, OperationRejectionCode, ReplicaItemRecord, ReplicaSnapshot,
 };
+use async_trait::async_trait;
+
+struct TwoRuntimeBarrierHttp {
+    server: Arc<FakeServer>,
+    mutation_barrier: tokio::sync::Barrier,
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for TwoRuntimeBarrierHttp {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        if request["method"] == "PUT"
+            && request["url"]
+                .as_str()
+                .is_some_and(|url| url.contains("/api/v1/vaults/"))
+        {
+            self.mutation_barrier.wait().await;
+        }
+        crate::http_transport::SerializedHttpExecutor::invoke(&*self.server, request_json).await
+    }
+
+    fn cancel(&self, dispatch_id: &str) {
+        crate::http_transport::SerializedHttpExecutor::cancel(&*self.server, dispatch_id);
+    }
+}
 
 #[test]
 fn attachment_state_conflict_remains_a_terminal_rejection_across_the_server_contract() {
@@ -106,21 +131,53 @@ fn assert_reconciled(harness: &Harness, operation_id: &str, item_id: &str) {
 async fn a_forced_duplicate_dispatch_leaves_one_server_effect_and_one_item() {
     let harness = seeded(false).await;
     let (operation_id, item_id) = harness.accept_create().await;
-    // Both senders read the accepted work before either of them answers, exactly as two Runtimes
-    // holding the same Operation would. Only the Server's outcome table decides what happened.
-    let snapshot = harness.snapshot();
-    let accepted = snapshot.operations[0].clone();
-
-    harness
-        .runtime
-        .dispatch_captured_ignoring_lease(&snapshot, &accepted)
-        .await;
-    harness
-        .runtime
-        .dispatch_captured_ignoring_lease(&snapshot, &accepted)
-        .await;
+    let shared_http = Arc::new(TwoRuntimeBarrierHttp {
+        server: harness.server.clone(),
+        mutation_barrier: tokio::sync::Barrier::new(2),
+    });
+    let first = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        shared_http.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        TestTimer::advancing(harness.clock.clone()),
+    );
+    let second = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        shared_http,
+        auth_config(),
+        harness.clock.clone(),
+        TestTimer::advancing(harness.clock.clone()),
+    );
+    first.replica().load(&harness.account_id).await.unwrap();
+    second.replica().load(&harness.account_id).await.unwrap();
+    first.unlock_account(&harness.account_id).await.unwrap();
+    second.unlock_account(&harness.account_id).await.unwrap();
+    // Each independent Runtime has its own Account fence and captured the same durable Operation
+    // before either Server response. The barrier proves both identical sends reach the Server;
+    // only the retained outcome contract can deduplicate across processes.
+    let first_snapshot = first.replica().snapshot(&harness.account_id).unwrap();
+    let second_snapshot = second.replica().snapshot(&harness.account_id).unwrap();
+    let first_accepted = first_snapshot.operations[0].clone();
+    let second_accepted = second_snapshot.operations[0].clone();
+    tokio::join!(
+        first.dispatch_captured_ignoring_lease(&first_snapshot, &first_accepted),
+        second.dispatch_captured_ignoring_lease(&second_snapshot, &second_accepted),
+    );
 
     assert_eq!(harness.server.creates(), 2, "both sends reached the Server");
+    harness
+        .runtime
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap();
+    harness
+        .runtime
+        .decrypt_visible_items(&harness.account_id)
+        .unwrap();
     assert_reconciled(&harness, &operation_id, &item_id);
 }
 
@@ -343,6 +400,71 @@ async fn an_operation_sync_event_reconciles_and_advances_the_matching_cursor() {
             id: "sync-7".to_owned()
         },
         "a matching exact Cursor advances with the reconciliation"
+    );
+}
+
+#[tokio::test]
+async fn sync_reconciliation_keeps_the_session_renewed_by_an_authoritative_fetch() {
+    let harness = seeded(false).await;
+    harness.server.lose_next_response();
+    let (operation_id, item_id) = harness.accept_create().await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    assert_eq!(harness.server.created_items(), vec![item_id.clone()]);
+
+    harness.server.script_item_faults([Fault::Status(401)]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    harness
+        .server
+        .script_operation_event(&operation_id, "sync-8");
+    harness
+        .server
+        .sync_events
+        .lock()
+        .unwrap()
+        .push(serde_json::json!({
+            "clientId": null,
+            "entityId": item_id,
+            "entityType": "item",
+            "id": "sync-8",
+            "metadata": null,
+            "timestamp": "1700000000000",
+            "type": "item_updated",
+            "userId": USER,
+            "vaultId": "vault-1",
+            "version": 1,
+        }));
+
+    harness
+        .runtime
+        .bootstrap_account(&harness.account_id, RequestCancellation::new())
+        .await
+        .unwrap();
+
+    let item_authorizations: Vec<_> = harness
+        .server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.contains("/api/v1/items/"))
+        .map(|request| request.header("authorization").unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        item_authorizations,
+        vec![
+            format!("Bearer {FIRST_TOKEN}"),
+            format!("Bearer {SECOND_TOKEN}"),
+            format!("Bearer {SECOND_TOKEN}"),
+        ],
+        "the next Sync event must use the Session renewed during reconciliation"
+    );
+    assert_eq!(
+        harness.server.refresh_calls.load(Ordering::SeqCst),
+        1,
+        "one catch-up flow must not refresh the stale credential again"
     );
 }
 

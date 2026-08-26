@@ -186,7 +186,10 @@ async fn a_lost_lease_duplicates_no_effect_and_loses_no_operation() {
     std::mem::forget(held);
     drop(stolen);
 
-    // Two senders now believe they own the same Operation. Correctness cannot depend on that.
+    // Two stale local senders now believe they own the same Operation. The Account execution
+    // fence serializes them, then current durable truth prevents the second HTTP send after the
+    // first reconciles. The lease remains only an optimization; the Account writer is the local
+    // ownership contract.
     let snapshot = harness
         .runtime
         .replica()
@@ -201,17 +204,16 @@ async fn a_lost_lease_duplicates_no_effect_and_loses_no_operation() {
         .dispatch_captured_ignoring_lease(&snapshot, &accepted)
         .await;
 
-    assert_eq!(harness.server.creates(), 2);
-    // One Operation ID and one fingerprint mean one Item row, whatever the local lease did.
+    assert_eq!(harness.server.creates(), 1);
     assert_eq!(harness.server.created_items(), vec![item_id]);
     let requests = harness.server.create_requests();
-    assert_eq!(requests[0].body, requests[1].body);
+    assert_eq!(requests[0].body, accepted.request.body);
     assert_eq!(
         requests[0].header("idempotency-key"),
-        requests[1].header("idempotency-key")
+        Some(operation_id.as_str())
     );
 
-    // And both sends land on the same single completion, not on two.
+    // The one accepted immutable request lands on one completion, never a local discard.
     let after = harness
         .runtime
         .replica()
@@ -260,6 +262,44 @@ async fn a_renewable_session_error_refreshes_and_keeps_the_same_bytes() {
 
     harness.runtime.close().await;
     dispatcher.await.unwrap();
+}
+
+#[tokio::test]
+async fn retry_lookup_refresh_replaces_the_session_used_by_the_following_send() {
+    let harness = seeded(false).await;
+    harness.server.script([Fault::NetworkFailure]);
+    let (operation_id, item_id) = harness.accept_create().await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    assert_eq!(harness.operation().unwrap().scheduling.attempt_count, 1);
+    harness.clock.advance(1_000);
+    harness.server.accepted_tokens.lock().unwrap().clear();
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    assert_eq!(
+        harness.server.refresh_calls.load(Ordering::SeqCst),
+        1,
+        "lookup renewal must replace the Session used by the send"
+    );
+    assert_eq!(harness.server.created_items(), vec![item_id]);
+    let requests = harness.server.create_requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer session-token-1")
+    );
+    assert_eq!(
+        requests[1].header("authorization"),
+        Some("Bearer session-token-2")
+    );
 }
 
 #[tokio::test]

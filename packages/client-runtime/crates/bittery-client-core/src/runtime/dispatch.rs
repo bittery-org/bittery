@@ -218,6 +218,36 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
     ) -> AttemptOutcome {
+        let account_id = snapshot.account_id.clone();
+        let expected_incarnation = snapshot.incarnation.clone();
+        let execution_lock = match self.account_execution_lock(&account_id) {
+            Ok(lock) => lock,
+            Err(_) => return AttemptOutcome::Parked,
+        };
+        let _execution_guard = execution_lock.lock().await;
+        if self.is_closed() {
+            return AttemptOutcome::Parked;
+        }
+        let Some(snapshot) = self.replica.snapshot(&account_id) else {
+            return AttemptOutcome::Progressed;
+        };
+        if snapshot.incarnation != expected_incarnation {
+            return AttemptOutcome::Progressed;
+        }
+        let Some(operation) = snapshot
+            .operations
+            .iter()
+            .find(|candidate| candidate.operation_id == operation.operation_id)
+            .cloned()
+        else {
+            return AttemptOutcome::Progressed;
+        };
+        let Ok(now_ms) = self.clock.now_ms() else {
+            return AttemptOutcome::Parked;
+        };
+        if operation.scheduling.not_before_ms > now_ms {
+            return AttemptOutcome::Progressed;
+        }
         let account_id = &snapshot.account_id;
         let Some(auth_config) = self.auth_client_config.clone() else {
             return AttemptOutcome::Parked;
@@ -233,7 +263,7 @@ impl Runtime {
                 return AttemptOutcome::Parked;
             }
             Err(_) => {
-                self.persist_backoff(snapshot, operation).await;
+                self.persist_backoff(&snapshot, &operation).await;
                 return AttemptOutcome::Progressed;
             }
         };
@@ -250,7 +280,7 @@ impl Runtime {
                 return AttemptOutcome::Parked;
             }
             Err(_) => {
-                self.persist_backoff(snapshot, operation).await;
+                self.persist_backoff(&snapshot, &operation).await;
                 return AttemptOutcome::Progressed;
             }
         };
@@ -262,11 +292,11 @@ impl Runtime {
         ) {
             Ok(http) => http,
             Err(_) => {
-                self.persist_backoff(snapshot, operation).await;
+                self.persist_backoff(&snapshot, &operation).await;
                 return AttemptOutcome::Progressed;
             }
         };
-        self.send_with_session(snapshot, operation, &http, session)
+        self.send_with_session(&snapshot, &operation, &http, session)
             .await
     }
 
@@ -284,16 +314,16 @@ impl Runtime {
         // effect; sending again would rely entirely on the Server's own deduplication.
         if operation.scheduling.attempt_count > 0 {
             match self
-                .lookup_operation_outcome(account_id, operation, http, &session)
+                .lookup_operation_outcome(account_id, operation, http, &mut session)
                 .await
             {
                 SemanticAnswer::Outcome(outcome) => {
                     return self
-                        .finish_operation(snapshot, operation, outcome, http, &session)
+                        .finish_operation(snapshot, operation, outcome, http, &mut session)
                         .await;
                 }
                 SemanticAnswer::IdentityReused => {
-                    self.fail_account_module(account_id).await;
+                    self.fail_account_module_fenced(account_id).await;
                     return AttemptOutcome::Parked;
                 }
                 // Nothing was decided yet, so the identical bytes still have to go.
@@ -353,11 +383,11 @@ impl Runtime {
             Ok(AuthenticatedOutcome::Ok(response)) => {
                 match self.read_dispatch_answer(operation, response.status, &response.body) {
                     SemanticAnswer::Outcome(outcome) => {
-                        self.finish_operation(snapshot, operation, outcome, http, &session)
+                        self.finish_operation(snapshot, operation, outcome, http, &mut session)
                             .await
                     }
                     SemanticAnswer::IdentityReused => {
-                        self.fail_account_module(account_id).await;
+                        self.fail_account_module_fenced(account_id).await;
                         AttemptOutcome::Parked
                     }
                     SemanticAnswer::Undecided | SemanticAnswer::Transient => {
@@ -389,10 +419,10 @@ impl Runtime {
         operation: &OperationRecord,
         outcome: crate::replica::ObservedOutcome,
         http: &AuthHttpClient<'_>,
-        session: &CurrentSessionDocument,
+        session: &mut CurrentSessionDocument,
     ) -> AttemptOutcome {
         match self
-            .complete_operation(
+            .complete_operation_fenced(
                 &snapshot.account_id,
                 operation,
                 outcome,

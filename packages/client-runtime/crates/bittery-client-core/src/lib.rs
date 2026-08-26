@@ -89,7 +89,6 @@ pub use replica::SqliteReplica;
 #[doc(hidden)]
 pub use runtime::{
     AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
-    AttachmentMoveManifest, AttachmentMoveManifestEntry, AttachmentMoveManifestRequest,
     AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
     AttachmentMoveUpload, AttachmentMoveUploadGrant,
 };

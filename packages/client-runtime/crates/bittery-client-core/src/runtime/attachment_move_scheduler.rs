@@ -16,6 +16,10 @@ use crate::{
     attachment_artifact_store::{
         AttachmentArtifactOwner, AttachmentArtifactStore, ProvisionalAttachmentArtifactStore,
     },
+    auth_http::{
+        AttachmentMoveManifestAnswer, AttachmentMoveManifestHttpEntry,
+        AttachmentMoveManifestHttpRequest, AuthHttpClient, AuthenticatedOutcome,
+    },
     replica::{
         AttachmentMovePreparationRecord, AuthorityAttachmentRecord, AuthorityVaultRecord,
         PreparedMoveAttachment, Replica,
@@ -30,7 +34,7 @@ use bittery_crypto_core::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -50,34 +54,11 @@ pub struct AttachmentMoveDownloadRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttachmentMoveManifestEntry {
-    pub attachment_id: String,
-    pub envelope_version: i32,
-    pub ciphertext_sha256: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttachmentMoveManifestRequest {
-    pub account_id: AccountId,
-    pub operation_id: String,
-    pub item_id: String,
-    pub source_vault_id: String,
-    pub target_vault_id: String,
-    pub attachments: Vec<AttachmentMoveManifestEntry>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttachmentMoveUploadGrant {
     pub attachment_id: String,
     pub storage_key: String,
     /// Invocation-scoped authority. Implementations must not persist or log it.
     pub upload_url: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttachmentMoveManifest {
-    pub operation_id: String,
-    pub uploads: Vec<AttachmentMoveUploadGrant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,10 +102,6 @@ pub trait AttachmentMoveTransferPort: Send + Sync {
         &self,
         request: AttachmentMoveDownloadRequest,
     ) -> Result<Box<dyn AttachmentMoveDownload>, AttachmentMoveTransferError>;
-    async fn renew_manifest(
-        &self,
-        request: AttachmentMoveManifestRequest,
-    ) -> Result<AttachmentMoveManifest, AttachmentMoveTransferError>;
     async fn open_upload(
         &self,
         account_id: &AccountId,
@@ -141,10 +118,6 @@ pub trait AttachmentMoveTransferPort {
         &self,
         request: AttachmentMoveDownloadRequest,
     ) -> Result<Box<dyn AttachmentMoveDownload>, AttachmentMoveTransferError>;
-    async fn renew_manifest(
-        &self,
-        request: AttachmentMoveManifestRequest,
-    ) -> Result<AttachmentMoveManifest, AttachmentMoveTransferError>;
     async fn open_upload(
         &self,
         account_id: &AccountId,
@@ -183,9 +156,44 @@ fn transfer_error(error: AttachmentMoveTransferError) -> PreparationTransportErr
     }
 }
 
-struct TransferAdapter(Arc<dyn AttachmentMoveTransferPort>);
+pub(crate) struct TransferAdapter {
+    binary: Arc<dyn AttachmentMoveTransferPort>,
+    runtime: Weak<super::Runtime>,
+}
 struct DownloadAdapter(Box<dyn AttachmentMoveDownload>);
 struct UploadAdapter(Box<dyn AttachmentMoveUpload>);
+
+impl TransferAdapter {
+    pub(crate) fn new(
+        binary: Arc<dyn AttachmentMoveTransferPort>,
+        runtime: Weak<super::Runtime>,
+    ) -> Self {
+        Self { binary, runtime }
+    }
+
+    fn manifest_answer(
+        answer: AttachmentMoveManifestAnswer,
+    ) -> Result<Manifest, PreparationTransportError> {
+        match answer {
+            AttachmentMoveManifestAnswer::Prepared(manifest) => Ok(Manifest {
+                operation_id: manifest.operation_id,
+                uploads: manifest
+                    .attachments
+                    .into_iter()
+                    .map(|grant| UploadGrant {
+                        attachment_id: grant.attachment_id,
+                        storage_key: grant.storage_key,
+                        upload_url: grant.upload_url,
+                    })
+                    .collect(),
+            }),
+            AttachmentMoveManifestAnswer::Busy => Err(PreparationTransportError::Busy),
+            AttachmentMoveManifestAnswer::StaleAuthority => {
+                Err(PreparationTransportError::StaleAuthority)
+            }
+        }
+    }
+}
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -218,7 +226,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
             DownloadPass::Scan => AttachmentMoveDownloadPass::Scan,
             DownloadPass::Transcrypt => AttachmentMoveDownloadPass::Transcrypt,
         };
-        self.0
+        self.binary
             .open_source(AttachmentMoveDownloadRequest {
                 account_id: request.account_id,
                 operation_id: request.operation_id,
@@ -235,37 +243,102 @@ impl AttachmentMoveTransfer for TransferAdapter {
         &self,
         request: ManifestRequest,
     ) -> Result<Manifest, PreparationTransportError> {
-        self.0
-            .renew_manifest(AttachmentMoveManifestRequest {
-                account_id: request.account_id,
-                operation_id: request.operation_id,
-                item_id: request.item_id,
-                source_vault_id: request.source_vault_id,
-                target_vault_id: request.target_vault_id,
-                attachments: request
-                    .attachments
-                    .into_iter()
-                    .map(|entry| AttachmentMoveManifestEntry {
-                        attachment_id: entry.attachment_id,
-                        envelope_version: entry.envelope_version,
-                        ciphertext_sha256: entry.ciphertext_sha256,
-                    })
-                    .collect(),
-            })
+        let runtime = self
+            .runtime
+            .upgrade()
+            .ok_or(PreparationTransportError::Transient)?;
+        let snapshot = runtime
+            .replica
+            .snapshot(&request.account_id)
+            .ok_or(PreparationTransportError::Invariant)?;
+        let metadata = runtime
+            .platform_storage
+            .load_account_metadata(&request.account_id, &snapshot.incarnation)
             .await
-            .map(|manifest| Manifest {
-                operation_id: manifest.operation_id,
-                uploads: manifest
-                    .uploads
-                    .into_iter()
-                    .map(|grant| UploadGrant {
-                        attachment_id: grant.attachment_id,
-                        storage_key: grant.storage_key,
-                        upload_url: grant.upload_url,
-                    })
-                    .collect(),
-            })
-            .map_err(transfer_error)
+            .map_err(|_| PreparationTransportError::Transient)?
+            .ok_or(PreparationTransportError::Transient)?;
+        if metadata.user_id != snapshot.user_id {
+            return Err(PreparationTransportError::Invariant);
+        }
+        let session = runtime
+            .platform_storage
+            .load_current_session(&request.account_id, &snapshot.incarnation)
+            .await
+            .map_err(|_| PreparationTransportError::Transient)?
+            .ok_or(PreparationTransportError::Transient)?;
+        let auth_config = runtime
+            .auth_client_config
+            .clone()
+            .ok_or(PreparationTransportError::Transient)?;
+        let http = AuthHttpClient::new(
+            &runtime.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        )
+        .map_err(|_| PreparationTransportError::Invariant)?;
+        let operation_id = request.operation_id;
+        let wire_request = AttachmentMoveManifestHttpRequest {
+            item_id: request.item_id,
+            source_vault_id: request.source_vault_id,
+            target_vault_id: request.target_vault_id,
+            attachments: request
+                .attachments
+                .into_iter()
+                .map(|entry| AttachmentMoveManifestHttpEntry {
+                    attachment_id: entry.attachment_id,
+                    envelope_version: entry.envelope_version,
+                    ciphertext_sha256: entry.ciphertext_sha256,
+                })
+                .collect(),
+        };
+        let first = http
+            .renew_attachment_move_manifest(
+                session.token.as_ref(),
+                &operation_id,
+                &wire_request,
+                crate::RequestCancellation::new(),
+            )
+            .await
+            .map_err(|error| match error.code {
+                RuntimeErrorCode::AuthenticationUnavailable
+                | RuntimeErrorCode::InvariantViolation => PreparationTransportError::Invariant,
+                _ => PreparationTransportError::Transient,
+            })?;
+        match first {
+            AuthenticatedOutcome::Ok(answer) => Self::manifest_answer(answer),
+            AuthenticatedOutcome::Transient => Err(PreparationTransportError::Transient),
+            AuthenticatedOutcome::ReauthenticationRequired => {
+                let renewed = runtime
+                    .renew_session(
+                        &request.account_id,
+                        &session,
+                        &http,
+                        crate::RequestCancellation::new(),
+                    )
+                    .await
+                    .map_err(|_| PreparationTransportError::Transient)?;
+                match http
+                    .renew_attachment_move_manifest(
+                        renewed.token.as_ref(),
+                        &operation_id,
+                        &wire_request,
+                        crate::RequestCancellation::new(),
+                    )
+                    .await
+                    .map_err(|error| match error.code {
+                        RuntimeErrorCode::AuthenticationUnavailable
+                        | RuntimeErrorCode::InvariantViolation => {
+                            PreparationTransportError::Invariant
+                        }
+                        _ => PreparationTransportError::Transient,
+                    })? {
+                    AuthenticatedOutcome::Ok(answer) => Self::manifest_answer(answer),
+                    AuthenticatedOutcome::ReauthenticationRequired
+                    | AuthenticatedOutcome::Transient => Err(PreparationTransportError::Transient),
+                }
+            }
+        }
     }
 
     async fn open_upload(
@@ -275,7 +348,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
         grant: &UploadGrant,
         owner: &AttachmentArtifactOwner,
     ) -> Result<Box<dyn StagingUpload>, PreparationTransportError> {
-        self.0
+        self.binary
             .open_upload(
                 account_id,
                 operation_id,
@@ -586,8 +659,10 @@ impl AttachmentMovePreparationScheduler {
             Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>,
         >,
         facade: AttachmentMovePreparationFacade,
+        runtime: Weak<super::Runtime>,
     ) -> Self {
-        let transfer: Arc<dyn AttachmentMoveTransfer> = Arc::new(TransferAdapter(facade.transfer));
+        let transfer: Arc<dyn AttachmentMoveTransfer> =
+            Arc::new(TransferAdapter::new(facade.transfer, runtime));
         let secrets: Arc<dyn AttachmentMoveSecretProvider> = Arc::new(
             RuntimeAttachmentMoveSecrets::new(replica.clone(), live_master_unlock_keys),
         );

@@ -42,9 +42,22 @@ impl Runtime {
                 "authentication is not configured for this Runtime",
             )
         })?;
+        let expected_incarnation = self
+            .replica
+            .snapshot(account_id)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+            })?
+            .incarnation;
+        let execution_lock = self.account_execution_lock(account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
         let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
+        if snapshot.incarnation != expected_incarnation {
+            return Err(replica_busy());
+        }
         let metadata = self
             .platform_storage
             .load_account_metadata(account_id, &snapshot.incarnation)
@@ -373,11 +386,11 @@ impl Runtime {
                 // keeps one Sync feed and one Cursor rather than a second parallel path.
                 if event.entity_type == SyncEntityType::Operation {
                     match self
-                        .reconcile_resolved_operation(
+                        .reconcile_resolved_operation_fenced(
                             account_id,
                             &event.entity_id,
                             http,
-                            &session,
+                            &mut session,
                             changes
                                 .cursor
                                 .as_ref()

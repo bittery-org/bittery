@@ -79,7 +79,7 @@ impl Runtime {
         account_id: &AccountId,
         operation: &OperationRecord,
         http: &AuthHttpClient<'_>,
-        session: &CurrentSessionDocument,
+        session: &mut CurrentSessionDocument,
     ) -> SemanticAnswer {
         let cancellation = RequestCancellation::new();
         let mut answer = http
@@ -96,9 +96,10 @@ impl Runtime {
             else {
                 return SemanticAnswer::Transient;
             };
+            *session = renewed;
             answer = http
                 .fetch_operation_outcome(
-                    renewed.token.as_ref(),
+                    session.token.as_ref(),
                     &operation.operation_id,
                     cancellation,
                 )
@@ -119,14 +120,54 @@ impl Runtime {
     /// and only then does one plan write authority, remove the Operation and its overlay, insert
     /// the compact receipt, and advance a matching exact Cursor. A fetch or commit failure leaves
     /// every one of those unchanged.
+    #[allow(
+        dead_code,
+        reason = "non-Bootstrap Sync callers retain the lock-acquiring reconciliation seam"
+    )]
     pub(super) async fn complete_operation(
         &self,
         account_id: &AccountId,
         operation: &OperationRecord,
         outcome: ObservedOutcome,
         http: &AuthHttpClient<'_>,
-        session: &CurrentSessionDocument,
+        session: &mut CurrentSessionDocument,
         cursor: Option<CursorAdvance>,
+    ) -> CompletionResult {
+        self.complete_operation_with_fence(
+            account_id, operation, outcome, http, session, cursor, false,
+        )
+        .await
+    }
+
+    /// Dispatch already owns the Account execution fence across Session use and reconciliation.
+    pub(super) async fn complete_operation_fenced(
+        &self,
+        account_id: &AccountId,
+        operation: &OperationRecord,
+        outcome: ObservedOutcome,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+        cursor: Option<CursorAdvance>,
+    ) -> CompletionResult {
+        self.complete_operation_with_fence(
+            account_id, operation, outcome, http, session, cursor, true,
+        )
+        .await
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the fence mode preserves one reconciliation path for dispatch and Sync"
+    )]
+    async fn complete_operation_with_fence(
+        &self,
+        account_id: &AccountId,
+        operation: &OperationRecord,
+        outcome: ObservedOutcome,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+        cursor: Option<CursorAdvance>,
+        fence_already_held: bool,
     ) -> CompletionResult {
         let observed = outcome.clone();
         let mutation = match &outcome.result {
@@ -145,7 +186,11 @@ impl Runtime {
                 {
                     // The Server's own outcome and its own Item disagree. Reading further would
                     // be guessing, and this Runtime does not guess about authority.
-                    return self.fail_account_module(account_id).await;
+                    return if fence_already_held {
+                        self.fail_account_module_fenced(account_id).await
+                    } else {
+                        self.fail_account_module(account_id).await
+                    };
                 }
                 PlanMutation::ReconcileAppliedCreate {
                     outcome,
@@ -157,8 +202,13 @@ impl Runtime {
                 PlanMutation::RetainRejection { outcome, cursor }
             }
         };
-        self.commit_completion(account_id, &observed, mutation)
-            .await
+        if fence_already_held {
+            self.commit_completion_fenced(account_id, &observed, mutation)
+                .await
+        } else {
+            self.commit_completion(account_id, &observed, mutation)
+                .await
+        }
     }
 
     /// Fetches the authoritative encrypted Item, renewing one expired Session on the way.
@@ -167,7 +217,7 @@ impl Runtime {
         account_id: &AccountId,
         item_id: &str,
         http: &AuthHttpClient<'_>,
-        session: &CurrentSessionDocument,
+        session: &mut CurrentSessionDocument,
     ) -> Result<Option<AuthorityItemRecord>, CompletionResult> {
         let cancellation = RequestCancellation::new();
         let mut fetched = http
@@ -179,8 +229,9 @@ impl Runtime {
                 .await
             {
                 Ok(renewed) => {
+                    *session = renewed;
                     fetched = http
-                        .fetch_item(renewed.token.as_ref(), item_id, cancellation)
+                        .fetch_item(session.token.as_ref(), item_id, cancellation)
                         .await;
                 }
                 Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
@@ -220,6 +271,19 @@ impl Runtime {
         if self.is_closed() {
             return CompletionResult::Retry;
         }
+        self.commit_completion_fenced(account_id, observed, mutation)
+            .await
+    }
+
+    async fn commit_completion_fenced(
+        &self,
+        account_id: &AccountId,
+        observed: &ObservedOutcome,
+        mutation: PlanMutation,
+    ) -> CompletionResult {
+        if self.is_closed() {
+            return CompletionResult::Retry;
+        }
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Retry;
         };
@@ -237,8 +301,7 @@ impl Runtime {
             }
             // A matching semantic outcome is immutable, so a different one for the same
             // identity is not an update; it is a contradiction.
-            drop(_execution_guard);
-            return self.fail_account_module(account_id).await;
+            return self.fail_account_module_fenced(account_id).await;
         }
         match snapshot
             .operations
@@ -247,8 +310,7 @@ impl Runtime {
         {
             // The durable fingerprint is the last word on which bytes this outcome answered.
             Some(operation) if operation.request_fingerprint != observed.request_fingerprint => {
-                drop(_execution_guard);
-                return self.fail_account_module(account_id).await;
+                return self.fail_account_module_fenced(account_id).await;
             }
             Some(_) => {}
             // The Operation is gone without a receipt, which only Account removal or a
@@ -296,6 +358,13 @@ impl Runtime {
             return CompletionResult::Failed;
         };
         let _execution_guard = execution_lock.lock().await;
+        self.fail_account_module_fenced(account_id).await
+    }
+
+    pub(super) async fn fail_account_module_fenced(
+        &self,
+        account_id: &AccountId,
+    ) -> CompletionResult {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Failed;
         };
@@ -329,12 +398,42 @@ impl Runtime {
     /// The feed carries identity, never the decision, so the outcome is still read from the
     /// Server. The event's Cursor rides along in the same reconciliation plan: the Operation and
     /// the Cursor step past it become durable together, or neither does.
+    #[allow(
+        dead_code,
+        reason = "non-Bootstrap Sync callers retain the lock-acquiring reconciliation seam"
+    )]
     pub(super) async fn reconcile_resolved_operation(
         &self,
         account_id: &AccountId,
         operation_id: &str,
         http: &AuthHttpClient<'_>,
-        session: &CurrentSessionDocument,
+        session: &mut CurrentSessionDocument,
+        next_cursor: Option<SyncCursor>,
+    ) -> CompletionResult {
+        let Ok(execution_lock) = self.account_execution_lock(account_id) else {
+            return CompletionResult::Retry;
+        };
+        let _execution_guard = execution_lock.lock().await;
+        if self.is_closed() {
+            return CompletionResult::Retry;
+        }
+        self.reconcile_resolved_operation_fenced(
+            account_id,
+            operation_id,
+            http,
+            session,
+            next_cursor,
+        )
+        .await
+    }
+
+    /// Bootstrap already owns the Account execution fence across Sync reconciliation.
+    pub(super) async fn reconcile_resolved_operation_fenced(
+        &self,
+        account_id: &AccountId,
+        operation_id: &str,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
         next_cursor: Option<SyncCursor>,
     ) -> CompletionResult {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
@@ -355,10 +454,12 @@ impl Runtime {
             .await
         {
             SemanticAnswer::Outcome(outcome) => {
-                self.complete_operation(account_id, &operation, outcome, http, session, cursor)
-                    .await
+                self.complete_operation_fenced(
+                    account_id, &operation, outcome, http, session, cursor,
+                )
+                .await
             }
-            SemanticAnswer::IdentityReused => self.fail_account_module(account_id).await,
+            SemanticAnswer::IdentityReused => self.fail_account_module_fenced(account_id).await,
             SemanticAnswer::Undecided | SemanticAnswer::Transient => CompletionResult::Retry,
         }
     }

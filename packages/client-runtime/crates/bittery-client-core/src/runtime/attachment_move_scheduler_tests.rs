@@ -6,12 +6,832 @@ use super::attachment_move_scheduler::{
 use crate::{AccountId, RuntimeError};
 use async_trait::async_trait;
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
     },
 };
+use zeroize::Zeroizing;
+
+struct BinaryOnlyTransfer;
+
+#[async_trait]
+impl super::attachment_move_scheduler::AttachmentMoveTransferPort for BinaryOnlyTransfer {
+    async fn open_source(
+        &self,
+        _request: super::attachment_move_scheduler::AttachmentMoveDownloadRequest,
+    ) -> Result<
+        Box<dyn super::attachment_move_scheduler::AttachmentMoveDownload>,
+        super::attachment_move_scheduler::AttachmentMoveTransferError,
+    > {
+        Err(super::attachment_move_scheduler::AttachmentMoveTransferError::Transient)
+    }
+
+    async fn open_upload(
+        &self,
+        _account_id: &AccountId,
+        _operation_id: &str,
+        _grant: &super::attachment_move_scheduler::AttachmentMoveUploadGrant,
+        _owner: &crate::attachment_artifact_store::AttachmentArtifactOwner,
+    ) -> Result<
+        Box<dyn super::attachment_move_scheduler::AttachmentMoveUpload>,
+        super::attachment_move_scheduler::AttachmentMoveTransferError,
+    > {
+        Err(super::attachment_move_scheduler::AttachmentMoveTransferError::Transient)
+    }
+}
+
+struct ManifestPlatform {
+    values: Mutex<BTreeMap<(String, String), String>>,
+    renewed_session_stored: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl crate::platform_storage::SerializedPlatformStorageExecutor for ManifestPlatform {
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        let area = request["area"].as_str().unwrap().to_owned();
+        let key = request["key"].as_str().unwrap().to_owned();
+        Ok(Zeroizing::new(match request["type"].as_str().unwrap() {
+            "get" => serde_json::json!({
+                "type": "value",
+                "value": self.values.lock().unwrap().get(&(area, key)).cloned(),
+            })
+            .to_string(),
+            "set" => {
+                let value = request["value"].as_str().unwrap().to_owned();
+                if value.contains("renewed-manifest-token") {
+                    self.renewed_session_stored.store(true, Ordering::SeqCst);
+                }
+                self.values.lock().unwrap().insert((area, key), value);
+                serde_json::json!({ "type": "done" }).to_string()
+            }
+            other => panic!("unexpected platform request {other}"),
+        }))
+    }
+}
+
+struct ManifestHttp {
+    renewed_session_stored: Arc<AtomicBool>,
+    requests: Mutex<Vec<serde_json::Value>>,
+    replay_unauthorized: bool,
+    operation_id: &'static str,
+    item_id: &'static str,
+    attachment_id: &'static str,
+    ciphertext_sha256: String,
+    refresh_hold: Option<Arc<RefreshHold>>,
+}
+
+struct RefreshHold {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+struct BootstrapHoldingHttp {
+    server: Arc<super::operation_fixtures::FakeServer>,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for BootstrapHoldingHttp {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        if request["url"]
+            .as_str()
+            .is_some_and(|url| url.contains("/api/v1/sync/changes"))
+        {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        crate::http_transport::SerializedHttpExecutor::invoke(&*self.server, request_json).await
+    }
+
+    fn cancel(&self, dispatch_id: &str) {
+        crate::http_transport::SerializedHttpExecutor::cancel(&*self.server, dispatch_id);
+    }
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for ManifestHttp {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        let url = request["url"].as_str().unwrap();
+        let authorization = request["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|header| {
+                header["name"]
+                    .as_str()
+                    .unwrap()
+                    .eq_ignore_ascii_case("authorization")
+            })
+            .and_then(|header| header["value"].as_str())
+            .unwrap();
+        let response = if url.ends_with("/api/v1/sessions/current/refresh") {
+            assert_eq!(authorization, "Bearer first-manifest-token");
+            if let Some(hold) = &self.refresh_hold {
+                hold.entered.notify_one();
+                hold.release.notified().await;
+            }
+            serde_json::json!({
+                "type": "completed",
+                "status": 200,
+                "headers": [{ "name": "content-type", "value": "application/json" }],
+                "body": serde_json::to_vec(&serde_json::json!({
+                    "token": "renewed-manifest-token",
+                    "sessionId": "renewed-session",
+                    "expiresAt": "2099-01-01T00:00:00Z",
+                })).unwrap(),
+            })
+        } else if url.ends_with("/attachment-move-manifest") {
+            assert_eq!(
+                url,
+                format!(
+                    "https://requested.example.test/api/v1/operations/{}/attachment-move-manifest",
+                    self.operation_id
+                )
+            );
+            let previous_manifest_calls = self
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|record| record["url"] == request["url"])
+                .count();
+            if previous_manifest_calls == 0 {
+                assert_eq!(authorization, "Bearer first-manifest-token");
+                serde_json::json!({
+                    "type": "completed",
+                    "status": 401,
+                    "headers": [],
+                    "body": [],
+                })
+            } else {
+                assert_eq!(authorization, "Bearer renewed-manifest-token");
+                assert!(self.renewed_session_stored.load(Ordering::SeqCst));
+                if self.replay_unauthorized {
+                    self.requests.lock().unwrap().push(request);
+                    return Ok(serde_json::json!({
+                        "type": "completed",
+                        "status": 401,
+                        "headers": [],
+                        "body": [],
+                    })
+                    .to_string());
+                }
+                let body: Vec<u8> = request["body"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|byte| byte.as_u64().unwrap() as u8)
+                    .collect();
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                    serde_json::json!({
+                        "itemId": self.item_id,
+                        "sourceVaultId": "vault-source",
+                        "targetVaultId": "vault-target",
+                        "attachments": [{
+                            "attachmentId": self.attachment_id,
+                            "envelopeVersion": 4,
+                            "ciphertextSha256": self.ciphertext_sha256,
+                        }],
+                    })
+                );
+                serde_json::json!({
+                    "type": "completed",
+                    "status": 200,
+                    "headers": [{ "name": "content-type", "value": "application/json" }],
+                    "body": serde_json::to_vec(&serde_json::json!({
+                        "operationId": self.operation_id,
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                        "attachments": [{
+                            "attachmentId": self.attachment_id,
+                            "storageKey": "staging-object",
+                            "uploadUrl": "https://object.example.test/invocation-secret",
+                        }],
+                    })).unwrap(),
+                })
+            }
+        } else {
+            serde_json::json!({ "type": "networkFailure" })
+        };
+        self.requests.lock().unwrap().push(request);
+        Ok(response.to_string())
+    }
+
+    fn cancel(&self, _dispatch_id: &str) {}
+}
+
+#[tokio::test]
+async fn core_manifest_authority_refreshes_the_explicit_account_before_one_replay() {
+    use super::attachment_move_preparation::{
+        AttachmentMoveTransfer, ManifestAttachment, ManifestRequest,
+    };
+    use crate::{
+        auth_http::{AuthClientConfig, ClientPlatform},
+        platform_storage::{AccountMetadataDocument, CurrentSessionDocument, PlatformStorage},
+        protocol::Incarnation,
+        replica::{InMemoryReplica, ReplicaPersistence},
+    };
+
+    let requested = AccountId::from("account-requested");
+    let foreign = AccountId::from("account-active-foreign");
+    let requested_incarnation = Incarnation::from("incarnation-requested");
+    let persistence = Arc::new(InMemoryReplica::default());
+    persistence
+        .install(
+            requested.clone(),
+            "user-requested".into(),
+            requested_incarnation.clone(),
+        )
+        .unwrap();
+    persistence
+        .install(
+            foreign,
+            "user-foreign".into(),
+            Incarnation::from("incarnation-foreign"),
+        )
+        .unwrap();
+    let stored = Arc::new(AtomicBool::new(false));
+    let platform = Arc::new(PlatformStorage::new(Arc::new(ManifestPlatform {
+        values: Mutex::new(BTreeMap::new()),
+        renewed_session_stored: stored.clone(),
+    })));
+    platform
+        .store_account_metadata(
+            &AccountMetadataDocument::new(
+                requested.clone(),
+                requested_incarnation.clone(),
+                "user-requested".into(),
+                "requested@example.test".into(),
+                "Requested".into(),
+                "https://requested.example.test".into(),
+                None,
+                None,
+                "A3".into(),
+                1,
+                1,
+                false,
+                false,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    platform
+        .store_current_session(
+            &CurrentSessionDocument::new(
+                requested.clone(),
+                requested_incarnation,
+                "first-manifest-token".into(),
+                Some("first-session".into()),
+                2,
+                Some(2),
+                Vec::new(),
+                "encrypted-private-key".into(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let http_executor = Arc::new(ManifestHttp {
+        renewed_session_stored: stored.clone(),
+        requests: Mutex::new(Vec::new()),
+        replay_unauthorized: false,
+        operation_id: "operation-requested",
+        item_id: "item-requested",
+        attachment_id: "attachment-requested",
+        ciphertext_sha256: "11".repeat(32),
+        refresh_hold: None,
+    });
+    let http_transport = Arc::new(crate::http_transport::HttpTransport::new(
+        http_executor.clone(),
+    ));
+    let auth_config =
+        AuthClientConfig::new("client".into(), ClientPlatform::Web, "1.0.0".into()).unwrap();
+    let runtime = super::Runtime::with_persistence(
+        persistence.clone() as Arc<dyn ReplicaPersistence>,
+        platform.clone(),
+        http_transport.clone(),
+        Some(auth_config.clone()),
+        None,
+        true,
+        Arc::new(crate::authentication_installation::FixedClock(0)),
+        Arc::new(NeverTimer),
+        Some(persistence),
+    );
+    runtime.replica().load(&requested).await.unwrap();
+    runtime.mark_reauthentication_required(&requested);
+    let revision_before_session_available = runtime.device_revision.load(Ordering::SeqCst);
+    let replica = runtime.replica();
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        Arc::new(BinaryOnlyTransfer),
+        Arc::downgrade(&runtime),
+    );
+
+    let manifest = adapter
+        .renew_manifest(ManifestRequest {
+            account_id: requested.clone(),
+            operation_id: "operation-requested".into(),
+            item_id: "item-requested".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: vec![ManifestAttachment {
+                attachment_id: "attachment-requested".into(),
+                envelope_version: 4,
+                ciphertext_sha256: "11".repeat(32),
+            }],
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(manifest.operation_id, "operation-requested");
+    assert_eq!(manifest.uploads.len(), 1);
+    assert!(stored.load(Ordering::SeqCst));
+    let renewed = platform
+        .load_current_session(
+            &requested,
+            &replica.snapshot(&requested).unwrap().incarnation,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(renewed.token.as_ref(), "renewed-manifest-token");
+    assert!(!runtime
+        .waiting_reasons
+        .lock()
+        .unwrap()
+        .contains_key(&requested));
+    assert_eq!(
+        runtime.device_revision.load(Ordering::SeqCst),
+        revision_before_session_available + 1
+    );
+    assert_eq!(http_executor.requests.lock().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn a_second_manifest_unauthorized_answer_retries_without_discarding_accepted_work() {
+    use super::attachment_move_preparation::{
+        AttachmentMoveTransfer, ManifestAttachment, ManifestRequest, PreparationTransportError,
+    };
+    use crate::{
+        auth_http::{AuthClientConfig, ClientPlatform},
+        platform_storage::{AccountMetadataDocument, CurrentSessionDocument, PlatformStorage},
+        protocol::Incarnation,
+        replica::{InMemoryReplica, ReplicaPersistence},
+    };
+
+    let requested = AccountId::from("account-requested");
+    let requested_incarnation = Incarnation::from("incarnation-account-requested");
+    let persistence = Arc::new(InMemoryReplica::default());
+    seed_promotable_preparation(&persistence, requested.clone(), "operation-requested", 7);
+    let stored = Arc::new(AtomicBool::new(false));
+    let platform = Arc::new(PlatformStorage::new(Arc::new(ManifestPlatform {
+        values: Mutex::new(BTreeMap::new()),
+        renewed_session_stored: stored.clone(),
+    })));
+    platform
+        .store_account_metadata(
+            &AccountMetadataDocument::new(
+                requested.clone(),
+                requested_incarnation.clone(),
+                "user-scheduler".into(),
+                "requested@example.test".into(),
+                "Requested".into(),
+                "https://requested.example.test".into(),
+                None,
+                None,
+                "A3".into(),
+                1,
+                1,
+                false,
+                false,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    platform
+        .store_current_session(
+            &CurrentSessionDocument::new(
+                requested.clone(),
+                requested_incarnation,
+                "first-manifest-token".into(),
+                Some("first-session".into()),
+                2,
+                Some(2),
+                Vec::new(),
+                "encrypted-private-key".into(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let http_executor = Arc::new(ManifestHttp {
+        renewed_session_stored: stored,
+        requests: Mutex::new(Vec::new()),
+        replay_unauthorized: true,
+        operation_id: "operation-requested",
+        item_id: "item-requested",
+        attachment_id: "attachment-requested",
+        ciphertext_sha256: "11".repeat(32),
+        refresh_hold: None,
+    });
+    let runtime = super::Runtime::with_persistence(
+        persistence.clone() as Arc<dyn ReplicaPersistence>,
+        platform,
+        Arc::new(crate::http_transport::HttpTransport::new(
+            http_executor.clone(),
+        )),
+        Some(AuthClientConfig::new("client".into(), ClientPlatform::Web, "1.0.0".into()).unwrap()),
+        None,
+        true,
+        Arc::new(crate::authentication_installation::FixedClock(0)),
+        Arc::new(NeverTimer),
+        Some(persistence),
+    );
+    runtime.replica().load(&requested).await.unwrap();
+    let replica = runtime.replica();
+    let adapter = super::attachment_move_scheduler::TransferAdapter::new(
+        Arc::new(BinaryOnlyTransfer),
+        Arc::downgrade(&runtime),
+    );
+
+    let error = adapter
+        .renew_manifest(ManifestRequest {
+            account_id: requested.clone(),
+            operation_id: "operation-requested".into(),
+            item_id: "item-requested".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: vec![ManifestAttachment {
+                attachment_id: "attachment-requested".into(),
+                envelope_version: 4,
+                ciphertext_sha256: "11".repeat(32),
+            }],
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error, PreparationTransportError::Transient);
+    let requests = http_executor.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/sessions/current/refresh"))
+            .count(),
+        1
+    );
+    let snapshot = replica.snapshot(&requested).unwrap();
+    assert_eq!(snapshot.attachment_move_preparations.len(), 1);
+    assert_eq!(
+        snapshot.attachment_move_preparations[0]
+            .scheduling
+            .attempt_count,
+        7
+    );
+}
+
+#[tokio::test]
+async fn ordinary_dispatch_waits_behind_the_same_account_preparation_execution_fence() {
+    use super::operation_fixtures::{seeded, RefreshBehavior, SECOND_TOKEN};
+
+    let harness = seeded(false).await;
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    harness.server.accepted_tokens.lock().unwrap().clear();
+    let (operation_id, _) = harness.accept_create().await;
+    let execution_lock = harness
+        .runtime
+        .account_execution_lock(&harness.account_id)
+        .unwrap();
+    let preparation_guard = execution_lock.lock().await;
+    let dispatch = tokio::spawn({
+        let runtime = harness.runtime.clone();
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .dispatch_once_ignoring_lease(&account_id, &operation_id)
+                .await
+        }
+    });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+
+    assert!(
+        harness.server.requests.lock().unwrap().is_empty(),
+        "dispatch must not reach Session HTTP while preparation owns the Account"
+    );
+    drop(preparation_guard);
+    tokio::time::timeout(std::time::Duration::from_secs(1), dispatch)
+        .await
+        .expect("dispatch must not reacquire its own Account execution fence")
+        .unwrap();
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert!(harness.operation().is_none());
+}
+
+#[tokio::test]
+async fn ordinary_dispatch_waits_while_bootstrap_owns_the_account_execution_fence() {
+    use super::operation_fixtures::{auth_config, seeded, TestTimer};
+
+    let harness = seeded(false).await;
+    let (operation_id, _) = harness.accept_create().await;
+    let http = Arc::new(BootstrapHoldingHttp {
+        server: harness.server.clone(),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let runtime = super::Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        http.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        TestTimer::advancing(harness.clock.clone()),
+    );
+    runtime.replica().load(&harness.account_id).await.unwrap();
+    runtime.unlock_account(&harness.account_id).await.unwrap();
+    let bootstrap = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .bootstrap_account(&account_id, crate::RequestCancellation::new())
+                .await
+        }
+    });
+    http.entered.notified().await;
+    let dispatch = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .dispatch_once_ignoring_lease(&account_id, &operation_id)
+                .await
+        }
+    });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        harness.server.creates(),
+        0,
+        "dispatch must not enter Session HTTP while Bootstrap owns the Account"
+    );
+    http.release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(1), bootstrap)
+        .await
+        .expect("Bootstrap must finish after its HTTP response")
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), dispatch)
+        .await
+        .expect("dispatch must resume after Bootstrap releases the Account")
+        .unwrap();
+    assert_eq!(harness.server.creates(), 1);
+}
+
+#[tokio::test]
+async fn production_scheduler_persists_backoff_after_manifest_refresh_replay_is_unauthorized() {
+    use crate::{
+        attachment_artifact_store::{
+            AttachmentArtifactStore, AttachmentArtifactStoreRequest, SqliteAttachmentArtifactStore,
+        },
+        auth_http::{AuthClientConfig, ClientPlatform},
+        platform_storage::{AccountMetadataDocument, CurrentSessionDocument, PlatformStorage},
+        protocol::Incarnation,
+        replica::{GuardedCommitPlan, InMemoryReplica, PlanMutation, ReplicaPersistence},
+    };
+
+    let account_id = AccountId::from("account-production-manifest");
+    let operation_id = "operation-production-manifest";
+    let incarnation = Incarnation::from("incarnation-account-production-manifest");
+    let persistence = Arc::new(InMemoryReplica::default());
+    seed_promotable_preparation(&persistence, account_id.clone(), operation_id, 7);
+    let before_reset = persistence.snapshot(&account_id).unwrap();
+    let preparation = &before_reset.attachment_move_preparations[0];
+    persistence
+        .execute(GuardedCommitPlan::new(
+            account_id.clone(),
+            before_reset.incarnation,
+            before_reset.revision,
+            before_reset.lock_epoch,
+            vec![PlanMutation::ResetAttachmentMoveUpload {
+                operation_id: operation_id.into(),
+                expected_intent_fingerprint: preparation.intent_fingerprint,
+                attachment_id: "attachment-scheduler".into(),
+            }],
+        ))
+        .unwrap();
+    let reset = persistence.snapshot(&account_id).unwrap();
+    let artifact = match &reset.attachment_move_preparations[0].progress[0] {
+        crate::replica::AttachmentMoveProgress::Encrypted { artifact, .. } => artifact.clone(),
+        other => panic!("expected encrypted artifact, got {other:?}"),
+    };
+    let owner = crate::attachment_artifact_store::AttachmentArtifactOwner::from_reference_parts(
+        account_id.clone(),
+        operation_id,
+        "attachment-scheduler",
+        artifact.artifact_id.clone(),
+        artifact.ciphertext_sha256.clone(),
+        artifact.byte_length,
+    )
+    .unwrap();
+    let artifacts = Arc::new(SqliteAttachmentArtifactStore::open(":memory:").unwrap());
+    artifacts
+        .invoke(AttachmentArtifactStoreRequest::WriteChunk {
+            owner: owner.clone(),
+            chunk_index: 0,
+            bytes: vec![42],
+        })
+        .await
+        .unwrap();
+    artifacts
+        .invoke(AttachmentArtifactStoreRequest::Publish { owner })
+        .await
+        .unwrap();
+
+    let stored = Arc::new(AtomicBool::new(false));
+    let platform = Arc::new(PlatformStorage::new(Arc::new(ManifestPlatform {
+        values: Mutex::new(BTreeMap::new()),
+        renewed_session_stored: stored.clone(),
+    })));
+    platform
+        .store_account_metadata(
+            &AccountMetadataDocument::new(
+                account_id.clone(),
+                incarnation.clone(),
+                "user-scheduler".into(),
+                "requested@example.test".into(),
+                "Requested".into(),
+                "https://requested.example.test".into(),
+                None,
+                None,
+                "A3".into(),
+                1,
+                1,
+                false,
+                false,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    platform
+        .store_current_session(
+            &CurrentSessionDocument::new(
+                account_id.clone(),
+                incarnation,
+                "first-manifest-token".into(),
+                Some("first-session".into()),
+                2,
+                Some(2),
+                Vec::new(),
+                "encrypted-private-key".into(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let refresh_hold = Arc::new(RefreshHold {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let http_executor = Arc::new(ManifestHttp {
+        renewed_session_stored: stored,
+        requests: Mutex::new(Vec::new()),
+        replay_unauthorized: true,
+        operation_id: "operation-production-manifest",
+        item_id: "item-scheduler",
+        attachment_id: "attachment-scheduler",
+        ciphertext_sha256: artifact.ciphertext_sha256.clone(),
+        refresh_hold: Some(refresh_hold.clone()),
+    });
+    let runtime = super::Runtime::with_persistence(
+        persistence.clone() as Arc<dyn ReplicaPersistence>,
+        platform,
+        Arc::new(crate::http_transport::HttpTransport::new(
+            http_executor.clone(),
+        )),
+        Some(AuthClientConfig::new("client".into(), ClientPlatform::Web, "1.0.0".into()).unwrap()),
+        None,
+        true,
+        Arc::new(crate::authentication_installation::FixedClock(0)),
+        Arc::new(NeverTimer),
+        Some(persistence),
+    );
+    runtime.replica().load(&account_id).await.unwrap();
+    runtime.install_attachment_move_preparation(
+        super::attachment_move_scheduler::AttachmentMovePreparationFacade::new(
+            artifacts.clone(),
+            artifacts,
+            Arc::new(BinaryOnlyTransfer),
+        ),
+    );
+    runtime.seed_unlocked_preparation_account(&account_id);
+    let ordinary_operation_id = match runtime
+        .request(
+            crate::RuntimeRequest::CreateLoginItem {
+                account_id: account_id.clone(),
+                vault_id: "vault-source".into(),
+                draft: super::operation_fixtures::draft(),
+            },
+            crate::RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        crate::RuntimeResponse::Accepted { operation_id, .. } => operation_id,
+        other => panic!("expected accepted ordinary Operation, got {other:?}"),
+    };
+    let lifecycle = tokio::spawn(runtime.clone().run_attachment_move_preparation());
+    refresh_hold.entered.notified().await;
+    let dispatch = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        async move {
+            runtime
+                .dispatch_once_ignoring_lease(&account_id, &ordinary_operation_id)
+                .await
+        }
+    });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!http_executor
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|request| { request["url"].as_str().unwrap().contains("/api/v1/vaults/") }));
+    refresh_hold.release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(1), dispatch)
+        .await
+        .expect("ordinary dispatch must resume after preparation releases the Account fence")
+        .unwrap();
+    for _ in 0..100 {
+        if runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .attachment_move_preparations[0]
+            .scheduling
+            .attempt_count
+            == 8
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let after = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(after.attachment_move_preparations.len(), 1);
+    assert_eq!(
+        after.attachment_move_preparations[0]
+            .scheduling
+            .attempt_count,
+        8
+    );
+    assert_eq!(
+        http_executor
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/sessions/current/refresh"))
+            .count(),
+        1
+    );
+    assert!(http_executor
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|request| { request["url"].as_str().unwrap().contains("/api/v1/vaults/") }));
+    runtime.close().await;
+    lifecycle.await.unwrap().unwrap();
+}
 
 fn seed_promotable_preparation(
     persistence: &crate::replica::InMemoryReplica,
@@ -28,6 +848,7 @@ fn seed_promotable_preparation(
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use bittery_crypto_core::{encrypt_with_aad, AadContext};
+    use sha2::Digest;
     const USER: &str = "user-scheduler";
     const UPLOADER: &str = "user-uploader";
     const SOURCE_ENVELOPE_VERSION: i32 = 4;
@@ -112,8 +933,9 @@ fn seed_promotable_preparation(
             }],
         )
         .unwrap();
+    let artifact_digest = format!("{:x}", sha2::Sha256::digest([42u8]));
     let owner =
-        attachment_move_artifact_ref(&account_id, operation_id, ATTACHMENT, &"11".repeat(32), 1)
+        attachment_move_artifact_ref(&account_id, operation_id, ATTACHMENT, &artifact_digest, 1)
             .unwrap();
     let mut preparation = AttachmentMovePreparationRecord {
         account_id: account_id.clone(),

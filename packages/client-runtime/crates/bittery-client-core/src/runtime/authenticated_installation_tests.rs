@@ -2860,9 +2860,22 @@ async fn lock_during_decrypt_publishes_no_plaintext() {
             sink.clone(),
         )
         .unwrap();
-    runtime.mark_account_locked(&account_id).await.unwrap();
+    let locking = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !locking.is_finished(),
+        "Lock must wait while Bootstrap owns the Account execution fence"
+    );
     pause.release();
-    running.await.unwrap().unwrap();
+    let (signed_in, locked) = tokio::join!(running, locking);
+    signed_in.unwrap().unwrap();
+    locked.unwrap().unwrap();
     let published: Vec<_> = sink.0.lock().unwrap().clone();
     for projection in published {
         let RuntimeProjection::Items(items) = projection else {
