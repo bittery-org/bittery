@@ -243,6 +243,45 @@ describe("performDeltaSync Item encryption context", () => {
 		expect(removedItems).toEqual([]);
 	});
 
+	it("does not fetch an Item or return a Create Item result for an applied Share outcome", async () => {
+		const api = client();
+		const fetchedItems: unknown[] = [];
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "create_share",
+					result: {
+						status: "applied",
+						shareLinkId: "share_link_1",
+						baseShareUrl: "https://app.example/share/",
+						expiresAt: "2026-08-27T00:00:00Z",
+					},
+				},
+			}) as never;
+		api.items.get = async (itemId) => {
+			fetchedItems.push(itemId);
+			return { data: serverItem() } as never;
+		};
+		const { cache, items } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "share_operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedItems).toEqual([]);
+		expect(items).toEqual([]);
+		expect(outcome).toBeUndefined();
+	});
+
 	it.each([
 		"item_created",
 		"item_updated",

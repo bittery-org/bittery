@@ -15,6 +15,57 @@ fn input(effect: ItemOperationEffect, raw_body: &[u8]) -> ItemOperationInput {
     }
 }
 
+#[test]
+fn create_share_outcomes_serialize_only_the_decided_payload_and_rejections() {
+    use super::{CreateShareOperationRejectionCode, CreateShareOperationResult, OperationOutcome};
+    use serde_json::json;
+
+    assert_eq!(
+        serde_json::to_value(OperationOutcome::new_create_share(
+            "share-operation".into(),
+            CreateShareOperationResult::Applied {
+                share_link_id: "share_link_1".into(),
+                base_share_url: "https://app.example/share/".into(),
+                expires_at: "2026-08-27T00:00:00Z".into(),
+            },
+        ))
+        .unwrap(),
+        json!({
+            "kind": "create_share",
+            "operationId": "share-operation",
+            "result": {
+                "status": "applied",
+                "shareLinkId": "share_link_1",
+                "baseShareUrl": "https://app.example/share/",
+                "expiresAt": "2026-08-27T00:00:00Z"
+            }
+        })
+    );
+
+    for code in [
+        CreateShareOperationRejectionCode::ItemNotFound,
+        CreateShareOperationRejectionCode::VaultReadOnly,
+        CreateShareOperationRejectionCode::ShareEntitlementDenied,
+        CreateShareOperationRejectionCode::ShareLimitReached,
+    ] {
+        let wire = serde_json::to_value(OperationOutcome::new_create_share(
+            "share-operation".into(),
+            CreateShareOperationResult::Rejected { code },
+        ))
+        .unwrap();
+        assert_eq!(
+            wire["result"]["code"],
+            json!(match code {
+                CreateShareOperationRejectionCode::ItemNotFound => "item_not_found",
+                CreateShareOperationRejectionCode::VaultReadOnly => "vault_read_only",
+                CreateShareOperationRejectionCode::ShareEntitlementDenied =>
+                    "share_entitlement_denied",
+                CreateShareOperationRejectionCode::ShareLimitReached => "share_limit_reached",
+            })
+        );
+    }
+}
+
 fn create(item_id: &str) -> ItemOperationEffect {
     ItemOperationEffect::Create(CreateItemEffectInput {
         item_id: item_id.into(),
@@ -95,8 +146,8 @@ fn fingerprint_separates_kinds_that_share_a_body_and_a_path() {
 
 #[test]
 fn every_kind_serializes_the_documented_wire_shape() {
-    use super::{ItemOperationResult, OperationOutcome};
-    use crate::db::enums::{OperationKind, OperationRejectionCode};
+    use super::{ItemOperationRejectionCode, ItemOperationResult, OperationOutcome};
+    use crate::db::enums::OperationKind;
     use serde_json::json;
 
     for (kind, wire) in [
@@ -137,7 +188,7 @@ fn every_kind_serializes_the_documented_wire_shape() {
             kind,
             "operation-2".into(),
             ItemOperationResult::Rejected {
-                code: OperationRejectionCode::VaultReadOnly,
+                code: ItemOperationRejectionCode::VaultReadOnly,
                 details: None,
             },
         );

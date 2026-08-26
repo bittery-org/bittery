@@ -14417,6 +14417,64 @@
           }
         }
       },
+      "CreateShareOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "item_not_found",
+          "vault_read_only",
+          "share_entitlement_denied",
+          "share_limit_reached"
+        ]
+      },
+      "CreateShareOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "shareLinkId",
+              "baseShareUrl",
+              "expiresAt",
+              "status"
+            ],
+            "properties": {
+              "baseShareUrl": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "shareLinkId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateShareOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The non-secret answer retained for Share creation. The raw token and Share key exist only in\nthe Account-protected Client Replica and can never be reconstructed from this value."
+      },
       "CreateTeamRequest": {
         "type": "object",
         "required": [
@@ -16879,13 +16937,35 @@
                 "$ref": "#/components/schemas/ItemOperationResult"
               }
             }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_share"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateShareOperationResult"
+              }
+            }
           }
         ],
         "description": "The one retained outcome shape, discriminated by Operation kind."
       },
       "OperationRejectionCode": {
         "type": "string",
-        "description": "The terminal semantic rejections an Item Operation can prove.\n\nOne set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`\nare the same fact whichever mutation met them, and a client that learns to read them once can\nread them everywhere. Each kind then contributes only its own genuinely new failures, and the\nhandler -- not the wire type -- decides which subset it can ever prove.",
+        "description": "The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has\nalready generated this contract; Share-only failures belong to the Share result instead.",
         "enum": [
           "invalid_ciphertext",
           "vault_access_denied",

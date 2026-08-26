@@ -35,6 +35,14 @@ use crate::{
     shared::transaction::{acquire_operation_lock, database_error},
 };
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateShareAppliedPayload {
+    pub(crate) share_link_id: String,
+    pub(crate) base_share_url: String,
+    pub(crate) expires_at: String,
+}
+
 /// Pins every fingerprint to this protocol, so bytes hashed under a later one can never collide.
 const OPERATION_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
 
@@ -132,10 +140,112 @@ pub(crate) enum ItemOperationResult {
         version: i32,
     },
     Rejected {
-        code: OperationRejectionCode,
+        code: ItemOperationRejectionCode,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Value>,
     },
+}
+
+/// The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has
+/// already generated this contract; Share-only failures belong to the Share result instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = OperationRejectionCode)]
+pub(crate) enum ItemOperationRejectionCode {
+    InvalidCiphertext,
+    VaultAccessDenied,
+    VaultReadOnly,
+    ItemIdConflict,
+    ItemNotFound,
+    ItemVersionConflict,
+    ItemTrashed,
+    ItemNotTrashed,
+    SourceVaultMismatch,
+    TargetVaultAccessDenied,
+    TargetVaultReadOnly,
+    AttachmentStateConflict,
+}
+
+fn item_rejection_code(
+    code: OperationRejectionCode,
+) -> Result<ItemOperationRejectionCode, AppError> {
+    Ok(match code {
+        OperationRejectionCode::InvalidCiphertext => ItemOperationRejectionCode::InvalidCiphertext,
+        OperationRejectionCode::VaultAccessDenied => ItemOperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly => ItemOperationRejectionCode::VaultReadOnly,
+        OperationRejectionCode::ItemIdConflict => ItemOperationRejectionCode::ItemIdConflict,
+        OperationRejectionCode::ItemNotFound => ItemOperationRejectionCode::ItemNotFound,
+        OperationRejectionCode::ItemVersionConflict => {
+            ItemOperationRejectionCode::ItemVersionConflict
+        }
+        OperationRejectionCode::ItemTrashed => ItemOperationRejectionCode::ItemTrashed,
+        OperationRejectionCode::ItemNotTrashed => ItemOperationRejectionCode::ItemNotTrashed,
+        OperationRejectionCode::SourceVaultMismatch => {
+            ItemOperationRejectionCode::SourceVaultMismatch
+        }
+        OperationRejectionCode::TargetVaultAccessDenied => {
+            ItemOperationRejectionCode::TargetVaultAccessDenied
+        }
+        OperationRejectionCode::TargetVaultReadOnly => {
+            ItemOperationRejectionCode::TargetVaultReadOnly
+        }
+        OperationRejectionCode::AttachmentStateConflict => {
+            ItemOperationRejectionCode::AttachmentStateConflict
+        }
+        OperationRejectionCode::ShareEntitlementDenied
+        | OperationRejectionCode::ShareLimitReached => {
+            return Err(AppError::internal(
+                "Stored Item Operation has a Share-only rejection",
+            ));
+        }
+    })
+}
+
+/// The non-secret answer retained for Share creation. The raw token and Share key exist only in
+/// the Account-protected Client Replica and can never be reconstructed from this value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum CreateShareOperationResult {
+    Applied {
+        #[serde(rename = "shareLinkId")]
+        share_link_id: String,
+        #[serde(rename = "baseShareUrl")]
+        base_share_url: String,
+        #[serde(rename = "expiresAt")]
+        expires_at: String,
+    },
+    Rejected {
+        code: CreateShareOperationRejectionCode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CreateShareOperationRejectionCode {
+    ItemNotFound,
+    VaultReadOnly,
+    ShareEntitlementDenied,
+    ShareLimitReached,
+}
+
+fn create_share_rejection_code(
+    code: OperationRejectionCode,
+) -> Result<CreateShareOperationRejectionCode, AppError> {
+    Ok(match code {
+        OperationRejectionCode::ItemNotFound => CreateShareOperationRejectionCode::ItemNotFound,
+        OperationRejectionCode::VaultReadOnly => CreateShareOperationRejectionCode::VaultReadOnly,
+        OperationRejectionCode::ShareEntitlementDenied => {
+            CreateShareOperationRejectionCode::ShareEntitlementDenied
+        }
+        OperationRejectionCode::ShareLimitReached => {
+            CreateShareOperationRejectionCode::ShareLimitReached
+        }
+        _ => {
+            return Err(AppError::internal(
+                "Stored Share Operation has an Item-only rejection",
+            ))
+        }
+    })
 }
 
 /// The one retained outcome shape, discriminated by Operation kind.
@@ -179,6 +289,11 @@ pub(crate) enum OperationOutcome {
         operation_id: String,
         result: ItemOperationResult,
     },
+    CreateShare {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: CreateShareOperationResult,
+    },
 }
 
 impl OperationOutcome {
@@ -212,6 +327,19 @@ impl OperationOutcome {
                 operation_id,
                 result,
             },
+            OperationKind::CreateShare => {
+                unreachable!("Share outcomes use their non-secret applied payload")
+            }
+        }
+    }
+
+    pub(crate) fn new_create_share(
+        operation_id: String,
+        result: CreateShareOperationResult,
+    ) -> Self {
+        Self::CreateShare {
+            operation_id,
+            result,
         }
     }
 }
@@ -232,6 +360,7 @@ struct StoredOutcomeRow {
     entity_version: Option<i32>,
     rejection_code: Option<OperationRejectionCode>,
     rejection_details: Option<String>,
+    applied_payload: Option<String>,
 }
 
 pub(crate) enum OperationResolution {
@@ -273,6 +402,33 @@ fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
 ) -> Result<OperationOutcome, AppError> {
+    if row.operation_kind == OperationKind::CreateShare {
+        let result = match row.result_status {
+            OperationOutcomeStatus::Applied => {
+                let payload = row.applied_payload.ok_or_else(|| {
+                    AppError::internal("Stored applied Share Operation has no payload")
+                })?;
+                let payload: CreateShareAppliedPayload = serde_json::from_str(&payload)
+                    .map_err(|_| AppError::internal("Stored Share Operation payload is invalid"))?;
+                CreateShareOperationResult::Applied {
+                    share_link_id: payload.share_link_id,
+                    base_share_url: payload.base_share_url,
+                    expires_at: payload.expires_at,
+                }
+            }
+            OperationOutcomeStatus::Rejected => {
+                CreateShareOperationResult::Rejected {
+                    code: create_share_rejection_code(row.rejection_code.ok_or_else(|| {
+                        AppError::internal("Stored rejected Operation has no code")
+                    })?)?,
+                }
+            }
+        };
+        return Ok(OperationOutcome::new_create_share(
+            operation_id.to_owned(),
+            result,
+        ));
+    }
     let result = match row.result_status {
         OperationOutcomeStatus::Applied => ItemOperationResult::Applied {
             item_id: row
@@ -283,9 +439,10 @@ fn outcome_from_row(
                 .ok_or_else(|| AppError::internal("Stored applied Operation has no version"))?,
         },
         OperationOutcomeStatus::Rejected => ItemOperationResult::Rejected {
-            code: row
-                .rejection_code
-                .ok_or_else(|| AppError::internal("Stored rejected Operation has no code"))?,
+            code: item_rejection_code(
+                row.rejection_code
+                    .ok_or_else(|| AppError::internal("Stored rejected Operation has no code"))?,
+            )?,
             details: row
                 .rejection_details
                 .map(|details| serde_json::from_str(&details))
@@ -306,7 +463,7 @@ async fn load_outcome<'e>(
     operation_id: &str,
 ) -> Result<Option<StoredOutcomeRow>, AppError> {
     query_as::<_, StoredOutcomeRow>(
-        "SELECT operation_kind::text AS operation_kind, request_fingerprint, result_status::text AS result_status, entity_id, entity_version, rejection_code::text AS rejection_code, rejection_details::text AS rejection_details FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+        "SELECT operation_kind::text AS operation_kind, request_fingerprint, result_status::text AS result_status, entity_id, entity_version, rejection_code::text AS rejection_code, rejection_details::text AS rejection_details, applied_payload::text AS applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
     )
     .bind(user_id)
     .bind(operation_id)
@@ -404,7 +561,7 @@ pub(crate) async fn execute_item_operation(
                 database_error(error, "Failed to retain rejected Operation outcome")
             })?;
             ItemOperationResult::Rejected {
-                code,
+                code: item_rejection_code(code)?,
                 details: None,
             }
         }

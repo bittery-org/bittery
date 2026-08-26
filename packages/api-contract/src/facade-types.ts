@@ -163,6 +163,20 @@ export type CreateItemInput = Schema<"CreateItemBody">;
  * against your own durable record, and only then read `result`.
  */
 export type OperationOutcome = Schema<"OperationOutcome">;
+/** The retained outcomes returned directly by Item mutation routes. */
+export type ItemOperationOutcome = Extract<
+	OperationOutcome,
+	{
+		kind:
+			| "create_item"
+			| "update_item"
+			| "set_item_favorite"
+			| "trash_item"
+			| "restore_item"
+			| "move_item"
+			| "permanently_delete_item";
+	}
+>;
 export type ItemOperationResult = Schema<"ItemOperationResult">;
 export type OperationRejectionCode = Schema<"OperationRejectionCode">;
 export type CreateItemOperationOutcome = Extract<

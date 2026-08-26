@@ -39,6 +39,7 @@ import type {
 	FinishLoginInput,
 	FinishLoginResponse,
 	ImageUploadInput,
+	ItemOperationOutcome,
 	ItemOperationWriteOptions,
 	ItemPayload,
 	LoginAttempt,
@@ -294,34 +295,34 @@ export interface ApiClient {
 			itemId: string,
 			input: CreateItemInput,
 			options: CreateItemWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		update(
 			itemId: string,
 			input: UpdateItemInput,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		setFavorite(
 			itemId: string,
 			input: FavoriteInput,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		move(
 			itemId: string,
 			input: MoveItemInput,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		trash(
 			itemId: string,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		deletePermanently(
 			itemId: string,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		restore(
 			itemId: string,
 			options: ItemOperationWriteOptions,
-		): Promise<ApiResult<OperationOutcome>>;
+		): Promise<ApiResult<ItemOperationOutcome>>;
 	};
 	readonly operations: {
 		get(operationId: string): Promise<ApiResult<OperationOutcome>>;
@@ -783,6 +784,18 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
+	async function itemOperationCall(
+		response: Promise<ApiResult<OperationOutcome>>,
+	): Promise<ApiResult<ItemOperationOutcome>> {
+		const result = await response;
+		if (result.data.kind === "create_share") {
+			throw new TypeError(
+				"An Item mutation returned a Share Operation outcome.",
+			);
+		}
+		return { ...result, data: result.data };
+	}
+
 	type PaginatedPath = {
 		[Path in ApiTransportPath<"GET">]: ApiTransportData<"GET", Path> extends {
 			items: readonly unknown[];
@@ -1133,47 +1146,61 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			get: (itemId) =>
 				call("GET", "/api/v1/items/{itemId}", { params: { path: { itemId } } }),
 			create: (vaultId, itemId, input, write) =>
-				call("PUT", "/api/v1/vaults/{vaultId}/items/{itemId}", {
-					params: {
-						path: { vaultId, itemId },
-						header: { "Idempotency-Key": write.idempotencyKey },
-					},
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PUT", "/api/v1/vaults/{vaultId}/items/{itemId}", {
+						params: {
+							path: { vaultId, itemId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			update: (itemId, input, write) =>
-				call("PATCH", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PATCH", "/api/v1/items/{itemId}", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			setFavorite: (itemId, input, write) =>
-				call("PATCH", "/api/v1/items/{itemId}/favorite", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PATCH", "/api/v1/items/{itemId}/favorite", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			move: (itemId, input, write) =>
-				call("POST", "/api/v1/items/{itemId}/moves", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("POST", "/api/v1/items/{itemId}/moves", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			trash: (itemId, write) =>
-				call("DELETE", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("DELETE", "/api/v1/items/{itemId}", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
 			deletePermanently: (itemId, write) =>
-				call("DELETE", "/api/v1/items/{itemId}/permanent", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("DELETE", "/api/v1/items/{itemId}/permanent", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
 			restore: (itemId, write) =>
-				call("POST", "/api/v1/items/{itemId}/restore", {
-					params: { path: { itemId }, ...itemOperationHeaderParams(write) },
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("POST", "/api/v1/items/{itemId}/restore", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
 		},
 		operations: {
 			get: (operationId) =>

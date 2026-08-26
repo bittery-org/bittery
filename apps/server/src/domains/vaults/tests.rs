@@ -5085,6 +5085,180 @@ async fn retained_outcome_count(pool: &PgPool, user_id: &str, operation_id: &str
     .expect("retained outcome count should load")
 }
 
+#[tokio::test]
+async fn create_share_outcome_schema_keeps_payload_and_rejection_sets_closed() {
+    with_api_test_app("create_share_outcome_schema", |app| async move {
+        let user_id = "share_outcome_schema_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Share Outcome Schema User",
+            "share-outcome-schema@example.com",
+        )
+        .await;
+
+        let missing_payload = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'missing-share-payload', 'create_share', $2, 'applied', NULL)",
+        )
+        .bind(user_id)
+        .bind(vec![0_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(missing_payload.is_err());
+
+        for (index, payload) in [
+            Value::Null,
+            json!({
+                "shareLinkId": "share_link_1",
+                "baseShareUrl": "https://app.example/share/"
+            }),
+            json!({
+                "shareLinkId": "share_link_1",
+                "baseShareUrl": "https://app.example/share/",
+                "expiresAt": "2026-08-27T00:00:00Z",
+                "token": "must-never-be-retained"
+            }),
+            json!({
+                "shareLinkId": 1,
+                "baseShareUrl": "https://app.example/share/",
+                "expiresAt": "2026-08-27T00:00:00Z"
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let result = query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'create_share', $3, 'applied', $4)",
+            )
+            .bind(user_id)
+            .bind(format!("invalid-share-payload-{index}"))
+            .bind(vec![index as u8; 32])
+            .bind(payload)
+            .execute(&app.pool)
+            .await;
+            assert!(result.is_err(), "invalid applied payload {index} was retained");
+        }
+
+        for (index, code) in [
+            "item_not_found",
+            "vault_read_only",
+            "share_entitlement_denied",
+            "share_limit_reached",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'create_share', $3, 'rejected', $4::operation_rejection_code)",
+            )
+            .bind(user_id)
+            .bind(format!("valid-share-rejection-{index}"))
+            .bind(vec![index as u8; 32])
+            .bind(code)
+            .execute(&app.pool)
+            .await
+            .expect("each decided Share rejection should be retained");
+        }
+
+        let foreign_share_rejection = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'foreign-share-rejection', 'create_share', $2, 'rejected', 'item_version_conflict')",
+        )
+        .bind(user_id)
+        .bind(vec![8_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(foreign_share_rejection.is_err());
+
+        let share_only_item_rejection = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'share-only-item-rejection', 'update_item', $2, 'rejected', 'share_limit_reached')",
+        )
+        .bind(user_id)
+        .bind(vec![9_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(share_only_item_rejection.is_err());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn operation_lookup_reads_preseeded_applied_and_rejected_share_outcomes() {
+    with_api_test_app("create_share_outcome_lookup", |app| async move {
+        let user_id = "share_outcome_lookup_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Share Outcome Lookup User",
+            "share-outcome-lookup@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'share-applied', 'create_share', $2, 'applied', $3)",
+        )
+        .bind(user_id)
+        .bind(vec![1_u8; 32])
+        .bind(json!({
+            "shareLinkId": "share_link_1",
+            "baseShareUrl": "https://app.example/share/",
+            "expiresAt": "2026-08-27T00:00:00Z"
+        }))
+        .execute(&app.pool)
+        .await
+        .expect("applied Share outcome should seed");
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'share-rejected', 'create_share', $2, 'rejected', 'share_limit_reached')",
+        )
+        .bind(user_id)
+        .bind(vec![2_u8; 32])
+        .execute(&app.pool)
+        .await
+        .expect("rejected Share outcome should seed");
+        let session = app.issue_session(user_id).await;
+
+        let applied = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/share-applied",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        applied.assert_contract_status();
+        assert_eq!(
+            applied.body,
+            json!({
+                "kind": "create_share",
+                "operationId": "share-applied",
+                "result": {
+                    "status": "applied",
+                    "shareLinkId": "share_link_1",
+                    "baseShareUrl": "https://app.example/share/",
+                    "expiresAt": "2026-08-27T00:00:00Z"
+                }
+            })
+        );
+
+        let rejected = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/share-rejected",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        rejected.assert_contract_status();
+        assert_eq!(
+            rejected.body,
+            json!({
+                "kind": "create_share",
+                "operationId": "share-rejected",
+                "result": { "status": "rejected", "code": "share_limit_reached" }
+            })
+        );
+    })
+    .await;
+}
+
 /// An identical retry answers the retained outcome, and a lost response is recoverable by lookup.
 #[tokio::test]
 async fn every_item_operation_replays_one_retained_outcome() {

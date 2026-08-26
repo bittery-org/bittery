@@ -139,7 +139,8 @@ fn closed_sets_keep_their_wire_strings() {
             "trash_item",
             "restore_item",
             "move_item",
-            "permanently_delete_item"
+            "permanently_delete_item",
+            "create_share"
         ]
     );
     assert_wire_labels!(OperationOutcomeStatus, ["applied", "rejected"]);
@@ -157,7 +158,9 @@ fn closed_sets_keep_their_wire_strings() {
             "source_vault_mismatch",
             "target_vault_access_denied",
             "target_vault_read_only",
-            "attachment_state_conflict"
+            "attachment_state_conflict",
+            "share_entitlement_denied",
+            "share_limit_reached"
         ]
     );
 }

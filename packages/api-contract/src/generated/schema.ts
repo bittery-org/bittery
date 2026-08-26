@@ -1801,6 +1801,23 @@ export interface components {
             readonly id: string;
             readonly token: string;
         };
+        /** @enum {string} */
+        readonly CreateShareOperationRejectionCode: "item_not_found" | "vault_read_only" | "share_entitlement_denied" | "share_limit_reached";
+        /**
+         * @description The non-secret answer retained for Share creation. The raw token and Share key exist only in
+         *     the Account-protected Client Replica and can never be reconstructed from this value.
+         */
+        readonly CreateShareOperationResult: {
+            readonly baseShareUrl: string;
+            readonly expiresAt: string;
+            readonly shareLinkId: string;
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["CreateShareOperationRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
         readonly CreateTeamRequest: {
             readonly name: string;
             readonly teamType?: null | components["schemas"]["TeamType"];
@@ -2367,14 +2384,15 @@ export interface components {
             readonly kind: "permanently_delete_item";
             readonly operationId: string;
             readonly result: components["schemas"]["ItemOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "create_share";
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateShareOperationResult"];
         };
         /**
-         * @description The terminal semantic rejections an Item Operation can prove.
-         *
-         *     One set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`
-         *     are the same fact whichever mutation met them, and a client that learns to read them once can
-         *     read them everywhere. Each kind then contributes only its own genuinely new failures, and the
-         *     handler -- not the wire type -- decides which subset it can ever prove.
+         * @description The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has
+         *     already generated this contract; Share-only failures belong to the Share result instead.
          * @enum {string}
          */
         readonly OperationRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict" | "item_not_found" | "item_version_conflict" | "item_trashed" | "item_not_trashed" | "source_vault_mismatch" | "target_vault_access_denied" | "target_vault_read_only" | "attachment_state_conflict";

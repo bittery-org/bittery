@@ -89,6 +89,9 @@ export async function performDeltaSync(
 
 	if (event.type === "operation_resolved") {
 		const { data: outcome } = await apiClient.operations.get(event.entityId);
+		if (outcome.kind === "create_share") {
+			return;
+		}
 		if (outcome.result.status === "applied") {
 			await reconcileCurrentItem(outcome.result.itemId);
 		}

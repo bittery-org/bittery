@@ -515,6 +515,7 @@ pub enum OperationKind {
     RestoreItem,
     MoveItem,
     PermanentlyDeleteItem,
+    CreateShare,
 }
 
 closed_enum!(OperationKind, "operation_kind", {
@@ -525,6 +526,7 @@ closed_enum!(OperationKind, "operation_kind", {
     RestoreItem => "restore_item",
     MoveItem => "move_item",
     PermanentlyDeleteItem => "permanently_delete_item",
+    CreateShare => "create_share",
 });
 
 /// Whether a retained Operation applied its effect or proved a terminal rejection.
@@ -561,6 +563,8 @@ pub enum OperationRejectionCode {
     TargetVaultAccessDenied,
     TargetVaultReadOnly,
     AttachmentStateConflict,
+    ShareEntitlementDenied,
+    ShareLimitReached,
 }
 
 closed_enum!(OperationRejectionCode, "operation_rejection_code", {
@@ -576,6 +580,8 @@ closed_enum!(OperationRejectionCode, "operation_rejection_code", {
     TargetVaultAccessDenied => "target_vault_access_denied",
     TargetVaultReadOnly => "target_vault_read_only",
     AttachmentStateConflict => "attachment_state_conflict",
+    ShareEntitlementDenied => "share_entitlement_denied",
+    ShareLimitReached => "share_limit_reached",
 });
 
 #[cfg(test)]

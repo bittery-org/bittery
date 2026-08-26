@@ -2,10 +2,10 @@ import {
 	type ApiClient,
 	ApiError,
 	type CreateItemOperationOutcome,
+	type ItemOperationOutcome,
 	type ItemOperationResult,
 	isApiErrorStatus,
 	isApiTransportError,
-	type OperationOutcome,
 } from "@bittery/api-contract";
 import { toCachedItem } from "@bittery/shared/item-mapping";
 import type {
@@ -79,8 +79,8 @@ function writeOptions(mutation: PendingMutation): {
  * result, and a rejection is terminal rather than something to retry.
  */
 function appliedItemOperation(
-	outcome: OperationOutcome,
-	expectedKind: OperationOutcome["kind"],
+	outcome: ItemOperationOutcome,
+	expectedKind: ItemOperationOutcome["kind"],
 ): Extract<ItemOperationResult, { status: "applied" }> {
 	if (outcome.kind !== expectedKind) {
 		throw new Error(

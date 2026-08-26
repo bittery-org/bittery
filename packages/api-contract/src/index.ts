@@ -81,6 +81,7 @@ export type {
 	ImageUploadInput,
 	InvitationStatus,
 	ItemCategory,
+	ItemOperationOutcome,
 	ItemOperationResult,
 	ItemOperationWriteOptions,
 	ItemPayload,
