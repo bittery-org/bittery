@@ -33,16 +33,21 @@ choice.
 
 ## Work
 
-This blocker is split before implementation into three sequential, independently reviewed commits
+This blocker is split before implementation into four sequential, independently reviewed commits
 with disjoint implementation paths:
 
-1. **Authenticated source-grant HTTP authority (A):** extend only Client Core's authenticated HTTP
+1. **Server source-authority response (S):** widen the existing Attachment download response in
+   place with the current Attachment, Item, Vault, storage-key, envelope-version, and uploader
+   authority needed to compare it with an accepted Move source. Update Server domain/HTTP shapes,
+   OpenAPI, generated API contract, and behavioral route tests together. Do not add a route, accept
+   an Operation ID, retain an outcome, or edit Client Runtime/bindings/TypeScript implementation.
+2. **Authenticated source-grant HTTP authority (A):** extend only Client Core's authenticated HTTP
    module with the typed Attachment download-grant exchange, a finite response bound, exact
    Attachment route identity, bearer classification, and closed success/reauthentication/transient/
    stale or invariant answers grounded in the existing Server response. Behavioral transport tests
    prove method, path encoding, bounds, body, headers, malformed answers, and retryable statuses. No
    Session persistence, scheduler, binding, or TypeScript path belongs here.
-2. **Runtime source-grant adaptation (B):** change only the Core Attachment Move scheduler/facade
+3. **Runtime source-grant adaptation (B):** change only the Core Attachment Move scheduler/facade
    module and its tests so `open_source` loads the explicit Account incarnation and accepted source,
    invokes Slice A, refreshes once through the central durable Session lifecycle, validates the
    response against immutable Attachment identity/storage/envelope authority, and passes the public
@@ -50,7 +55,7 @@ with disjoint implementation paths:
    needed by Slice C without exposing policy publicly. A second `401`, stale authority, or transport
    failure preserves accepted preparation under C2 backoff; URLs are never persisted or logged. Do
    not edit Runtime construction, C2, bindings, TypeScript, or Server.
-3. **Core exclusive startup and Account lifecycle (C):** add a dedicated Core lifecycle module and
+4. **Core exclusive startup and Account lifecycle (C):** add a dedicated Core lifecycle module and
    Runtime construction paths, leaving Slice B untouched. Define one primitive host lease port; while
    its per-Account guard is live, Core derives that Account's published and provisional live artifact
    references, issues the private exclusive orphan sweep, and only then drives that Account's C2
@@ -67,7 +72,7 @@ IndexedDB/binary executor construction, actual browser reachability, and lifecyc
 ## Verification
 
 Every slice starts with an exact failing behavioral test, receives a fresh implementer and reviewer,
-and passes its focused Client Core tests. After all three slices, the full Client Runtime package
+and passes its focused Server or Client Core tests. After all four slices, the full Client Runtime package
 check, `pnpm check:ci`, and `pnpm check:ci:rust` pass from a clean tree without tracked-file drift.
 C4b then resumes without route, Session, live-reference, sweep, or Operation policy in bindings.
 
@@ -87,6 +92,11 @@ The maintainer selected the existing authenticated
 `POST /api/v1/attachments/{attachmentId}/download-urls` route. Client Core validates a successful
 response against the accepted Attachment identity, durable storage key, envelope version, encrypted
 metadata, and byte authority before handing its invocation-scoped URL to the binary port.
+
+The committed response did not yet expose all of that comparison authority. The split therefore
+gains the path-disjoint Server Slice S before Client HTTP work starts. It extends this same response
+with current Attachment, Item, Vault, storage-key, envelope-version, and uploader fields; it neither
+adds an endpoint nor gives this non-Operation route semantic outcome authority.
 
 An exact `200` is the only download grant. A `404`, or a successful response whose authority does
 not match the immutable accepted source, yields the local non-outcome `StaleAuthority` preparation
