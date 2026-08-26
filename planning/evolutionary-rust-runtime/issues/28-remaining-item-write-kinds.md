@@ -964,3 +964,33 @@ file. C4a is therefore closed. Deliberately left open: C4b still owns browser-wi
 exclusive orphan sweeping, fixed production adapter construction, Worker error observation, and
 actual browser reachability before Ticket 28 proceeds to its remaining Server/dispatch/outcome/
 Attachment-service/Web-cutover slices.
+
+### 2026-08-26 — C4b1 delivered the Rust/WASM composition bridge
+
+Commit `99e92c58` adds the one configured Web Runtime constructor for Attachment Move preparation.
+The binding adapts Core's transfer port to the fixed binary executor, uses one shared artifact-store
+instance for provisional and published artifacts, accepts only an explicit Account ID through the
+closed JavaScript lease surface, and starts the Core-owned preparation lifecycle. Transfer attempt
+IDs and OPFS spool generations are fresh opaque binding identities; the Server storage key never
+crosses the binary-transfer boundary. Closing or freeing the wrapper releases acquired or late lease
+handles once, abandons pending and opened transfers, and cancels the preparation future, including a
+reentrant free from a synchronous JavaScript callback.
+
+Native tests and a feature-only generated-WASM harness cover exact error mapping, JS `this` binding,
+own-key and symbol rejection, lease denial/loss/release, close during pending acquisition, download
+and upload abandonment, upload serialization without `storageKey`, lifecycle redaction, drop before
+open, and reentrant lifecycle cancellation. The production binding drift gate proves that the test
+harness is not exported.
+
+Independent review found real defects in the initial slice: Server storage identity was used as a
+spool generation; resource shutdown could wait behind a live drive; exact lease validation missed
+symbol and non-enumerable keys; late and rejected handles could leak browser locks; the first WASM
+suite did not exercise the upload boundary; and lifecycle ownership leaked or panicked during drop
+and reentrant free. Each is now behaviorally covered. A generated-contract test failure after
+constructor factoring was a fixture-sensitive funnel check rather than a product defect, so the
+established constructor funnel was preserved without weakening the test.
+
+Deliberately left open: this slice edits no Worker or browser-host composition and therefore makes no
+production write path reachable. C4b2 still owns the fixed IndexedDB artifact executor, OPFS binary
+executor, browser-wide per-Account Web Locks lease, Worker lifecycle observation, and actual browser
+proofs for exclusive startup, restart/unlock reachability, lease loss, and unbounded retry.
