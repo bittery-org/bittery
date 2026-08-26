@@ -7,7 +7,10 @@
  * would close a package cycle. Ticket 22 removes the Crypto channel entirely.
  */
 
+import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-artifact-executor";
 import { IndexedDbReplicaExecutor } from "../indexeddb-executor";
+import { WebAccountLeaseExecutor } from "../web-account-lease-executor";
+import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
 import { WebHttpTransportExecutor } from "../web-http-transport-executor";
 import { createWorkerHostRpc } from "../worker/host-rpc";
 import {
@@ -40,6 +43,8 @@ export function serveWebRuntimeWorker(
 	deps: WebRuntimeWorkerDeps,
 ): void {
 	const hostRpc = createWorkerHostRpc(scope);
+	const attachmentArtifactExecutor = new IndexedDbAttachmentArtifactExecutor();
+	const accountLeaseExecutor = new WebAccountLeaseExecutor();
 	serveWorkerChannels(scope, {
 		...(deps.crypto === undefined ? {} : { crypto: deps.crypto }),
 		runtime: createRuntimeWorkerService({
@@ -48,6 +53,9 @@ export function serveWebRuntimeWorker(
 				invoke: (requestJson) => hostRpc.request<string>(requestJson),
 			},
 			httpExecutor: new WebHttpTransportExecutor(),
+			attachmentArtifactExecutor,
+			binaryTransferExecutorFactory: () => new WebBinaryTransferExecutor(),
+			accountLeaseExecutor,
 			loadWasm: deps.loadWasm,
 			...(deps.authClient === undefined ? {} : { authClient: deps.authClient }),
 		}),

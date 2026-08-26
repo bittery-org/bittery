@@ -148,13 +148,26 @@ describe("Runtime worker service", () => {
 		]);
 	});
 
-	test("passes authentication identity into withConfiguredExecutors", async () => {
+	test("authenticated production uses the Attachment preparation constructor and fixed ports", async () => {
 		const runtime = new RuntimeDouble();
-		const configured: string[] = [];
+		const configured: unknown[] = [];
+		let legacyConfiguredCalls = 0;
+		let constructorThis: unknown;
+		const artifactExecutor = {
+			invoke: async () => ({ controlResponseJson: "{}" }),
+		};
+		const binaryExecutor = {
+			invoke: async () => ({ controlResponseJson: "{}" }),
+			close: () => undefined,
+		};
+		const accountLeaseExecutor = { acquire: async () => null };
 		const configuredService = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
 			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: artifactExecutor,
+			binaryTransferExecutorFactory: () => binaryExecutor,
+			accountLeaseExecutor,
 			authClient: {
 				clientId: "bittery-web",
 				platform: "web",
@@ -164,18 +177,34 @@ describe("Runtime worker service", () => {
 				({
 					WebClientRuntime: {
 						withExecutors: () => runtime,
-						// The literal is asserted to `RuntimeWasm` only after it is built, so the
-						// parameters get no contextual type and must be annotated here.
-						withConfiguredExecutors(
+						withConfiguredExecutors() {
+							legacyConfiguredCalls += 1;
+							return runtime;
+						},
+						withConfiguredAttachmentMovePreparation(
+							this: unknown,
 							_replica: unknown,
 							_platform: unknown,
 							_http: unknown,
 							_cancel: unknown,
+							artifact: unknown,
+							binary: unknown,
+							lease: unknown,
 							clientId: string,
 							platform: string,
 							version: string,
+							lifecycleError: unknown,
 						) {
-							configured.push(clientId, platform, version);
+							constructorThis = this;
+							configured.push(
+								artifact,
+								binary,
+								lease,
+								clientId,
+								platform,
+								version,
+								lifecycleError,
+							);
 							return runtime;
 						},
 					},
@@ -186,7 +215,690 @@ describe("Runtime worker service", () => {
 			new AbortController().signal,
 			() => undefined,
 		);
-		expect(configured).toEqual(["bittery-web", "web", "0.5.2"]);
+		expect(configured.slice(0, 6)).toEqual([
+			artifactExecutor,
+			binaryExecutor,
+			accountLeaseExecutor,
+			"bittery-web",
+			"web",
+			"0.5.2",
+		]);
+		expect(configured[6]).toBeFunction();
+		expect(legacyConfiguredCalls).toBe(0);
+		expect(constructorThis).toBeDefined();
+	});
+
+	test("closes a failed preparation runner, surfaces one stable error, and reconstructs", async () => {
+		const runtimes = Array.from({ length: 8 }, () => new RuntimeDouble());
+		const lifecycleErrors: Array<(errorJson: string) => void> = [];
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => {
+				const runtime = runtimes[loads++];
+				if (runtime === undefined) throw new Error("unexpected extra restart");
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation(
+							_replica,
+							_platform,
+							_http,
+							_cancel,
+							_artifact,
+							_binary,
+							_lease,
+							_clientId,
+							_platformName,
+							_version,
+							lifecycleError,
+						) {
+							lifecycleErrors.push(lifecycleError);
+							return runtime;
+						},
+					},
+				};
+			},
+		});
+
+		await service.request(
+			{ type: "request", requestId: "initial", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		for (let attempt = 0; attempt < 7; attempt += 1) {
+			lifecycleErrors[attempt]?.(
+				'{"code":"SECRET_BACKTRACE","message":"https://signed.example/credential"}',
+			);
+			await expect(
+				service.request(
+					{
+						type: "request",
+						requestId: `observes-failure-${attempt}`,
+						requestJson: "{}",
+					},
+					new AbortController().signal,
+					() => undefined,
+				),
+			).rejects.toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+				message: "Attachment Move preparation lifecycle failed.",
+			});
+			await service.request(
+				{
+					type: "request",
+					requestId: `restart-${attempt}`,
+					requestJson: "{}",
+				},
+				new AbortController().signal,
+				() => undefined,
+			);
+		}
+		expect(runtimes.slice(0, 7).map(({ closeCalls }) => closeCalls)).toEqual(
+			Array.from({ length: 7 }, () => 1),
+		);
+		expect(loads).toBe(8);
+		expect(runtimes[7]?.openCalls).toBe(1);
+	});
+
+	test("reconstruction receives a fresh live binary executor incarnation", async () => {
+		const runtimes = [new RuntimeDouble(), new RuntimeDouble()];
+		const lifecycleErrors: Array<(errorJson: string) => void> = [];
+		const binaries: Array<{
+			closed: boolean;
+			close(): void;
+			invoke(): Promise<{ controlResponseJson: string }>;
+		}> = [];
+		let loads = 0;
+		let factoryCalls = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => {
+				factoryCalls += 1;
+				const binary = {
+					closed: false,
+					close() {
+						binary.closed = true;
+					},
+					invoke: async () => ({ controlResponseJson: "{}" }),
+				};
+				return binary;
+			},
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors: () => {
+						throw new Error("unexpected legacy constructor");
+					},
+					withConfiguredAttachmentMovePreparation(
+						_replica,
+						_platform,
+						_http,
+						_cancel,
+						_artifact,
+						binary,
+						_lease,
+						_clientId,
+						_platformName,
+						_version,
+						onLifecycleError,
+					) {
+						const runtime = runtimes[loads];
+						if (runtime === undefined) throw new Error("unexpected restart");
+						loads += 1;
+						const received = binary as (typeof binaries)[number];
+						binaries.push(received);
+						lifecycleErrors.push(onLifecycleError);
+						runtime.close = async () => {
+							runtime.closeCalls += 1;
+							received.close();
+						};
+						return runtime;
+					},
+				},
+			}),
+		});
+
+		await service.request(
+			{ type: "request", requestId: "first", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		lifecycleErrors[0]?.("{}");
+		await service
+			.request(
+				{ type: "request", requestId: "failure", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch(() => undefined);
+		await service.request(
+			{ type: "request", requestId: "replacement", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+
+		expect(factoryCalls).toBe(2);
+		expect(binaries).toHaveLength(2);
+		expect(binaries[0]?.closed).toBe(true);
+		expect(binaries[1]?.closed).toBe(false);
+		expect(binaries[1]).not.toBe(binaries[0]);
+	});
+
+	test("does not serve through a runner that fails synchronously during construction", async () => {
+		const failed = new RuntimeDouble();
+		const replacement = new RuntimeDouble();
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => {
+				const runtime = loads++ === 0 ? failed : replacement;
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation(
+							_replica,
+							_platform,
+							_http,
+							_cancel,
+							_artifact,
+							_binary,
+							_lease,
+							_clientId,
+							_platformName,
+							_version,
+							lifecycleError,
+						) {
+							if (runtime === failed) lifecycleError('{"code":"secret"}');
+							return runtime;
+						},
+					},
+				};
+			},
+		});
+
+		await expect(
+			service.request(
+				{ type: "request", requestId: "failed", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			message: "Attachment Move preparation lifecycle failed.",
+		});
+		expect(failed.requests).toHaveLength(0);
+		expect(failed.openCalls).toBe(0);
+		expect(failed.closeCalls).toBe(1);
+
+		await service.request(
+			{ type: "request", requestId: "replacement", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		expect(loads).toBe(2);
+		expect(replacement.requests).toHaveLength(1);
+	});
+
+	test("does not serve a cached incarnation that fails before the request continuation", async () => {
+		const failed = new RuntimeDouble();
+		const replacement = new RuntimeDouble();
+		let lifecycleError!: (errorJson: string) => void;
+		let loads = 0;
+		const moduleFor = (runtime: RuntimeDouble): RuntimeWasm => ({
+			WebClientRuntime: {
+				withExecutors: () => runtime,
+				withConfiguredAttachmentMovePreparation(
+					_replica,
+					_platform,
+					_http,
+					_cancel,
+					_artifact,
+					_binary,
+					_lease,
+					_clientId,
+					_platformName,
+					_version,
+					onLifecycleError,
+				) {
+					lifecycleError = onLifecycleError;
+					return runtime;
+				},
+			},
+		});
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: () => {
+				const runtime = loads++ === 0 ? failed : replacement;
+				const module = moduleFor(runtime);
+				return {
+					// biome-ignore lint/suspicious/noThenProperty: the pre-registered reaction creates the exact promise-continuation race under test
+					then<TResult1 = RuntimeWasm, TResult2 = never>(
+						onFulfilled?:
+							| ((value: RuntimeWasm) => TResult1 | PromiseLike<TResult1>)
+							| null,
+						onRejected?:
+							| ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+							| null,
+					) {
+						const started = Promise.resolve(module).then(
+							onFulfilled,
+							onRejected,
+						);
+						if (runtime === failed) {
+							void started.then(() => lifecycleError("{}"));
+						}
+						return started;
+					},
+				} as Promise<RuntimeWasm>;
+			},
+		});
+
+		const failure = await service
+			.request(
+				{ type: "request", requestId: "failed-cached", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+
+		expect(failed.requests).toHaveLength(0);
+		expect(failure).toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			message: "Attachment Move preparation lifecycle failed.",
+		});
+		await service.request(
+			{ type: "request", requestId: "replacement", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		expect(loads).toBe(2);
+		expect(replacement.requests).toHaveLength(1);
+	});
+
+	test("close during a lifecycle restart barrier closes the failed runner once", async () => {
+		const runtime = new RuntimeDouble();
+		let lifecycleError!: (errorJson: string) => void;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors: () => runtime,
+					withConfiguredAttachmentMovePreparation(
+						_replica,
+						_platform,
+						_http,
+						_cancel,
+						_artifact,
+						_binary,
+						_lease,
+						_clientId,
+						_platformName,
+						_version,
+						onLifecycleError,
+					) {
+						lifecycleError = onLifecycleError;
+						return runtime;
+					},
+				},
+			}),
+		});
+
+		await service.request(
+			{ type: "request", requestId: "start", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		lifecycleError("{}");
+		await service.close();
+
+		expect(runtime.closeCalls).toBe(1);
+	});
+
+	test("a lifecycle failure racing a rejected open closes the created runner once", async () => {
+		const runtime = new RuntimeDouble();
+		let lifecycleError!: (errorJson: string) => void;
+		runtime.open = async () => {
+			runtime.openCalls += 1;
+			lifecycleError('{"message":"https://signed.example/secret"}');
+			throw new Error("open exposed an internal failure");
+		};
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors: () => runtime,
+					withConfiguredAttachmentMovePreparation(
+						_replica,
+						_platform,
+						_http,
+						_cancel,
+						_artifact,
+						_binary,
+						_lease,
+						_clientId,
+						_platformName,
+						_version,
+						onLifecycleError,
+					) {
+						lifecycleError = onLifecycleError;
+						return runtime;
+					},
+				},
+			}),
+		});
+
+		const failure = await service
+			.request(
+				{ type: "request", requestId: "raced-open", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+
+		expect(runtime.closeCalls).toBe(1);
+		expect(failure).toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			message: "Attachment Move preparation lifecycle failed.",
+		});
+	});
+
+	test("a lifecycle close failure stays terminal and redacted without reconstructing", async () => {
+		const runtime = new RuntimeDouble();
+		const secretCloseFailure = new Error(
+			"https://signed.example/secret?credential=plaintext",
+		);
+		runtime.close = async () => {
+			runtime.closeCalls += 1;
+			throw secretCloseFailure;
+		};
+		let lifecycleError!: (errorJson: string) => void;
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => {
+				loads += 1;
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation(
+							_replica,
+							_platform,
+							_http,
+							_cancel,
+							_artifact,
+							_binary,
+							_lease,
+							_clientId,
+							_platformName,
+							_version,
+							onLifecycleError,
+						) {
+							lifecycleError = onLifecycleError;
+							return runtime;
+						},
+					},
+				};
+			},
+		});
+
+		await service.request(
+			{ type: "request", requestId: "start", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		lifecycleError('{"message":"another signed secret"}');
+		const closeFailure = service.close().catch((error: unknown) => error);
+		const firstFailure = await service
+			.request(
+				{ type: "request", requestId: "terminal-1", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		const secondFailure = await service
+			.request(
+				{ type: "request", requestId: "terminal-2", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		const observedCloseFailure = await closeFailure;
+		const repeatedCloseFailure = await service
+			.close()
+			.catch((error: unknown) => error);
+
+		for (const failure of [
+			firstFailure,
+			secondFailure,
+			observedCloseFailure,
+			repeatedCloseFailure,
+		]) {
+			expect(failure).toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+				message: "Attachment Move preparation lifecycle failed.",
+			});
+			expect(String(failure)).not.toContain("signed.example");
+			expect(String(failure)).not.toContain("credential");
+		}
+		expect(runtime.closeCalls).toBe(1);
+		expect(runtime.openCalls).toBe(1);
+		expect(loads).toBe(1);
+	});
+
+	test("authenticated open and cleanup rejection stays terminal and redacted", async () => {
+		const runtime = new RuntimeDouble();
+		runtime.open = async () => {
+			runtime.openCalls += 1;
+			throw new Error("open leaked https://signed.example/open-secret");
+		};
+		runtime.close = async () => {
+			runtime.closeCalls += 1;
+			throw new Error("close leaked credential=close-secret");
+		};
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => {
+				loads += 1;
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation: () => runtime,
+					},
+				};
+			},
+		});
+
+		const firstFailure = await service
+			.request(
+				{ type: "request", requestId: "open-failure", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		const secondFailure = await service
+			.request(
+				{ type: "request", requestId: "terminal", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		const closeFailure = await service.close().catch((error: unknown) => error);
+
+		for (const failure of [firstFailure, secondFailure, closeFailure]) {
+			expect(failure).toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+				message: "Attachment Move preparation lifecycle failed.",
+			});
+			expect(String(failure)).not.toContain("signed.example");
+			expect(String(failure)).not.toContain("credential");
+		}
+		expect(runtime.openCalls).toBe(1);
+		expect(runtime.closeCalls).toBe(1);
+		expect(loads).toBe(1);
+	});
+
+	test("close racing authenticated open and cleanup rejection stays terminal and redacted", async () => {
+		const runtime = new RuntimeDouble();
+		let rejectOpen!: (error: unknown) => void;
+		let openStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			openStarted = resolve;
+		});
+		runtime.open = () => {
+			runtime.openCalls += 1;
+			openStarted();
+			return new Promise<void>((_resolve, reject) => {
+				rejectOpen = reject;
+			});
+		};
+		runtime.close = async () => {
+			runtime.closeCalls += 1;
+			throw new Error("cleanup leaked credential=close-secret");
+		};
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => {
+				loads += 1;
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation: () => runtime,
+					},
+				};
+			},
+		});
+
+		const requestFailure = service
+			.request(
+				{ type: "request", requestId: "pending-open", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		await started;
+		const closeFailure = service.close().catch((error: unknown) => error);
+		rejectOpen(new Error("open leaked https://signed.example/open-secret"));
+
+		const failures = [
+			await requestFailure,
+			await closeFailure,
+			await service.close().catch((error: unknown) => error),
+			await service
+				.request(
+					{ type: "request", requestId: "terminal", requestJson: "{}" },
+					new AbortController().signal,
+					() => undefined,
+				)
+				.catch((error: unknown) => error),
+		];
+		for (const failure of failures) {
+			expect(failure).toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+				message: "Attachment Move preparation lifecycle failed.",
+			});
+			expect(String(failure)).not.toContain("signed.example");
+			expect(String(failure)).not.toContain("credential");
+		}
+		expect(runtime.openCalls).toBe(1);
+		expect(runtime.closeCalls).toBe(1);
+		expect(loads).toBe(1);
 	});
 
 	test("awaits open before request and closes safely while startup is pending", async () => {
