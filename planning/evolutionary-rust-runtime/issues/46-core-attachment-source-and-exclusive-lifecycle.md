@@ -136,3 +136,22 @@ adversarial answer matrix. Independent review found no product or fixture defect
 Deliberately left open: the HTTP adapter does not refresh or persist a Session, retry, compare the
 grant with an accepted Move source, persist or log the invocation URL, drive preparation, or expose
 the exchange to a host. Runtime adaptation and exclusive lifecycle remain Slices B and C.
+
+### 2026-08-26 — Slice B landed
+
+Commit `f0e15789` makes Client Core resolve the explicit Account incarnation and accepted Move
+source, mint and fully validate a fresh grant for each scan or transcrypt pass, perform the central
+durable one-refresh/one-replay Session lifecycle, and hand the binary port only an invocation URL,
+signed headers, and checked stream bounds. `404` or any authority mismatch remains the local stale
+preparation signal; second authorization failure and transient transport preserve accepted work.
+
+Primary review found a real nested-Base64 response-bound defect, not a fixture defect. The corrected
+legacy-envelope calculation now matches the Server formula, including the behavioral 73-byte to
+226-byte vector. Independent review found no functional or security defect. It did identify the old
+public `AttachmentMoveDownloadPass` name as unreachable compatibility residue: no request carries it
+and no host can use it to select policy. Its mechanical re-exports are deliberately left for C4b's
+public binding cleanup so this slice retains its recorded scheduler-only path boundary.
+
+Deliberately left open: Slice B does not acquire a cross-process Account lease, sweep artifacts,
+drive startup, construct Runtime lifecycle paths, or make a browser binding reachable. Those remain
+Slice C and Ticket 28 C4b.
