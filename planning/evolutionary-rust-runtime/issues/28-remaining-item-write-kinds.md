@@ -1226,3 +1226,41 @@ combined WebAssembly binding checks. Deliberately left open: the production disp
 The next atomic cutover still owns the hash-only Operation POST, same-transaction rejection audit
 and entitlement lookup, create-route-only `422`, opening dispatch and Sync verification, Web Runtime
 creation/result/ACK ownership, and removal of the transitional writer.
+
+### 2026-08-26 — atomic Share cutover delivered
+
+Commit `e29e3d96` replaces the public Share POST and its transitional TypeScript writer in one
+vertical cutover. The Server now accepts the Runtime's hash-only immutable request, serializes exact
+Operation replay, and performs access, entitlement, active-link limit, Share/allowlist writes,
+applied or rejected audit, retained outcome, and ordered Item/Operation Sync events on the same
+transaction connection. Only the create route advertises Operation-identity reuse as `422`; raw
+tokens and Share keys never enter Server persistence or responses.
+
+Production Runtime dispatch now includes `create_share`. A lookup remains only a hint until replay
+of the identical POST proves the accepted fingerprint. Applied results retain the Server's
+non-secret payload beside the protected local capability, derive Item correlation from the
+authoritative Operation receipt, and remain durable until an explicit Account-scoped ACK. Web
+creates only through Runtime, renders a result before ACK, retries ACK without an attempt bound, and
+resumes a keyed Account-and-Item result after unmount or restart. The whole-entry import audit now
+classifies the retired Share writer as forbidden and proves it unreachable.
+
+The in-place Server contract makes the legacy Desktop and Mobile create writer invalid, so their
+create-Share affordances are deliberately absent until those later Runtime host slices; Share reads
+and history remain. Independent review found real defects in unseen late-result ACK, mutable
+Account/Item delivery scope, redundant unverified persisted Item correlation, a stale dispatch-gate
+comment, and unrelated lockfile drift. Mounted lifecycle tests, receipt-derived authority, corrected
+documentation, and an importer-only lockfile cover those findings. A moved test value, a text-as-JSON
+audit query, and the generated positive projection without required `itemId` were fixture defects;
+an exhaustive-access Clippy failure was a real production quality defect.
+
+Primary gates pass for the complete Server, Client Runtime (311 Core tests plus generator and native/
+Web binding drift), API, UI, Web ownership/reachability, dependent types, contracts, formatting, and
+diff checks. The unchanged sharing E2E cannot reach Share because Sign-in waits on the held SSE body:
+the finite ping fixture in the existing Runtime acceptance explicitly records that Ticket 30 owns
+this lifecycle. No finite SSE bypass or softened test was added.
+
+Deliberately left open: ordinary cross-kind dispatch/outcome widening, the dedicated Attachment
+Runtime service and authenticated C4b2b browser acceptance, final Web mutation/lifecycle cutover,
+`idempotency_record` removal, native host Share creation, and Ticket 30's held-SSE loop. Ticket 48 now
+records the maintainer's teardown contract and remains an implementation dependency before Ticket 28
+can resolve.

@@ -1,7 +1,7 @@
 # Move Account removal and Device Wipe into the Runtime
 
-Type: grilling
-Status: needs-info
+Type: task
+Status: ready-for-agent
 Blocked by: 22
 Spec: ../spec.md#web-cutover
 
@@ -66,10 +66,24 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-26 — destructive scope and partial-failure contract decided
+
+The maintainer accepted the recommendation. `RemoveAccount { accountId }` and `Wipe` are explicit,
+irreversible local-destruction authorities. After the Runtime fences every runner and plaintext/key
+lease in the named scope, either request may destroy still-pending accepted Operations together with
+the selected Replica and protected platform material. This is requested Account/Device teardown,
+not a transport-attempt or per-Operation discard policy.
+
+The response is closed and idempotently retryable. It names the requested Account or whole-Device
+scope and returns success only after every required phase is proven complete. A partial Replica,
+platform-store, or host-primitive failure returns `incomplete` with bounded redacted phase failures;
+it never reports success while named data may remain. Retry resumes the same explicit scope without
+consulting an active Account. The implementation must fence first, tolerate already-absent records,
+and converge repeated calls to the same complete outcome.
+
 ### 2026-08-26 — filed from the durable Share acceptance correction
 
 The correction proved successful Sign-out destruction and durable restart, Lock retention without
 exposure, and actual password Quick Unlock recovery. It found no production Runtime request for
 Account removal or Wipe and stopped rather than inventing their destructive/partial-failure
 protocol. Ticket 28 remains blocked on this decision and implementation before final host cutover.
-
