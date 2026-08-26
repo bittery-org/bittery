@@ -66,6 +66,33 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-26 — implementation split at storage, Core, and host boundaries
+
+The decided teardown spans three independently failing authorities and cannot be implemented and
+verified honestly in one pass. It is split before implementation, in this order:
+
+1. **Destructive storage primitives:** extend the closed Replica, platform-storage, Attachment
+   artifact, and upload-spool persistence seams with idempotent explicit-Account deletion and
+   whole-Device namespace wipe. Implement the native SQLite and browser IndexedDB/OPFS primitives,
+   including orphaned records that the Device catalog can no longer name. Fault-injection and real
+   restart tests prove exact scope, no renumbered persisted tags, retry after every partial primitive
+   failure, and no secret logging. This slice exposes no Runtime request and edits no host lifecycle.
+2. **Core teardown state machine:** add the two closed Runtime requests and one scoped
+   `complete | incomplete` outcome over the committed primitives. Core owns catalog serialization,
+   fences dispatch, Sync, preparation, observations, plaintext/key leases, and Account installation
+   before deletion, then reports bounded redacted phase failures and resumes an identical explicit
+   scope idempotently. This slice edits no Web or transitional TypeScript lifecycle path.
+3. **Web lifecycle composition and reachability:** expose the Core requests through the existing
+   binding/client seam, route Web Account removal and Device wipe through Runtime, and remove their
+   reachability to the transitional lifecycle owner. Behavioral browser tests prove named scope,
+   orphan wipe, retry after partial host failure, capability destruction, and no active-Account
+   inference. Desktop, Extension, iOS, and Android consume the same Runtime contract in their later
+   ordered host phases rather than reimplementing it.
+
+Generated persistence artifacts belong to slice 1; generated Runtime/native/Web protocol artifacts
+belong to slice 2. The three slices are sequential. Each starts with an exact behavioral failure,
+receives a fresh implementer and independent reviewer, and is independently green before the next.
+
 ### 2026-08-26 — destructive scope and partial-failure contract decided
 
 The maintainer accepted the recommendation. `RemoveAccount { accountId }` and `Wipe` are explicit,
