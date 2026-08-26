@@ -66,6 +66,35 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-26 — Replica and platform-state deletion primitives delivered
+
+Commit `a1424699` delivers slice 1. The closed Replica persistence seam now supports idempotent
+explicit-Account deletion and whole-Device wipe across InMemory, native SQLite, and browser
+IndexedDB. SQLite and IndexedDB remove heads plus every existing numeric/store-tagged row in one
+transaction, preserve other Accounts, remove orphaned rows, survive reopen, and roll back at every
+injected write boundary. The shared conformance history covers deletion, repeated deletion, wipe,
+and repeated wipe without changing the IndexedDB version or persisted store tags.
+
+Rust now owns length-delimited Account and Runtime-namespace prefixes for platform state. The Web
+host exposes only a generated non-empty `deletePrefix` primitive; Account cleanup spans device
+plain, device secret, and session secret storage while preserving colliding UTF-8 Account identities
+and unrelated host keys. Partial storage-area failure is surfaced without secret material, and an
+identical retry converges.
+
+Independent review found one real defect before commit: an empty `deleteAccount.accountId` was
+wire-valid, accepted by InMemory, and rejected by SQLite/IndexedDB. The generated contract and
+InMemory adapter now reject it consistently. Review also identified cache-preservation and Unicode
+prefix behavior as coverage gaps rather than implementation defects; behavioral tests now protect
+both. The final re-review had no findings. The orchestrator's
+`pnpm --filter @bittery/client-runtime check` passed, including 316 Core tests, Clippy, formatting,
+all generators and drift checks, native bindings, and the combined WebAssembly binding.
+
+Deliberately left open for the remaining recorded slices: Attachment artifact and OPFS/upload-spool
+deletion, the public Runtime teardown state machine and runner/key/lease fencing, closed
+`complete | incomplete` phase reporting, and Web lifecycle composition/reachability. Browser
+PlatformStorage cannot make a multi-area deletion atomic; this primitive therefore exposes failure
+and idempotent retry while the Core slice will own bounded incomplete-phase reporting.
+
 ### 2026-08-26 — implementation split at storage, Core, and host boundaries
 
 The decided teardown spans four independently failing authorities and cannot be implemented and
