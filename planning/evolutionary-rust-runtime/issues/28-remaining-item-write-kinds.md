@@ -994,3 +994,11 @@ Deliberately left open: this slice edits no Worker or browser-host composition a
 production write path reachable. C4b2 still owns the fixed IndexedDB artifact executor, OPFS binary
 executor, browser-wide per-Account Web Locks lease, Worker lifecycle observation, and actual browser
 proofs for exclusive startup, restart/unlock reachability, lease loss, and unbounded retry.
+
+### 2026-08-26 — C4b2 paused on dependent Web binary typing
+
+The first authenticated production Worker import of the fixed binary executor makes the Web
+application's ES2022 DOM compiler reach a pre-existing `Uint8Array<ArrayBufferLike>` to
+`BufferSource` mismatch in the committed digest comparison. C4b2 excludes the binary implementation,
+so [Ticket 47](47-web-binary-buffer-source-compatibility.md) owns the minimal path-disjoint correction
+and its focused behavior/type proof. The C4b2 implementer did not edit that excluded path.
