@@ -124,3 +124,15 @@ a fixture defect, and the same commit regenerates it.
 Deliberately left open: this Server slice does not interpret the response in Client Core, refresh a
 Session, validate an accepted Move source, schedule preparation, acquire an Account lease, or expose
 any host binding. Those remain Slices A, B, and C.
+
+### 2026-08-26 — Slice A landed
+
+Commit `3210f1b8` adds Client Core's crate-private, authenticated source-grant HTTP exchange. It owns
+the exact encoded Attachment route, client and bearer headers, empty request body, finite response
+bound, strict complete response shape, and the decided stale, reauthentication, transient,
+cancellation, and invariant classifications. Behavioral tests prove one transport attempt and the
+adversarial answer matrix. Independent review found no product or fixture defect.
+
+Deliberately left open: the HTTP adapter does not refresh or persist a Session, retry, compare the
+grant with an accepted Move source, persist or log the invocation URL, drive preparation, or expose
+the exchange to a host. Runtime adaptation and exclusive lifecycle remain Slices B and C.
