@@ -99,6 +99,30 @@ Ticket 46 owns both missing Core seams and is split into three independently ver
 before C4b resumes. This follows the already-binding Rust network ownership and per-Account Web Lock
 decisions; it introduces no new product-protocol choice.
 
+### 2026-08-26 — resumed C4b split at the WASM and Worker seams
+
+Ticket 46 resolved the source-grant and exclusive-lifecycle blockers and both repository gates pass
+from a clean tree. C4b now has two independent failure domains that cannot be implemented and
+verified faithfully in one pass, so it is split before new implementation:
+
+1. **C4b1 — Rust/WASM composition bridge:** binding-only Rust paths adapt the committed Core binary
+   transfer port to the committed C3b executor, adapt one primitive JavaScript Account lease guard
+   to Core's lease port, construct the shared IndexedDB artifact/provisional ports, and expose one
+   configured Web Runtime constructor that starts and observes the Core preparation lifecycle. Native
+   and WASM binding tests prove closed error mapping, abandonment, guard loss/release, and that no
+   route, Session, Operation, live-set, sweep proof, or active-Account policy crosses the binding.
+   This slice edits no TypeScript Worker or browser-host path.
+2. **C4b2 — fixed Worker composition and browser reachability:** TypeScript-only Runtime Worker paths
+   construct the fixed IndexedDB artifact executor, fixed binary executor/OPFS spool, and one
+   browser-wide per-Account Web Locks lease executor, then call the C4b1 constructor and await its
+   lifecycle errors. Actual browser tests prove startup sweep before preparation, restart/unlock
+   reachability, two contexts cannot write one Account, lease loss/close cleanup, production executor
+   use, and more than five failures without discard. This slice does not edit Rust, C2, C3, or store
+   implementations.
+
+The slices remain sequential and path-disjoint. C4b2 is the production reachability proof; C4b1 is
+only the deep binding bridge and cannot make preparation reachable by itself.
+
 ### 2026-08-24 — ticket 23 added acceptance prerequisites
 
 The first-slice adversarial review found that the shared Replica adapter conformance and the complete
