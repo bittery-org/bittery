@@ -66,6 +66,35 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-26 — Artifact and upload-spool deletion primitives delivered
+
+Commit `10fcb46f` delivers slice 2. The closed Attachment artifact control seam now supports
+whole-Device wipe alongside explicit-Account deletion across native SQLite and browser IndexedDB.
+Both scopes remove published artifacts, provisional metadata, ciphertext chunks, physical
+generations, and hostile orphan rows in one transaction, preserve other Accounts for the narrower
+scope, reject an empty Account identity, survive restart, and roll back at every one of the four
+store boundaries. Persisted database versions and store names remain unchanged.
+
+The browser ciphertext upload spool now exposes idempotent explicit-Account deletion and
+whole-Device wipe inside its dedicated OPFS root. Every Account upload and cleanup holds the shared
+Device lifecycle Web Lock plus its existing exclusive Account lock; Device wipe holds the exclusive
+Device lock. Actual MV3 Chromium coverage proves wipe waits for an active file callback, and unit
+coverage proves stale/orphan generations, colliding UTF-8 Account identities, restart, and repeated
+cleanup without touching unrelated origin storage.
+
+Implementation found two real pre-existing defects in this slice's authority: SQLite Account
+deletion could leave a foreign-key-disabled orphan published chunk, and IndexedDB Account deletion
+committed one record at a time rather than atomically. Both are fixed and behaviorally protected.
+Independent standards/spec review found no additional defect. The orchestrator's
+`pnpm --filter @bittery/client-runtime check` and focused actual-Chromium OPFS test passed, including
+Rust tests, Clippy, formatting, generators and drift, native bindings, and the combined WebAssembly
+binding.
+
+Deliberately left open for slice 3: public Runtime teardown requests and closed outcomes, catalog
+serialization, runner/Sync/preparation/observation and plaintext/key-lease fencing, composition of
+the committed deletion authorities, and bounded `incomplete` phase reporting. Web lifecycle
+cutover and reachability remain slice 4.
+
 ### 2026-08-26 — Replica and platform-state deletion primitives delivered
 
 Commit `a1424699` delivers slice 1. The closed Replica persistence seam now supports idempotent
