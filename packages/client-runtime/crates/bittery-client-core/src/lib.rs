@@ -88,8 +88,8 @@ pub use replica::SerializedReplicaExecutor;
 pub use replica::SqliteReplica;
 #[doc(hidden)]
 pub use runtime::{
-    AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
-    AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
-    AttachmentMoveUpload, AttachmentMoveUploadGrant,
+    AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort, AttachmentMoveDownload,
+    AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade, AttachmentMoveTransferError,
+    AttachmentMoveTransferPort, AttachmentMoveUpload, AttachmentMoveUploadGrant,
 };
 pub use runtime::{ObservationHandle, Runtime};

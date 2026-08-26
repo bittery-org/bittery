@@ -1,3 +1,6 @@
+mod attachment_move_lifecycle;
+#[cfg(test)]
+mod attachment_move_lifecycle_tests;
 #[allow(
     dead_code,
     reason = "Ticket 28 C2 lands the preparation worker before C4 composes its production ports"
@@ -5,6 +8,10 @@
 mod attachment_move_preparation;
 #[cfg(test)]
 mod attachment_move_preparation_tests;
+#[allow(
+    dead_code,
+    reason = "the obsolete download-pass enum stays private until the scheduler module is simplified"
+)]
 mod attachment_move_scheduler;
 #[cfg(test)]
 mod attachment_move_scheduler_tests;
@@ -24,13 +31,16 @@ mod outcome;
 #[cfg(test)]
 mod outcome_tests;
 
+#[doc(hidden)]
+pub use attachment_move_lifecycle::{AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort};
+use attachment_move_lifecycle::{AttachmentMoveLifecycle, LifecyclePass};
 #[cfg(test)]
 use attachment_move_scheduler::AttachmentMovePreparationDriver;
 #[doc(hidden)]
 pub use attachment_move_scheduler::{
-    AttachmentMoveDownload, AttachmentMoveDownloadPass, AttachmentMoveDownloadRequest,
-    AttachmentMovePreparationFacade, AttachmentMoveTransferError, AttachmentMoveTransferPort,
-    AttachmentMoveUpload, AttachmentMoveUploadGrant,
+    AttachmentMoveDownload, AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade,
+    AttachmentMoveTransferError, AttachmentMoveTransferPort, AttachmentMoveUpload,
+    AttachmentMoveUploadGrant,
 };
 use attachment_move_scheduler::{
     AttachmentMovePreparationScheduler, PreparationCandidate, SchedulerPass,
@@ -429,7 +439,9 @@ pub struct Runtime {
     dispatch_wake: tokio::sync::Notify,
     dispatch_leases: Arc<DispatchLeases>,
     attachment_move_scheduler: Mutex<Option<Arc<AttachmentMovePreparationScheduler>>>,
+    attachment_move_lifecycle: Mutex<Option<Arc<AttachmentMoveLifecycle>>>,
     attachment_move_lifecycle_active: AtomicBool,
+    attachment_move_account_cursor: AtomicU64,
 }
 
 struct AttachmentMoveLifecycleLease {
@@ -585,6 +597,25 @@ impl Runtime {
         clock: Arc<dyn Clock>,
         device_timer: Arc<dyn DeviceTimer>,
     ) -> Arc<Self> {
+        Self::with_test_preparation_lifecycle_environment(
+            persistence,
+            driver,
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+            Arc::new(attachment_move_lifecycle::TestArtifactStore),
+            clock,
+            device_timer,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_preparation_lifecycle_environment(
+        persistence: Arc<InMemoryReplica>,
+        driver: Arc<dyn AttachmentMovePreparationDriver>,
+        lease_port: Arc<dyn AttachmentMoveAccountLeasePort>,
+        artifacts: Arc<dyn crate::attachment_artifact_store::AttachmentArtifactStore>,
+        clock: Arc<dyn Clock>,
+        device_timer: Arc<dyn DeviceTimer>,
+    ) -> Arc<Self> {
         let replica_persistence: Arc<dyn ReplicaPersistence> = persistence.clone();
         let runtime = Self::with_persistence(
             replica_persistence,
@@ -602,6 +633,12 @@ impl Runtime {
             .lock()
             .expect("Attachment Move scheduler lock poisoned") = Some(Arc::new(
             AttachmentMovePreparationScheduler::new_for_test(driver),
+        ));
+        *runtime
+            .attachment_move_lifecycle
+            .lock()
+            .expect("Attachment Move lifecycle lock poisoned") = Some(Arc::new(
+            AttachmentMoveLifecycle::new(lease_port, artifacts),
         ));
         runtime
     }
@@ -642,6 +679,7 @@ impl Runtime {
         http: Arc<dyn SerializedHttpExecutor>,
         auth_config: AuthClientConfig,
         preparation: AttachmentMovePreparationFacade,
+        lease_port: Arc<dyn AttachmentMoveAccountLeasePort>,
     ) -> Arc<Self> {
         let persistence: Arc<dyn ReplicaPersistence> =
             Arc::new(SerializedReplicaPersistence::new(replica));
@@ -650,7 +688,7 @@ impl Runtime {
             Arc::new(PlatformStorage::new(platform)),
             Arc::new(HttpTransport::new(http)),
             Some(auth_config),
-            Some(preparation),
+            Some((preparation, lease_port)),
             false,
             Arc::new(SystemClock),
             Arc::new(SystemDeviceTimer),
@@ -675,7 +713,10 @@ impl Runtime {
         platform_storage: Arc<PlatformStorage>,
         http_transport: Arc<HttpTransport>,
         auth_client_config: Option<AuthClientConfig>,
-        attachment_move_preparation: Option<AttachmentMovePreparationFacade>,
+        attachment_move_preparation: Option<(
+            AttachmentMovePreparationFacade,
+            Arc<dyn AttachmentMoveAccountLeasePort>,
+        )>,
         ready: bool,
         clock: Arc<dyn Clock>,
         device_timer: Arc<dyn DeviceTimer>,
@@ -714,18 +755,33 @@ impl Runtime {
             dispatch_wake: tokio::sync::Notify::new(),
             dispatch_leases: Arc::new(DispatchLeases::default()),
             attachment_move_scheduler: Mutex::new(None),
+            attachment_move_lifecycle: Mutex::new(None),
             attachment_move_lifecycle_active: AtomicBool::new(false),
+            attachment_move_account_cursor: AtomicU64::new(0),
         });
-        if let Some(facade) = attachment_move_preparation {
-            runtime.install_attachment_move_preparation(facade);
+        if let Some((facade, lease_port)) = attachment_move_preparation {
+            runtime.install_attachment_move_preparation_with_lease(facade, lease_port);
         }
         runtime
     }
 
+    #[cfg(test)]
     fn install_attachment_move_preparation(
         self: &Arc<Self>,
         facade: AttachmentMovePreparationFacade,
     ) {
+        self.install_attachment_move_preparation_with_lease(
+            facade,
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+        );
+    }
+
+    fn install_attachment_move_preparation_with_lease(
+        self: &Arc<Self>,
+        facade: AttachmentMovePreparationFacade,
+        lease_port: Arc<dyn AttachmentMoveAccountLeasePort>,
+    ) {
+        let lifecycle = Arc::new(AttachmentMoveLifecycle::new(lease_port, facade.artifacts()));
         let scheduler = Arc::new(AttachmentMovePreparationScheduler::new(
             Arc::clone(&self.replica),
             Arc::clone(&self.live_master_unlock_keys),
@@ -736,6 +792,10 @@ impl Runtime {
             .attachment_move_scheduler
             .lock()
             .expect("Attachment Move scheduler lock poisoned") = Some(scheduler);
+        *self
+            .attachment_move_lifecycle
+            .lock()
+            .expect("Attachment Move lifecycle lock poisoned") = Some(lifecycle);
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.
@@ -754,6 +814,18 @@ impl Runtime {
         else {
             return Ok(());
         };
+        let lifecycle = self
+            .attachment_move_lifecycle
+            .lock()
+            .expect("Attachment Move lifecycle lock poisoned")
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationUnavailable,
+                    "Attachment Move preparation has no exclusive Account lease port",
+                )
+            })?;
         loop {
             if self.is_closed() {
                 return Ok(());
@@ -776,18 +848,21 @@ impl Runtime {
                 .filter(|(_, access)| **access == AccountAccessState::Unlocked)
                 .map(|(account_id, _)| account_id.clone())
                 .collect();
-            let mut candidates: Vec<_> = self
+            let snapshots: Vec<_> = self
                 .replica
                 .snapshots()
                 .into_iter()
                 .filter(|snapshot| snapshot.failure.is_none())
+                .collect();
+            let mut candidates: Vec<_> = snapshots
+                .iter()
                 .flat_map(|snapshot| {
                     snapshot
                         .attachment_move_preparations
-                        .into_iter()
+                        .iter()
                         .map(move |preparation| PreparationCandidate {
                             account_id: snapshot.account_id.clone(),
-                            operation_id: preparation.operation_id,
+                            operation_id: preparation.operation_id.clone(),
                             not_before_ms: preparation.scheduling.not_before_ms,
                         })
                 })
@@ -798,47 +873,91 @@ impl Runtime {
                     .cmp(right.account_id.as_str())
                     .then_with(|| left.operation_id.cmp(&right.operation_id))
             });
-            let due_account = candidates
+            let mut scheduled_accounts = HashSet::new();
+            let mut attempts: Vec<(&ReplicaSnapshot, Option<String>)> = candidates
                 .iter()
-                .find(|candidate| {
+                .filter(|candidate| {
                     unlocked_accounts.contains(&candidate.account_id)
                         && candidate.not_before_ms <= now_ms
+                        && scheduled_accounts.insert(candidate.account_id.clone())
                 })
-                .map(|candidate| candidate.account_id.clone());
-            let execution_guard = if let Some(account_id) = due_account {
-                let execution_lock = self.account_execution_lock(&account_id)?;
-                let guard = execution_lock.lock_owned().await;
-                if self.is_closed() {
-                    return Ok(());
-                }
-                if self
-                    .account_access
-                    .lock()
-                    .expect("Account access lock poisoned")
-                    .get(&account_id)
-                    != Some(&AccountAccessState::Unlocked)
+                .filter_map(|candidate| {
+                    snapshots
+                        .iter()
+                        .find(|snapshot| snapshot.account_id == candidate.account_id)
+                        .map(|snapshot| (snapshot, Some(candidate.operation_id.clone())))
+                })
+                .collect();
+            attempts.extend(snapshots.iter().filter_map(|snapshot| {
+                (unlocked_accounts.contains(&snapshot.account_id)
+                    && !scheduled_accounts.contains(&snapshot.account_id)
+                    && !lifecycle.has_swept(&snapshot.account_id, &snapshot.incarnation))
+                .then_some((snapshot, None))
+            }));
+            if !attempts.is_empty() {
+                let cursor = self
+                    .attachment_move_account_cursor
+                    .fetch_add(1, Ordering::SeqCst) as usize
+                    % attempts.len();
+                attempts.rotate_left(cursor);
+            }
+            let attempted_accounts = !attempts.is_empty();
+
+            let mut pass = None;
+            for (snapshot, operation_id) in attempts {
+                match lifecycle
+                    .run_account(&self, &scheduler, snapshot, operation_id, now_ms)
+                    .await?
                 {
-                    drop(guard);
-                    continue;
+                    LifecyclePass::LeaseUnavailable => continue,
+                    acquired => {
+                        pass = Some(acquired);
+                        break;
+                    }
                 }
-                Some(guard)
+            }
+            let pass = if let Some(pass) = pass {
+                pass
+            } else if !attempted_accounts {
+                let earliest = candidates
+                    .iter()
+                    .filter(|candidate| unlocked_accounts.contains(&candidate.account_id))
+                    .map(|candidate| candidate.not_before_ms)
+                    .min();
+                match earliest {
+                    Some(deadline) => {
+                        let milliseconds = deadline.saturating_sub(now_ms).max(1);
+                        tokio::select! {
+                            () = wake => {}
+                            () = self.device_timer.sleep_ms(milliseconds) => {}
+                        }
+                    }
+                    None => wake.await,
+                }
+                continue;
             } else {
-                None
+                // Cross-process lease contention is a resource wait, not a transport attempt.
+                // A wake remains immediate, while the timer avoids a denied Account hot loop.
+                tokio::select! {
+                    () = wake => {}
+                    () = self.device_timer.sleep_ms(250) => {}
+                }
+                continue;
             };
-            let pass = scheduler
-                .drive_eligible(candidates, &unlocked_accounts, now_ms)
-                .await?;
-            drop(execution_guard);
             if self.is_closed() {
                 return Ok(());
             }
             match pass {
-                SchedulerPass::Progressed => continue,
-                SchedulerPass::DispatchReady => {
+                LifecyclePass::Swept | LifecyclePass::GenerationRetired => continue,
+                LifecyclePass::LeaseUnavailable => {
+                    unreachable!("unavailable leases are tried fairly")
+                }
+                LifecyclePass::Driven(SchedulerPass::DispatchReady) => {
                     self.wake_dispatch();
                 }
-                SchedulerPass::Parked => wake.await,
-                SchedulerPass::WaitFor { milliseconds } => {
+                LifecyclePass::Driven(SchedulerPass::Progressed) => continue,
+                LifecyclePass::Driven(SchedulerPass::Parked) => wake.await,
+                LifecyclePass::Driven(SchedulerPass::WaitFor { milliseconds }) => {
                     tokio::select! {
                         () = wake => {}
                         () = self.device_timer.sleep_ms(milliseconds) => {}
@@ -1449,6 +1568,26 @@ impl Runtime {
             .entry(account_id.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone())
+    }
+
+    fn generation_is_preparation_eligible(&self, snapshot: &ReplicaSnapshot) -> bool {
+        !self.is_closed()
+            && self.ready.load(Ordering::SeqCst)
+            && snapshot.failure.is_none()
+            && self
+                .account_access
+                .lock()
+                .expect("Account access lock poisoned")
+                .get(&snapshot.account_id)
+                == Some(&AccountAccessState::Unlocked)
+            && self
+                .replica
+                .snapshot(&snapshot.account_id)
+                .is_some_and(|current| {
+                    current.failure.is_none()
+                        && current.incarnation == snapshot.incarnation
+                        && current.lock_epoch == snapshot.lock_epoch
+                })
     }
 
     fn identity(&self) -> usize {
