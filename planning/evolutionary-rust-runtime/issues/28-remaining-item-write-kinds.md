@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22, 24, 31, 32, 43, 45, 46
+Blocked by: 22, 24, 31, 32, 43, 45, 46, 48
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -1082,3 +1082,12 @@ boundary used by the other durable acceptance tests. The later Server slice keep
 HTTP route and Operation lookup as its separate public seam. This restores the binding order without
 folding Client cryptography, Server transaction semantics, and generated OpenAPI into one
 unreviewable commit.
+
+### 2026-08-26 — Account removal and Wipe lifecycle gap filed separately
+
+The durable Share acceptance correction can prove successful Sign-out destruction, Lock hiding,
+and password Quick Unlock recovery. It cannot prove Account removal or whole-Device Wipe because
+Client Runtime exposes neither request; those remain in the transitional TypeScript lifecycle
+owner. [Ticket 48](48-runtime-account-removal-and-wipe.md) owns the unresolved destructive and
+partial-failure protocol plus its host cutover. The Share correction does not infer that general
+product contract, and Ticket 28 cannot resolve before Ticket 48 does.
