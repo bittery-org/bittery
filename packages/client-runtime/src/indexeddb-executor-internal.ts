@@ -60,7 +60,11 @@ export class ConfigurableIndexedDbReplicaExecutor {
 						? await install(database, request.prepared, failure)
 						: request.type === "commit"
 							? await commit(database, request.prepared, failure)
-							: await advanceLockEpoch(database, request.prepared, failure);
+							: request.type === "advanceLockEpoch"
+								? await advanceLockEpoch(database, request.prepared, failure)
+								: request.type === "deleteAccount"
+									? await deleteAccount(database, request.accountId, failure)
+									: await wipeDevice(database, failure);
 			if (!validateReplicaPersistenceResponse(response)) {
 				throw new Error(
 					"persistence response does not match the generated contract",
@@ -326,6 +330,54 @@ async function advanceLockEpoch(
 			type: "lockEpochAdvanced",
 			result: { type: "applied", lockEpoch: prepared.nextHead.lockEpoch },
 		};
+	} catch (error) {
+		abort(transaction);
+		await completed.catch(() => undefined);
+		throw error;
+	}
+}
+
+async function deleteAccount(
+	database: IDBDatabase,
+	accountId: string,
+	failure: WriteFailureInjection,
+): Promise<ReplicaPersistenceResponse> {
+	assertIdentifier(accountId, "delete Account");
+	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const completed = transactionDone(transaction);
+	try {
+		for (const storeName of STORE_NAMES.filter((name) => name !== "heads")) {
+			const store = transaction.objectStore(storeName);
+			const keys = await requestResult(
+				store.index(ACCOUNT_INDEX).getAllKeys(accountId),
+			);
+			for (const key of keys) store.delete(key);
+			failure.afterWrite();
+		}
+		transaction.objectStore("heads").delete(accountId);
+		failure.afterWrite();
+		await completed;
+		return { type: "accountDeleted" };
+	} catch (error) {
+		abort(transaction);
+		await completed.catch(() => undefined);
+		throw error;
+	}
+}
+
+async function wipeDevice(
+	database: IDBDatabase,
+	failure: WriteFailureInjection,
+): Promise<ReplicaPersistenceResponse> {
+	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const completed = transactionDone(transaction);
+	try {
+		for (const storeName of STORE_NAMES) {
+			transaction.objectStore(storeName).clear();
+			failure.afterWrite();
+		}
+		await completed;
+		return { type: "deviceWiped" };
 	} catch (error) {
 		abort(transaction);
 		await completed.catch(() => undefined);

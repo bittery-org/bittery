@@ -38,6 +38,46 @@ function request(value: unknown): string {
 }
 
 describe("Web platform storage host", () => {
+	test("deletes only keys under the requested prefix", async () => {
+		const device = new StorageDouble();
+		device.values.set("runtime:account:3:abc:one", "secret-one");
+		device.values.set("runtime:account:3:abc:two", "secret-two");
+		device.values.set("runtime:account:4:abcd:one", "kept");
+		device.values.set("unrelated-host-key", "kept");
+		const host = new WebPlatformStorageHost({
+			device,
+			session: new StorageDouble(),
+		});
+
+		expect(
+			JSON.parse(
+				await host.invoke(
+					request({
+						type: "deletePrefix",
+						area: "deviceSecret",
+						prefix: "runtime:account:3:abc:",
+					}),
+				),
+			),
+		).toEqual({ type: "done" });
+		expect(device.values).toEqual(
+			new Map([
+				["runtime:account:4:abcd:one", "kept"],
+				["unrelated-host-key", "kept"],
+			]),
+		);
+		expect(
+			JSON.parse(
+				await host.invoke(
+					request({
+						type: "deletePrefix",
+						area: "deviceSecret",
+						prefix: "runtime:account:3:abc:",
+					}),
+				),
+			),
+		).toEqual({ type: "done" });
+	});
 	test("maps both device areas to localStorage and session secrets to sessionStorage", async () => {
 		const device = new StorageDouble();
 		const session = new StorageDouble();
@@ -101,6 +141,14 @@ describe("Web platform storage host", () => {
 		for (const invalid of [
 			"not-json",
 			request({ type: "get", area: "memory", key: "key" }),
+			request({ type: "deletePrefix", area: "devicePlain" }),
+			request({ type: "deletePrefix", area: "devicePlain", prefix: "" }),
+			request({
+				type: "deletePrefix",
+				area: "devicePlain",
+				prefix: "runtime:",
+				key: "must-not-be-accepted",
+			}),
 			request({
 				type: "get",
 				area: "devicePlain",
@@ -115,9 +163,12 @@ describe("Web platform storage host", () => {
 	});
 
 	test("normalizes browser storage failures without leaking host error details", async () => {
-		for (const operation of ["get", "set", "delete"] as const) {
+		for (const operation of ["get", "set", "delete", "deletePrefix"] as const) {
 			const device = new StorageDouble();
-			device.throwOn = operation;
+			device.throwOn = operation === "deletePrefix" ? "delete" : operation;
+			if (operation === "deletePrefix") {
+				device.values.set("secret-prefix:key", "secret-value");
+			}
 			const host = new WebPlatformStorageHost({
 				device,
 				session: new StorageDouble(),
@@ -130,7 +181,13 @@ describe("Web platform storage host", () => {
 							key: "key",
 							value: "value",
 						}
-					: { type: operation, area: "devicePlain", key: "key" };
+					: operation === "deletePrefix"
+						? {
+								type: operation,
+								area: "devicePlain",
+								prefix: "secret-prefix:",
+							}
+						: { type: operation, area: "devicePlain", key: "key" };
 
 			try {
 				await host.invoke(request(envelope));
@@ -144,6 +201,7 @@ describe("Web platform storage host", () => {
 					"platform-storage-failure",
 				);
 				expect((error as Error).message).not.toContain(`${operation} failed`);
+				expect((error as Error).message).not.toContain("secret-prefix");
 			}
 		}
 	});

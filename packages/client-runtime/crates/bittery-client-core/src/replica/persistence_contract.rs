@@ -22,6 +22,19 @@ mod required_option {
     }
 }
 
+fn deserialize_non_empty_account_id<'de, D>(deserializer: D) -> Result<AccountId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::custom(
+            "Replica Account identity must not be empty",
+        ));
+    }
+    Ok(AccountId::from(value))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -234,6 +247,15 @@ pub(crate) enum ReplicaPersistenceRequest {
     AdvanceLockEpoch {
         prepared: PreparedLockEpochAdvance,
     },
+    DeleteAccount {
+        #[serde(deserialize_with = "deserialize_non_empty_account_id")]
+        #[cfg_attr(
+            feature = "persistence-contract-schema",
+            schemars(with = "String", length(min = 1))
+        )]
+        account_id: AccountId,
+    },
+    WipeDevice,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +285,8 @@ pub(crate) enum ReplicaPersistenceResponse {
     LockEpochAdvanced {
         result: LockEpochAdvanceResult,
     },
+    AccountDeleted,
+    DeviceWiped,
 }
 
 #[cfg(feature = "persistence-contract-schema")]

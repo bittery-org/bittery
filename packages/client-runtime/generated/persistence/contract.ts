@@ -13,6 +13,11 @@ type: "commit"
 } | {
 prepared: PreparedLockEpochAdvance
 type: "advanceLockEpoch"
+} | {
+accountId: string
+type: "deleteAccount"
+} | {
+type: "wipeDevice"
 })
 export type ExpectedReplicaInstall = ({
 accountId: string
@@ -48,6 +53,10 @@ type: "committed"
 } | {
 result: LockEpochAdvanceResult
 type: "lockEpochAdvanced"
+} | {
+type: "accountDeleted"
+} | {
+type: "deviceWiped"
 })
 export type ReplicaInstallResult = ({
 type: "applied"

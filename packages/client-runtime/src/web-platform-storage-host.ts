@@ -34,6 +34,16 @@ export class WebPlatformStorageHost {
 					storage.removeItem(request.key);
 					response = { type: "done" };
 					break;
+				case "deletePrefix": {
+					const keys: string[] = [];
+					for (let index = 0; index < storage.length; index += 1) {
+						const key = storage.key(index);
+						if (key?.startsWith(request.prefix)) keys.push(key);
+					}
+					for (const key of keys) storage.removeItem(key);
+					response = { type: "done" };
+					break;
+				}
 			}
 		} catch {
 			throw new PlatformStorageHostError();

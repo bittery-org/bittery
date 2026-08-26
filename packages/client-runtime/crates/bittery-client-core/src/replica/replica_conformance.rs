@@ -350,6 +350,26 @@ impl HistoryBuilder {
             },
         )
     }
+
+    fn delete_account(&mut self, label: &str, account_id: &str) -> Result<(), RuntimeError> {
+        self.snapshots.remove(account_id);
+        self.push(
+            label,
+            ReplicaPersistenceRequest::DeleteAccount {
+                account_id: AccountId::from(account_id),
+            },
+            ReplicaPersistenceResponse::AccountDeleted,
+        )
+    }
+
+    fn wipe_device(&mut self, label: &str) -> Result<(), RuntimeError> {
+        self.snapshots.clear();
+        self.push(
+            label,
+            ReplicaPersistenceRequest::WipeDevice,
+            ReplicaPersistenceResponse::DeviceWiped,
+        )
+    }
 }
 
 fn loaded_response(
@@ -662,6 +682,44 @@ fn installation_history() -> Result<History, RuntimeError> {
             result: PlanResult::Stale { actual_revision: 2 },
         },
     )?;
+    Ok(history.finish())
+}
+
+fn deletion_history() -> Result<History, RuntimeError> {
+    let mut history = HistoryBuilder::new(
+        "explicit-account-deletion-and-device-wipe",
+        &[
+            "exact Account deletion across stores",
+            "other Account preservation",
+            "idempotent repeated Account deletion",
+            "whole Device wipe",
+            "idempotent repeated Device wipe",
+        ],
+        &["account-delete-a", "account-delete-b"],
+    );
+    history.install("install deletion target", "account-delete-a", "first")?;
+    history.install("install preserved Account", "account-delete-b", "first")?;
+    history.commit_plan(
+        "seed deletion target Operation and overlay",
+        GuardedCommitPlan::new(
+            AccountId::from("account-delete-a"),
+            incarnation("account-delete-a", "first"),
+            0,
+            0,
+            vec![
+                PlanMutation::AcceptOperation(operation("operation-delete-a", "item-delete-a")),
+                PlanMutation::PutOptimisticItem(overlay(
+                    "account-delete-a",
+                    "operation-delete-a",
+                    "item-delete-a",
+                )),
+            ],
+        ),
+    )?;
+    history.delete_account("delete exactly one Account", "account-delete-a")?;
+    history.delete_account("repeat Account deletion", "account-delete-a")?;
+    history.wipe_device("wipe remaining Device Replica")?;
+    history.wipe_device("repeat Device wipe")?;
     Ok(history.finish())
 }
 
@@ -1089,6 +1147,7 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
         forbidden_durable_row_markers: vec![KNOWN_PLAINTEXT_MARKER.to_owned()],
         histories: vec![
             installation_history()?,
+            deletion_history()?,
             bootstrap_history()?,
             operation_history()?,
         ],

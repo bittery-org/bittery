@@ -221,6 +221,19 @@ fn account_key(
     ))
 }
 
+fn account_prefix(account_id: &AccountId) -> Result<String, RuntimeError> {
+    require_account_id(account_id)?;
+    let identity = account_id.as_str();
+    Ok(format!(
+        "{KEY_PREFIX}:account:{}:{identity}:",
+        identity.len()
+    ))
+}
+
+fn runtime_namespace_prefix() -> String {
+    format!("{KEY_PREFIX}:")
+}
+
 fn require_account_id(account_id: &AccountId) -> Result<(), RuntimeError> {
     if account_id.as_str().is_empty() {
         return Err(platform_storage_invariant(
@@ -657,6 +670,16 @@ enum PlatformStorageRequest {
         #[zeroize(skip)]
         key: String,
     },
+    DeletePrefix {
+        #[zeroize(skip)]
+        area: PlatformStorageArea,
+        #[zeroize(skip)]
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(length(min = 1))
+        )]
+        prefix: String,
+    },
 }
 
 impl<'de> Deserialize<'de> for PlatformStorageRequest {
@@ -680,6 +703,7 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
                 let mut request_type = None;
                 let mut area = None;
                 let mut key = None;
+                let mut prefix = None;
                 let mut value = None;
                 let mut value_present = false;
                 let mut unknown_field = None;
@@ -689,6 +713,7 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
                         "type" => read_buffered_field(&mut map, &mut request_type, "type")?,
                         "area" => read_buffered_field(&mut map, &mut area, "area")?,
                         "key" => read_buffered_field(&mut map, &mut key, "key")?,
+                        "prefix" => read_buffered_field(&mut map, &mut prefix, "prefix")?,
                         "value" => {
                             if value_present {
                                 return Err(serde::de::Error::duplicate_field("value"));
@@ -711,21 +736,45 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
 
                 let request_type: String = decode_buffered_field(request_type, "type")?;
                 let area = decode_buffered_field(area, "area")?;
-                let key = decode_buffered_field(key, "key")?;
                 match request_type.as_str() {
-                    "get" if !value_present => Ok(PlatformStorageRequest::Get { area, key }),
-                    "set" => Ok(PlatformStorageRequest::Set {
+                    "get" if !value_present && prefix.is_none() => {
+                        Ok(PlatformStorageRequest::Get {
+                            area,
+                            key: decode_buffered_field(key, "key")?,
+                        })
+                    }
+                    "set" if prefix.is_none() => Ok(PlatformStorageRequest::Set {
                         area,
-                        key,
+                        key: decode_buffered_field(key, "key")?,
                         value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
                     }),
-                    "delete" if !value_present => Ok(PlatformStorageRequest::Delete { area, key }),
+                    "delete" if !value_present && prefix.is_none() => {
+                        Ok(PlatformStorageRequest::Delete {
+                            area,
+                            key: decode_buffered_field(key, "key")?,
+                        })
+                    }
+                    "deletePrefix" if !value_present && key.is_none() => {
+                        let prefix: String = decode_buffered_field(prefix, "prefix")?;
+                        if prefix.is_empty() {
+                            return Err(serde::de::Error::custom(
+                                "platform-storage deletion prefix is empty",
+                            ));
+                        }
+                        Ok(PlatformStorageRequest::DeletePrefix { area, prefix })
+                    }
                     "get" | "delete" => Err(serde::de::Error::custom(format!(
-                        "unknown field `value` in platform-storage {request_type} request"
+                        "invalid fields in platform-storage {request_type} request"
                     ))),
+                    "deletePrefix" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage deletePrefix request",
+                    )),
+                    "set" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage set request",
+                    )),
                     _ => Err(serde::de::Error::unknown_variant(
                         &request_type,
-                        &["get", "set", "delete"],
+                        &["get", "set", "delete", "deletePrefix"],
                     )),
                 }
             }
@@ -940,6 +989,43 @@ impl PlatformStorage {
 
     pub(crate) async fn remove_device_catalog(&self) -> Result<(), RuntimeError> {
         self.delete(PlatformStorageValue::DeviceCatalog).await
+    }
+
+    /// Removes every persisted incarnation for one explicit Account from every storage area.
+    pub(crate) async fn delete_account_namespace(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), RuntimeError> {
+        let prefix = account_prefix(account_id)?;
+        for area in [
+            PlatformStorageArea::DevicePlain,
+            PlatformStorageArea::DeviceSecret,
+            PlatformStorageArea::SessionSecret,
+        ] {
+            self.expect_done(PlatformStorageRequest::DeletePrefix {
+                area,
+                prefix: prefix.clone(),
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Removes only the Runtime-owned namespace, including Device documents and orphaned Accounts.
+    pub(crate) async fn wipe_runtime_namespace(&self) -> Result<(), RuntimeError> {
+        let prefix = runtime_namespace_prefix();
+        for area in [
+            PlatformStorageArea::DevicePlain,
+            PlatformStorageArea::DeviceSecret,
+            PlatformStorageArea::SessionSecret,
+        ] {
+            self.expect_done(PlatformStorageRequest::DeletePrefix {
+                area,
+                prefix: prefix.clone(),
+            })
+            .await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn load_account_metadata(
@@ -1347,6 +1433,33 @@ mod tests {
         saw_secret: Mutex<bool>,
     }
 
+    struct PrefixStorageExecutor {
+        values: Mutex<Vec<(PlatformStorageArea, String, String)>>,
+        fail_once_in: Mutex<Option<PlatformStorageArea>>,
+    }
+
+    impl PrefixStorageExecutor {
+        fn new(values: Vec<(PlatformStorageArea, String, String)>) -> Self {
+            Self {
+                values: Mutex::new(values),
+                fail_once_in: Mutex::new(None),
+            }
+        }
+
+        fn fail_once_in(&self, area: PlatformStorageArea) {
+            *self.fail_once_in.lock().expect("failure lock poisoned") = Some(area);
+        }
+
+        fn keys(&self) -> Vec<(PlatformStorageArea, String)> {
+            self.values
+                .lock()
+                .expect("values lock poisoned")
+                .iter()
+                .map(|(area, key, _)| (*area, key.clone()))
+                .collect()
+        }
+    }
+
     #[async_trait]
     impl SerializedPlatformStorageExecutor for FailingWireExecutor {
         async fn invoke(
@@ -1393,6 +1506,37 @@ mod tests {
             serde_json::to_string(&response)
                 .map(Zeroizing::new)
                 .map_err(|_| platform_storage_invariant("test response could not serialize"))
+        }
+    }
+
+    #[async_trait]
+    impl SerializedPlatformStorageExecutor for PrefixStorageExecutor {
+        async fn invoke(
+            &self,
+            request_json: Zeroizing<String>,
+        ) -> Result<Zeroizing<String>, RuntimeError> {
+            let request: PlatformStorageRequest = serde_json::from_str(&request_json)
+                .map_err(|_| platform_storage_invariant("test request was invalid"))?;
+            let PlatformStorageRequest::DeletePrefix { area, prefix } = &request else {
+                return Err(platform_storage_invariant(
+                    "test executor accepts only prefix deletion",
+                ));
+            };
+            let mut fail_once = self.fail_once_in.lock().expect("failure lock poisoned");
+            if *fail_once == Some(*area) {
+                *fail_once = None;
+                return Err(platform_storage_invariant(
+                    "platform storage primitive failed",
+                ));
+            }
+            drop(fail_once);
+            self.values
+                .lock()
+                .expect("values lock poisoned")
+                .retain(|(candidate_area, key, _)| {
+                    *candidate_area != *area || !key.starts_with(prefix)
+                });
+            Ok(Zeroizing::new(r#"{"type":"done"}"#.into()))
         }
     }
 
@@ -2007,6 +2151,234 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn account_and_device_deletion_use_only_rust_owned_length_delimited_prefixes() {
+        let executor = Arc::new(RecordingExecutor::default());
+        executor
+            .responses
+            .lock()
+            .expect("responses lock poisoned")
+            .extend(std::iter::repeat_n(PlatformStorageResponse::Done, 6));
+        let storage = PlatformStorage::new(executor.clone());
+
+        storage
+            .delete_account_namespace(&account("a:b"))
+            .await
+            .expect("Account namespace deletion must succeed");
+        storage
+            .wipe_runtime_namespace()
+            .await
+            .expect("Runtime namespace wipe must succeed");
+
+        let requests = executor.requests.lock().expect("requests lock poisoned");
+        let areas = [
+            PlatformStorageArea::DevicePlain,
+            PlatformStorageArea::DeviceSecret,
+            PlatformStorageArea::SessionSecret,
+        ];
+        for (request, expected_area) in requests[..3].iter().zip(areas) {
+            let PlatformStorageRequest::DeletePrefix { area, prefix } = request else {
+                panic!("expected Account prefix deletion");
+            };
+            assert_eq!(*area, expected_area);
+            assert_eq!(prefix, "bittery:runtime:platform-storage:account:3:a:b:");
+        }
+        for (request, expected_area) in requests[3..].iter().zip(areas) {
+            let PlatformStorageRequest::DeletePrefix { area, prefix } = request else {
+                panic!("expected Device prefix deletion");
+            };
+            assert_eq!(*area, expected_area);
+            assert_eq!(prefix, "bittery:runtime:platform-storage:");
+        }
+    }
+
+    #[tokio::test]
+    async fn account_and_device_prefix_deletion_retry_partial_area_failure_without_collisions() {
+        let target = account("a");
+        let collision = account("a:");
+        let unicode = account("ä");
+        let unicode_collision = account("ä:");
+        let target_incarnation = incarnation("first");
+        let second_incarnation = incarnation("second");
+        let collision_incarnation = incarnation("collision");
+        let target_metadata =
+            PlatformStorageValue::AccountMetadata(target.clone(), target_incarnation.clone())
+                .key()
+                .unwrap();
+        let target_second_metadata =
+            PlatformStorageValue::AccountMetadata(target.clone(), second_incarnation.clone())
+                .key()
+                .unwrap();
+        let target_quick_unlock =
+            PlatformStorageValue::AccountQuickUnlock(target.clone(), target_incarnation.clone())
+                .key()
+                .unwrap();
+        let target_session = PlatformStorageValue::CurrentSessionCredentials(
+            target.clone(),
+            target_incarnation.clone(),
+        )
+        .key()
+        .unwrap();
+        let collision_metadata =
+            PlatformStorageValue::AccountMetadata(collision, collision_incarnation)
+                .key()
+                .unwrap();
+        let unicode_metadata =
+            PlatformStorageValue::AccountMetadata(unicode.clone(), incarnation("unicode"))
+                .key()
+                .unwrap();
+        let unicode_collision_metadata = PlatformStorageValue::AccountMetadata(
+            unicode_collision,
+            incarnation("unicode-collision"),
+        )
+        .key()
+        .unwrap();
+        assert_eq!(
+            account_prefix(&unicode).unwrap(),
+            "bittery:runtime:platform-storage:account:2:ä:"
+        );
+        let executor = Arc::new(PrefixStorageExecutor::new(vec![
+            (
+                PlatformStorageArea::DevicePlain,
+                target_metadata.clone(),
+                "target-metadata".into(),
+            ),
+            (
+                PlatformStorageArea::DevicePlain,
+                target_second_metadata.clone(),
+                "target-second-metadata".into(),
+            ),
+            (
+                PlatformStorageArea::DeviceSecret,
+                target_quick_unlock.clone(),
+                "target-quick-unlock".into(),
+            ),
+            (
+                PlatformStorageArea::SessionSecret,
+                target_session.clone(),
+                "target-session".into(),
+            ),
+            (
+                PlatformStorageArea::DevicePlain,
+                collision_metadata.clone(),
+                "collision".into(),
+            ),
+            (
+                PlatformStorageArea::DevicePlain,
+                unicode_metadata.clone(),
+                "unicode".into(),
+            ),
+            (
+                PlatformStorageArea::DevicePlain,
+                unicode_collision_metadata.clone(),
+                "unicode-collision".into(),
+            ),
+            (
+                PlatformStorageArea::DevicePlain,
+                "unrelated-host-key".into(),
+                "unrelated".into(),
+            ),
+        ]));
+        let storage = PlatformStorage::new(executor.clone());
+        executor.fail_once_in(PlatformStorageArea::DeviceSecret);
+
+        let error = storage
+            .delete_account_namespace(&target)
+            .await
+            .expect_err("the injected second-area failure must surface");
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(error.message, "platform storage primitive failed");
+        let after_failure = executor.keys();
+        assert!(!after_failure.iter().any(|(_, key)| key == &target_metadata));
+        assert!(!after_failure
+            .iter()
+            .any(|(_, key)| key == &target_second_metadata));
+        assert!(after_failure
+            .iter()
+            .any(|(_, key)| key == &target_quick_unlock));
+        assert!(after_failure.iter().any(|(_, key)| key == &target_session));
+
+        storage
+            .delete_account_namespace(&target)
+            .await
+            .expect("retry must converge");
+        storage
+            .delete_account_namespace(&target)
+            .await
+            .expect("repeated deletion must remain idempotent");
+        let after_retry = executor.keys();
+        assert!(!after_retry.iter().any(|(_, key)| {
+            key == &target_metadata
+                || key == &target_second_metadata
+                || key == &target_quick_unlock
+                || key == &target_session
+        }));
+        assert!(after_retry
+            .iter()
+            .any(|(_, key)| key == &collision_metadata));
+        assert!(after_retry.iter().any(|(_, key)| key == &unicode_metadata));
+        assert!(after_retry
+            .iter()
+            .any(|(_, key)| key == &unicode_collision_metadata));
+        assert!(after_retry
+            .iter()
+            .any(|(_, key)| key == "unrelated-host-key"));
+
+        storage
+            .delete_account_namespace(&unicode)
+            .await
+            .expect("Unicode Account deletion must succeed");
+        let after_unicode = executor.keys();
+        assert!(!after_unicode
+            .iter()
+            .any(|(_, key)| key == &unicode_metadata));
+        assert!(after_unicode
+            .iter()
+            .any(|(_, key)| key == &unicode_collision_metadata));
+
+        executor
+            .values
+            .lock()
+            .expect("values lock poisoned")
+            .extend([
+                (
+                    PlatformStorageArea::DevicePlain,
+                    PlatformStorageValue::DeviceCatalog.key().unwrap(),
+                    "catalog".into(),
+                ),
+                (
+                    PlatformStorageArea::DeviceSecret,
+                    PlatformStorageValue::DeviceKey.key().unwrap(),
+                    "device-key".into(),
+                ),
+                (
+                    PlatformStorageArea::SessionSecret,
+                    format!("{}orphan", runtime_namespace_prefix()),
+                    "orphan".into(),
+                ),
+            ]);
+        executor.fail_once_in(PlatformStorageArea::SessionSecret);
+        storage
+            .wipe_runtime_namespace()
+            .await
+            .expect_err("the injected final-area failure must surface");
+        storage
+            .wipe_runtime_namespace()
+            .await
+            .expect("Device wipe retry must converge");
+        storage
+            .wipe_runtime_namespace()
+            .await
+            .expect("repeated Device wipe must remain idempotent");
+        assert_eq!(
+            executor.keys(),
+            vec![(
+                PlatformStorageArea::DevicePlain,
+                "unrelated-host-key".into()
+            )]
+        );
+    }
+
+    #[tokio::test]
     async fn load_rejects_unknown_fields_versions_and_cross_account_documents() {
         for invalid in [
             {
@@ -2047,6 +2419,10 @@ mod tests {
     #[test]
     fn wire_contract_rejects_unknown_or_missing_fields() {
         assert!(serde_json::from_str::<PlatformStorageRequest>(
+            r#"{"type":"deletePrefix","area":"deviceSecret","prefix":"runtime:"}"#
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<PlatformStorageRequest>(
             r#"{"type":"get","area":"devicePlain","key":"opaque","extra":true}"#
         )
         .is_err());
@@ -2054,6 +2430,14 @@ mod tests {
             r#"{"type":"get","area":"memory","key":"opaque"}"#
         )
         .is_err());
+        for invalid in [
+            r#"{"type":"deletePrefix","area":"devicePlain"}"#,
+            r#"{"type":"deletePrefix","area":"devicePlain","prefix":""}"#,
+            r#"{"type":"deletePrefix","area":"devicePlain","prefix":"runtime:","key":"opaque"}"#,
+            r#"{"type":"deletePrefix","area":"devicePlain","prefix":"runtime:","value":"secret"}"#,
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageRequest>(invalid).is_err());
+        }
         assert!(serde_json::from_str::<PlatformStorageResponse>(r#"{"type":"value"}"#).is_err());
     }
 }

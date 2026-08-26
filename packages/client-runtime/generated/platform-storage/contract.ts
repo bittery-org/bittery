@@ -14,6 +14,10 @@ value: string
 area: PlatformStorageArea
 key: string
 type: "delete"
+} | {
+area: PlatformStorageArea
+prefix: string
+type: "deletePrefix"
 })
 export type PlatformStorageArea = ("devicePlain" | "deviceSecret" | "sessionSecret")
 export type PlatformStorageResponse = ({

@@ -203,6 +203,116 @@ function install(
 }
 
 describe("IndexedDbReplicaExecutor", () => {
+	test("keeps one transaction alive across async index scans, deletes exactly one Account, and survives reopen", async () => {
+		const database = await openRawDatabase();
+		const storeNames = [
+			"heads",
+			"optimistic_items",
+			"operations",
+			"attachment_move_preparations",
+			"share_capabilities",
+			"operation_receipts",
+			"replica_metadata",
+			"bootstrap_generations",
+			"bootstrap_pages",
+			"authority_vaults",
+			"authority_items",
+		];
+		const transaction = database.transaction(storeNames, "readwrite");
+		for (const accountId of ["account-target", "account-kept"]) {
+			transaction.objectStore("heads").put({
+				accountId,
+				userId: `user-${accountId}`,
+				incarnation: `incarnation-${accountId}`,
+				replicaRevision: "0",
+				lockEpoch: "0",
+				failure: null,
+			});
+			for (const storeName of storeNames.slice(1)) {
+				transaction.objectStore(storeName).put({
+					accountId,
+					recordId: `row-${storeName}`,
+					payloadJson: "opaque",
+				});
+			}
+		}
+		transaction.objectStore("share_capabilities").put({
+			accountId: "account-orphan",
+			recordId: "orphan-capability",
+			payloadJson: "opaque",
+		});
+		await transactionDone(transaction);
+		database.close();
+
+		expect(
+			await invoke({ type: "deleteAccount", accountId: "account-target" }),
+		).toEqual({ type: "accountDeleted" });
+		expect(await invoke({ type: "load", accountId: "account-target" })).toEqual(
+			{
+				type: "loaded",
+				head: null,
+				rows: [],
+			},
+		);
+		expect(
+			await invoke({ type: "load", accountId: "account-kept" }),
+		).toMatchObject({
+			type: "loaded",
+			head: { accountId: "account-kept" },
+			rows: expect.arrayContaining([
+				expect.objectContaining({ store: "operations" }),
+				expect.objectContaining({ store: "shareCapabilities" }),
+			]),
+		});
+		expect(await rawDatabaseContents()).toContainEqual(
+			expect.objectContaining({ accountId: "account-orphan" }),
+		);
+		expect(
+			await invoke({ type: "deleteAccount", accountId: "account-orphan" }),
+		).toEqual({ type: "accountDeleted" });
+		expect(await rawDatabaseContents()).not.toContainEqual(
+			expect.objectContaining({ accountId: "account-orphan" }),
+		);
+		expect(
+			await invoke({ type: "deleteAccount", accountId: "account-target" }),
+		).toEqual({ type: "accountDeleted" });
+	});
+
+	test("wipes every Replica row including an orphan without recreating the database", async () => {
+		const database = await openRawDatabase();
+		const transaction = database.transaction(
+			["heads", "operations", "share_capabilities"],
+			"readwrite",
+		);
+		transaction.objectStore("heads").put({
+			accountId: "account-headed",
+			userId: "user-headed",
+			incarnation: "incarnation-headed",
+			replicaRevision: "0",
+			lockEpoch: "0",
+			failure: null,
+		});
+		transaction.objectStore("operations").put({
+			accountId: "account-headed",
+			recordId: "operation-headed",
+			payloadJson: "opaque",
+		});
+		transaction.objectStore("share_capabilities").put({
+			accountId: "orphan-account",
+			recordId: "orphan-capability",
+			payloadJson: "opaque",
+		});
+		await transactionDone(transaction);
+		database.close();
+
+		expect(await invoke({ type: "wipeDevice" })).toEqual({
+			type: "deviceWiped",
+		});
+		expect(await rawDatabaseContents()).toEqual([]);
+		expect(await invoke({ type: "wipeDevice" })).toEqual({
+			type: "deviceWiped",
+		});
+	});
 	test("upgrades v6 additively without destroying durable Replica rows or indexes", async () => {
 		const priorRequest = indexedDB.open(DB_NAME, PRIOR_DB_VERSION);
 		priorRequest.onupgradeneeded = () => {
@@ -567,6 +677,35 @@ describe("IndexedDbReplicaExecutor", () => {
 	});
 
 	test("rejects the former domain plan and unknown wire fields", async () => {
+		expect(
+			validateReplicaPersistenceRequest({
+				type: "deleteAccount",
+				accountId: "account-a",
+			}),
+		).toBeTrue();
+		expect(
+			validateReplicaPersistenceRequest({ type: "wipeDevice" }),
+		).toBeTrue();
+		for (const invalid of [
+			{ type: "deleteAccount" },
+			{ type: "deleteAccount", accountId: "account-a", extra: true },
+			{ type: "wipeDevice", accountId: "account-a" },
+			{ type: "accountDeleted" },
+		]) {
+			expect(validateReplicaPersistenceRequest(invalid)).toBeFalse();
+		}
+		expect(
+			validateReplicaPersistenceResponse({ type: "accountDeleted" }),
+		).toBeTrue();
+		expect(
+			validateReplicaPersistenceResponse({ type: "deviceWiped" }),
+		).toBeTrue();
+		expect(
+			validateReplicaPersistenceResponse({
+				type: "accountDeleted",
+				accountId: "account-a",
+			}),
+		).toBeFalse();
 		await expect(
 			invoke({ type: "commit", plan: { mutations: [] } }),
 		).rejects.toThrow(
@@ -577,6 +716,15 @@ describe("IndexedDbReplicaExecutor", () => {
 		).rejects.toThrow(
 			"persistence request does not match the generated contract",
 		);
+	});
+
+	test("generated Account deletion rejects an empty explicit Account scope", () => {
+		expect(
+			validateReplicaPersistenceRequest({
+				type: "deleteAccount",
+				accountId: "",
+			}),
+		).toBeFalse();
 	});
 
 	test("generated response validation requires explicit nullable fields", () => {

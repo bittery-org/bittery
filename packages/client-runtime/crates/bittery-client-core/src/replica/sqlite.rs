@@ -213,6 +213,39 @@ impl SqliteReplica {
                     },
                 }
             }
+            ReplicaPersistenceRequest::DeleteAccount { account_id } => {
+                if account_id.as_str().is_empty() {
+                    return Err(replica_error("Replica Account identity is empty"));
+                }
+                let mut boundary = 0;
+                transaction
+                    .execute(
+                        "DELETE FROM replica_rows WHERE account_id = ?1",
+                        params![account_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
+                self.after_write(&mut boundary)?;
+                transaction
+                    .execute(
+                        "DELETE FROM replica_heads WHERE account_id = ?1",
+                        params![account_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
+                self.after_write(&mut boundary)?;
+                ReplicaPersistenceResponse::AccountDeleted
+            }
+            ReplicaPersistenceRequest::WipeDevice => {
+                let mut boundary = 0;
+                transaction
+                    .execute("DELETE FROM replica_rows", [])
+                    .map_err(sqlite_error)?;
+                self.after_write(&mut boundary)?;
+                transaction
+                    .execute("DELETE FROM replica_heads", [])
+                    .map_err(sqlite_error)?;
+                self.after_write(&mut boundary)?;
+                ReplicaPersistenceResponse::DeviceWiped
+            }
         };
         transaction.commit().map_err(sqlite_error)?;
         Ok(response)

@@ -70,6 +70,199 @@ fn plan(account_id: &str, revision: u64, operation_id: &str) -> GuardedCommitPla
 }
 
 #[tokio::test]
+async fn sqlite_deletes_one_explicit_account_and_preserves_another_after_reopen() {
+    let database = TestDatabase::new("delete-account-reopen");
+    let persistence = Arc::new(SqliteReplica::open(&database.path).unwrap());
+    let replica = Replica::new(persistence.clone());
+    install(&replica, "account-target").await;
+    install(&replica, "account-kept").await;
+    replica
+        .execute(plan("account-target", 0, "operation-target"))
+        .await
+        .unwrap();
+    replica
+        .execute(plan("account-kept", 0, "operation-kept"))
+        .await
+        .unwrap();
+    drop(replica);
+    drop(persistence);
+
+    let raw = rusqlite::Connection::open(&database.path).unwrap();
+    for store in 0..=9 {
+        raw.execute(
+            "INSERT INTO replica_rows (account_id, store, record_id, payload_json) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["account-target", store, format!("exhaustive-{store}"), "opaque"],
+        )
+        .unwrap();
+    }
+    raw.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    raw.execute(
+        "INSERT INTO replica_rows (account_id, store, record_id, payload_json) VALUES ('account-orphan', 9, 'orphan-capability', 'opaque')",
+        [],
+    )
+    .unwrap();
+    drop(raw);
+
+    let persistence = Arc::new(SqliteReplica::open(&database.path).unwrap());
+
+    assert_eq!(
+        super::SerializedReplicaExecutor::invoke(
+            persistence.as_ref(),
+            r#"{"type":"deleteAccount","accountId":"account-target"}"#.into(),
+        )
+        .await
+        .unwrap(),
+        r#"{"type":"accountDeleted"}"#,
+    );
+    drop(persistence);
+
+    let raw = rusqlite::Connection::open(&database.path).unwrap();
+    let target_rows: i64 = raw
+        .query_row(
+            "SELECT COUNT(*) FROM replica_rows WHERE account_id = 'account-target'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let kept_rows: i64 = raw
+        .query_row(
+            "SELECT COUNT(*) FROM replica_rows WHERE account_id = 'account-kept'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(target_rows, 0);
+    assert!(kept_rows > 0);
+    let orphan_rows: i64 = raw
+        .query_row(
+            "SELECT COUNT(*) FROM replica_rows WHERE account_id = 'account-orphan'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan_rows, 1);
+    drop(raw);
+
+    let persistence = SqliteReplica::open(&database.path).unwrap();
+    super::SerializedReplicaExecutor::invoke(
+        &persistence,
+        r#"{"type":"deleteAccount","accountId":"account-orphan"}"#.into(),
+    )
+    .await
+    .unwrap();
+    drop(persistence);
+    let raw = rusqlite::Connection::open(&database.path).unwrap();
+    let orphan_rows: i64 = raw
+        .query_row(
+            "SELECT COUNT(*) FROM replica_rows WHERE account_id = 'account-orphan'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan_rows, 0);
+    drop(raw);
+
+    let reopened = Replica::new(Arc::new(SqliteReplica::open(&database.path).unwrap()));
+    assert_eq!(
+        reopened
+            .load(&AccountId::from("account-target"))
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(reopened
+        .load(&AccountId::from("account-kept"))
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn sqlite_wipe_removes_orphan_rows_and_is_idempotent_after_reopen() {
+    let database = TestDatabase::new("wipe-orphans-reopen");
+    let persistence = Arc::new(SqliteReplica::open(&database.path).unwrap());
+    let replica = Replica::new(persistence.clone());
+    install(&replica, "account-headed").await;
+    drop(replica);
+    drop(persistence);
+
+    let raw = rusqlite::Connection::open(&database.path).unwrap();
+    raw.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    raw.execute(
+        "INSERT INTO replica_rows (account_id, store, record_id, payload_json) VALUES ('orphan-account', 9, 'orphan-capability', 'opaque')",
+        [],
+    )
+    .unwrap();
+    drop(raw);
+
+    for _ in 0..2 {
+        let persistence = SqliteReplica::open(&database.path).unwrap();
+        assert_eq!(
+            super::SerializedReplicaExecutor::invoke(
+                &persistence,
+                r#"{"type":"wipeDevice"}"#.into(),
+            )
+            .await
+            .unwrap(),
+            r#"{"type":"deviceWiped"}"#,
+        );
+    }
+
+    let raw = rusqlite::Connection::open(&database.path).unwrap();
+    let heads: i64 = raw
+        .query_row("SELECT COUNT(*) FROM replica_heads", [], |row| row.get(0))
+        .unwrap();
+    let rows: i64 = raw
+        .query_row("SELECT COUNT(*) FROM replica_rows", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!((heads, rows), (0, 0));
+}
+
+#[tokio::test]
+async fn sqlite_account_delete_and_device_wipe_roll_back_at_every_write_boundary() {
+    for (name, request) in [
+        (
+            "delete-account",
+            r#"{"type":"deleteAccount","accountId":"account-target"}"#,
+        ),
+        ("wipe-device", r#"{"type":"wipeDevice"}"#),
+    ] {
+        for boundary in 1..=2 {
+            let database = TestDatabase::new(&format!("{name}-atomic-{boundary}"));
+            let initial = Arc::new(SqliteReplica::open(&database.path).unwrap());
+            let replica = Replica::new(initial.clone());
+            install(&replica, "account-target").await;
+            replica
+                .execute(plan("account-target", 0, "operation-target"))
+                .await
+                .unwrap();
+            let before = replica
+                .load(&AccountId::from("account-target"))
+                .await
+                .unwrap();
+            drop(replica);
+            drop(initial);
+
+            let failing = SqliteReplica::open_failing_after(&database.path, boundary).unwrap();
+            let error = super::SerializedReplicaExecutor::invoke(&failing, request.into())
+                .await
+                .unwrap_err();
+            assert_eq!(error.message, "injected SQLite Replica write failure");
+            drop(failing);
+
+            let reopened = Replica::new(Arc::new(SqliteReplica::open(&database.path).unwrap()));
+            assert_eq!(
+                reopened
+                    .load(&AccountId::from("account-target"))
+                    .await
+                    .unwrap(),
+                before,
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn sqlite_loads_a_missing_account_without_rows() {
     let database = TestDatabase::new("missing-account");
     let replica = SqliteReplica::open(&database.path).unwrap();
@@ -506,6 +699,9 @@ fn sqlite_write_boundaries(request: &ReplicaPersistenceRequest) -> usize {
         ReplicaPersistenceRequest::Install { prepared } => 1 + prepared.writes.len(),
         ReplicaPersistenceRequest::Commit { prepared } => 1 + prepared.writes.len(),
         ReplicaPersistenceRequest::AdvanceLockEpoch { .. } => 1,
+        ReplicaPersistenceRequest::DeleteAccount { .. } | ReplicaPersistenceRequest::WipeDevice => {
+            2
+        }
         ReplicaPersistenceRequest::Load { .. } => panic!("a load has no SQLite write boundary"),
     }
 }

@@ -913,6 +913,356 @@
       ]
     },
     {
+      "name": "explicit-account-deletion-and-device-wipe",
+      "coverage": [
+        "exact Account deletion across stores",
+        "other Account preservation",
+        "idempotent repeated Account deletion",
+        "whole Device wipe",
+        "idempotent repeated Device wipe"
+      ],
+      "steps": [
+        {
+          "label": "install deletion target",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-delete-a"
+              },
+              "nextHead": {
+                "accountId": "account-delete-a",
+                "userId": "user-account-delete-a",
+                "incarnation": "incarnation-account-delete-a-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-a",
+                  "userId": "user-account-delete-a",
+                  "incarnation": "incarnation-account-delete-a-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "install preserved Account",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-delete-b"
+              },
+              "nextHead": {
+                "accountId": "account-delete-b",
+                "userId": "user-account-delete-b",
+                "incarnation": "incarnation-account-delete-b-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-a",
+                  "userId": "user-account-delete-a",
+                  "incarnation": "incarnation-account-delete-a-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-b",
+                  "userId": "user-account-delete-b",
+                  "incarnation": "incarnation-account-delete-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "seed deletion target Operation and overlay",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-delete-a",
+                "incarnation": "incarnation-account-delete-a-first",
+                "userId": "user-account-delete-a",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-delete-a",
+                "userId": "user-account-delete-a",
+                "incarnation": "incarnation-account-delete-a-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-delete-a",
+                      "recordId": "operation-delete-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-delete-a\",\"kind\":\"create_item\",\"itemId\":\"item-delete-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-delete-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,100,101,108,101,116,101,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"cb7eac881398a70bffcf2644b438419825e0dfa752581f6ed79e1b7acfc0dab1\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-delete-a",
+                      "recordId": "item-delete-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-delete-a\",\"itemId\":\"item-delete-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-delete-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-delete-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-delete-a\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-a",
+                  "userId": "user-account-delete-a",
+                  "incarnation": "incarnation-account-delete-a-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "optimisticItems",
+                    "key": {
+                      "accountId": "account-delete-a",
+                      "recordId": "item-delete-a"
+                    },
+                    "payloadJson": "{\"accountId\":\"account-delete-a\",\"itemId\":\"item-delete-a\",\"vaultId\":\"vault-1\",\"operationId\":\"operation-delete-a\",\"category\":\"login\",\"encryptedData\":\"opaque-sealed-item-delete-a\",\"encryptionIv\":\"AAAAAAAAAAAAAAAA\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-delete-a\",\"favorite\":false,\"version\":1,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\",\"deletedAt\":null,\"attachments\":[],\"permanentlyDeleted\":false}"
+                  },
+                  {
+                    "store": "operations",
+                    "key": {
+                      "accountId": "account-delete-a",
+                      "recordId": "operation-delete-a"
+                    },
+                    "payloadJson": "{\"operationId\":\"operation-delete-a\",\"kind\":\"create_item\",\"itemId\":\"item-delete-a\",\"vaultId\":\"vault-1\",\"request\":{\"method\":\"PUT\",\"path\":\"/api/v1/vaults/vault-1/items/item-delete-a\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"}],\"body\":[123,34,105,116,101,109,73,100,34,58,34,105,116,101,109,45,100,101,108,101,116,101,45,97,34,44,34,101,110,99,114,121,112,116,101,100,68,97,116,97,34,58,34,111,112,97,113,117,101,45,99,105,112,104,101,114,116,101,120,116,34,125]},\"requestFingerprint\":\"cb7eac881398a70bffcf2644b438419825e0dfa752581f6ed79e1b7acfc0dab1\",\"scheduling\":{\"attemptCount\":\"0\",\"notBeforeMs\":\"0\"}}"
+                  }
+                ]
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-b",
+                  "userId": "user-account-delete-b",
+                  "incarnation": "incarnation-account-delete-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "delete exactly one Account",
+          "request": {
+            "type": "deleteAccount",
+            "accountId": "account-delete-a"
+          },
+          "expectedResponse": {
+            "type": "accountDeleted"
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-b",
+                  "userId": "user-account-delete-b",
+                  "incarnation": "incarnation-account-delete-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "repeat Account deletion",
+          "request": {
+            "type": "deleteAccount",
+            "accountId": "account-delete-a"
+          },
+          "expectedResponse": {
+            "type": "accountDeleted"
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-delete-b",
+                  "userId": "user-account-delete-b",
+                  "incarnation": "incarnation-account-delete-b-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "wipe remaining Device Replica",
+          "request": {
+            "type": "wipeDevice"
+          },
+          "expectedResponse": {
+            "type": "deviceWiped"
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "repeat Device wipe",
+          "request": {
+            "type": "wipeDevice"
+          },
+          "expectedResponse": {
+            "type": "deviceWiped"
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-delete-a",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            },
+            {
+              "accountId": "account-delete-b",
+              "response": {
+                "type": "loaded",
+                "head": null,
+                "rows": []
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "bootstrap-staging-promotion-and-tagged-cursor",
       "coverage": [
         "Bootstrap staging",

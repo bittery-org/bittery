@@ -1152,6 +1152,50 @@ impl Replica {
         reconstruct_snapshot(account_id, head, rows)
     }
 
+    #[allow(
+        dead_code,
+        reason = "consumed by Ticket 48's sequential Core teardown slice"
+    )]
+    pub(crate) async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::DeleteAccount {
+                account_id: account_id.clone(),
+            })
+            .await?;
+        if response != ReplicaPersistenceResponse::AccountDeleted {
+            return Err(replica_invariant(
+                "Replica persistence returned the wrong Account-deletion response",
+            ));
+        }
+        self.snapshots
+            .lock()
+            .expect("Replica cache lock poisoned")
+            .remove(account_id);
+        Ok(())
+    }
+
+    #[allow(
+        dead_code,
+        reason = "consumed by Ticket 48's sequential Core teardown slice"
+    )]
+    pub(crate) async fn wipe_device(&self) -> Result<(), RuntimeError> {
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::WipeDevice)
+            .await?;
+        if response != ReplicaPersistenceResponse::DeviceWiped {
+            return Err(replica_invariant(
+                "Replica persistence returned the wrong Device-wipe response",
+            ));
+        }
+        self.snapshots
+            .lock()
+            .expect("Replica cache lock poisoned")
+            .clear();
+        Ok(())
+    }
+
     pub(crate) async fn restore_known_accounts(
         &self,
         account_ids: &[AccountId],
@@ -2266,6 +2310,25 @@ impl ReplicaPersistence for InMemoryReplica {
                     },
                 })
             }
+            ReplicaPersistenceRequest::DeleteAccount { account_id } => {
+                if account_id.as_str().is_empty() {
+                    return Err(replica_invariant("Replica Account identity is empty"));
+                }
+                self.state
+                    .lock()
+                    .expect("replica lock poisoned")
+                    .accounts
+                    .remove(&account_id);
+                Ok(ReplicaPersistenceResponse::AccountDeleted)
+            }
+            ReplicaPersistenceRequest::WipeDevice => {
+                self.state
+                    .lock()
+                    .expect("replica lock poisoned")
+                    .accounts
+                    .clear();
+                Ok(ReplicaPersistenceResponse::DeviceWiped)
+            }
         }
     }
 }
@@ -2277,6 +2340,48 @@ mod persistence_contract_tests {
 
     struct HostileCrossUserExecutor {
         install_called: AtomicBool,
+    }
+
+    #[derive(Clone, Copy)]
+    enum DestructiveFailureBehavior {
+        DeleteError,
+        DeleteWrongResponse,
+        WipeError,
+        WipeWrongResponse,
+    }
+
+    struct DestructiveFailurePersistence {
+        inner: InMemoryReplica,
+        behavior: DestructiveFailureBehavior,
+    }
+
+    #[async_trait]
+    impl ReplicaPersistence for DestructiveFailurePersistence {
+        async fn invoke(
+            &self,
+            request: ReplicaPersistenceRequest,
+        ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+            match (&request, self.behavior) {
+                (
+                    ReplicaPersistenceRequest::DeleteAccount { .. },
+                    DestructiveFailureBehavior::DeleteError,
+                )
+                | (ReplicaPersistenceRequest::WipeDevice, DestructiveFailureBehavior::WipeError) => {
+                    Err(replica_invariant(
+                        "injected destructive persistence failure",
+                    ))
+                }
+                (
+                    ReplicaPersistenceRequest::DeleteAccount { .. },
+                    DestructiveFailureBehavior::DeleteWrongResponse,
+                ) => Ok(ReplicaPersistenceResponse::DeviceWiped),
+                (
+                    ReplicaPersistenceRequest::WipeDevice,
+                    DestructiveFailureBehavior::WipeWrongResponse,
+                ) => Ok(ReplicaPersistenceResponse::AccountDeleted),
+                _ => self.inner.invoke(request).await,
+            }
+        }
     }
 
     #[async_trait]
@@ -2306,7 +2411,9 @@ mod persistence_contract_tests {
                     })
                 }
                 ReplicaPersistenceRequest::Commit { .. }
-                | ReplicaPersistenceRequest::AdvanceLockEpoch { .. } => unreachable!(),
+                | ReplicaPersistenceRequest::AdvanceLockEpoch { .. }
+                | ReplicaPersistenceRequest::DeleteAccount { .. }
+                | ReplicaPersistenceRequest::WipeDevice => unreachable!(),
             }
         }
     }
@@ -2407,7 +2514,9 @@ mod persistence_contract_tests {
                         result: LockEpochAdvanceResult::Applied { lock_epoch },
                     })
                 }
-                ReplicaPersistenceRequest::Commit { .. } => unreachable!(),
+                ReplicaPersistenceRequest::Commit { .. }
+                | ReplicaPersistenceRequest::DeleteAccount { .. }
+                | ReplicaPersistenceRequest::WipeDevice => unreachable!(),
             }
         }
     }
@@ -3229,5 +3338,67 @@ mod persistence_contract_tests {
         assert_replica_conformance(&Replica::new(persistence)).await;
         // Accept, remove, accept, and complete: four commits, and one round trip each.
         assert_eq!(executor.commit_calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn destructive_persistence_errors_and_wrong_responses_preserve_the_replica_cache() {
+        for behavior in [
+            DestructiveFailureBehavior::DeleteError,
+            DestructiveFailureBehavior::DeleteWrongResponse,
+            DestructiveFailureBehavior::WipeError,
+            DestructiveFailureBehavior::WipeWrongResponse,
+        ] {
+            let persistence = Arc::new(DestructiveFailurePersistence {
+                inner: InMemoryReplica::default(),
+                behavior,
+            });
+            let replica = Replica::new(persistence.clone());
+            let account_id = AccountId::from("account-cache-preserved");
+            replica
+                .install_or_replace(
+                    account_id.clone(),
+                    "user-cache-preserved".into(),
+                    Incarnation::from("incarnation-cache-preserved"),
+                )
+                .await
+                .unwrap();
+            let before = replica.load(&account_id).await.unwrap().unwrap();
+
+            let error = match behavior {
+                DestructiveFailureBehavior::DeleteError
+                | DestructiveFailureBehavior::DeleteWrongResponse => {
+                    replica.delete_account(&account_id).await.unwrap_err()
+                }
+                DestructiveFailureBehavior::WipeError
+                | DestructiveFailureBehavior::WipeWrongResponse => {
+                    replica.wipe_device().await.unwrap_err()
+                }
+            };
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert_eq!(
+                replica
+                    .snapshots
+                    .lock()
+                    .expect("Replica cache lock poisoned")
+                    .get(&account_id),
+                Some(&before),
+            );
+            assert!(persistence.inner.snapshot(&account_id).is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_account_deletion_is_closed_for_deserialization_and_in_memory_execution() {
+        assert!(serde_json::from_str::<ReplicaPersistenceRequest>(
+            r#"{"type":"deleteAccount","accountId":""}"#
+        )
+        .is_err());
+        let error = InMemoryReplica::default()
+            .invoke(ReplicaPersistenceRequest::DeleteAccount {
+                account_id: AccountId::from(""),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
     }
 }
