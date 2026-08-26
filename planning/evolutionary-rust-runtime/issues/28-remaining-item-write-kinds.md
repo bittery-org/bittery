@@ -1123,3 +1123,37 @@ acknowledged capability delivery, the Attachment Runtime service, C4b2b authenti
 acceptance, final Web cutover and reachability audit, and `idempotency_record` removal remain later
 Ticket 28 slices. Account removal and Device wipe capability destruction remain blocked on the
 maintainer decision in Ticket 48.
+
+### 2026-08-26 — Share Server slice split after dependent-contract review
+
+The first uncommitted Server Share pass proved that the recorded Server-only route switch cannot be
+an independently green slice. Replacing the public POST immediately widens `OperationOutcome` while
+the reachable transitional Share service still sends the old request and expects the old raw-token
+response; Client Runtime deliberately does not dispatch `create_share` until that replacement
+exists. Dependent type checks fail, and an applied Share `operation_resolved` event makes the legacy
+delta consumer attempt to fetch Item `undefined`. Adding a TypeScript compatibility token writer
+would create the dual owner the accepted Rust decision forbids. None of that uncommitted pass may be
+committed as the Server slice.
+
+The remaining Share work is therefore re-split at three green, non-parallel boundaries:
+
+1. **Outcome schema and lookup foundation:** add the closed `create_share` applied/rejected retained
+   schema, migration invariants, generated lookup union, and safe existing union consumers. The
+   public create-Share route and facade keep their legacy contract in this commit, so no caller or
+   writer changes and the Runtime dispatch gate remains closed.
+2. **Runtime Share outcome lifecycle:** implement typed dispatch classification, lookup/retry,
+   atomic reconciliation, durable `PendingShareResult`, and idempotent acknowledgement against test
+   transport while keeping the production `create_share` dispatch gate closed.
+3. **Atomic Share cutover:** in one vertical commit, replace the public POST with the hash-only
+   Operation executor, open Runtime dispatch, route Web Share creation/result acknowledgement to
+   Runtime, and remove the transitional TypeScript Share writer. The route, generated facade, host,
+   and only reachable writer change together.
+
+Review of the rejected Server-only pass also found real defects that the owning later slices must
+retain as regression requirements: semantic Share rejections need an audit in the same transaction;
+entitlement lookup must not acquire a second pool connection while holding the Operation
+transaction; and the create-only Operation-ID `422` must not be advertised through shared error
+responses on unrelated Share routes. PostgreSQL enum use in one migration transaction, nullable or
+incomplete applied payloads, and foreign Share rejection codes were already reproduced as real
+migration defects. The stale exact enum-label expectation and an accidentally zero-test Cargo
+filter were fixture/command defects, not product behavior.
