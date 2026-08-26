@@ -17,6 +17,7 @@ pub mod passkey;
 pub mod recovery;
 pub mod rsa;
 pub mod secret_key;
+mod share_capability;
 pub mod srp6a;
 pub mod totp;
 pub mod uuid;
@@ -51,6 +52,9 @@ pub use recovery::{
 };
 pub use rsa::{generate_rsa_key_pair, rsa_decrypt, rsa_encrypt, RsaKeyPair};
 pub use secret_key::{generate_secret_key, get_secret_key_hint, validate_secret_key};
+pub use share_capability::{
+    decrypt_share_capability, encrypt_share_capability, ShareCapabilityAadContext,
+};
 pub use srp6a::{SrpClient, SrpServer};
 pub use totp::{generate_totp, generate_totp_at, TotpResult};
 pub use uuid::generate_uuid;

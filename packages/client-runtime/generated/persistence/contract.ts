@@ -34,7 +34,7 @@ key: ReplicaRowKey
 store: ReplicaStore
 type: "delete"
 })
-export type ReplicaStore = ("optimisticItems" | "operations" | "attachmentMovePreparations" | "operationReceipts" | "replicaMetadata" | "bootstrapGenerations" | "bootstrapPages" | "authorityVaults" | "authorityItems")
+export type ReplicaStore = ("optimisticItems" | "operations" | "attachmentMovePreparations" | "shareCapabilities" | "operationReceipts" | "replicaMetadata" | "bootstrapGenerations" | "bootstrapPages" | "authorityVaults" | "authorityItems")
 export type ReplicaPersistenceResponse = ({
 head: (ReplicaHead | null)
 rows: StoredReplicaRow[]

@@ -39,9 +39,9 @@ pub(crate) use domain::{
     CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
     MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
     OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
-    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan, RecomputedPlanResult,
-    ReplicaItemRecord, ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
-    StageBootstrapPageResult, SyncCursor,
+    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan,
+    ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot,
+    ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -1690,6 +1690,7 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
     let Some(current) = current else {
         return next.items.is_empty()
             && next.operations.is_empty()
+            && next.share_capabilities.is_empty()
             && next.attachment_move_preparations.is_empty()
             && next.receipts.is_empty();
     };
@@ -1713,6 +1714,16 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .iter()
         .map(|operation| (&operation.operation_id, operation))
         .collect();
+    let current_share_capabilities: HashMap<_, _> = current
+        .share_capabilities
+        .iter()
+        .map(|capability| (&capability.operation_id, capability))
+        .collect();
+    let next_share_capabilities: HashMap<_, _> = next
+        .share_capabilities
+        .iter()
+        .map(|capability| (&capability.operation_id, capability))
+        .collect();
     let current_preparations: HashMap<_, _> = current
         .attachment_move_preparations
         .iter()
@@ -1735,6 +1746,7 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .collect();
     current_items == next_items
         && current_operations == next_operations
+        && current_share_capabilities == next_share_capabilities
         && current_preparations == next_preparations
         && current_receipts == next_receipts
 }
@@ -1774,6 +1786,7 @@ impl InMemoryReplica {
                 lock_epoch: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
+                share_capabilities: HashMap::new(),
                 attachment_move_preparations: HashMap::new(),
                 receipts: HashMap::new(),
                 failure: None,
@@ -2130,6 +2143,7 @@ impl ReplicaPersistence for InMemoryReplica {
                                 lock_epoch: head.lock_epoch,
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
+                                share_capabilities: HashMap::new(),
                                 attachment_move_preparations: HashMap::new(),
                                 receipts: HashMap::new(),
                                 failure: head.failure,
@@ -2582,6 +2596,7 @@ mod persistence_contract_tests {
                     lock_epoch: 0,
                     items: vec![item("account-1", "item-1", "operation-1")],
                     operations: vec![operation("operation-1", "item-1")],
+                    share_capabilities: vec![],
                     attachment_move_preparations: vec![],
                     receipts: vec![],
                     failure: None,
@@ -2617,6 +2632,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![item("account-1", "item-1", "operation-1")],
                 operations: vec![operation("operation-1", "item-1")],
+                share_capabilities: vec![],
                 attachment_move_preparations: vec![],
                 receipts: vec![],
                 failure: None,
@@ -2938,6 +2954,7 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
+                share_capabilities: vec![],
                 attachment_move_preparations: vec![],
                 receipts: vec![],
                 failure: None,
@@ -3051,6 +3068,7 @@ mod persistence_contract_tests {
             lock_epoch: 0,
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
+            share_capabilities: vec![],
             attachment_move_preparations: vec![],
             receipts: vec![],
             failure: None,

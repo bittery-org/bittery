@@ -396,6 +396,7 @@ fn row_key(row: &StoredReplicaRow) -> (u8, &str, &str) {
         ReplicaStore::AuthorityVaults => 6,
         ReplicaStore::AuthorityItems => 7,
         ReplicaStore::AttachmentMovePreparations => 8,
+        ReplicaStore::ShareCapabilities => 9,
     };
     (store, row.key.account_id.as_str(), &row.key.record_id)
 }
@@ -1179,6 +1180,7 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
         lock_epoch: 0,
         items: Vec::new(),
         operations: Vec::new(),
+        share_capabilities: Vec::new(),
         attachment_move_preparations: Vec::new(),
         receipts: Vec::new(),
         failure: None,

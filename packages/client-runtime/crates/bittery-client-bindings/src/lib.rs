@@ -144,6 +144,29 @@ impl LoginItemDraft {
     }
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CreateShareDraft {
+    pub access_mode: ShareAccessMode,
+    pub expires_in: ShareExpiration,
+    pub is_one_time_use: bool,
+    pub allowed_emails: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ShareAccessMode {
+    Anyone,
+    EmailRestricted,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ShareExpiration {
+    OneHour,
+    OneDay,
+    SevenDays,
+    FourteenDays,
+    ThirtyDays,
+}
+
 impl LoginItemDraft {
     fn to_core(&self) -> core::LoginItemDraft {
         core::LoginItemDraft {
@@ -214,6 +237,11 @@ pub enum RuntimeRequest {
     PermanentlyDeleteItem {
         account_id: String,
         item_id: String,
+    },
+    CreateShare {
+        account_id: String,
+        item_id: String,
+        draft: CreateShareDraft,
     },
 }
 
@@ -304,6 +332,16 @@ impl fmt::Debug for RuntimeRequest {
                 .debug_struct("PermanentlyDeleteItem")
                 .field("account_id", account_id)
                 .field("item_id", item_id)
+                .finish(),
+            Self::CreateShare {
+                account_id,
+                item_id,
+                draft,
+            } => formatter
+                .debug_struct("CreateShare")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("draft", draft)
                 .finish(),
         }
     }
@@ -793,6 +831,41 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id: account_id.into(),
                 item_id,
             },
+            RuntimeRequest::CreateShare {
+                account_id,
+                item_id,
+                draft,
+            } => Self::CreateShare {
+                account_id: account_id.into(),
+                item_id,
+                draft: core::CreateShareDraft {
+                    access_mode: draft.access_mode.into(),
+                    expires_in: draft.expires_in.into(),
+                    is_one_time_use: draft.is_one_time_use,
+                    allowed_emails: draft.allowed_emails,
+                },
+            },
+        }
+    }
+}
+
+impl From<ShareAccessMode> for core::ShareAccessMode {
+    fn from(value: ShareAccessMode) -> Self {
+        match value {
+            ShareAccessMode::Anyone => Self::Anyone,
+            ShareAccessMode::EmailRestricted => Self::EmailRestricted,
+        }
+    }
+}
+
+impl From<ShareExpiration> for core::ShareExpiration {
+    fn from(value: ShareExpiration) -> Self {
+        match value {
+            ShareExpiration::OneHour => Self::OneHour,
+            ShareExpiration::OneDay => Self::OneDay,
+            ShareExpiration::SevenDays => Self::SevenDays,
+            ShareExpiration::FourteenDays => Self::FourteenDays,
+            ShareExpiration::ThirtyDays => Self::ThirtyDays,
         }
     }
 }

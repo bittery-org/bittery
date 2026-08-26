@@ -1335,6 +1335,14 @@ impl Runtime {
                 )
                 .await
             }
+            RuntimeRequest::CreateShare {
+                account_id,
+                item_id,
+                draft,
+            } => {
+                self.accept_create_share(account_id, item_id, draft, cancellation, accepted)
+                    .await
+            }
         }
     }
 

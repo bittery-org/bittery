@@ -4071,6 +4071,54 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
 
 
 
+data class CreateShareDraft (
+    var `accessMode`: ShareAccessMode
+    ,
+    var `expiresIn`: ShareExpiration
+    ,
+    var `isOneTimeUse`: kotlin.Boolean
+    ,
+    var `allowedEmails`: List<kotlin.String>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreateShareDraft: FfiConverterRustBuffer<CreateShareDraft> {
+    override fun read(buf: ByteBuffer): CreateShareDraft {
+        return CreateShareDraft(
+            FfiConverterTypeShareAccessMode.read(buf),
+            FfiConverterTypeShareExpiration.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CreateShareDraft) = (
+            FfiConverterTypeShareAccessMode.allocationSize(value.`accessMode`) +
+            FfiConverterTypeShareExpiration.allocationSize(value.`expiresIn`) +
+            FfiConverterBoolean.allocationSize(value.`isOneTimeUse`) +
+            FfiConverterSequenceString.allocationSize(value.`allowedEmails`)
+    )
+
+    override fun write(value: CreateShareDraft, buf: ByteBuffer) {
+            FfiConverterTypeShareAccessMode.write(value.`accessMode`, buf)
+            FfiConverterTypeShareExpiration.write(value.`expiresIn`, buf)
+            FfiConverterBoolean.write(value.`isOneTimeUse`, buf)
+            FfiConverterSequenceString.write(value.`allowedEmails`, buf)
+    }
+}
+
+
+
 data class ItemsProjection (
     var `accountId`: kotlin.String
     ,
@@ -4791,6 +4839,17 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class CreateShare(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `draft`: uniffi.bittery_client_bindings.CreateShareDraft) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
 
 
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
@@ -4889,6 +4948,15 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.CreateShare -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`draft`
+    )
+
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -4954,6 +5022,11 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             11 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
+                )
+            12 -> RuntimeRequest.CreateShare(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeCreateShareDraft.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -5053,6 +5126,15 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`itemId`)
             )
         }
+        is RuntimeRequest.CreateShare -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterTypeCreateShareDraft.allocationSize(value.`draft`)
+            )
+        }
     }
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
@@ -5126,6 +5208,13 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 buf.putInt(11)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.CreateShare -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -5252,6 +5341,77 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ShareAccessMode {
+
+    ANYONE,
+    EMAIL_RESTRICTED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareAccessMode: FfiConverterRustBuffer<ShareAccessMode> {
+    override fun read(buf: ByteBuffer) = try {
+        ShareAccessMode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ShareAccessMode) = 4UL
+
+    override fun write(value: ShareAccessMode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class ShareExpiration {
+
+    ONE_HOUR,
+    ONE_DAY,
+    SEVEN_DAYS,
+    FOURTEEN_DAYS,
+    THIRTY_DAYS;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareExpiration: FfiConverterRustBuffer<ShareExpiration> {
+    override fun read(buf: ByteBuffer) = try {
+        ShareExpiration.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ShareExpiration) = 4UL
+
+    override fun write(value: ShareExpiration, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 

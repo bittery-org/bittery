@@ -402,6 +402,7 @@ fn encode_store(store: ReplicaStore) -> i64 {
         ReplicaStore::AuthorityVaults => 6,
         ReplicaStore::AuthorityItems => 7,
         ReplicaStore::AttachmentMovePreparations => 8,
+        ReplicaStore::ShareCapabilities => 9,
     }
 }
 
@@ -416,6 +417,7 @@ fn decode_store(store: i64) -> Result<ReplicaStore, RuntimeError> {
         6 => Ok(ReplicaStore::AuthorityVaults),
         7 => Ok(ReplicaStore::AuthorityItems),
         8 => Ok(ReplicaStore::AttachmentMovePreparations),
+        9 => Ok(ReplicaStore::ShareCapabilities),
         _ => Err(replica_error("SQLite Replica row has an unknown store")),
     }
 }

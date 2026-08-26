@@ -13,7 +13,20 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
+const PRIOR_DB_VERSION = 6;
+const PRIOR_STORE_NAMES = [
+	"heads",
+	"optimistic_items",
+	"operations",
+	"attachment_move_preparations",
+	"operation_receipts",
+	"replica_metadata",
+	"bootstrap_generations",
+	"bootstrap_pages",
+	"authority_vaults",
+	"authority_items",
+] as const;
 let indexedDB: IDBFactory;
 
 beforeEach(() => {
@@ -59,6 +72,8 @@ async function rawDatabaseContents(): Promise<unknown[]> {
 		"heads",
 		"optimistic_items",
 		"operations",
+		"attachment_move_preparations",
+		"share_capabilities",
 		"operation_receipts",
 		"replica_metadata",
 		"bootstrap_generations",
@@ -188,6 +203,86 @@ function install(
 }
 
 describe("IndexedDbReplicaExecutor", () => {
+	test("upgrades v6 additively without destroying durable Replica rows or indexes", async () => {
+		const priorRequest = indexedDB.open(DB_NAME, PRIOR_DB_VERSION);
+		priorRequest.onupgradeneeded = () => {
+			const database = priorRequest.result;
+			database.createObjectStore("heads", { keyPath: "accountId" });
+			for (const storeName of PRIOR_STORE_NAMES.filter(
+				(name) => name !== "heads",
+			)) {
+				const store = database.createObjectStore(storeName, {
+					keyPath: ["accountId", "recordId"],
+				});
+				store.createIndex("by_account", "accountId");
+			}
+		};
+		const prior = await requestResult(priorRequest);
+		const seed = prior.transaction(PRIOR_STORE_NAMES, "readwrite");
+		seed.objectStore("heads").put({
+			accountId: "account-a",
+			userId: "user-a",
+			incarnation: "incarnation-a",
+			replicaRevision: "6",
+			lockEpoch: "2",
+			failure: null,
+		});
+		for (const storeName of PRIOR_STORE_NAMES.filter(
+			(name) => name !== "heads",
+		)) {
+			seed.objectStore(storeName).put({
+				accountId: "account-a",
+				recordId: `${storeName}-record`,
+				payloadJson: `${storeName}-opaque`,
+			});
+		}
+		await transactionDone(seed);
+		prior.close();
+
+		const loaded = await invoke({ type: "load", accountId: "account-a" });
+		expect(loaded.head).toMatchObject({
+			replicaRevision: "6",
+			lockEpoch: "2",
+		});
+		expect(loaded.rows).toHaveLength(PRIOR_STORE_NAMES.length - 1);
+		expect(loaded.rows).toContainEqual({
+			store: "operations",
+			key: { accountId: "account-a", recordId: "operations-record" },
+			payloadJson: "operations-opaque",
+		});
+		expect(loaded.rows).toContainEqual({
+			store: "operationReceipts",
+			key: {
+				accountId: "account-a",
+				recordId: "operation_receipts-record",
+			},
+			payloadJson: "operation_receipts-opaque",
+		});
+
+		const upgraded = await openRawDatabase();
+		expect(upgraded.version).toBe(DB_VERSION);
+		expect([...upgraded.objectStoreNames]).toContain("share_capabilities");
+		const verify = upgraded.transaction(
+			[...PRIOR_STORE_NAMES, "share_capabilities"],
+			"readonly",
+		);
+		for (const storeName of PRIOR_STORE_NAMES.filter(
+			(name) => name !== "heads",
+		)) {
+			expect([...verify.objectStore(storeName).indexNames]).toContain(
+				"by_account",
+			);
+		}
+		expect([...verify.objectStore("share_capabilities").indexNames]).toEqual([
+			"by_account",
+		]);
+		expect(
+			await requestResult(verify.objectStore("share_capabilities").getAll()),
+		).toEqual([]);
+		await transactionDone(verify);
+		upgraded.close();
+	});
+
 	test("advances only the durable lock epoch and makes an old commit stale", async () => {
 		await invoke(install());
 		await invoke(commit(prepared([put("operations", "kept", "opaque")])));
@@ -605,6 +700,11 @@ describe("IndexedDbReplicaExecutor", () => {
 		const writes = [
 			put("optimisticItems", "item-a", "not-json"),
 			put("operations", "operation-a", '{"sealed":[4,5,6]}'),
+			put(
+				"shareCapabilities",
+				"operation-a",
+				'{"ciphertext":"opaque-account-protected-capability"}',
+			),
 		];
 		expect(await invoke(commit(prepared(writes)))).toEqual({
 			type: "committed",
@@ -640,7 +740,11 @@ describe("IndexedDbReplicaExecutor", () => {
 		).toMatchObject({ result: { type: "applied", replicaRevision: "2" } });
 		expect(
 			(await invoke({ type: "load", accountId: "account-a" })).rows,
-		).toEqual([writes[0]?.type === "put" ? writes[0].row : writes[0]]);
+		).toEqual(
+			[writes[0], writes[2]].map((write) =>
+				write?.type === "put" ? write.row : write,
+			),
+		);
 	});
 
 	test("rejects an unsafe primitive batch before writing any row", async () => {

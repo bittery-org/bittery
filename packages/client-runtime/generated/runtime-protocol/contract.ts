@@ -99,7 +99,14 @@ type: "moveItem"
 accountId: string
 itemId: string
 type: "permanentlyDeleteItem"
+} | {
+accountId: string
+draft: CreateShareDraft
+itemId: string
+type: "createShare"
 })
+export type ShareAccessMode = ("anyone" | "email-restricted")
+export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")
 
 export interface RuntimeProtocolContract {
 observation: ObservationRequest
@@ -200,4 +207,10 @@ title: string
 url?: (string | null)
 urls?: string[]
 username?: (string | null)
+}
+export interface CreateShareDraft {
+accessMode: ShareAccessMode
+allowedEmails?: string[]
+expiresIn: ShareExpiration
+isOneTimeUse: boolean
 }

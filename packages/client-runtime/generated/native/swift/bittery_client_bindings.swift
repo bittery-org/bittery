@@ -1952,6 +1952,68 @@ public func FfiConverterTypeAccountStatus_lower(_ value: AccountStatus) -> RustB
 }
 
 
+public struct CreateShareDraft: Equatable, Hashable {
+    public var accessMode: ShareAccessMode
+    public var expiresIn: ShareExpiration
+    public var isOneTimeUse: Bool
+    public var allowedEmails: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accessMode: ShareAccessMode, expiresIn: ShareExpiration, isOneTimeUse: Bool, allowedEmails: [String]) {
+        self.accessMode = accessMode
+        self.expiresIn = expiresIn
+        self.isOneTimeUse = isOneTimeUse
+        self.allowedEmails = allowedEmails
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CreateShareDraft: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreateShareDraft: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreateShareDraft {
+        return
+            try CreateShareDraft(
+                accessMode: FfiConverterTypeShareAccessMode.read(from: &buf),
+                expiresIn: FfiConverterTypeShareExpiration.read(from: &buf),
+                isOneTimeUse: FfiConverterBool.read(from: &buf),
+                allowedEmails: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CreateShareDraft, into buf: inout [UInt8]) {
+        FfiConverterTypeShareAccessMode.write(value.accessMode, into: &buf)
+        FfiConverterTypeShareExpiration.write(value.expiresIn, into: &buf)
+        FfiConverterBool.write(value.isOneTimeUse, into: &buf)
+        FfiConverterSequenceString.write(value.allowedEmails, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateShareDraft_lift(_ buf: RustBuffer) throws -> CreateShareDraft {
+    return try FfiConverterTypeCreateShareDraft.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateShareDraft_lower(_ value: CreateShareDraft) -> RustBuffer {
+    return FfiConverterTypeCreateShareDraft.lower(value)
+}
+
+
 public struct ItemsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
@@ -2801,6 +2863,8 @@ public enum RuntimeRequest {
     )
     case permanentlyDeleteItem(accountId: String, itemId: String
     )
+    case createShare(accountId: String, itemId: String, draft: CreateShareDraft
+    )
 
 
 
@@ -2853,6 +2917,9 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 11: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 12: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2932,6 +2999,13 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             writeInt(&buf, Int32(11))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .createShare(accountId,itemId,draft):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
         }
     }
@@ -3037,6 +3111,161 @@ public func FfiConverterTypeRuntimeResponse_lift(_ buf: RustBuffer) throws -> Ru
 #endif
 public func FfiConverterTypeRuntimeResponse_lower(_ value: RuntimeResponse) -> RustBuffer {
     return FfiConverterTypeRuntimeResponse.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ShareAccessMode: Equatable, Hashable {
+
+    case anyone
+    case emailRestricted
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareAccessMode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareAccessMode: FfiConverterRustBuffer {
+    typealias SwiftType = ShareAccessMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareAccessMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .anyone
+
+        case 2: return .emailRestricted
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ShareAccessMode, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .anyone:
+            writeInt(&buf, Int32(1))
+
+
+        case .emailRestricted:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAccessMode_lift(_ buf: RustBuffer) throws -> ShareAccessMode {
+    return try FfiConverterTypeShareAccessMode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAccessMode_lower(_ value: ShareAccessMode) -> RustBuffer {
+    return FfiConverterTypeShareAccessMode.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ShareExpiration: Equatable, Hashable {
+
+    case oneHour
+    case oneDay
+    case sevenDays
+    case fourteenDays
+    case thirtyDays
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareExpiration: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareExpiration: FfiConverterRustBuffer {
+    typealias SwiftType = ShareExpiration
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareExpiration {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .oneHour
+
+        case 2: return .oneDay
+
+        case 3: return .sevenDays
+
+        case 4: return .fourteenDays
+
+        case 5: return .thirtyDays
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ShareExpiration, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .oneHour:
+            writeInt(&buf, Int32(1))
+
+
+        case .oneDay:
+            writeInt(&buf, Int32(2))
+
+
+        case .sevenDays:
+            writeInt(&buf, Int32(3))
+
+
+        case .fourteenDays:
+            writeInt(&buf, Int32(4))
+
+
+        case .thirtyDays:
+            writeInt(&buf, Int32(5))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareExpiration_lift(_ buf: RustBuffer) throws -> ShareExpiration {
+    return try FfiConverterTypeShareExpiration.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareExpiration_lower(_ value: ShareExpiration) -> RustBuffer {
+    return FfiConverterTypeShareExpiration.lower(value)
 }
 
 

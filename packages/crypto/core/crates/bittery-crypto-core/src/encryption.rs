@@ -151,6 +151,14 @@ fn encrypt_internal(plaintext: &str, key: &[u8], aad: &[u8]) -> Result<Encrypted
     })
 }
 
+pub(crate) fn encrypt_with_raw_aad(
+    plaintext: &str,
+    key: &[u8],
+    aad: &[u8],
+) -> Result<EncryptedData, CryptoError> {
+    encrypt_internal(plaintext, key, aad)
+}
+
 /// Decrypt data using AES-256-GCM
 ///
 /// # Arguments
@@ -253,6 +261,14 @@ fn decrypt_internal(
     ciphertext.zeroize();
     iv.zeroize();
     Ok(plaintext)
+}
+
+pub(crate) fn decrypt_with_raw_aad(
+    encrypted_data: &EncryptedData,
+    key: &[u8],
+    aad: &[u8],
+) -> Result<String, CryptoError> {
+    decrypt_internal(encrypted_data, key, aad)
 }
 
 /// Generate a random 32-byte encryption key

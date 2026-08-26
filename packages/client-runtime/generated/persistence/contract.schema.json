@@ -558,6 +558,7 @@
         "optimisticItems",
         "operations",
         "attachmentMovePreparations",
+        "shareCapabilities",
         "operationReceipts",
         "replicaMetadata",
         "bootstrapGenerations",

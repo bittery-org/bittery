@@ -7,10 +7,65 @@ use super::operation_fixtures::*;
 use super::*;
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
+    replica::{
+        GuardedCommitPlan, ImmutableHttpRequest, OperationKind, OperationRecord,
+        OperationSchedulingState, PlanMutation, RecomputedPlanResult, Sha256Fingerprint,
+    },
     test_fixtures::TEST_VAULT_ID,
 };
 
 // ---------------------------------------------------------------- the required behavior
+
+#[tokio::test]
+async fn create_share_stays_durable_without_dispatch_until_its_server_contract_lands() {
+    let harness = seeded(false).await;
+    let before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let operation = OperationRecord {
+        operation_id: "share-operation-1".into(),
+        kind: OperationKind::CreateShare,
+        item_id: "item-existing".into(),
+        vault_id: TEST_VAULT_ID.into(),
+        request: ImmutableHttpRequest {
+            method: HttpMethod::Post,
+            path: "/api/v1/items/item-existing/share-links".into(),
+            headers: vec![HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }],
+            body: br#"{"tokenHash":"locally-generated-hash"}"#.to_vec(),
+        },
+        request_fingerprint: Sha256Fingerprint([7; 32]),
+        attachment_move_recovery: None,
+        scheduling: OperationSchedulingState::default(),
+    };
+    let result = harness
+        .runtime
+        .replica()
+        .execute_recomputing(GuardedCommitPlan::new(
+            harness.account_id.clone(),
+            before.incarnation,
+            before.revision,
+            before.lock_epoch,
+            vec![PlanMutation::AcceptOperation(operation.clone())],
+        ))
+        .await
+        .unwrap();
+    let RecomputedPlanResult::Applied { snapshot } = result else {
+        panic!("Share fixture commit must apply");
+    };
+    harness.runtime.replica().cache(snapshot);
+
+    let dispatcher = tokio::spawn(Arc::clone(&harness.runtime).run_operation_dispatch());
+    settle().await;
+    assert!(harness.server.requests.lock().unwrap().is_empty());
+    assert_eq!(harness.operation(), Some(operation));
+    harness.runtime.close().await;
+    dispatcher.await.unwrap();
+}
 
 #[tokio::test]
 async fn an_operation_outlives_more_than_five_transient_failures_with_identical_bytes() {

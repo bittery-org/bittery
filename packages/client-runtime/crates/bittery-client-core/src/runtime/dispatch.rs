@@ -11,7 +11,7 @@ use super::*;
 use crate::{
     auth_http::AuthenticatedOutcome,
     platform_storage::CurrentSessionDocument,
-    replica::{OperationSchedulingState, ReplicaSnapshot},
+    replica::{OperationKind, OperationSchedulingState, ReplicaSnapshot},
     AccountId,
 };
 use std::collections::HashMap;
@@ -176,6 +176,11 @@ impl Runtime {
                 continue;
             }
             for operation in &snapshot.operations {
+                // Durable Share acceptance landed before the matching Server request contract.
+                // Keep it owed, but do not put incompatible locally-tokenized bytes on the wire.
+                if operation.kind == OperationKind::CreateShare {
+                    continue;
+                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {

@@ -6,23 +6,30 @@
 
 use super::*;
 use crate::{
-    http_transport::{HttpHeader, HttpMethod},
+    http_transport::{HttpHeader, HttpMethod, SerializedHttpExecutor},
+    platform_storage::SerializedPlatformStorageExecutor,
     protocol::Incarnation,
     replica::{
         attachment_move_artifact_ref, AttachmentMoveArtifactRef, AttachmentMoveProgress,
         AttachmentMoveUploadState, AuthorityAttachmentRecord, AuthorityItemCategory,
-        AuthorityItemRecord, AuthorityVaultRole, AuthorityVaultType, GuardedCommitPlan,
-        InMemoryReplica, OperationKind, OperationRecord, PlanMutation, PreparedMoveAttachment,
-        ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+        AuthorityItemRecord, AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan,
+        BootstrapGenerationId, BootstrapGuard, GuardedCommitPlan, InMemoryReplica,
+        MarkRefreshRequiredPlan, OperationKind, OperationRecord, PlanMutation,
+        PreparedMoveAttachment, ReplicaPersistence, ReplicaPersistenceRequest, ReplicaState,
+        SerializedReplicaExecutor,
     },
     server_contract::{CreateItemBody, ItemCategory},
-    test_fixtures::{personal_vault, seed_ready_personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
-    CustomFieldKind, LoginCustomField, LoginItemDraft,
+    test_fixtures::{
+        personal_vault, seed_ready_personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID,
+        TEST_VAULT_KEY,
+    },
+    CreateShareDraft, CustomFieldKind, LoginCustomField, LoginItemDraft, ShareAccessMode,
+    ShareExpiration,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{decrypt_with_aad, encrypt_with_aad, AadContext, EncryptedData};
-use create::{create_item_fingerprint, create_item_path};
+use create::{create_item_fingerprint, create_item_path, share_operation_fingerprint};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::AtomicBool;
@@ -40,6 +47,35 @@ struct RecordingExecutor {
     reverse_preparation_progress_on_load: AtomicBool,
     invalidate_artifact_id_on_load: AtomicBool,
     cancel_after_commit: Mutex<Option<RequestCancellation>>,
+}
+
+struct SuccessfulDeletePlatform;
+
+#[async_trait]
+impl SerializedPlatformStorageExecutor for SuccessfulDeletePlatform {
+    async fn invoke(
+        &self,
+        request_json: Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        let response = match request["type"].as_str() {
+            Some("delete") | Some("set") => serde_json::json!({ "type": "done" }),
+            Some("get") => serde_json::json!({ "type": "value", "value": null }),
+            other => panic!("unexpected platform request {other:?}"),
+        };
+        Ok(Zeroizing::new(response.to_string()))
+    }
+}
+
+struct UnusedHttp;
+
+#[async_trait]
+impl SerializedHttpExecutor for UnusedHttp {
+    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+        panic!("Share durable acceptance must not invoke HTTP")
+    }
+
+    fn cancel(&self, _dispatch_id: &str) {}
 }
 
 impl RecordingExecutor {
@@ -71,6 +107,65 @@ impl RecordingExecutor {
 
     fn seeded_attachment_free_item(deleted: bool) -> Arc<Self> {
         Self::seeded_item(deleted, false)
+    }
+
+    fn seeded_share_item(
+        category: AuthorityItemCategory,
+        plaintext: serde_json::Value,
+    ) -> Arc<Self> {
+        let state = InMemoryReplica::default();
+        let account_id = AccountId::from(ACCOUNT);
+        state
+            .install(
+                account_id.clone(),
+                USER.to_owned(),
+                Incarnation::from(INCARNATION),
+            )
+            .unwrap();
+        let sealed = encrypt_with_aad(
+            &serde_json::to_string(&plaintext).unwrap(),
+            &TEST_VAULT_KEY,
+            &AadContext {
+                vault_id: TEST_VAULT_ID.into(),
+                entity_id: "item-existing".into(),
+                entity_type: "item".into(),
+                version: 1,
+                user_id: USER.into(),
+            },
+        )
+        .unwrap();
+        state
+            .seed_ready_authority(
+                &account_id,
+                vec![personal_vault(TEST_VAULT_ID, USER)],
+                vec![AuthorityItemRecord {
+                    id: "item-existing".into(),
+                    vault_id: TEST_VAULT_ID.into(),
+                    category,
+                    favorite: true,
+                    encrypted_data: sealed.ciphertext,
+                    encryption_iv: sealed.iv,
+                    encryption_algorithm: sealed.algorithm,
+                    version: 1,
+                    encryption_version: 1,
+                    encrypted_by_user_id: USER.into(),
+                    last_modified_by: USER.into(),
+                    created_at: "2026-08-23T00:00:00Z".into(),
+                    updated_at: "2026-08-23T00:00:00Z".into(),
+                    deleted_at: None,
+                    attachments: Vec::new(),
+                }],
+            )
+            .unwrap();
+        Arc::new(Self {
+            state,
+            requests: Mutex::new(Vec::new()),
+            fail_commits: AtomicBool::new(false),
+            fence_before_commit: AtomicBool::new(false),
+            reverse_preparation_progress_on_load: AtomicBool::new(false),
+            invalidate_artifact_id_on_load: AtomicBool::new(false),
+            cancel_after_commit: Mutex::new(None),
+        })
     }
 
     fn seeded_item(deleted: bool, with_attachment: bool) -> Arc<Self> {
@@ -331,6 +426,19 @@ fn create(account_id: &AccountId, vault_id: &str) -> RuntimeRequest {
     }
 }
 
+fn create_share(account_id: &AccountId) -> RuntimeRequest {
+    RuntimeRequest::CreateShare {
+        account_id: account_id.clone(),
+        item_id: "item-existing".into(),
+        draft: CreateShareDraft {
+            access_mode: ShareAccessMode::Anyone,
+            expires_in: ShareExpiration::SevenDays,
+            is_one_time_use: false,
+            allowed_emails: Vec::new(),
+        },
+    }
+}
+
 fn accepted(response: RuntimeResponse) -> (String, String, u64) {
     match response {
         RuntimeResponse::Accepted {
@@ -340,6 +448,732 @@ fn accepted(response: RuntimeResponse) -> (String, String, u64) {
         } => (operation_id, item_id, replica_revision),
         other => panic!("expected Accepted, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn accepted_share_is_one_explicit_account_scoped_durable_operation() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+
+    let (operation_id, item_id, replica_revision) = accepted(
+        runtime
+            .request(
+                RuntimeRequest::CreateShare {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    draft: CreateShareDraft {
+                        access_mode: ShareAccessMode::Anyone,
+                        expires_in: ShareExpiration::SevenDays,
+                        is_one_time_use: false,
+                        allowed_emails: Vec::new(),
+                    },
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.revision, replica_revision);
+    assert_eq!(snapshot.operations.len(), 1);
+    assert_eq!(snapshot.operations[0].operation_id, operation_id);
+    assert_eq!(snapshot.operations[0].item_id, item_id);
+    assert_eq!(snapshot.operations[0].kind, OperationKind::CreateShare);
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FrozenShareBody {
+    token_hash: String,
+    access_mode: ShareAccessMode,
+    expires_in: ShareExpiration,
+    is_one_time_use: bool,
+    allowed_emails: Option<Vec<String>>,
+    encrypted_item_data: String,
+    encryption_iv: String,
+    encrypted_share_key: String,
+    share_key_iv: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ShareCapabilityPlaintext {
+    token: String,
+    share_key: String,
+}
+
+#[tokio::test]
+async fn accepted_share_freezes_hash_only_server_bytes_beside_muk_protected_capability() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+
+    let (operation_id, _, _) = accepted(
+        runtime
+            .request(
+                RuntimeRequest::CreateShare {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    draft: CreateShareDraft {
+                        access_mode: ShareAccessMode::EmailRestricted,
+                        expires_in: ShareExpiration::SevenDays,
+                        is_one_time_use: true,
+                        allowed_emails: vec!["reader@example.test".into()],
+                    },
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    let operation = &snapshot.operations[0];
+    let body: FrozenShareBody = serde_json::from_slice(&operation.request.body).unwrap();
+    let protected = &snapshot.share_capabilities[0];
+    assert_eq!(protected.operation_id, operation_id);
+    let plaintext = bittery_crypto_core::decrypt_share_capability(
+        &EncryptedData {
+            ciphertext: protected.ciphertext.clone(),
+            iv: protected.iv.clone(),
+            algorithm: protected.algorithm.clone(),
+        },
+        &TEST_MASTER_UNLOCK_KEY,
+        &bittery_crypto_core::ShareCapabilityAadContext::new(
+            account_id.as_str().into(),
+            operation_id.clone(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let capability: ShareCapabilityPlaintext = serde_json::from_str(&plaintext).unwrap();
+    assert_eq!(
+        body.token_hash,
+        format!("{:x}", Sha256::digest(capability.token.as_bytes()))
+    );
+    let durable_json = executor.recorded().join("\n");
+    assert!(!durable_json.contains(&capability.token));
+    assert!(!durable_json.contains(&capability.share_key));
+
+    let share_key = BASE64.decode(&capability.share_key).unwrap();
+    assert_eq!(share_key.len(), 32);
+    let encrypted_share_key = EncryptedData {
+        ciphertext: body.encrypted_share_key,
+        iv: body.share_key_iv,
+        algorithm: "AES-GCM-AAD-V1".into(),
+    };
+    assert_eq!(
+        bittery_crypto_core::decrypt(&encrypted_share_key, &share_key).unwrap(),
+        capability.share_key
+    );
+    let shared_payload = bittery_crypto_core::decrypt(
+        &EncryptedData {
+            ciphertext: body.encrypted_item_data,
+            iv: body.encryption_iv,
+            algorithm: "AES-GCM-AAD-V1".into(),
+        },
+        &share_key,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&shared_payload).unwrap()["category"],
+        "login"
+    );
+    assert_eq!(body.access_mode, ShareAccessMode::EmailRestricted);
+    assert_eq!(body.expires_in, ShareExpiration::SevenDays);
+    assert!(body.is_one_time_use);
+    assert_eq!(body.allowed_emails.unwrap(), ["reader@example.test"]);
+}
+
+#[tokio::test]
+async fn share_payload_preserves_non_login_category_and_withholds_local_only_fields() {
+    let executor = RecordingExecutor::seeded_share_item(
+        AuthorityItemCategory::CreditCard,
+        serde_json::json!({
+            "title": "Travel card",
+            "cardholderName": "A. Reader",
+            "cardNumber": "4111111111111111",
+            "cvv": "123",
+            "expiryDate": "12/30",
+            "billingAddress": "1 Cipher Lane",
+            "passwordHistory": [{ "password": "old" }],
+            "passkeys": [{ "privateKey": "forbidden" }],
+            "tags": ["private"],
+            "linkedItemId": "item-local"
+        }),
+    );
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+
+    let (operation_id, _, _) = accepted(
+        runtime
+            .request(
+                RuntimeRequest::CreateShare {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    draft: CreateShareDraft {
+                        access_mode: ShareAccessMode::Anyone,
+                        expires_in: ShareExpiration::SevenDays,
+                        is_one_time_use: false,
+                        allowed_emails: Vec::new(),
+                    },
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+    );
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    let body: FrozenShareBody =
+        serde_json::from_slice(&snapshot.operations[0].request.body).unwrap();
+    let protected = &snapshot.share_capabilities[0];
+    let capability: ShareCapabilityPlaintext = serde_json::from_str(
+        &bittery_crypto_core::decrypt_share_capability(
+            &EncryptedData {
+                ciphertext: protected.ciphertext.clone(),
+                iv: protected.iv.clone(),
+                algorithm: protected.algorithm.clone(),
+            },
+            &TEST_MASTER_UNLOCK_KEY,
+            &bittery_crypto_core::ShareCapabilityAadContext::new(
+                account_id.as_str().into(),
+                operation_id,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let share_key = BASE64.decode(capability.share_key).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(
+        &bittery_crypto_core::decrypt(
+            &EncryptedData {
+                ciphertext: body.encrypted_item_data,
+                iv: body.encryption_iv,
+                algorithm: "AES-GCM-AAD-V1".into(),
+            },
+            &share_key,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(payload["category"], "credit-card");
+    assert_eq!(payload["cardNumber"], "4111111111111111");
+    for forbidden in [
+        "id",
+        "vaultId",
+        "favorite",
+        "createdAt",
+        "updatedAt",
+        "passwordHistory",
+        "passkeys",
+        "tags",
+        "linkedItemId",
+    ] {
+        assert!(
+            payload.get(forbidden).is_none(),
+            "{forbidden} leaked into Share payload"
+        );
+    }
+}
+
+#[tokio::test]
+async fn share_tokens_preserve_the_existing_32_character_ascii_alphanumeric_contract() {
+    for _ in 0..48 {
+        let executor = RecordingExecutor::seeded_attachment_free_item(false);
+        let (runtime, account_id) = unlocked_runtime(executor).await;
+        let (operation_id, _, _) = accepted(
+            runtime
+                .request(
+                    RuntimeRequest::CreateShare {
+                        account_id: account_id.clone(),
+                        item_id: "item-existing".into(),
+                        draft: CreateShareDraft {
+                            access_mode: ShareAccessMode::Anyone,
+                            expires_in: ShareExpiration::SevenDays,
+                            is_one_time_use: false,
+                            allowed_emails: Vec::new(),
+                        },
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+        );
+        let protected = &runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .share_capabilities[0];
+        let plaintext = bittery_crypto_core::decrypt_share_capability(
+            &EncryptedData {
+                ciphertext: protected.ciphertext.clone(),
+                iv: protected.iv.clone(),
+                algorithm: protected.algorithm.clone(),
+            },
+            &TEST_MASTER_UNLOCK_KEY,
+            &bittery_crypto_core::ShareCapabilityAadContext::new(
+                account_id.as_str().into(),
+                operation_id,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let capability: ShareCapabilityPlaintext = serde_json::from_str(&plaintext).unwrap();
+        assert_eq!(capability.token.len(), 32);
+        assert!(capability
+            .token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric()));
+    }
+}
+
+#[test]
+fn share_fingerprint_pins_the_no_precondition_operation_contract() {
+    assert_eq!(
+        share_operation_fingerprint("item-vector", br#"{"tokenHash":"abc"}"#)
+            .0
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        "400c9732ad66ea68144f7e94890f7f2247fde40e45667e0ef89d590592c39f24"
+    );
+}
+
+#[tokio::test]
+async fn invalid_share_access_controls_are_rejected_before_any_durable_write() {
+    for (access_mode, allowed_emails) in [
+        (ShareAccessMode::Anyone, vec!["reader@example.test".into()]),
+        (ShareAccessMode::EmailRestricted, Vec::new()),
+        (
+            ShareAccessMode::EmailRestricted,
+            vec!["reader@extra@example.test".into()],
+        ),
+    ] {
+        let executor = RecordingExecutor::seeded_attachment_free_item(false);
+        let (runtime, account_id) = unlocked_runtime(executor).await;
+        let error = runtime
+            .request(
+                RuntimeRequest::CreateShare {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    draft: CreateShareDraft {
+                        access_mode,
+                        expires_in: ShareExpiration::SevenDays,
+                        is_one_time_use: false,
+                        allowed_emails,
+                    },
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+        assert!(snapshot.operations.is_empty());
+        assert!(snapshot.share_capabilities.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn sign_out_destroys_protected_share_capabilities_without_discarding_operations() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let runtime = Runtime::with_serialized_executors(
+        executor.clone(),
+        Arc::new(SuccessfulDeletePlatform),
+        Arc::new(UnusedHttp),
+    );
+    runtime.open().await.unwrap();
+    let account_id = AccountId::from(ACCOUNT);
+    runtime.replica().load(&account_id).await.unwrap().unwrap();
+    runtime.unlock_account(&account_id).await.unwrap();
+    runtime
+        .request(
+            RuntimeRequest::CreateShare {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: CreateShareDraft {
+                    access_mode: ShareAccessMode::Anyone,
+                    expires_in: ShareExpiration::SevenDays,
+                    is_one_time_use: false,
+                    allowed_emails: Vec::new(),
+                },
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .share_capabilities
+            .len(),
+        1
+    );
+
+    let response = runtime
+        .request(
+            RuntimeRequest::SignOut {
+                account_id: account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response,
+        RuntimeResponse::AccessChanged {
+            account_id: account_id.clone(),
+            access: AccountAccessState::SignedOut,
+        }
+    );
+
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.share_capabilities.is_empty());
+    assert_eq!(
+        snapshot.operations.len(),
+        1,
+        "Sign-out is not Operation discard"
+    );
+
+    drop(runtime);
+    let restored = Runtime::with_serialized_replica_executor(executor);
+    restored.replica().load(&account_id).await.unwrap().unwrap();
+    let restored_snapshot = restored.replica().snapshot(&account_id).unwrap();
+    assert!(restored_snapshot.share_capabilities.is_empty());
+    assert_eq!(restored_snapshot.operations.len(), 1);
+}
+
+#[tokio::test]
+async fn lock_hides_but_durably_retains_the_protected_share_capability() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    runtime
+        .request(
+            RuntimeRequest::CreateShare {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: CreateShareDraft {
+                    access_mode: ShareAccessMode::Anyone,
+                    expires_in: ShareExpiration::SevenDays,
+                    is_one_time_use: false,
+                    allowed_emails: Vec::new(),
+                },
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let before = runtime.replica().snapshot(&account_id).unwrap();
+    let capability = before.share_capabilities[0].clone();
+
+    assert_eq!(
+        runtime
+            .request(
+                RuntimeRequest::Lock {
+                    account_id: account_id.clone(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AccessChanged {
+            account_id: account_id.clone(),
+            access: AccountAccessState::Locked,
+        }
+    );
+    assert!(!runtime.has_live_master_unlock_key(&account_id, &before.incarnation));
+    let locked = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(locked.share_capabilities, std::slice::from_ref(&capability));
+    assert_eq!(locked.operations.len(), 1);
+
+    drop(runtime);
+    let restored = Runtime::with_serialized_replica_executor(executor);
+    restored.replica().load(&account_id).await.unwrap().unwrap();
+    assert_eq!(
+        restored
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .share_capabilities,
+        [capability]
+    );
+}
+
+#[tokio::test]
+async fn failed_or_fenced_share_commit_never_leaves_half_an_acceptance() {
+    let failing = RecordingExecutor::seeded_attachment_free_item(false);
+    failing.fail_commits.store(true, Ordering::SeqCst);
+    let (runtime, account_id) = unlocked_runtime(failing).await;
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), RequestCancellation::new(),)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
+    );
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.share_capabilities.is_empty());
+
+    let fenced = RecordingExecutor::seeded_attachment_free_item(false);
+    fenced.fence_before_commit.store(true, Ordering::SeqCst);
+    let (runtime, account_id) = unlocked_runtime(fenced).await;
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), RequestCancellation::new(),)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.share_capabilities.is_empty());
+    assert!(!runtime.has_live_master_unlock_key(&account_id, &snapshot.incarnation));
+    let RuntimeProjection::RuntimeStatus(status) = runtime
+        .projection(&ObservationRequest::RuntimeStatus {
+            account_id: Some(account_id),
+        })
+        .unwrap()
+        .projection
+    else {
+        panic!("expected Runtime status");
+    };
+    assert_eq!(status.accounts[0].access, AccountAccessState::Locked);
+}
+
+#[tokio::test]
+async fn cancellation_after_atomic_share_commit_cannot_discard_either_durable_half() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let cancellation = RequestCancellation::new();
+    *executor.cancel_after_commit.lock().unwrap() = Some(cancellation.clone());
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), cancellation)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::Cancelled
+    );
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(snapshot.operations.len(), 1);
+    assert_eq!(snapshot.share_capabilities.len(), 1);
+    assert_eq!(
+        snapshot.operations[0].operation_id,
+        snapshot.share_capabilities[0].operation_id
+    );
+}
+
+#[tokio::test]
+async fn accepted_share_wakes_the_generic_operation_dispatcher() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let waiting_runtime = Arc::clone(&runtime);
+    let wake = tokio::spawn(async move {
+        waiting_runtime.dispatch_wake.notified().await;
+    });
+    tokio::task::yield_now().await;
+
+    runtime
+        .request(create_share(&account_id), RequestCancellation::new())
+        .await
+        .unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_millis(100), wake)
+        .await
+        .expect("durable Share acceptance wakes the generic dispatcher")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn share_queued_before_close_cannot_decrypt_or_persist_after_close_begins() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let execution_lock = runtime.account_execution_lock(&account_id).unwrap();
+    let guard = execution_lock.lock().await;
+    let request_runtime = Arc::clone(&runtime);
+    let request_account = account_id.clone();
+    let request = tokio::spawn(async move {
+        request_runtime
+            .request(create_share(&request_account), RequestCancellation::new())
+            .await
+    });
+    tokio::task::yield_now().await;
+    let close_runtime = Arc::clone(&runtime);
+    let close = tokio::spawn(async move { close_runtime.close().await });
+    while !runtime.is_closed() {
+        tokio::task::yield_now().await;
+    }
+    drop(guard);
+
+    assert_eq!(
+        request.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::RuntimeClosed
+    );
+    close.await.unwrap();
+    let durable = executor.state.snapshot(&account_id).unwrap();
+    assert!(durable.operations.is_empty());
+    assert!(durable.share_capabilities.is_empty());
+}
+
+#[tokio::test]
+async fn share_acceptance_rejects_retained_authority_until_bootstrap_is_ready() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let guard_for = |snapshot: &ReplicaSnapshot| BootstrapGuard {
+        account_id: account_id.clone(),
+        user_id: snapshot.user_id.clone(),
+        incarnation: snapshot.incarnation.clone(),
+        expected_replica_revision: snapshot.revision,
+        expected_lock_epoch: snapshot.lock_epoch,
+    };
+    let ready = runtime.replica().snapshot(&account_id).unwrap();
+    runtime
+        .replica()
+        .mark_refresh_required(MarkRefreshRequiredPlan {
+            guard: guard_for(&ready),
+        })
+        .await
+        .unwrap();
+    let refresh = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(refresh.bootstrap.state, ReplicaState::RefreshRequired);
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), RequestCancellation::new(),)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
+    );
+
+    runtime
+        .replica()
+        .begin_bootstrap(BeginBootstrapPlan {
+            guard: guard_for(&refresh),
+            generation_id: BootstrapGenerationId("replacement".into()),
+        })
+        .await
+        .unwrap();
+    let bootstrapping = runtime.replica().snapshot(&account_id).unwrap();
+    assert_eq!(bootstrapping.bootstrap.state, ReplicaState::Bootstrapping);
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
+    );
+    assert!(bootstrapping.operations.is_empty());
+    assert!(bootstrapping.share_capabilities.is_empty());
+}
+
+#[test]
+fn share_plaintext_owner_recursively_wipes_nested_json_before_release() {
+    let mut owner = create::ZeroizingJsonValue::new(serde_json::json!({
+        "secret-key": ["secret-value", { "nested-key": "nested-value" }]
+    }));
+
+    assert_eq!(owner.wipe_now_for_test(), vec![0, 0, 0, 0]);
+    assert!(owner.as_value().is_null());
+}
+
+#[tokio::test]
+async fn share_admission_rejects_failed_exhausted_and_pending_account_state() {
+    let failed_executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (failed_runtime, account_id) = unlocked_runtime(failed_executor).await;
+    let before = failed_runtime.replica().snapshot(&account_id).unwrap();
+    let failed = failed_runtime
+        .replica()
+        .execute_recomputing(GuardedCommitPlan::new(
+            account_id.clone(),
+            before.incarnation,
+            before.revision,
+            before.lock_epoch,
+            vec![PlanMutation::FailAccount {
+                code: RuntimeErrorCode::InvariantViolation,
+            }],
+        ))
+        .await
+        .unwrap();
+    let RecomputedPlanResult::Applied { snapshot } = failed else {
+        panic!("failure fixture must apply");
+    };
+    failed_runtime.replica().cache(snapshot);
+    assert_eq!(
+        failed_runtime
+            .request(create_share(&account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AccountFailed
+    );
+
+    let exhausted_executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (exhausted_runtime, account_id) = unlocked_runtime(exhausted_executor.clone()).await;
+    exhausted_executor
+        .state
+        .set_lock_epoch(&account_id, u64::MAX)
+        .unwrap();
+    exhausted_runtime
+        .replica()
+        .load(&account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        exhausted_runtime
+            .request(create_share(&account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+
+    let pending_executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (pending_runtime, account_id) = unlocked_runtime(pending_executor).await;
+    pending_runtime
+        .lock_epoch_pending
+        .lock()
+        .unwrap()
+        .insert(account_id.clone(), 1);
+    assert_eq!(
+        pending_runtime
+            .request(create_share(&account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
+    );
+}
+
+#[tokio::test]
+async fn share_guard_uses_the_tracked_account_lock_epoch() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    runtime
+        .account_lock_epochs
+        .lock()
+        .unwrap()
+        .insert(account_id.clone(), 7);
+
+    assert_eq!(
+        runtime
+            .request(create_share(&account_id), RequestCancellation::new())
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AuthenticationRequired
+    );
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.share_capabilities.is_empty());
 }
 
 /// Opens ciphertext exactly the way the Bootstrap read path opens authoritative Items.

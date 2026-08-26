@@ -127,6 +127,32 @@
         "createdAt"
       ]
     },
+    "CreateShareDraft": {
+      "type": "object",
+      "properties": {
+        "accessMode": {
+          "$ref": "#/$defs/ShareAccessMode"
+        },
+        "allowedEmails": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresIn": {
+          "$ref": "#/$defs/ShareExpiration"
+        },
+        "isOneTimeUse": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "accessMode",
+        "expiresIn",
+        "isOneTimeUse"
+      ]
+    },
     "CustomFieldKind": {
       "type": "string",
       "enum": [
@@ -739,6 +765,30 @@
             "accountId",
             "itemId"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/CreateShareDraft"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "createShare"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "draft"
+          ]
         }
       ]
     },
@@ -840,6 +890,23 @@
         "revision",
         "accounts",
         "closed"
+      ]
+    },
+    "ShareAccessMode": {
+      "type": "string",
+      "enum": [
+        "anyone",
+        "email-restricted"
+      ]
+    },
+    "ShareExpiration": {
+      "type": "string",
+      "enum": [
+        "1hour",
+        "1day",
+        "7days",
+        "14days",
+        "30days"
       ]
     },
     "VaultProjection": {

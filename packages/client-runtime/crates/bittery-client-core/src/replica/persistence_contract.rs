@@ -2,8 +2,8 @@ use super::domain::{
     apply_plan, AccountReplica, AttachmentMovePreparationRecord, AuthorityItemRecord,
     AuthorityVaultRecord, BootstrapAuthority, BootstrapGenerationId, BootstrapGenerationRecord,
     BootstrapPageReceipt, GuardedCommitPlan, ObservedOutcome, OperationReceiptRecord,
-    OperationRecord, PlanMutation, PlanResult, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
-    SyncCursor,
+    OperationRecord, PlanMutation, PlanResult, ProtectedShareCapabilityRecord, ReplicaItemRecord,
+    ReplicaSnapshot, ReplicaState, SyncCursor,
 };
 use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
@@ -29,6 +29,7 @@ pub(crate) enum ReplicaStore {
     OptimisticItems,
     Operations,
     AttachmentMovePreparations,
+    ShareCapabilities,
     OperationReceipts,
     ReplicaMetadata,
     BootstrapGenerations,
@@ -373,6 +374,18 @@ pub(super) fn prepare_commit(
             // The failure lives in the head, and no row moves because of it.
             continue;
         }
+        if matches!(mutation, PlanMutation::RemoveAllProtectedShareCapabilities) {
+            writes.extend(current.share_capabilities.iter().map(|capability| {
+                PreparedReplicaWrite::Delete {
+                    store: ReplicaStore::ShareCapabilities,
+                    key: ReplicaRowKey {
+                        account_id: plan.account_id.clone(),
+                        record_id: capability.operation_id.clone(),
+                    },
+                }
+            }));
+            continue;
+        }
         if let PlanMutation::FreezeAttachmentMoveRejection { operation_id, .. }
         | PlanMutation::PromoteAttachmentMovePreparation { operation_id, .. } = mutation
         {
@@ -438,6 +451,17 @@ pub(super) fn prepare_commit(
                     operation,
                 )?,
             },
+            PlanMutation::PutProtectedShareCapability(capability) => PreparedReplicaWrite::Put {
+                row: stored_row(
+                    ReplicaStore::ShareCapabilities,
+                    &capability.account_id,
+                    &capability.operation_id,
+                    capability,
+                )?,
+            },
+            PlanMutation::RemoveAllProtectedShareCapabilities => {
+                unreachable!("bulk Share capability deletion is collected above")
+            }
             PlanMutation::AcceptAttachmentMovePreparation(preparation) => {
                 let operation_id = &preparation.operation_id;
                 let preparation = next
@@ -618,6 +642,7 @@ pub(super) fn snapshot_rows(
     let mut rows = Vec::with_capacity(
         snapshot.items.len()
             + snapshot.operations.len()
+            + snapshot.share_capabilities.len()
             + snapshot.attachment_move_preparations.len()
             + snapshot.receipts.len()
             + snapshot.bootstrap.row_count(),
@@ -636,6 +661,14 @@ pub(super) fn snapshot_rows(
             &snapshot.account_id,
             &operation.operation_id,
             &operation,
+        )?);
+    }
+    for capability in snapshot.share_capabilities {
+        rows.push(stored_row(
+            ReplicaStore::ShareCapabilities,
+            &snapshot.account_id,
+            &capability.operation_id,
+            &capability,
         )?);
     }
     for preparation in snapshot.attachment_move_preparations {
@@ -697,6 +730,7 @@ pub(super) fn reconstruct_snapshot(
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
+    let mut share_capabilities = HashMap::new();
     let mut attachment_move_preparations = HashMap::new();
     let mut receipts = HashMap::new();
     let mut bootstrap = BootstrapAuthority::default();
@@ -753,6 +787,27 @@ pub(super) fn reconstruct_snapshot(
                 {
                     return Err(replica_invariant(
                         "Replica Attachment Move preparation key is duplicated",
+                    ));
+                }
+            }
+            ReplicaStore::ShareCapabilities => {
+                let capability: ProtectedShareCapabilityRecord =
+                    serde_json::from_str(&row.payload_json).map_err(|_| {
+                        replica_invariant("Replica protected Share capability payload is invalid")
+                    })?;
+                if capability.account_id != head.account_id
+                    || capability.operation_id != row.key.record_id
+                {
+                    return Err(replica_invariant(
+                        "Replica protected Share capability key does not match its payload",
+                    ));
+                }
+                if share_capabilities
+                    .insert(capability.operation_id.clone(), capability)
+                    .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica protected Share capability key is duplicated",
                     ));
                 }
             }
@@ -892,6 +947,7 @@ pub(super) fn reconstruct_snapshot(
         lock_epoch: head.lock_epoch,
         items,
         operations,
+        share_capabilities,
         attachment_move_preparations,
         receipts,
         failure: head.failure,

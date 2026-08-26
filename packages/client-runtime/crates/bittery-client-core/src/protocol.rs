@@ -146,6 +146,15 @@ pub enum RuntimeRequest {
         account_id: AccountId,
         item_id: String,
     },
+    CreateShare {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        draft: CreateShareDraft,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -236,6 +245,16 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("item_id", item_id)
                 .finish(),
+            Self::CreateShare {
+                account_id,
+                item_id,
+                draft,
+            } => formatter
+                .debug_struct("CreateShare")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("draft", draft)
+                .finish(),
         }
     }
 }
@@ -252,9 +271,54 @@ impl RuntimeRequest {
             | Self::TrashItem { account_id, .. }
             | Self::RestoreItem { account_id, .. }
             | Self::MoveItem { account_id, .. }
-            | Self::PermanentlyDeleteItem { account_id, .. } => Some(account_id),
+            | Self::PermanentlyDeleteItem { account_id, .. }
+            | Self::CreateShare { account_id, .. } => Some(account_id),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateShareDraft {
+    pub access_mode: ShareAccessMode,
+    pub expires_in: ShareExpiration,
+    #[serde(default)]
+    pub is_one_time_use: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_emails: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShareAccessMode {
+    Anyone,
+    EmailRestricted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+pub enum ShareExpiration {
+    #[serde(rename = "1hour")]
+    OneHour,
+    #[serde(rename = "1day")]
+    OneDay,
+    #[serde(rename = "7days")]
+    SevenDays,
+    #[serde(rename = "14days")]
+    FourteenDays,
+    #[serde(rename = "30days")]
+    ThirtyDays,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

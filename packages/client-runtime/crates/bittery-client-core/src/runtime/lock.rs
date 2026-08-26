@@ -97,7 +97,7 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(account_id)?;
         let execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
-        let Some(snapshot) = self.replica.snapshot(account_id) else {
+        let Some(mut snapshot) = self.replica.snapshot(account_id) else {
             drop(execution_guard);
             self.forget_uninstalled_account_access(account_id);
             return Ok(AccountAccessState::SignedOut);
@@ -153,6 +153,35 @@ impl Runtime {
 
         let _execution_guard = execution_lock.lock().await;
         if retirement == AccessRetirement::SignOut {
+            if !snapshot.share_capabilities.is_empty() {
+                snapshot = match self
+                    .replica
+                    .execute_recomputing(GuardedCommitPlan::new(
+                        account_id.clone(),
+                        snapshot.incarnation.clone(),
+                        snapshot.revision,
+                        snapshot.lock_epoch,
+                        vec![PlanMutation::RemoveAllProtectedShareCapabilities],
+                    ))
+                    .await?
+                {
+                    RecomputedPlanResult::Applied { snapshot } => {
+                        self.replica.cache(snapshot.clone());
+                        snapshot
+                    }
+                    RecomputedPlanResult::Fenced { snapshot } => {
+                        self.replica.cache(snapshot);
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::AuthenticationRequired,
+                            "Account was fenced while destroying Share capabilities",
+                        ));
+                    }
+                    RecomputedPlanResult::Missing => {
+                        self.forget_uninstalled_account_access(account_id);
+                        return Ok(AccountAccessState::SignedOut);
+                    }
+                };
+            }
             self.forget_sign_in_material(account_id, &snapshot.incarnation)
                 .await?;
         }

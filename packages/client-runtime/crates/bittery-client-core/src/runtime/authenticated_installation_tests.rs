@@ -2661,6 +2661,31 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
     else {
         panic!("expected SignedIn");
     };
+    let RuntimeResponse::Accepted {
+        operation_id: share_operation_id,
+        ..
+    } = first
+        .request(
+            RuntimeRequest::CreateShare {
+                account_id: account_id.clone(),
+                item_id: "item-1".into(),
+                draft: crate::CreateShareDraft {
+                    access_mode: crate::ShareAccessMode::Anyone,
+                    expires_in: crate::ShareExpiration::SevenDays,
+                    is_one_time_use: false,
+                    allowed_emails: Vec::new(),
+                },
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected Share acceptance");
+    };
+    let accepted = first.replica.snapshot(&account_id).unwrap();
+    let immutable_share_bytes = accepted.operations[0].request.body.clone();
+    assert_eq!(accepted.share_capabilities.len(), 1);
     first.close().await;
 
     let restored = Runtime::with_configured_serialized_executors(
@@ -2686,6 +2711,30 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
         )
         .await
         .unwrap();
+    let recovered = restored.replica.snapshot(&account_id).unwrap();
+    assert_eq!(recovered.operations[0].request.body, immutable_share_bytes);
+    let capability = recovered
+        .share_capabilities
+        .iter()
+        .find(|capability| capability.operation_id == share_operation_id)
+        .unwrap();
+    let live_muk = restored
+        .copy_live_master_unlock_key(&account_id, &recovered.incarnation)
+        .unwrap();
+    assert!(bittery_crypto_core::decrypt_share_capability(
+        &bittery_crypto_core::EncryptedData {
+            ciphertext: capability.ciphertext.clone(),
+            iv: capability.iv.clone(),
+            algorithm: capability.algorithm.clone(),
+        },
+        live_muk.as_slice(),
+        &bittery_crypto_core::ShareCapabilityAadContext::new(
+            account_id.as_str().into(),
+            share_operation_id,
+        )
+        .unwrap(),
+    )
+    .is_ok());
     http.disconnect();
     http.clear_requests();
     let sink = Arc::new(Sink::default());

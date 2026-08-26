@@ -44,6 +44,8 @@ impl GuardedCommitPlan {
 pub(crate) enum PlanMutation {
     PutOptimisticItem(ReplicaItemRecord),
     AcceptOperation(OperationRecord),
+    PutProtectedShareCapability(ProtectedShareCapabilityRecord),
+    RemoveAllProtectedShareCapabilities,
     AcceptAttachmentMovePreparation(AttachmentMovePreparationRecord),
     RescheduleAttachmentMovePreparation(AttachmentMovePreparationRecord),
     CheckpointAttachmentMove {
@@ -191,6 +193,7 @@ pub(crate) enum OperationKind {
     RestoreItem,
     MoveItem,
     PermanentlyDeleteItem,
+    CreateShare,
 }
 
 /// The exact bytes an accepted Operation will send, forever.
@@ -236,6 +239,16 @@ pub(crate) struct OperationRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_move_recovery: Option<AttachmentMoveRecovery>,
     pub scheduling: OperationSchedulingState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProtectedShareCapabilityRecord {
+    pub account_id: AccountId,
+    pub operation_id: String,
+    pub ciphertext: String,
+    pub iv: String,
+    pub algorithm: String,
 }
 
 /// One accepted Attachment-bearing Move before its final HTTP request can exist.
@@ -954,6 +967,7 @@ pub(crate) struct ReplicaSnapshot {
     pub lock_epoch: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
+    pub share_capabilities: Vec<ProtectedShareCapabilityRecord>,
     pub attachment_move_preparations: Vec<AttachmentMovePreparationRecord>,
     pub receipts: Vec<OperationReceiptRecord>,
     pub failure: Option<RuntimeErrorCode>,
@@ -987,6 +1001,7 @@ pub(super) struct AccountReplica {
     pub(super) lock_epoch: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
+    pub(super) share_capabilities: HashMap<String, ProtectedShareCapabilityRecord>,
     pub(super) attachment_move_preparations: HashMap<String, AttachmentMovePreparationRecord>,
     pub(super) receipts: HashMap<String, OperationReceiptRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
@@ -1010,6 +1025,11 @@ impl AccountReplica {
                 .operations
                 .into_iter()
                 .map(|operation| (operation.operation_id.clone(), operation))
+                .collect(),
+            share_capabilities: snapshot
+                .share_capabilities
+                .into_iter()
+                .map(|capability| (capability.operation_id.clone(), capability))
                 .collect(),
             attachment_move_preparations: snapshot
                 .attachment_move_preparations
@@ -1054,6 +1074,23 @@ impl AccountReplica {
             {
                 return Err(replica_invariant(
                     "Replica active Operation identity is inconsistent",
+                ));
+            }
+        }
+        for capability in self.share_capabilities.values() {
+            let matching_operation = self.operations.get(&capability.operation_id);
+            if capability.account_id != self.account_id
+                || capability.operation_id.is_empty()
+                || capability.ciphertext.is_empty()
+                || capability.iv.is_empty()
+                || capability.algorithm != "AES-GCM-AAD-V1"
+                || !matching_operation.is_some_and(|operation| {
+                    operation.kind == OperationKind::CreateShare
+                        && operation.operation_id == capability.operation_id
+                })
+            {
+                return Err(replica_invariant(
+                    "protected Share capability is not bound to one active CreateShare Operation",
                 ));
             }
         }
@@ -1528,6 +1565,31 @@ impl AccountReplica {
                 }
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
+            }
+            PlanMutation::PutProtectedShareCapability(capability) => {
+                let operation = self.operations.get(&capability.operation_id);
+                if capability.account_id != self.account_id
+                    || capability.operation_id.is_empty()
+                    || capability.ciphertext.is_empty()
+                    || capability.iv.is_empty()
+                    || capability.algorithm != "AES-GCM-AAD-V1"
+                    || self
+                        .share_capabilities
+                        .contains_key(&capability.operation_id)
+                    || !operation.is_some_and(|operation| {
+                        operation.kind == OperationKind::CreateShare
+                            && operation.operation_id == capability.operation_id
+                    })
+                {
+                    return Err(replica_invariant(
+                        "protected Share capability is invalid or reused",
+                    ));
+                }
+                self.share_capabilities
+                    .insert(capability.operation_id.clone(), capability);
+            }
+            PlanMutation::RemoveAllProtectedShareCapabilities => {
+                self.share_capabilities.clear();
             }
             PlanMutation::AcceptAttachmentMovePreparation(preparation) => {
                 self.check_attachment_move_preparation(&preparation, true)?;
@@ -2031,6 +2093,8 @@ impl AccountReplica {
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut operations: Vec<_> = self.operations.values().cloned().collect();
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+        let mut share_capabilities: Vec<_> = self.share_capabilities.values().cloned().collect();
+        share_capabilities.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         let mut attachment_move_preparations: Vec<_> = self
             .attachment_move_preparations
             .values()
@@ -2047,6 +2111,7 @@ impl AccountReplica {
             lock_epoch: self.lock_epoch,
             items,
             operations,
+            share_capabilities,
             attachment_move_preparations,
             receipts,
             failure: self.failure,
@@ -2312,6 +2377,7 @@ pub(crate) fn item_operation_fingerprint(
         OperationKind::RestoreItem => "restore_item",
         OperationKind::MoveItem => "move_item",
         OperationKind::PermanentlyDeleteItem => "permanently_delete_item",
+        OperationKind::CreateShare => "create_share",
     };
     let expected_version = expected_version.to_string();
     let mut hasher = Sha256::new();
@@ -2763,5 +2829,101 @@ mod bootstrap_head_invariant_tests {
             .generations
             .insert(generation_id, generation_record("staging"));
         assert!(authority.validate().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod share_capability_invariant_tests {
+    use super::*;
+
+    fn operation(kind: OperationKind) -> OperationRecord {
+        OperationRecord {
+            operation_id: "share-operation".into(),
+            kind,
+            item_id: "item-1".into(),
+            vault_id: "vault-1".into(),
+            request: ImmutableHttpRequest {
+                method: HttpMethod::Post,
+                path: "/api/v1/items/item-1/share-links".into(),
+                headers: Vec::new(),
+                body: br#"{"tokenHash":"hash"}"#.to_vec(),
+            },
+            request_fingerprint: Sha256Fingerprint([1; 32]),
+            attachment_move_recovery: None,
+            scheduling: OperationSchedulingState::default(),
+        }
+    }
+
+    fn capability() -> ProtectedShareCapabilityRecord {
+        ProtectedShareCapabilityRecord {
+            account_id: AccountId::from("account-1"),
+            operation_id: "share-operation".into(),
+            ciphertext: "ciphertext".into(),
+            iv: "iv".into(),
+            algorithm: "AES-GCM-AAD-V1".into(),
+        }
+    }
+
+    fn replica(
+        operation: Option<OperationRecord>,
+        capability: ProtectedShareCapabilityRecord,
+    ) -> AccountReplica {
+        AccountReplica::from_snapshot(ReplicaSnapshot {
+            account_id: AccountId::from("account-1"),
+            user_id: "user-1".into(),
+            incarnation: Incarnation::from("incarnation-1"),
+            revision: 1,
+            lock_epoch: 0,
+            items: Vec::new(),
+            operations: operation.into_iter().collect(),
+            share_capabilities: vec![capability],
+            attachment_move_preparations: Vec::new(),
+            receipts: Vec::new(),
+            failure: None,
+            bootstrap: BootstrapAuthority::default(),
+        })
+    }
+
+    #[test]
+    fn restart_rejects_orphan_wrong_kind_wrong_scope_and_invalid_share_capabilities() {
+        assert!(replica(None, capability()).validate_durable_work().is_err());
+        assert!(
+            replica(Some(operation(OperationKind::CreateItem)), capability())
+                .validate_durable_work()
+                .is_err()
+        );
+
+        let mut wrong_account = capability();
+        wrong_account.account_id = AccountId::from("account-2");
+        assert!(
+            replica(Some(operation(OperationKind::CreateShare)), wrong_account)
+                .validate_durable_work()
+                .is_err()
+        );
+        for invalid in [
+            ProtectedShareCapabilityRecord {
+                ciphertext: String::new(),
+                ..capability()
+            },
+            ProtectedShareCapabilityRecord {
+                iv: String::new(),
+                ..capability()
+            },
+            ProtectedShareCapabilityRecord {
+                algorithm: "AES-GCM-V1".into(),
+                ..capability()
+            },
+        ] {
+            assert!(
+                replica(Some(operation(OperationKind::CreateShare)), invalid)
+                    .validate_durable_work()
+                    .is_err()
+            );
+        }
+        assert!(
+            replica(Some(operation(OperationKind::CreateShare)), capability())
+                .validate_durable_work()
+                .is_ok()
+        );
     }
 }

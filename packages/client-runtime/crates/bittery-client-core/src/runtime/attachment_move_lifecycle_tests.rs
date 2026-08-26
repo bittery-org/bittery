@@ -1162,6 +1162,7 @@ fn synthetic_snapshot(
         lock_epoch: 0,
         items: vec![],
         operations,
+        share_capabilities: vec![],
         attachment_move_preparations: preparations,
         receipts: vec![],
         failure: None,
