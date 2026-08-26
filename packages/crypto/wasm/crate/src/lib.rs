@@ -3,6 +3,8 @@
 #[allow(clippy::single_component_path_imports, unused_imports)]
 use bittery_crypto_api;
 pub use bittery_client_bindings::WebClientRuntime;
+#[cfg(feature = "binding-test-harness")]
+pub use bittery_client_bindings::WebAttachmentMoveBridgeTestHarness;
 mod bittery_crypto_api_module;
 
 

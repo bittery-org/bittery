@@ -1280,6 +1280,22 @@ export const webclientruntime_unobserve: (
   b: number,
   c: number,
 ) => void;
+export const webclientruntime_withConfiguredAttachmentMovePreparation: (
+  a: any,
+  b: any,
+  c: any,
+  d: any,
+  e: any,
+  f: any,
+  g: any,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: any,
+) => [number, number, number];
 export const webclientruntime_withConfiguredExecutors: (
   a: any,
   b: any,

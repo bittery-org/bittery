@@ -40,7 +40,11 @@ fi
 cp "$COMBINED_ENTRYPOINT" "$GENERATED_ENTRYPOINT"
 cp "$COMBINED_PACKAGE_ENTRYPOINT" "$GENERATED_PACKAGE_ENTRYPOINT"
 
-cargo build --manifest-path crate/Cargo.toml --release --target wasm32-unknown-unknown
+cargo_features=()
+if [[ "${BITTERY_BINDING_TEST_HARNESS:-0}" == "1" ]]; then
+	cargo_features=(--features binding-test-harness)
+fi
+cargo build --manifest-path crate/Cargo.toml --release --target wasm32-unknown-unknown "${cargo_features[@]}"
 wasm-bindgen --target web --omit-default-module-path --out-name index \
 	--out-dir "$WASM_BINDINGS_OUTPUT" \
 	crate/target/wasm32-unknown-unknown/release/bittery_crypto_wasm.wasm

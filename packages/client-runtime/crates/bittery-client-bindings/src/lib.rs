@@ -1133,7 +1133,10 @@ mod web_attachment_artifact_control;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_attachment_artifact_policy;
 #[cfg(target_arch = "wasm32")]
-#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested adapter.
+#[allow(
+    dead_code,
+    reason = "download handles retain explicit cancellation for the closed transfer contract; Runtime abandonment uses Drop"
+)]
 mod web_binary_transfer;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_binary_transfer_abandonment;
@@ -1142,10 +1145,9 @@ mod web_binary_transfer_abandonment;
     feature = "transfer-control-contract-schema",
     test
 ))]
-#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested contract.
+#[cfg_attr(test, allow(dead_code))]
 mod web_binary_transfer_control;
 #[cfg(any(target_arch = "wasm32", test))]
-#[allow(dead_code)] // C4 owns production Runtime composition of this independently tested policy.
 mod web_binary_transfer_policy;
 
 #[cfg(feature = "artifact-control-contract-schema")]
@@ -1160,6 +1162,10 @@ pub use web_binary_transfer_control::{
 };
 #[cfg(target_arch = "wasm32")]
 mod web_attachment_artifact_store;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_attachment_move_bridge;
+#[cfg(all(target_arch = "wasm32", feature = "binding-test-harness"))]
+pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 
 #[cfg(test)]
 mod tests {

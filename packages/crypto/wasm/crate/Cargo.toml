@@ -12,6 +12,7 @@ features = ["wasm32"]
 path = "../../../../node_modules/.pnpm/uniffi-bindgen-react-native@0.31.0-3_patch_hash=3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a/node_modules/uniffi-bindgen-react-native/crates/ubrn_cli/../uniffi-runtime-javascript"
 
 [features]
+binding-test-harness = ["bittery-client-bindings/binding-test-harness"]
 default = []
 
 [lib]

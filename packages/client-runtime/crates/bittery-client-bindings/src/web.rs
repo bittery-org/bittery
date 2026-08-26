@@ -1,4 +1,8 @@
-use crate::{observation_buffer::BufferedSink, observation_slots::ObservationSlots};
+use crate::{
+    observation_buffer::BufferedSink,
+    observation_slots::ObservationSlots,
+    web_attachment_move_bridge::{configured_runtime, WebAttachmentMoveResources},
+};
 use bittery_client_core as core;
 use std::{
     collections::HashMap,
@@ -105,6 +109,7 @@ pub struct WebClientRuntime {
     // a freed Runtime alive: it stops the first time it wakes and finds the table gone.
     observations: Rc<ObservationSlots<WebObservation>>,
     wake: Arc<Notify>,
+    attachment_move_resources: Option<WebAttachmentMoveResources>,
 }
 
 struct WebObservation {
@@ -203,17 +208,7 @@ impl WebClientRuntime {
         platform: String,
         version: String,
     ) -> Result<Self, JsValue> {
-        let platform = match platform.as_str() {
-            "web" => core::ClientPlatform::Web,
-            "desktop" => core::ClientPlatform::Desktop,
-            "mobile" => core::ClientPlatform::Mobile,
-            "extension" => core::ClientPlatform::Extension,
-            _ => {
-                return Err(JsValue::from_str(
-                    "authentication client platform is invalid",
-                ));
-            }
-        };
+        let platform = client_platform(&platform)?;
         let config = core::AuthClientConfig::new(client_id, platform, version)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         Ok(Self::from_inner(
@@ -230,6 +225,50 @@ impl WebClientRuntime {
                 }),
                 config,
             ),
+        ))
+    }
+
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = withConfiguredAttachmentMovePreparation)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the fixed browser composition receives each closed primitive executor explicitly"
+    )]
+    pub fn with_configured_attachment_move_preparation(
+        replica_invoke: js_sys::Function,
+        platform_storage_invoke: js_sys::Function,
+        http_invoke: js_sys::Function,
+        http_cancel: js_sys::Function,
+        artifact_executor: JsValue,
+        binary_executor: JsValue,
+        lease_executor: JsValue,
+        client_id: String,
+        platform: String,
+        version: String,
+        lifecycle_error: js_sys::Function,
+    ) -> Result<Self, JsValue> {
+        let platform = client_platform(&platform)?;
+        let config = core::AuthClientConfig::new(client_id, platform, version)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let (inner, resources) = configured_runtime(
+            Arc::new(JsSerializedReplicaExecutor {
+                invoke: replica_invoke,
+            }),
+            Arc::new(JsSerializedPlatformStorageExecutor {
+                invoke: platform_storage_invoke,
+            }),
+            Arc::new(JsSerializedHttpExecutor {
+                invoke: http_invoke,
+                cancel: http_cancel,
+            }),
+            config,
+            artifact_executor,
+            binary_executor,
+            lease_executor,
+            lifecycle_error,
+        )?;
+        Ok(Self::from_inner_with_attachment_move_resources(
+            inner, resources,
         ))
     }
 
@@ -250,7 +289,17 @@ impl WebClientRuntime {
             cancellations: Mutex::new(HashMap::new()),
             observations,
             wake,
+            attachment_move_resources: None,
         }
+    }
+
+    fn from_inner_with_attachment_move_resources(
+        inner: Arc<core::Runtime>,
+        resources: WebAttachmentMoveResources,
+    ) -> Self {
+        let mut runtime = Self::from_inner(inner);
+        runtime.attachment_move_resources = Some(resources);
+        runtime
     }
 
     pub async fn open(&self) -> Result<(), JsValue> {
@@ -340,6 +389,9 @@ impl WebClientRuntime {
         for cancellation in cancellations {
             cancellation.cancel();
         }
+        if let Some(resources) = &self.attachment_move_resources {
+            resources.close();
+        }
         self.inner.close().await;
         for observation in self.observations.drain() {
             observation.close();
@@ -351,7 +403,22 @@ impl WebClientRuntime {
 // send. One last wake lets it observe the dropped table and finish.
 impl Drop for WebClientRuntime {
     fn drop(&mut self) {
+        if let Some(resources) = &self.attachment_move_resources {
+            resources.close();
+        }
         self.wake.notify_one();
+    }
+}
+
+fn client_platform(platform: &str) -> Result<core::ClientPlatform, JsValue> {
+    match platform {
+        "web" => Ok(core::ClientPlatform::Web),
+        "desktop" => Ok(core::ClientPlatform::Desktop),
+        "mobile" => Ok(core::ClientPlatform::Mobile),
+        "extension" => Ok(core::ClientPlatform::Extension),
+        _ => Err(JsValue::from_str(
+            "authentication client platform is invalid",
+        )),
     }
 }
 

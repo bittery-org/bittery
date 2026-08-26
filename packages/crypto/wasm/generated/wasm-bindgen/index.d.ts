@@ -24,6 +24,19 @@ export class WebClientRuntime {
   open(): Promise<void>;
   request_json(request_id: string, request_json: string): Promise<string>;
   unobserve(observation_id: string): void;
+  static withConfiguredAttachmentMovePreparation(
+    replica_invoke: Function,
+    platform_storage_invoke: Function,
+    http_invoke: Function,
+    http_cancel: Function,
+    artifact_executor: any,
+    binary_executor: any,
+    lease_executor: any,
+    client_id: string,
+    platform: string,
+    version: string,
+    lifecycle_error: Function,
+  ): WebClientRuntime;
   static withConfiguredExecutors(
     replica_invoke: Function,
     platform_storage_invoke: Function,
@@ -1888,6 +1901,22 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => void;
+  readonly webclientruntime_withConfiguredAttachmentMovePreparation: (
+    a: any,
+    b: any,
+    c: any,
+    d: any,
+    e: any,
+    f: any,
+    g: any,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: any,
+  ) => [number, number, number];
   readonly webclientruntime_withConfiguredExecutors: (
     a: any,
     b: any,
