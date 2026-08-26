@@ -1157,3 +1157,36 @@ responses on unrelated Share routes. PostgreSQL enum use in one migration transa
 incomplete applied payloads, and foreign Share rejection codes were already reproduced as real
 migration defects. The stale exact enum-label expectation and an accidentally zero-test Cargo
 filter were fixture/command defects, not product behavior.
+
+### 2026-08-26 — Share outcome schema and lookup foundation delivered
+
+Commit `3b3892c0` adds the closed `create_share` retained-outcome schema and authenticated lookup
+union without changing the reachable Share writer. Its migration preserves every existing Item
+outcome while requiring an applied Share result to contain exactly the three non-secret string
+fields `shareLinkId`, `baseShareUrl`, and `expiresAt`; the raw token cannot be retained. Rejected
+Share outcomes accept exactly `item_not_found`, `vault_read_only`, `share_entitlement_denied`, or
+`share_limit_reached`, and Share-only codes cannot appear on Item outcomes. OpenAPI, the TypeScript
+facade, and generated Rust agree on that closed union.
+
+Existing Item mutation facade methods now return an explicitly Item-only outcome union, while the
+User-scoped Operation lookup returns the complete union. Delta Sync ignores an applied Share
+outcome before any Item fetch or cache mutation. The legacy public Share POST, Server-generated raw
+token response, TypeScript Share service, and Client Runtime production dispatch gate remain
+unchanged, so this foundation introduces neither a compatibility writer nor a second reachable
+owner.
+
+The widened union exposed real dependent defects: Delta Sync fetched Item `undefined` and cached
+its response, and the outbound queue accepted Share-only results and rejection codes in Item paths.
+Behavioral and type regressions cover both. The PostgreSQL enum-in-transaction, SQL `NULL`, closed
+payload, and rejection-vocabulary failures from the rejected pass were real migration defects and
+are covered here. Its stale closed-enum expectation and zero-test short Cargo filter were fixture
+and command defects. A fresh independent review reported no remaining findings. The complete Server
+suite passes 455 tests plus both migration-binary tests; all fourteen dependent type checks, API
+contract and Delta Sync suites, generated-contract drift, generator tests, formatting, and diff
+checks pass.
+
+Deliberately left open: Runtime Share dispatch, retained-outcome polling and reconciliation,
+durable `PendingShareResult`, and acknowledgement remain the next slice with production dispatch
+still closed. The later atomic cutover still owns the hash-only public POST, same-transaction
+rejection audit and entitlement lookup, scoped create-route `422`, opening production dispatch,
+Web Runtime ownership, acknowledgement, and removal of the transitional TypeScript Share writer.
