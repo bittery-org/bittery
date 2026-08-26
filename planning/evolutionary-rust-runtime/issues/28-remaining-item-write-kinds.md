@@ -75,6 +75,14 @@ Ticket 45 owns the missing Core seam and is split into two independently verifia
 slices before C4b resumes. It deliberately makes no new product-protocol choice. C4b remains limited
 to Web binary primitives, per-Account Worker composition, and exclusive lifecycle ownership.
 
+### 2026-08-26 — Core manifest authority blocker resolved
+
+Ticket 45 now owns the typed authenticated manifest exchange, one-refresh durable Session lifecycle,
+renewed-credential propagation, and one Account execution fence shared by preparation, dispatch,
+Bootstrap/Sync, Lock, close, and reconciliation. The public preparation facade is binary-only, and
+both repository CI gates pass from a clean tree. C4b may resume without exposing route, bearer,
+Session, or manifest response policy to bindings or TypeScript.
+
 ### 2026-08-24 — ticket 23 added acceptance prerequisites
 
 The first-slice adversarial review found that the shared Replica adapter conformance and the complete

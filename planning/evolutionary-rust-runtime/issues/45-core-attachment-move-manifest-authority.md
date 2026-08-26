@@ -1,7 +1,7 @@
 # Keep Attachment Move manifest authority inside Client Core
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 24
 Spec: ../spec.md#offline-create
 
@@ -75,3 +75,33 @@ transient retry forever. The corrected implementation uses a dedicated finite 16
 behavioral 200-entry response larger than 64 KiB. A fresh re-review found no remaining issue.
 Deliberately left open: Slice B still owns current-Session load, one refresh and durable replacement,
 Scheduler adaptation, and removal of manifest renewal from the public host transfer port.
+
+### 2026-08-26 — Slice B delivered the Core Session lifecycle and binary-only facade
+
+Client Core now derives the exact Account incarnation, Server metadata, current Session, and
+Operation-scoped manifest request. It refreshes one `401`, durably stores the renewed Session before
+one replay, propagates that current credential through outcome lookup, send, authoritative fetch,
+and Sync, and maps a second `401` or transient answer back into C2's durable unbounded backoff. The
+public host port now exposes only bounded binary source and upload streams. A `Weak<Runtime>` keeps
+the Scheduler authority cycle-free.
+
+Independent review found real product defects in the initial implementation: manifest and ordinary
+dispatch could both replace one Account Session; successful manifest refresh omitted the Runtime's
+availability transition; Bootstrap/Sync remained a reachable second Session writer; and outcome
+helpers discarded a renewed credential before the next exchange. The corrected Runtime serializes
+preparation, dispatch, Bootstrap/Sync, Lock, close, and reconciliation on the existing Account
+execution fence and uses the central Session renewal lifecycle. A final fresh review found no
+remaining product or fixture defect.
+
+Review also found stale fixtures rather than product defects: same-Runtime calls claimed to model
+independent duplicate senders, and a Lock/no-plaintext test awaited Lock before releasing the
+Bootstrap HTTP request whose Account fence Lock correctly waits for. The corrected tests prove
+same-Runtime single-writer serialization, two genuinely independent Runtimes still sending duplicate
+bytes to one exactly-once Server outcome, and Lock remaining pending until Bootstrap completes while
+publishing no plaintext.
+
+`pnpm check:ci` and `pnpm check:ci:rust` pass from the same clean tree with the development database
+and `SQLX_OFFLINE=true`; neither gate changes a tracked file. Deliberately left open: Ticket 28 C4b
+still owns Web Worker construction, per-Account lifecycle exclusivity, and the already-delivered
+binary browser executor composition. No binding, TypeScript, Server protocol, C2 preparation
+mechanic, accepted-work retry ceiling, or upload-URL persistence was added here.
