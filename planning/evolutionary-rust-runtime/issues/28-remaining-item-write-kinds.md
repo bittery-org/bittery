@@ -1190,3 +1190,39 @@ durable `PendingShareResult`, and acknowledgement remain the next slice with pro
 still closed. The later atomic cutover still owns the hash-only public POST, same-transaction
 rejection audit and entitlement lookup, scoped create-route `422`, opening production dispatch,
 Web Runtime ownership, acknowledgement, and removal of the transitional TypeScript Share writer.
+
+### 2026-08-26 — Runtime Share outcome lifecycle delivered behind the cutover gate
+
+Commit `05c8965d` classifies the closed `create_share` applied/rejected union and reconciles it in
+one guarded Replica commit. An applied outcome receipts and removes the accepted Operation while
+retaining the non-secret Server result beside the locally protected capability; a rejection
+receipts and removes the Operation and destroys that capability. An explicitly unlocked Account
+can observe a durable `PendingShareResult` reconstructed from those two authorities, and
+`AcknowledgeShareResult { accountId, operationId }` atomically removes it. ACK is idempotent,
+Account-scoped, lifecycle-fenced, and leaves the receipt intact.
+
+Restart, real password Quick Unlock, Lock hiding, Sign-out destruction, injected ACK persistence
+failure, more than five transport failures, dropped responses, cross-kind outcomes, same-kind
+Operation-ID reuse, and applied and rejected outcomes after Sign-out all have behavioral coverage.
+Because the lookup response carries no request fingerprint or Share Item correlation, a Share GET
+is only a hint: identical immutable POST replay must prove the request fingerprint before Runtime
+can complete it. Sync cannot perform that verification while production Share dispatch remains
+closed, so it leaves the Operation owed for the atomic cutover.
+
+Independent reviews found real product defects in a Web binding queue that could outlive Core's
+Lock lease, capability-less post-Sign-out reconciliation, same-kind GET identity acceptance, and
+unwiped Rust-owned Core, Web JSON, and native UniFFI buffers. Account-scoped observation suspension
+now starts before the Lock/Sign-out future, covers its complete asynchronous lifetime and nested
+requests, and preserves the subscription for a later generation. Core projection storage uses
+zeroizing drop; Web JSON is zeroizing; Swift and Kotlin use a fail-closed generated sensitive lift
+whose RustBuffer is wiped before UniFFI frees it, with Kotlin also wiping its temporary byte array.
+The first missing authoritative Item in the dispatch harness and one zero-test Cargo filter were
+fixture and command defects. The final fresh review reported no findings.
+
+The complete Client Runtime check passes 33 binding tests, 310 Core tests, every integration suite,
+Clippy, formatting, 17 generator tests, all contract/conformance/native/Web drift checks, and the
+combined WebAssembly binding checks. Deliberately left open: the production dispatcher still skips
+`create_share`; the public Server route and transitional TypeScript Share writer remain unchanged.
+The next atomic cutover still owns the hash-only Operation POST, same-transaction rejection audit
+and entitlement lookup, create-route-only `422`, opening dispatch and Sync verification, Web Runtime
+creation/result/ACK ownership, and removal of the transitional writer.
