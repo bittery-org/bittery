@@ -1091,3 +1091,35 @@ Client Runtime exposes neither request; those remain in the transitional TypeScr
 owner. [Ticket 48](48-runtime-account-removal-and-wipe.md) owns the unresolved destructive and
 partial-failure protocol plus its host cutover. The Share correction does not infer that general
 product contract, and Ticket 28 cannot resolve before Ticket 48 does.
+
+### 2026-08-26 — durable Share acceptance correction delivered
+
+Commit `e144b05d` adds the explicit-Account `CreateShare` Runtime request and atomically persists its
+immutable `create_share` Operation with MUK-protected, Account- and Operation-AAD-bound capability
+material. Rust preserves the existing 32-character alphanumeric token, lowercase SHA-256 token
+hash, five-category shared-payload allowlist, and AES-GCM formats. SQLite retains every existing
+numeric store code and adds Share capabilities as code 9; IndexedDB v7 adds its store without
+destroying v6 heads, authority, accepted Operations, or receipts. Generated persistence, Runtime,
+native, and Web contracts travel with the defining Rust change.
+
+The slice proves atomic failure, restart and password Quick Unlock, Lock hiding, successful Sign-out
+destruction without Operation discard, post-commit cancellation, close and Account lifecycle
+fences, ready-authority admission, hostile persisted-row rejection, recursive plaintext JSON
+zeroization, and fixed cross-language AAD and request-fingerprint vectors. `CreateShare` is
+deliberately retained but not dispatched until the next Server slice replaces the old
+server-generated-token request; already-supported Operations remain dispatchable with their
+unbounded retry behavior.
+
+Independent review found real product defects in premature dispatch against the old Server
+contract, destructive IndexedDB upgrades, divergent admission guards, unvalidated protected rows,
+and non-zeroized plaintext JSON copies. Behavioral regressions cover each. Updating fresh-schema
+store-list expectations was a fixture change, while preserving a populated v6 database was a real
+product requirement. The final independent review reported no remaining findings, and focused Rust,
+Clippy, IndexedDB, TypeScript, generated-contract, native/WASM binding, Quick Unlock, crypto-vector,
+format, and diff checks pass.
+
+Deliberately left open: the Server Share Operation, Share dispatch and outcome reconciliation,
+acknowledged capability delivery, the Attachment Runtime service, C4b2b authenticated browser
+acceptance, final Web cutover and reachability audit, and `idempotency_record` removal remain later
+Ticket 28 slices. Account removal and Device wipe capability destruction remain blocked on the
+maintainer decision in Ticket 48.
