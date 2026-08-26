@@ -610,6 +610,7 @@ pub struct ItemsProjection {
 #[derive(Zeroize, ZeroizeOnDrop, uniffi::Object)]
 pub struct PendingShareResult {
     operation_id: String,
+    item_id: String,
     share_link_id: String,
     share_url: String,
     expires_at: String,
@@ -620,6 +621,7 @@ impl fmt::Debug for PendingShareResult {
         formatter
             .debug_struct("PendingShareResult")
             .field("operation_id", &self.operation_id)
+            .field("item_id", &self.item_id)
             .field("share_link_id", &self.share_link_id)
             .field("share_url", &"[redacted]")
             .field("expires_at", &self.expires_at)
@@ -631,6 +633,10 @@ impl fmt::Debug for PendingShareResult {
 impl PendingShareResult {
     pub fn operation_id(&self) -> String {
         self.operation_id.clone()
+    }
+
+    pub fn item_id(&self) -> String {
+        self.item_id.clone()
     }
 
     pub fn share_link_id(&self) -> String {
@@ -1113,6 +1119,7 @@ impl From<core::PendingShareResult> for PendingShareResult {
     fn from(value: core::PendingShareResult) -> Self {
         Self {
             operation_id: value.operation_id.clone(),
+            item_id: value.item_id.clone(),
             share_link_id: value.share_link_id.clone(),
             share_url: value.share_url.clone(),
             expires_at: value.expires_at.clone(),
@@ -1421,6 +1428,7 @@ mod tests {
     fn native_share_url_uniffi_lowering_is_wiped_before_its_rust_buffer_is_freed() {
         let pending = PendingShareResult {
             operation_id: "operation-1".into(),
+            item_id: "item-1".into(),
             share_link_id: "share-link-1".into(),
             share_url: "UNIQUE_NATIVE_MARSHALLED_SHARE_URL".into(),
             expires_at: "2099-01-02T03:04:05Z".into(),
@@ -1510,6 +1518,7 @@ mod tests {
                 replica_revision: 2,
                 results: vec![Arc::new(PendingShareResult {
                     operation_id: "operation-1".into(),
+                    item_id: "item-1".into(),
                     share_link_id: "share-link-1".into(),
                     share_url: "UNIQUE_PENDING_SHARE_URL".into(),
                     expires_at: "2099-01-02T03:04:05Z".into(),

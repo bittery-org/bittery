@@ -37,8 +37,10 @@ export type TransitionalKind =
 	| "item-create"
 	/** Runs or assembles the transitional Sync loop. The Runtime owns Web Sync ownership. */
 	| "sync-loop"
-	/** Update, delete, favorite, move, share. Ticket 28. */
+	/** Update, delete, favorite and move. Ticket 28. */
 	| "item-write"
+	/** Creates a Share through the retired TypeScript writer. Runtime owns this on Web. */
+	| "share-write"
 	/** Vault create, update, delete, type conversion. Still transitional; no ticket yet. */
 	| "vault-write"
 	/** Transitional Account, Session and lifecycle machinery. Sign-in itself is the Runtime's. */
@@ -58,6 +60,7 @@ export const FORBIDDEN_KINDS: ReadonlySet<TransitionalKind> = new Set([
 	"vault-read",
 	"item-create",
 	"sync-loop",
+	"share-write",
 ]);
 
 /** A Web file that may still reach a forbidden symbol, and the reason it may. */
@@ -166,7 +169,7 @@ export const TRANSITIONAL_SURFACE: readonly TransitionalEntry[] = [
 	{ module: HOOKS, symbol: "usePermanentDeleteItem", kind: "item-write" },
 	{ module: HOOKS, symbol: "useToggleFavorite", kind: "item-write" },
 	{ module: HOOKS, symbol: "useMoveItem", kind: "item-write" },
-	{ module: HOOKS, symbol: "useCreateShare", kind: "item-write" },
+	{ module: HOOKS, symbol: "useCreateShare", kind: "share-write" },
 
 	// --- Vault writes: still transitional, no ticket yet -----------------------------
 	{ module: HOOKS, symbol: "useCreateVault", kind: "vault-write" },
@@ -367,7 +370,7 @@ export const TRANSITIONAL_SURFACE: readonly TransitionalEntry[] = [
 		kind: "product",
 	},
 	{
-		module: "@bittery/core/services/share-service",
+		module: "@bittery/core/services/share-url",
 		symbol: "readShareKeyFromUrl",
 		kind: "product",
 	},

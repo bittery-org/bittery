@@ -13,6 +13,7 @@ export {
 	useCreateLoginItem,
 	useRuntimeItems,
 	useRuntimeLock,
+	useRuntimePendingShareResults,
 	useRuntimeQuickUnlock,
 	useRuntimeSession,
 	useRuntimeSignIn,

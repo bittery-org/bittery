@@ -82,6 +82,18 @@ describe("observation registry", () => {
 		stopFirst();
 	});
 
+	test("keys pending Share results by explicit Account scope", () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		expect(client.pendingShareResults("account-1")).toBe(
+			client.pendingShareResults("account-1"),
+		);
+		expect(client.pendingShareResults("account-1")).not.toBe(
+			client.pendingShareResults("account-2"),
+		);
+	});
+
 	test("caches a frozen snapshot between publishes", async () => {
 		const transport = createFakeRuntimeTransport();
 		const clock = createManualClock();

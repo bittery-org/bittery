@@ -467,10 +467,6 @@ export interface ApiClient {
 	};
 	readonly share: {
 		list(itemId: string): Promise<ApiResult<Final.ShareLinkList>>;
-		create(
-			itemId: string,
-			input: Final.CreateShareLinkInput,
-		): Promise<ApiResult<Final.CreateShareLinkResponse>>;
 		remove(linkId: string): Promise<ApiResult<unknown>>;
 		accessLogs(
 			linkId: string,
@@ -1419,11 +1415,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			list: (itemId) =>
 				call("GET", "/api/v1/items/{itemId}/share-links", {
 					params: { path: { itemId } },
-				}),
-			create: (itemId, input) =>
-				call("POST", "/api/v1/items/{itemId}/share-links", {
-					params: { path: { itemId } },
-					body: input,
 				}),
 			remove: (linkId) =>
 				call("DELETE", "/api/v1/share-links/{linkId}", {

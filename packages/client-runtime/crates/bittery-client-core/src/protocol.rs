@@ -603,6 +603,7 @@ impl fmt::Debug for PendingShareResultsProjection {
 #[serde(rename_all = "camelCase")]
 pub struct PendingShareResult {
     pub operation_id: String,
+    pub item_id: String,
     pub share_link_id: String,
     pub share_url: String,
     pub expires_at: String,
@@ -613,6 +614,7 @@ impl fmt::Debug for PendingShareResult {
         formatter
             .debug_struct("PendingShareResult")
             .field("operation_id", &self.operation_id)
+            .field("item_id", &self.item_id)
             .field("share_link_id", &self.share_link_id)
             .field("share_url", &"[redacted]")
             .field("expires_at", &self.expires_at)

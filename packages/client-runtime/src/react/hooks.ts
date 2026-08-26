@@ -1,6 +1,7 @@
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import type {
 	ItemsProjection,
+	PendingShareResultsProjection,
 	RuntimeStatusProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
@@ -30,6 +31,16 @@ export function useRuntimeItems(
 	return useRuntimeStore(
 		accountId == null ? null : client.items(accountId),
 		IDLE_SNAPSHOT as RuntimeSnapshot<ItemsProjection>,
+	);
+}
+
+export function useRuntimePendingShareResults(
+	accountId: string | null | undefined,
+): RuntimeSnapshot<PendingShareResultsProjection> {
+	const client = useRuntimeClient();
+	return useRuntimeStore(
+		accountId == null ? null : client.pendingShareResults(accountId),
+		IDLE_SNAPSHOT as RuntimeSnapshot<PendingShareResultsProjection>,
 	);
 }
 

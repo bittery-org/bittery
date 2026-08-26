@@ -575,9 +575,10 @@ impl Runtime {
         {
             SemanticAnswer::Outcome(outcome) => {
                 if operation.kind == OperationKind::CreateShare {
-                    // The lookup cannot prove the Share request fingerprint. Sync is a reader
-                    // and must not turn the hint into the POST that proves it while production
-                    // CreateShare dispatch remains gated for the atomic cutover.
+                    // A Share lookup is only a hint because it carries no request fingerprint.
+                    // The production dispatcher replays the exact immutable POST to prove
+                    // identity; this Sync hint remains uncommitted until that proof completes.
+                    self.wake_dispatch();
                     return CompletionResult::Retry;
                 }
                 self.complete_operation_fenced(

@@ -62,7 +62,6 @@ import {
 	IconPencil,
 	IconPlus,
 	IconSearch,
-	IconShare,
 	IconStar,
 	IconTrash,
 	IconTriangleAlert,
@@ -98,7 +97,6 @@ import { ItemAttachments } from "@/components/vault/item-attachments";
 import { MoveItemSheet } from "@/components/vault/move-item-sheet";
 import { PasswordHistorySheet } from "@/components/vault/password-history-sheet";
 import { ShareHistorySheet } from "@/components/vault/share-history-sheet";
-import { ShareItemSheet } from "@/components/vault/share-item-sheet";
 import { useI18n } from "@/providers/i18n-provider";
 
 type Messages = ReturnType<typeof useI18n>["m"];
@@ -1387,7 +1385,6 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 	const [isMoveOpen, setIsMoveOpen] = useState(false);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
-	const [isShareOpen, setIsShareOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
@@ -1569,10 +1566,9 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 	const passkeys = decryptedData?.passkeys ?? [];
 
 	/**
-	 * The flattened item shape the share and move sheets both take. `DecryptedItem` is the
-	 * repository row's identity fields spread over its decrypted payload, and neither sheet
-	 * carries the repository's own `accountId` — `useCreateShare` and `useMoveItem` resolve
-	 * that from the repository themselves.
+	 * The flattened item shape the move sheet takes. `DecryptedItem` is the repository row's
+	 * identity fields spread over its decrypted payload, and the sheet does not carry the
+	 * repository's own `accountId`; `useMoveItem` resolves that from the repository itself.
 	 */
 	const decryptedItem =
 		rawItem && decryptedData
@@ -1636,11 +1632,6 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 									}
 									disabled={toggleFavorite.isPending}
 									onPress={() => runAction(() => void handleToggleFavorite())}
-								/>
-								<SheetAction
-									icon={IconShare}
-									label={m.mob_item_header_action_share()}
-									onPress={() => runAction(() => setIsShareOpen(true))}
 								/>
 								<SheetAction
 									icon={IconCopy}
@@ -1737,14 +1728,6 @@ export function ItemDetailScreen({ itemId, onBack }: ItemDetailScreenProps) {
 							onCopy={copyValue}
 							onRestorePassword={handleRestorePassword}
 							isRestoring={updateItem.isPending}
-						/>
-					) : null}
-
-					{decryptedItem ? (
-						<ShareItemSheet
-							open={isShareOpen}
-							onOpenChange={setIsShareOpen}
-							item={decryptedItem}
 						/>
 					) : null}
 

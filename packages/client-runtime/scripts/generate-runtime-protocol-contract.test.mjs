@@ -225,6 +225,7 @@ test("Share result delivery and acknowledgement stay explicit and closed", () =>
 				results: [
 					{
 						operationId: "operation-1",
+						itemId: "item-1",
 						shareLinkId: "share-link-1",
 						shareUrl: "https://app.example.test/share/token#key",
 						expiresAt: "2099-01-02T03:04:05Z",

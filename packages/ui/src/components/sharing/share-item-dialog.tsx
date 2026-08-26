@@ -8,7 +8,7 @@ import {
 	IconTriangleAlert,
 	IconX,
 } from "@bittery/ui/icons";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -63,15 +63,65 @@ export interface CreateShareRequest {
 }
 
 export interface ShareItemDialogProps {
+	accountId: string;
 	item: DecryptedItem;
-	onCreateShare: (request: CreateShareRequest) => Promise<{ shareUrl: string }>;
+	onCreateShare: (request: CreateShareRequest) => Promise<DeliveredShareResult>;
+	onAcknowledgeShareResult?: (result: DeliveredShareResult) => Promise<void>;
+	resumableResult?: DeliveredShareResult | null;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
 }
 
+export interface DeliveredShareResult {
+	accountId: string;
+	itemId: string;
+	operationId: string;
+	shareUrl: string;
+}
+
+export type ShareAckSchedule = (
+	run: () => void,
+	delayMs: number,
+) => () => void;
+
+export function retryShareResultAcknowledgement(
+	acknowledge: () => Promise<void>,
+	onAcknowledged: () => void,
+	schedule: ShareAckSchedule = (run, delayMs) => {
+		const handle = setTimeout(run, delayMs);
+		return () => clearTimeout(handle);
+	},
+): () => void {
+	let cancelled = false;
+	let cancelRetry: () => void = () => undefined;
+	let attempt = 0;
+	const run = async () => {
+		try {
+			await acknowledge();
+			if (!cancelled) onAcknowledged();
+		} catch {
+			if (!cancelled) {
+				attempt += 1;
+				cancelRetry = schedule(
+					() => void run(),
+					Math.min(1_000 * 2 ** Math.min(attempt - 1, 8), 300_000),
+				);
+			}
+		}
+	};
+	void run();
+	return () => {
+		cancelled = true;
+		cancelRetry();
+	};
+}
+
 export function ShareItemDialog({
+	accountId,
 	item,
 	onCreateShare,
+	onAcknowledgeShareResult,
+	resumableResult,
 	open: controlledOpen,
 	onOpenChange: controlledOnOpenChange,
 }: ShareItemDialogProps) {
@@ -84,7 +134,16 @@ export function ShareItemDialog({
 		: setInternalOpen;
 
 	const [showConfirmation, setShowConfirmation] = useState(false);
-	const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+	const [generatedResult, setGeneratedResult] =
+		useState<DeliveredShareResult | null>(null);
+	const deliveryScope = useRef({ accountId, itemId: item.id, open });
+	deliveryScope.current = { accountId, itemId: item.id, open };
+	const acknowledgedOperation = useRef<string | null>(null);
+	const resultMatchesScope =
+		generatedResult?.accountId === accountId &&
+		generatedResult.itemId === item.id;
+	const generatedLink =
+		open && resultMatchesScope ? generatedResult.shareUrl : null;
 	const [hasCopiedLink, setHasCopiedLink] = useState(false);
 	const [showCloseWithoutCopy, setShowCloseWithoutCopy] = useState(false);
 
@@ -95,6 +154,35 @@ export function ShareItemDialog({
 	const [emailInput, setEmailInput] = useState("");
 
 	const [isCreating, setIsCreating] = useState(false);
+
+	useEffect(() => {
+		if (
+			open &&
+			generatedResult === null &&
+			resumableResult?.accountId === accountId &&
+			resumableResult.itemId === item.id
+		) {
+			setGeneratedResult(resumableResult);
+		}
+	}, [accountId, generatedResult, item.id, open, resumableResult]);
+
+	useEffect(() => {
+		if (
+			!open ||
+			!generatedResult ||
+			!resultMatchesScope ||
+			!onAcknowledgeShareResult ||
+			acknowledgedOperation.current === generatedResult.operationId
+		) {
+			return;
+		}
+		return retryShareResultAcknowledgement(
+			() => onAcknowledgeShareResult(generatedResult),
+			() => {
+				acknowledgedOperation.current = generatedResult.operationId;
+			},
+		);
+	}, [generatedResult, onAcknowledgeShareResult, open, resultMatchesScope]);
 
 	const expirationLabels: Record<ShareExpirationOption, string> = {
 		"1hour": m.sharing_item_dialog_expiration_1hour(),
@@ -116,7 +204,14 @@ export function ShareItemDialog({
 					accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
-			setGeneratedLink(result.shareUrl);
+			const currentScope = deliveryScope.current;
+			if (
+				currentScope.open &&
+				result.accountId === currentScope.accountId &&
+				result.itemId === currentScope.itemId
+			) {
+				setGeneratedResult(result);
+			}
 			toast.success(m.sharing_item_dialog_toast_create_success());
 		} catch (error) {
 			const errorMessage =
@@ -179,7 +274,7 @@ export function ShareItemDialog({
 		setOpen(false);
 		setShowCloseWithoutCopy(false);
 		setTimeout(() => {
-			setGeneratedLink(null);
+			setGeneratedResult(null);
 			setHasCopiedLink(false);
 			setAccessMode("anyone");
 			setExpiresIn("7days");
@@ -189,8 +284,8 @@ export function ShareItemDialog({
 		}, 200);
 	};
 
-	// The share key only ever exists in this component's memory — once the
-	// dialog closes it is unrecoverable, so an uncopied link is a dead link.
+	// Once Runtime has observed delivery, closing an uncopied result makes this host copy
+	// unavailable; retain the explicit warning before clearing the rendered value.
 	const isLinkAtRisk = generatedLink !== null && !hasCopiedLink;
 
 	const handleRequestClose = () => {
@@ -421,24 +516,26 @@ export function ShareItemDialog({
 							/>
 							{m.sharing_item_dialog_confirm_title()}
 						</AlertDialogTitle>
-						<AlertDialogDescription>
-							{m.sharing_item_dialog_confirm_description({
+						<AlertDialogDescription asChild>
+							<div>
+								{m.sharing_item_dialog_confirm_description({
 								itemTitle: item.title,
-							})}
-							<br />
-							<br />
-							<strong>
-								{m.sharing_item_dialog_confirm_security_title()}
-							</strong>
-							<ul className="mt-2 list-inside list-disc">
-								<li>{m.sharing_item_dialog_confirm_security_item_data()}</li>
-								<li>
-									{m.sharing_item_dialog_confirm_security_item_access()}
-								</li>
-								<li>
-									{m.sharing_item_dialog_confirm_security_item_recommendation()}
-								</li>
-							</ul>
+								})}
+								<br />
+								<br />
+								<strong>
+									{m.sharing_item_dialog_confirm_security_title()}
+								</strong>
+								<ul className="mt-2 list-inside list-disc">
+									<li>{m.sharing_item_dialog_confirm_security_item_data()}</li>
+									<li>
+										{m.sharing_item_dialog_confirm_security_item_access()}
+									</li>
+									<li>
+										{m.sharing_item_dialog_confirm_security_item_recommendation()}
+									</li>
+								</ul>
+							</div>
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

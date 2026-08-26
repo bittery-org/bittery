@@ -277,6 +277,7 @@ mod tests {
                 replica_revision: 1,
                 results: vec![core::PendingShareResult {
                     operation_id: "operation-old".into(),
+                    item_id: "item-old".into(),
                     share_link_id: "share-old".into(),
                     share_url: "https://app.example.test/share/old-token#old-key".into(),
                     expires_at: "2099-01-02T03:04:05Z".into(),
@@ -291,6 +292,7 @@ mod tests {
                 replica_revision: 2,
                 results: vec![core::PendingShareResult {
                     operation_id: "operation-racing".into(),
+                    item_id: "item-racing".into(),
                     share_link_id: "share-racing".into(),
                     share_url: "https://app.example.test/share/racing-token#racing-key".into(),
                     expires_at: "2099-01-02T03:04:05Z".into(),
@@ -306,6 +308,7 @@ mod tests {
                 replica_revision: 3,
                 results: vec![core::PendingShareResult {
                     operation_id: "operation-new".into(),
+                    item_id: "item-new".into(),
                     share_link_id: "share-new".into(),
                     share_url: "https://app.example.test/share/new-token#new-key".into(),
                     expires_at: "2099-01-02T03:04:05Z".into(),

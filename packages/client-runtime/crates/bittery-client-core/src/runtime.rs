@@ -67,9 +67,9 @@ use crate::{
         PendingAccountInstallIntent, PlatformStorage, SerializedPlatformStorageExecutor,
     },
     replica::{
-        AuthorityVaultRole, AuthorityVaultType, GuardedCommitPlan, InMemoryReplica,
-        OperationRecord, PlanMutation, RecomputedPlanResult, Replica, ReplicaItemRecord,
-        ReplicaPersistence, ReplicaSnapshot, SerializedReplicaExecutor,
+        AuthorityVaultRole, AuthorityVaultType, GuardedCommitPlan, InMemoryReplica, OperationKind,
+        OperationOutcomeResult, OperationRecord, PlanMutation, RecomputedPlanResult, Replica,
+        ReplicaItemRecord, ReplicaPersistence, ReplicaSnapshot, SerializedReplicaExecutor,
         SerializedReplicaPersistence,
     },
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
@@ -1851,8 +1851,35 @@ impl Runtime {
                         .result
                         .as_ref()
                         .expect("filtered pending Share result must exist");
+                    let receipt = snapshot
+                        .receipts
+                        .iter()
+                        .find(|receipt| receipt.operation_id == capability.operation_id)
+                        .ok_or_else(|| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the pending Share result has no Operation receipt",
+                            )
+                        })?;
+                    match &receipt.result {
+                        OperationOutcomeResult::ShareApplied {
+                            share_link_id,
+                            base_share_url,
+                            expires_at,
+                        } if receipt.kind == OperationKind::CreateShare
+                            && share_link_id == &applied.share_link_id
+                            && base_share_url == &applied.base_share_url
+                            && expires_at == &applied.expires_at => {}
+                        _ => {
+                            return Err(RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the pending Share result disagrees with its Operation receipt",
+                            ));
+                        }
+                    }
                     results.push(PendingShareResult {
                         operation_id: capability.operation_id.clone(),
+                        item_id: receipt.item_id.clone(),
                         share_link_id: applied.share_link_id.clone(),
                         share_url: format!(
                             "{}{}#{}",

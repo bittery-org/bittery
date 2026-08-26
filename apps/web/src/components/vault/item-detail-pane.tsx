@@ -1,8 +1,8 @@
 import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import {
 	getAttachmentUploadErrorCode,
 	type UnifiedItem,
-	useCreateShare,
 	useItemAttachments,
 	useQueryInvalidator,
 	useToggleFavorite,
@@ -44,6 +44,10 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { MoveItemDialog } from "@/components/vault/move-item-dialog";
+import {
+	useCreateShare,
+	usePendingShareResults,
+} from "@/hooks/use-create-share";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
@@ -103,6 +107,7 @@ export function ItemDetailPane({
 	const toggleFavorite = useToggleFavorite();
 	const updateItem = useUpdateItem();
 	const createShare = useCreateShare();
+	const runtimeClient = useRuntimeClient();
 	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
@@ -110,6 +115,28 @@ export function ItemDetailPane({
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
+	const shareAccountId = selectedItem?.accountId ?? null;
+	const pendingShares = usePendingShareResults(shareAccountId);
+	const resumableShare =
+		pendingShares.state === "ready" && selectedItem
+			? (() => {
+					const result = pendingShares.value.results.find(
+						(candidate) => candidate.itemId === selectedItem.id,
+					);
+					return result
+						? { ...result, accountId: pendingShares.value.accountId }
+						: null;
+				})()
+			: null;
+	const acknowledgeShareResult = useCallback(
+		async (result: { accountId: string; operationId: string }) => {
+			await runtimeClient.acknowledgeShareResult({
+				accountId: result.accountId,
+				operationId: result.operationId,
+			});
+		},
+		[runtimeClient],
+	);
 	const itemAttachments = useItemAttachments(
 		selectedItem?.id,
 		selectedItem?.vaultId,
@@ -348,8 +375,12 @@ export function ItemDetailPane({
 					</div>
 
 					<ShareItemDialog
+						key={`${shareAccountId}:${selectedItem.id}`}
+						accountId={selectedItem.accountId}
 						item={selectedItem}
 						onCreateShare={(request) => createShare.mutateAsync(request)}
+						onAcknowledgeShareResult={acknowledgeShareResult}
+						resumableResult={resumableShare}
 						open={isShareDialogOpen}
 						onOpenChange={setIsShareDialogOpen}
 					/>

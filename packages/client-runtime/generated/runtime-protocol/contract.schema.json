@@ -443,6 +443,9 @@
         "expiresAt": {
           "type": "string"
         },
+        "itemId": {
+          "type": "string"
+        },
         "operationId": {
           "type": "string"
         },
@@ -455,6 +458,7 @@
       },
       "required": [
         "operationId",
+        "itemId",
         "shareLinkId",
         "shareUrl",
         "expiresAt"

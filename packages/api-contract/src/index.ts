@@ -60,8 +60,6 @@ export type {
 	CreateItemInput,
 	CreateItemOperationOutcome,
 	CreateItemWriteOptions,
-	CreateShareLinkInput,
-	CreateShareLinkResponse,
 	CreateTeamInput,
 	CreateVaultInput,
 	CreateVaultResponse,

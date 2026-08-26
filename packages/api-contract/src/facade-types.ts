@@ -221,8 +221,6 @@ export type TeamMember = Schema<"TeamMemberResponse">;
 export type TeamMemberAccess = Schema<"MemberAccessResponse">;
 export type TeamVault = Schema<"TeamVaultResponse">;
 
-export type CreateShareLinkInput = Schema<"CreateShareLinkRequest">;
-export type CreateShareLinkResponse = Schema<"CreateShareLinkResponse">;
 export type ShareLinkList = Schema<"ShareLinkListResponse">;
 export type PublicShareInfo = Schema<"PublicShareInfoResponse">;
 export type EmailShareAccessInput = Schema<"EmailAccessRequest">;

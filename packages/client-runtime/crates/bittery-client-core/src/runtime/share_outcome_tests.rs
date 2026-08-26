@@ -1,4 +1,4 @@
-//! The Share Operation's terminal lifecycle while production dispatch remains gated.
+//! The Share Operation's terminal lifecycle and durable result delivery.
 
 use super::operation_fixtures::seeded_with_share_item;
 use super::*;
@@ -39,6 +39,42 @@ async fn accept_share(harness: &operation_fixtures::Harness) -> String {
 }
 
 #[tokio::test]
+async fn production_dispatch_delivers_an_accepted_share_and_retains_its_result() {
+    let harness = seeded_with_share_item(false).await;
+    let operation_id = accept_share(&harness).await;
+
+    let dispatcher = tokio::spawn(Arc::clone(&harness.runtime).run_operation_dispatch());
+    operation_fixtures::until("the accepted Share reaches the Server", || {
+        harness.server.shares() == 1
+    })
+    .await;
+    operation_fixtures::until("the applied Share result becomes durable", || {
+        harness
+            .runtime
+            .replica()
+            .snapshot(&harness.account_id)
+            .is_some_and(|snapshot| snapshot.operations.is_empty())
+    })
+    .await;
+
+    let RuntimeProjection::PendingShareResults(projected) = harness
+        .runtime
+        .projection(&ObservationRequest::PendingShareResults {
+            account_id: harness.account_id.clone(),
+        })
+        .unwrap()
+        .projection
+    else {
+        panic!("expected PendingShareResults projection");
+    };
+    assert_eq!(projected.results.len(), 1);
+    assert_eq!(projected.results[0].operation_id, operation_id);
+
+    harness.runtime.close().await;
+    dispatcher.await.unwrap();
+}
+
+#[tokio::test]
 async fn applied_create_share_answer_is_classified_for_the_accepted_operation() {
     let harness = seeded_with_share_item(false).await;
     accept_share(&harness).await;
@@ -68,7 +104,7 @@ async fn applied_share_reconciliation_atomically_ends_the_operation() {
 
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
 
     let snapshot = harness
@@ -87,7 +123,7 @@ async fn unlocked_account_projects_the_durable_reconstructed_share_result() {
     let operation_id = accept_share(&harness).await;
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     let snapshot = harness
         .runtime
@@ -147,7 +183,7 @@ async fn acknowledge_share_result_is_atomic_and_idempotent_for_one_explicit_acco
     let operation_id = accept_share(&harness).await;
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     assert_eq!(
         harness
@@ -252,7 +288,7 @@ async fn pending_share_result_survives_lock_and_is_destroyed_by_sign_out() {
     let operation_id = accept_share(&harness).await;
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
 
     harness
@@ -329,7 +365,7 @@ async fn pending_share_result_reloads_from_durable_replica_after_restart() {
     let operation_id = accept_share(&harness).await;
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     harness.runtime.close().await;
 
@@ -372,6 +408,52 @@ async fn pending_share_result_reloads_from_durable_replica_after_restart() {
 }
 
 #[tokio::test]
+async fn pending_share_item_correlation_is_derived_from_the_operation_receipt() {
+    let harness = seeded_with_share_item(false).await;
+    let operation_id = accept_share(&harness).await;
+    harness
+        .runtime
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
+        .await;
+
+    let snapshot = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let capability = snapshot
+        .share_capabilities
+        .iter()
+        .find(|candidate| candidate.operation_id == operation_id)
+        .expect("applied Share capability should remain pending delivery");
+    let durable_result = serde_json::to_value(
+        capability
+            .result
+            .as_ref()
+            .expect("applied Share capability should retain its result"),
+    )
+    .unwrap();
+    assert_eq!(durable_result.get("itemId"), None);
+
+    let receipt = snapshot
+        .receipts
+        .iter()
+        .find(|candidate| candidate.operation_id == operation_id)
+        .expect("applied Share should retain its Operation receipt");
+    let RuntimeProjection::PendingShareResults(projected) = harness
+        .runtime
+        .projection(&ObservationRequest::PendingShareResults {
+            account_id: harness.account_id.clone(),
+        })
+        .unwrap()
+        .projection
+    else {
+        panic!("expected PendingShareResults projection");
+    };
+    assert_eq!(projected.results[0].item_id, receipt.item_id);
+}
+
+#[tokio::test]
 async fn share_survives_more_than_five_transient_attempts_with_identical_hash_only_bytes() {
     let harness = seeded_with_share_item(false).await;
     harness.server.script([
@@ -388,7 +470,7 @@ async fn share_survives_more_than_five_transient_attempts_with_identical_hash_on
     for _ in 0..7 {
         harness
             .runtime
-            .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+            .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
             .await;
         if let Some(operation) = harness.operation() {
             harness
@@ -433,7 +515,7 @@ async fn dropped_share_response_uses_lookup_as_a_hint_then_replays_the_identical
 
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     let waiting = harness.operation().unwrap();
     harness
@@ -441,7 +523,7 @@ async fn dropped_share_response_uses_lookup_as_a_hint_then_replays_the_identical
         .advance(waiting.scheduling.not_before_ms - harness.clock.now());
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
 
     assert_eq!(harness.server.shares(), 2);
@@ -460,7 +542,7 @@ async fn same_kind_lookup_with_another_share_fingerprint_fails_closed_on_exact_p
 
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     let waiting = harness.operation().unwrap();
     harness.server.outcomes.lock().unwrap().insert(
@@ -480,7 +562,7 @@ async fn same_kind_lookup_with_another_share_fingerprint_fails_closed_on_exact_p
 
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
 
     let failed = harness
@@ -497,7 +579,7 @@ async fn same_kind_lookup_with_another_share_fingerprint_fails_closed_on_exact_p
 }
 
 #[tokio::test]
-async fn sync_share_hint_cannot_complete_or_send_while_production_dispatch_is_gated() {
+async fn sync_share_hint_cannot_complete_without_exact_post_identity_proof() {
     let harness = seeded_with_share_item(false).await;
     let operation_id = accept_share(&harness).await;
     let operation = harness.operation().unwrap();
@@ -541,7 +623,7 @@ async fn rejected_share_terminates_without_publishing_or_retaining_capability() 
     let operation_id = accept_share(&harness).await;
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
 
     let snapshot = harness
@@ -614,7 +696,7 @@ async fn signed_out_share_without_a_capability_still_terminates_on_either_author
         harness.runtime.note_session_available(&harness.account_id);
         harness
             .runtime
-            .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+            .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
             .await;
 
         let completed = harness
@@ -663,7 +745,7 @@ async fn cross_kind_share_outcome_fails_closed_without_discarding_the_receiptles
 
     harness
         .runtime
-        .dispatch_create_share_once_while_gated(&harness.account_id, &operation_id)
+        .dispatch_create_share_once_for_test(&harness.account_id, &operation_id)
         .await;
     let snapshot = harness
         .runtime

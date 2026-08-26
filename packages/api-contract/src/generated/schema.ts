@@ -1794,12 +1794,7 @@ export interface components {
             readonly expiresIn: components["schemas"]["ShareExpiration"];
             readonly isOneTimeUse?: boolean;
             readonly shareKeyIv: string;
-        };
-        readonly CreateShareLinkResponse: {
-            readonly baseShareUrl: string;
-            readonly expiresAt: string;
-            readonly id: string;
-            readonly token: string;
+            readonly tokenHash: string;
         };
         /** @enum {string} */
         readonly CreateShareOperationRejectionCode: "item_not_found" | "vault_read_only" | "share_entitlement_denied" | "share_limit_reached";
@@ -5900,9 +5895,9 @@ export interface operations {
     readonly createShareLink: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                /** @description Not accepted because this operation returns a one-time secret */
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                /** @description Stable Client Runtime Operation identity */
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5915,12 +5910,12 @@ export interface operations {
             };
         };
         readonly responses: {
-            readonly 201: {
+            readonly 200: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["CreateShareLinkResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -5968,7 +5963,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
+            /** @description Operation identity was reused for different immutable bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;

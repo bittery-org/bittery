@@ -120,6 +120,69 @@ describe("Runtime client requests", () => {
 		});
 	});
 
+	test("keeps Share creation and delivery acknowledgement explicitly Account-scoped", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		const creating = client.createShare({
+			accountId: "account-share",
+			itemId: "item-share",
+			draft: {
+				accessMode: "anyone",
+				expiresIn: "7days",
+				isOneTimeUse: false,
+			},
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "createShare",
+			accountId: "account-share",
+			itemId: "item-share",
+			draft: {
+				accessMode: "anyone",
+				expiresIn: "7days",
+				isOneTimeUse: false,
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "accepted",
+				operationId: "operation-share",
+				itemId: "item-share",
+				replicaRevision: "8",
+			},
+		});
+		expect(await creating).toEqual({
+			operationId: "operation-share",
+			itemId: "item-share",
+			replicaRevision: "8",
+		});
+
+		const acknowledging = client.acknowledgeShareResult({
+			accountId: "account-share",
+			operationId: "operation-share",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "acknowledgeShareResult",
+			accountId: "account-share",
+			operationId: "operation-share",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "shareResultAcknowledged",
+				accountId: "account-share",
+				operationId: "operation-share",
+			},
+		});
+		expect(await acknowledging).toEqual({
+			accountId: "account-share",
+			operationId: "operation-share",
+		});
+	});
+
 	test("closes the transport", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });

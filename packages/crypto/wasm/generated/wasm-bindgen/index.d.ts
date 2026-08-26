@@ -1673,6 +1673,7 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
@@ -1886,6 +1887,11 @@ export interface InitOutput {
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_item_id: (
     a: number,
     b: bigint,
     c: number,

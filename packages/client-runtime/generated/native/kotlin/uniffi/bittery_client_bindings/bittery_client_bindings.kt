@@ -746,6 +746,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at(
     ): Int
+    external fun uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id(
@@ -894,6 +896,8 @@ external fun uniffi_bittery_client_bindings_fn_clone_pendingshareresult(`handle`
 external fun uniffi_bittery_client_bindings_fn_free_pendingshareresult(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_pendingshareresult_item_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_pendingshareresult_operation_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1140,6 +1144,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at() != 54441) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id() != 54320) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id() != 13793) {
@@ -3924,6 +3931,8 @@ public interface PendingShareResultInterface {
 
     fun `expiresAt`(): kotlin.String
 
+    fun `itemId`(): kotlin.String
+
     fun `operationId`(): kotlin.String
 
     fun `shareLinkId`(): kotlin.String
@@ -4034,6 +4043,19 @@ open class PendingShareResult: Disposable, AutoCloseable, PendingShareResultInte
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `itemId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_pendingshareresult_item_id(
         it,
         _status)
 }

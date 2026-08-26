@@ -4,7 +4,6 @@ import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import { AccountResolver } from "./services/account-resolver";
 import type { AccountVaultRuntime } from "./services/account-vault-runtime";
 import { type CommandQueuePort, ItemCommands } from "./services/item-commands";
-import { ShareService } from "./services/share-service";
 import type { VaultCrypto } from "./services/vault-crypto";
 import type { VaultRepository } from "./services/vault-repository";
 import { VaultService } from "./services/vault-service";
@@ -24,7 +23,6 @@ export interface CoreContext {
 	accounts: AccountResolver;
 	itemCommands: ItemCommands;
 	vaults: VaultService;
-	shares: ShareService;
 	vaultRepository: VaultRepository;
 	vaultRuntime: AccountVaultRuntime;
 	/** Explicit user-requested remote refresh; local reads never call this during render/bootstrap. */
@@ -66,11 +64,6 @@ export function createCoreContext(
 		accounts,
 		vaultKeyProjection: vaultRepository,
 	});
-	const shares = new ShareService({
-		crypto: options.crypto,
-		vaultCrypto: options.vaultCrypto,
-		accounts,
-	});
 	const refreshActiveVaults = async (): Promise<void> => {
 		// First recover the local projection and clear any runtime hydration error.
 		// The explicit remote refresh follows only once the local read seam is sound.
@@ -92,7 +85,6 @@ export function createCoreContext(
 		accounts,
 		itemCommands,
 		vaults,
-		shares,
 		vaultRepository,
 		vaultRuntime: options.vaultRuntime,
 		refreshActiveVaults,

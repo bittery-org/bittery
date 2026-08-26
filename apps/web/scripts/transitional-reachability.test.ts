@@ -87,7 +87,6 @@ describe("what this audit deliberately does not assert yet", () => {
 			.filter((item) => item.kind === "item-write")
 			.map((item) => item.symbol);
 		expect([...new Set(writes)].sort()).toEqual([
-			"useCreateShare",
 			"useDeleteItem",
 			"useMoveItem",
 			"usePermanentDeleteItem",
@@ -95,6 +94,12 @@ describe("what this audit deliberately does not assert yet", () => {
 			"useToggleFavorite",
 			"useUpdateItem",
 		]);
+	});
+
+	test("Share creation cannot reach its retired transitional writer", () => {
+		expect(FORBIDDEN_KINDS.has("share-write")).toBe(true);
+		const writes = audit.reached.filter((item) => item.kind === "share-write");
+		expect(writes).toEqual([]);
 	});
 
 	test("Vault create, update, delete and conversion are still transitional", () => {

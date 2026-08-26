@@ -1791,6 +1791,8 @@ public protocol PendingShareResultProtocol: AnyObject, Sendable {
 
     func expiresAt()  -> String
 
+    func itemId()  -> String
+
     func operationId()  -> String
 
     func shareLinkId()  -> String
@@ -1854,6 +1856,14 @@ open class PendingShareResult: PendingShareResultProtocol, @unchecked Sendable {
 open func expiresAt() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func itemId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_pendingshareresult_item_id(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -4101,6 +4111,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at() != 54441) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id() != 54320) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id() != 13793) {

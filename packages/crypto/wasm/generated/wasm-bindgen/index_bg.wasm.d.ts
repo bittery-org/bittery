@@ -1052,6 +1052,7 @@ export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
@@ -1265,6 +1266,11 @@ export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_item_id: (
   a: number,
   b: bigint,
   c: number,

@@ -176,11 +176,6 @@ impl Runtime {
                 continue;
             }
             for operation in &snapshot.operations {
-                // The lookup contract exists, but the public mutation route remains legacy until
-                // the atomic cutover removes its TypeScript writer. Keep Share owed until then.
-                if operation.kind == OperationKind::CreateShare {
-                    continue;
-                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {
@@ -521,9 +516,9 @@ impl Runtime {
         let _ = self.attempt_dispatch(&snapshot, &operation).await;
     }
 
-    /// Exercises the decided Share wire lifecycle without opening its production eligibility gate.
+    /// Exercises one Share dispatch deterministically without running the background loop.
     #[cfg(test)]
-    pub(crate) async fn dispatch_create_share_once_while_gated(
+    pub(crate) async fn dispatch_create_share_once_for_test(
         &self,
         account_id: &AccountId,
         operation_id: &str,

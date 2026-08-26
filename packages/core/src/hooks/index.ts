@@ -94,12 +94,6 @@ export {
 	useToggleFavorite,
 	useUpdateItem,
 } from "./items";
-// Share Mutation Hooks (write operations)
-export {
-	type CreateShareInput,
-	type CreateShareResult,
-	useCreateShare,
-} from "./share";
 // Team Mutation Hooks (write operations)
 export {
 	TeamAvatarError,

@@ -6,9 +6,11 @@
  */
 
 import type {
+	CreateShareDraft,
 	ItemsProjection,
 	LoginItemDraft,
 	ObservationRequest,
+	PendingShareResultsProjection,
 	RuntimeOutcome,
 	RuntimeRequest,
 	RuntimeResponse,
@@ -79,6 +81,21 @@ export interface CreateLoginItemInput {
 	vaultId: string;
 	draft: LoginItemDraft;
 }
+export interface CreateShareInput {
+	accountId: string;
+	itemId: string;
+	draft: CreateShareDraft;
+}
+
+export interface AcknowledgeShareResultInput {
+	accountId: string;
+	operationId: string;
+}
+
+export type RuntimeShareResultAcknowledged = Omit<
+	Extract<RuntimeResponse, { type: "shareResultAcknowledged" }>,
+	"type"
+>;
 
 export interface RuntimeCallOptions {
 	signal?: AbortSignal;
@@ -112,8 +129,20 @@ export interface RuntimeClient {
 		input: CreateLoginItemInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
+	createShare(
+		input: CreateShareInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	acknowledgeShareResult(
+		input: AcknowledgeShareResultInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeShareResultAcknowledged>;
 	/** The Items observation for one Account. The same Account returns the same store. */
 	items(accountId: string): RuntimeStore<ItemsProjection>;
+	/** Durable, Account-scoped Share results waiting for host delivery acknowledgement. */
+	pendingShareResults(
+		accountId: string,
+	): RuntimeStore<PendingShareResultsProjection>;
 	/** One Account's status, or the Device aggregate when no Account is named. */
 	status(accountId?: string | null): RuntimeStore<RuntimeStatusProjection>;
 	/**
@@ -223,9 +252,31 @@ export function createRuntimeClient(
 			);
 			return { operationId, itemId, replicaRevision };
 		},
+		async createShare(input, callOptions) {
+			const { operationId, itemId, replicaRevision } = await call(
+				{ type: "createShare", ...input },
+				"accepted",
+				callOptions,
+			);
+			return { operationId, itemId, replicaRevision };
+		},
+		async acknowledgeShareResult(input, callOptions) {
+			const { accountId, operationId } = await call(
+				{ type: "acknowledgeShareResult", ...input },
+				"shareResultAcknowledged",
+				callOptions,
+			);
+			return { accountId, operationId };
+		},
 		items(accountId) {
 			return registry.store<ItemsProjection>({
 				type: "items",
+				accountId,
+			} satisfies ObservationRequest);
+		},
+		pendingShareResults(accountId) {
+			return registry.store<PendingShareResultsProjection>({
+				type: "pendingShareResults",
 				accountId,
 			} satisfies ObservationRequest);
 		},

@@ -3918,13 +3918,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Not accepted because this operation returns a one-time secret",
-            "required": false,
+            "description": "Stable Client Runtime Operation identity",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3939,12 +3936,12 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateShareLinkResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -4000,7 +3997,7 @@
             }
           },
           "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+            "description": "Operation identity was reused for different immutable bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14352,6 +14349,7 @@
       "CreateShareLinkRequest": {
         "type": "object",
         "required": [
+          "tokenHash",
           "accessMode",
           "expiresIn",
           "encryptedItemData",
@@ -14390,32 +14388,13 @@
           },
           "shareKeyIv": {
             "type": "string"
+          },
+          "tokenHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "additionalProperties": false
-      },
-      "CreateShareLinkResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "token",
-          "expiresAt",
-          "baseShareUrl"
-        ],
-        "properties": {
-          "baseShareUrl": {
-            "type": "string"
-          },
-          "expiresAt": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
-          }
-        }
       },
       "CreateShareOperationRejectionCode": {
         "type": "string",

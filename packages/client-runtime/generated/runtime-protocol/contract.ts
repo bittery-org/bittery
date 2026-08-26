@@ -205,6 +205,7 @@ results: PendingShareResult[]
 }
 export interface PendingShareResult {
 expiresAt: string
+itemId: string
 operationId: string
 shareLinkId: string
 shareUrl: string

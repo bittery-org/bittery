@@ -455,7 +455,7 @@ describe("Bittery API facade", () => {
 		).toEqual(["Bearer expired-token", "Bearer refreshed-token"]);
 	});
 
-	test("keeps one-time share secrets and final domain operations inside the facade", async () => {
+	test("keeps final domain operations inside the facade", async () => {
 		const requests: Request[] = [];
 		const client = createApiClient({
 			serverUrl: "https://api.example.test",
@@ -467,18 +467,6 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
-				if (request.url.endsWith("/share-links")) {
-					return new Response(
-						JSON.stringify({
-							id: "share-1",
-							token: "one-time-token",
-							baseShareUrl: "https://share.example.test",
-							expiresAt: "2026-01-01T00:00:00Z",
-						}),
-						{ status: 201, headers: { "Content-Type": "application/json" } },
-					);
-				}
-
 				if (request.url.endsWith("/travel-mode")) {
 					return new Response(
 						JSON.stringify({
@@ -496,27 +484,13 @@ describe("Bittery API facade", () => {
 			},
 		});
 
-		const share = await client.share.create("item-1", {
-			accessMode: "anyone",
-			encryptedItemData: "ciphertext",
-			encryptedShareKey: "share-key",
-			encryptionIv: "iv",
-			expiresIn: "1day",
-			shareKeyIv: "share-iv",
-		});
 		const travelMode = await client.travelMode.get();
 		const audit = await client.audit.list({ actionGroup: "share", limit: 10 });
 
-		expect(share.data.token).toBe("one-time-token");
-		expect(requests).toHaveLength(3);
-		expect(requests[0]?.method).toBe("POST");
-		expect(requests[0]?.url).toBe(
-			"https://api.example.test/api/v1/items/item-1/share-links",
-		);
-		expect(requests[0]?.headers.get("Idempotency-Key")).toBeNull();
+		expect(requests).toHaveLength(2);
 		expect(travelMode.data.enabled).toBe(false);
 		expect(audit.data.events).toEqual([]);
-		expect(requests[2]?.url).toBe(
+		expect(requests[1]?.url).toBe(
 			"https://api.example.test/api/v1/audit-events?actionGroup=share&limit=10",
 		);
 	});
