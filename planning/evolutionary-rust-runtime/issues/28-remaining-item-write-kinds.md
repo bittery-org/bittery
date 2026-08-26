@@ -1027,3 +1027,31 @@ starts preparation only for a valid installed and unlocked Account with live key
 preparation. Fake WASM lifecycle tests prove only Worker policy and therefore do not satisfy C4b2b.
 The split records that acceptance gap rather than weakening it or exporting a fixture/install-key
 surface from production.
+
+### 2026-08-26 — C4b2a delivered fixed Worker composition and the browser Account lease
+
+Commit `74acae4b` constructs the production IndexedDB artifact executor, one fresh close-owned OPFS
+binary executor per authenticated Runtime incarnation, and the exact browser-wide
+`bittery:attachment-move:account:<AccountId>` exclusive Web Lock. The authenticated Worker calls
+only the C4b1 constructor. Lifecycle failure closes its exact runner once, rejects commands that
+raced the failed incarnation, reconstructs without a finite limit after proven cleanup, and remains
+terminal with one stable redacted error when cleanup cannot prove that writer ownership ended.
+
+Behavioral unit tests cover synchronous construction failure, lifecycle/open/close races, fresh
+binary ownership, unbounded reconstruction, and retained terminal failure. An actual Chromium test
+proves that two same-origin contexts cannot hold the same Account lease and that explicit release or
+context loss permits reacquisition. The focused Worker, lease, composition, and Chromium suites pass;
+all fourteen dependent type-check tasks, Biome, and `git diff --check` pass.
+
+Independent review found real product defects in reused closed binary resources, a request admitted
+after its resolved Runtime incarnation failed, swallowed cleanup failure that could permit a second
+writer, and a concurrent close that acknowledged success despite uncertain ownership. Each now has
+behavioral regression coverage. The earlier unsupported Bun polling matcher was a fixture/tooling
+defect and was replaced with bounded behavioral polling rather than a softened assertion.
+
+Deliberately left open: C4b2a does not prove the Core lifecycle through authenticated Web/Server
+ceremony. C4b2b still owns sweep-before-preparation, restart/unlock reachability, actual production
+artifact and binary invocation, and more than five real failures without durable discard after the
+dedicated Attachment Runtime service exposes the host path. Server Share, ordinary cross-kind
+dispatch/outcome, the Attachment service, final Web cutover, transitional-writer reachability audit,
+and `idempotency_record` removal remain later Ticket 28 slices.
