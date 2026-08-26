@@ -1,7 +1,7 @@
 # Make the fixed Web binary executor compile in the production Worker graph
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by:
 Spec: ../spec.md#offline-create
 
@@ -47,3 +47,15 @@ C4b2's lease primitive and Worker composition tests remain uncommitted in disjoi
 The production import exposed this pre-existing binary-executor typing defect; the C4b2 implementer
 did not edit the excluded implementation. Deliberately left open: this ticket does not construct the
 Worker, acquire an Account lease, start preparation, or prove browser reachability.
+
+### 2026-08-26 — resolved
+
+Commit `86f684b7` copies the exact viewed ciphertext bytes into an owned `ArrayBuffer`-backed
+`Uint8Array` only at the WebCrypto digest boundary. The fixed executor now type-checks in both the
+Client Runtime and dependent Web application configurations. Its 19 behavioral tests still accept
+the matching digest and reject same-length corruption, and the existing MV3 Chromium transfer test
+passes under Xvfb. Independent review found no product or fixture defect in the correction.
+
+Deliberately left open: the copy changes no transfer contract, OPFS ownership, credential handling,
+retry, cancellation, or bounds. Ticket 28 C4b2 remains responsible for Worker construction, Account
+leases, lifecycle restart, and actual preparation reachability.
