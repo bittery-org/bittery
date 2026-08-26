@@ -17,6 +17,9 @@ const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
 // expanded presigned credential for every entry. Keep that amplification finite while allowing
 // about fifteen times the maximum request size for duplicated identities and signed URL material.
 const ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES: u32 = 16 * 1024 * 1024;
+// One grant contains one bounded Attachment authority document and one invocation-scoped signed
+// URL. Leave ample room for object-store credential expansion without accepting an entity page.
+const ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES: u32 = 256 * 1024;
 /// One Operation outcome is a small closed document, never an entity page.
 const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
@@ -88,6 +91,29 @@ pub(crate) struct AttachmentMoveManifestHttpResponse {
 pub(crate) enum AttachmentMoveManifestAnswer {
     Prepared(AttachmentMoveManifestHttpResponse),
     Busy,
+    StaleAuthority,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentDownloadGrant {
+    pub(crate) attachment_id: String,
+    pub(crate) item_id: String,
+    pub(crate) vault_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) uploaded_by: String,
+    pub(crate) download_url: String,
+    pub(crate) encrypted_name: String,
+    pub(crate) encrypted_content_type: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encrypted_content_type_iv: String,
+    pub(crate) encryption_algorithm: String,
+    pub(crate) file_size: i32,
+}
+
+pub(crate) enum AttachmentDownloadGrantAnswer {
+    Grant(Box<AttachmentDownloadGrant>),
     StaleAuthority,
 }
 
@@ -523,6 +549,64 @@ impl<'transport> AuthHttpClient<'transport> {
             )),
             HttpResponse::Completed { .. } => Err(authentication_failure(
                 "Attachment Move manifest returned an unexpected status",
+            )),
+        }
+    }
+
+    pub(crate) async fn create_attachment_download_grant(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentDownloadGrantAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let url = self.endpoint(&["api", "v1", "attachments", attachment_id, "download-urls"])?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    url.into(),
+                    self.headers(Some(token))?,
+                    Vec::new(),
+                    ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let grant = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment download grant returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(
+                    AttachmentDownloadGrantAnswer::Grant(Box::new(grant)),
+                ))
+            }
+            HttpResponse::Completed { status: 404, .. } => Ok(AuthenticatedOutcome::Ok(
+                AttachmentDownloadGrantAnswer::StaleAuthority,
+            )),
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 403 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Attachment download grant request was cancelled",
+            )),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Attachment download grant returned an unexpected status",
             )),
         }
     }
@@ -1238,6 +1322,226 @@ mod tests {
                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             }],
         }
+    }
+
+    fn source_grant() -> Value {
+        json!({
+            "attachmentId": "attachment /?7",
+            "itemId": "item-7",
+            "vaultId": "vault-source",
+            "storageKey": "attachments/source/attachment-7",
+            "envelopeVersion": 12,
+            "uploadedBy": "user-7",
+            "downloadUrl": "https://objects.example.test/invocation-only-signature",
+            "encryptedName": "encrypted-name",
+            "encryptedContentType": "encrypted-content-type",
+            "encryptionIv": "encryption-iv",
+            "encryptedContentTypeIv": "content-type-iv",
+            "encryptionAlgorithm": "AES-GCM-AAD-V1",
+            "fileSize": 1048576
+        })
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_source_grant_exchange() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json; charset=utf-8",
+            source_grant(),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            "https://vault.example.test/root",
+            false,
+            metadata(),
+        )
+        .unwrap();
+
+        let answer = client
+            .create_attachment_download_grant(
+                "fresh-token",
+                "attachment /?7",
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::Grant(grant)) = answer else {
+            panic!("expected an exact source grant");
+        };
+        assert_eq!(grant.attachment_id, "attachment /?7");
+        assert_eq!(grant.item_id, "item-7");
+        assert_eq!(grant.vault_id, "vault-source");
+        assert_eq!(grant.storage_key, "attachments/source/attachment-7");
+        assert_eq!(grant.envelope_version, 12);
+        assert_eq!(grant.uploaded_by, "user-7");
+        assert_eq!(
+            grant.download_url,
+            "https://objects.example.test/invocation-only-signature"
+        );
+        assert_eq!(grant.encrypted_name, "encrypted-name");
+        assert_eq!(grant.encrypted_content_type, "encrypted-content-type");
+        assert_eq!(grant.encryption_iv, "encryption-iv");
+        assert_eq!(grant.encrypted_content_type_iv, "content-type-iv");
+        assert_eq!(grant.encryption_algorithm, "AES-GCM-AAD-V1");
+        assert_eq!(grant.file_size, 1_048_576);
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "POST");
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/root/api/v1/attachments/attachment%20%2F%3F7/download-urls"
+        );
+        assert_eq!(
+            requests[0]["headers"],
+            json!([
+                {"name":"Bittery-Client-Id","value":"client-7"},
+                {"name":"Bittery-Client-Platform","value":"web"},
+                {"name":"Bittery-Client-Version","value":"0.5.2"},
+                {"name":"Authorization","value":"Bearer fresh-token"}
+            ])
+        );
+        assert_eq!(requests[0]["body"], json!([]));
+        assert_eq!(
+            requests[0]["maxResponseBytes"],
+            ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn classifies_attachment_source_grant_authority_and_transport_answers() {
+        let cases = [
+            (
+                completed(404, "application/problem+json", json!({})),
+                "stale",
+            ),
+            (
+                completed(401, "application/problem+json", json!({})),
+                "reauth",
+            ),
+            (
+                completed(403, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(408, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(425, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(429, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(500, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(599, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (r#"{"type":"networkFailure"}"#.to_owned(), "transient"),
+            (r#"{"type":"responseTooLarge"}"#.to_owned(), "transient"),
+        ];
+
+        for (response, expected) in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let answer = client
+                .create_attachment_download_grant(
+                    "fresh-token",
+                    "attachment-7",
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            match (expected, answer) {
+                (
+                    "stale",
+                    AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::StaleAuthority),
+                )
+                | ("reauth", AuthenticatedOutcome::ReauthenticationRequired)
+                | ("transient", AuthenticatedOutcome::Transient) => {}
+                _ => panic!("unexpected source-grant classification for {expected}"),
+            }
+            assert_eq!(executor.requests().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_or_unrecognized_attachment_source_grant_answers() {
+        let mut unknown_field = source_grant();
+        unknown_field["unexpected"] = json!("not-authority");
+        let cases = [
+            completed(200, "text/plain", source_grant()),
+            serde_json::to_string(&json!({
+                "type": "completed",
+                "status": 200,
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "body": [123]
+            }))
+            .unwrap(),
+            completed(200, "application/json", unknown_field),
+            completed(0, "application/problem+json", json!({})),
+            completed(201, "application/json", source_grant()),
+            completed(400, "application/problem+json", json!({})),
+            completed(409, "application/problem+json", json!({})),
+            completed(499, "application/problem+json", json!({})),
+            completed(600, "application/problem+json", json!({})),
+        ];
+
+        for response in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let error = expect_error(
+                client
+                    .create_attachment_download_grant(
+                        "fresh-token",
+                        "attachment-7",
+                        RequestCancellation::new(),
+                    )
+                    .await,
+            );
+            assert!(matches!(
+                error.code,
+                RuntimeErrorCode::AuthenticationUnavailable | RuntimeErrorCode::InvariantViolation
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn reports_attachment_source_grant_cancellation_without_retrying() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            r#"{"type":"cancelled"}"#.to_owned()
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+
+        let error = expect_error(
+            client
+                .create_attachment_download_grant(
+                    "fresh-token",
+                    "attachment-7",
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+
+        assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+        assert_eq!(executor.requests().len(), 1);
     }
 
     fn problem(code: &str, status: u16) -> Value {
