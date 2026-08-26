@@ -1,7 +1,7 @@
 # Keep Attachment source grants and exclusive lifecycle inside Client Core
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 24, 45
 Spec: ../spec.md#offline-create
 
@@ -178,3 +178,19 @@ The recorded scheduler-only path boundary was expanded by one mechanical crate-p
 variants. It changes no model or serialization behavior. Deliberately left open: Slice C does not
 implement Web Locks, a browser lease guard, the fixed browser Runtime composition, or final Web
 reachability. Those remain Ticket 28 C4b.
+
+### 2026-08-26 — resolved
+
+Slices S, A, B, and C landed in commits `d64825bd`, `3210f1b8`, `f0e15789`, and `af3144e0`.
+Together they extend the existing Server grant with comparable source authority, own its strict
+authenticated exchange and one-refresh adaptation in Client Core, and require a Core-orchestrated
+exclusive per-Account lease around live-set derivation, orphan sweep, and preparation drive.
+
+From a clean tree the orchestrator ran both `pnpm check:ci` and `pnpm check:ci:rust` with the
+development database and `SQLX_OFFLINE=true`; both passed and left no tracked-file drift.
+
+Deliberately left open: this blocker does not implement the Web Locks lease primitive, fixed browser
+binary/artifact composition, Worker startup wiring, or final reachability. Ticket 28 C4b now consumes
+these Core seams and owns those host-only mechanics. Server Share, ordinary dispatch/outcome, the
+general Attachment service, Web cutover, and the final reachability/idempotency audit also remain in
+Ticket 28.
