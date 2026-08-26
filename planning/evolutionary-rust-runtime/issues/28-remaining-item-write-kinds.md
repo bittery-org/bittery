@@ -1055,3 +1055,30 @@ artifact and binary invocation, and more than five real failures without durable
 dedicated Attachment Runtime service exposes the host path. Server Share, ordinary cross-kind
 dispatch/outcome, the Attachment service, final Web cutover, transitional-writer reachability audit,
 and `idempotency_record` removal remain later Ticket 28 slices.
+
+### 2026-08-26 — missing durable Share acceptance inserted before the Server slice
+
+The post-C4b2a sequence audit found that commit `2719bd25` delivered durable acceptance for the six
+remaining Item mutations but not the `create_share` acceptance that the later ownership decision
+added to that slice. No `CreateShare` request, Account-protected local capability state, Share AAD,
+or restart/Lock/destruction proof exists in Client Runtime. Starting the Server Share Operation now
+would therefore leave its accepted request producer undefined and would not be independently
+verifiable as the recorded vertical slice.
+
+Ticket 28 is amended with one path-disjoint correction before Server work:
+
+1. **Durable Share acceptance correction:** Client Runtime and its generated contracts accept one
+   explicit-Account `create_share` draft, generate the raw token and Share key locally, persist only
+   their MUK-bound Account- and Operation-AAD-protected capability state, freeze the decided Server
+   request containing the token hash rather than the token, and prove offline acceptance, restart,
+   Quick Unlock, Lock hiding, and Account teardown destruction. It edits no Server path and performs
+   no dispatch or reconciliation.
+2. **Server Share Operation:** the already-recorded Server-only slice then consumes those immutable
+   bytes and atomically retains the decided applied/rejected semantic outcome while the raw token
+   remains absent from Server persistence and responses.
+
+The public test seam for the correction is the existing explicit-Account Runtime request/projection
+boundary used by the other durable acceptance tests. The later Server slice keeps the authenticated
+HTTP route and Operation lookup as its separate public seam. This restores the binding order without
+folding Client cryptography, Server transaction semantics, and generated OpenAPI into one
+unreviewable commit.
