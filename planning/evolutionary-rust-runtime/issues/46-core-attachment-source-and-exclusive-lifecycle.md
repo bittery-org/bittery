@@ -111,3 +111,16 @@ return and accepted work has no attempt or elapsed-time owner. Malformed success
 invariant. Extending the later manifest was rejected because C2 must download and transcrypt before
 it knows the target ciphertext digest that the manifest requires. A new Operation-specific source
 route was rejected as unnecessary protocol surface.
+
+### 2026-08-26 — Slice S landed
+
+Commit `d64825bd` extends the existing authenticated Attachment download response with the current
+Attachment, Item, Vault, storage-key, envelope-version, and uploader authority from the same scoped
+database row whose storage key is presigned. Its behavioral route test proves the complete response
+and exact object path; OpenAPI, the TypeScript API contract, and the generated Runtime Server
+contract are current. Independent review found a real stale generated Runtime contract digest, not
+a fixture defect, and the same commit regenerates it.
+
+Deliberately left open: this Server slice does not interpret the response in Client Core, refresh a
+Session, validate an accepted Move source, schedule preparation, acquire an Account lease, or expose
+any host binding. Those remain Slices A, B, and C.
