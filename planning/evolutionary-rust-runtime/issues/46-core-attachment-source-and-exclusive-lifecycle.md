@@ -155,3 +155,26 @@ public binding cleanup so this slice retains its recorded scheduler-only path bo
 Deliberately left open: Slice B does not acquire a cross-process Account lease, sweep artifacts,
 drive startup, construct Runtime lifecycle paths, or make a browser binding reachable. Those remain
 Slice C and Ticket 28 C4b.
+
+### 2026-08-26 — Slice C landed
+
+Commit `af3144e0` requires the configured production Runtime to receive a primitive per-Account host
+lease. While that guard and Core's existing Account execution fence remain live, Core derives the
+complete canonical artifact live set from active preparations and both Operation recovery variants,
+performs the private orphan sweep, and only then fairly drives the same explicit Account. Lease loss
+cancels an awaited sweep or drive fail-closed; Lock, close, incarnation retirement, sweep failure,
+and more than five lease or sweep failures retain accepted work. The host receives only the Account
+lease scope and opaque guard. The slice also removes the obsolete download-pass public re-exports.
+
+Independent review found three real product defects, not fixture defects. The first implementation
+did not cancel an in-flight drive after lease loss, retried a denied first Account every millisecond
+while starving later Accounts, and treated one old sweep as authority across an A-to-B-crash-to-A
+ownership handoff. The final implementation races both sweep and drive against guard loss, rotates
+and exhausts explicit Account candidates before a wakeable contention wait, and performs a fresh
+sweep before every newly leased drive. A fresh re-review found no remaining defect.
+
+The recorded scheduler-only path boundary was expanded by one mechanical crate-private
+`AttachmentMoveRecovery` re-export so the lifecycle can match both already-defined recovery
+variants. It changes no model or serialization behavior. Deliberately left open: Slice C does not
+implement Web Locks, a browser lease guard, the fixed browser Runtime composition, or final Web
+reachability. Those remain Ticket 28 C4b.
