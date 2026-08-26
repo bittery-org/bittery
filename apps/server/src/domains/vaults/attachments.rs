@@ -454,6 +454,7 @@ struct DbPendingAttachmentReservationRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbScopedAttachmentAccessRow {
+    attachment_id: String,
     item_id: String,
     vault_id: String,
     storage_key: String,
@@ -876,6 +877,12 @@ pub(crate) async fn get_attachment_download_url(
             AppError::internal("An internal error occurred")
         })?;
     Ok(AttachmentDownloadResponse {
+        attachment_id: attachment.attachment_id,
+        item_id: attachment.item_id,
+        vault_id: attachment.vault_id,
+        storage_key: attachment.storage_key,
+        envelope_version: attachment.envelope_version,
+        uploaded_by: attachment.uploaded_by,
         download_url,
         encrypted_name: attachment.encrypted_name,
         encrypted_content_type: attachment.encrypted_content_type,
@@ -1128,7 +1135,7 @@ async fn load_attachment_access(
     user_id: &str,
 ) -> Result<DbScopedAttachmentAccessRow, AppError> {
     query_as::<_, DbScopedAttachmentAccessRow>(
-		"SELECT ia.id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_attachment_key, ia.attachment_key_iv, ia.attachment_key_algorithm, ia.envelope_version, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
+		"SELECT ia.id AS attachment_id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_attachment_key, ia.attachment_key_iv, ia.attachment_key_algorithm, ia.envelope_version, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
 	)
 	.bind(attachment_id)
 	.bind(user_id)

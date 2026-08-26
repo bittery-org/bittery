@@ -13319,6 +13319,12 @@
       "AttachmentDownloadResponse": {
         "type": "object",
         "required": [
+          "attachmentId",
+          "itemId",
+          "vaultId",
+          "storageKey",
+          "envelopeVersion",
+          "uploadedBy",
           "downloadUrl",
           "encryptedName",
           "encryptedContentType",
@@ -13328,6 +13334,9 @@
           "fileSize"
         ],
         "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
           "downloadUrl": {
             "type": "string"
           },
@@ -13346,9 +13355,25 @@
           "encryptionIv": {
             "type": "string"
           },
+          "envelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
           "fileSize": {
             "type": "integer",
             "format": "int32"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadedBy": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
           }
         }
       },

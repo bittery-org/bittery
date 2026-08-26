@@ -139,6 +139,12 @@ macro_rules! vault_available_member_shape {
 macro_rules! attachment_download_shape {
     ($emit:ident $args:tt) => {
         $crate::shapes::$emit! { $args {
+            attachment_id: String,
+            item_id: String,
+            vault_id: String,
+            storage_key: String,
+            envelope_version: i32,
+            uploaded_by: String,
             download_url: String,
             encrypted_name: String,
             encrypted_content_type: String,

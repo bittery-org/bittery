@@ -1537,6 +1537,7 @@ export interface components {
             readonly supportedMajors: readonly number[];
         };
         readonly AttachmentDownloadResponse: {
+            readonly attachmentId: string;
             readonly downloadUrl: string;
             readonly encryptedContentType: string;
             readonly encryptedContentTypeIv: string;
@@ -1544,7 +1545,13 @@ export interface components {
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
+            readonly envelopeVersion: number;
+            /** Format: int32 */
             readonly fileSize: number;
+            readonly itemId: string;
+            readonly storageKey: string;
+            readonly uploadedBy: string;
+            readonly vaultId: string;
         };
         readonly AttachmentMoveManifestBody: {
             readonly attachments: readonly components["schemas"]["AttachmentMoveManifestEntryBody"][];

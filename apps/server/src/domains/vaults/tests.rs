@@ -6117,6 +6117,73 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 }
 
 #[tokio::test]
+async fn attachment_download_grant_returns_the_presigned_row_authority() {
+    with_api_test_app_state(
+        "attachment_download_grant_returns_the_presigned_row_authority",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    (
+                        "BITTERY_STORAGE_ENDPOINT",
+                        "https://storage.example.invalid",
+                    ),
+                    ("BITTERY_STORAGE_BUCKET", "bittery-test"),
+                    ("BITTERY_STORAGE_ACCESS_KEY_ID", "test-access-key"),
+                    ("BITTERY_STORAGE_SECRET_ACCESS_KEY", "test-secret-key"),
+                    ("BITTERY_STORAGE_REGION", "auto"),
+                ],
+            )
+        },
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!(
+                        "/api/v1/attachments/{}/download-urls",
+                        fixture.attachment_id
+                    ),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK);
+            assert_eq!(
+                response.body,
+                json!({
+                    "attachmentId": fixture.attachment_id,
+                    "itemId": fixture.active_item_id,
+                    "vaultId": fixture.main_vault_id,
+                    "storageKey": "attachments/vault_main_attachment",
+                    "envelopeVersion": 1,
+                    "uploadedBy": fixture.owner_user_id,
+                    "downloadUrl": response.body["downloadUrl"],
+                    "encryptedName": "encrypted-attachment-name",
+                    "encryptedContentType": "encrypted-content-type",
+                    "encryptionIv": "attachment-iv",
+                    "encryptedContentTypeIv": "attachment-content-type-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                    "fileSize": 128,
+                })
+            );
+            let download_url = response.body["downloadUrl"]
+                .as_str()
+                .expect("download URL should exist");
+            let parsed = url::Url::parse(download_url).expect("download URL should parse");
+            assert_eq!(
+                parsed.path(),
+                "/bittery-test/attachments/vault_main_attachment"
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn vault_member_handlers_manage_members() {
     with_api_test_app("vault_member_handlers_manage_members", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
