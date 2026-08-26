@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22, 24, 31, 32, 43, 45
+Blocked by: 22, 24, 31, 32, 43, 45, 46
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -82,6 +82,22 @@ renewed-credential propagation, and one Account execution fence shared by prepar
 Bootstrap/Sync, Lock, close, and reconciliation. The public preparation facade is binary-only, and
 both repository CI gates pass from a clean tree. C4b may resume without exposing route, bearer,
 Session, or manifest response policy to bindings or TypeScript.
+
+### 2026-08-26 — retried C4b exposed source-grant and exclusive-lifecycle blockers
+
+A fresh C4b implementer stopped before edits or TDD. Core's binary download request carries only a
+durable storage key, while the fixed browser executor requires an invocation-scoped URL that only the
+authenticated Attachment download-grant route can mint. Bindings cannot obtain that URL without
+duplicating Server route, Session, and refresh policy.
+
+The audit also proved that bindings cannot lawfully initiate an orphan sweep or fence preparation:
+Core privately owns the live artifact set and `ExclusiveStartupBoundary`, while its current lifecycle
+scans all Accounts. Placing a Web Lock around binary calls alone would leave secret resolution,
+manifest work, Replica checkpoints, and promotion outside the browser-wide writer authority.
+
+Ticket 46 owns both missing Core seams and is split into three independently verifiable path slices
+before C4b resumes. This follows the already-binding Rust network ownership and per-Account Web Lock
+decisions; it introduces no new product-protocol choice.
 
 ### 2026-08-24 — ticket 23 added acceptance prerequisites
 
