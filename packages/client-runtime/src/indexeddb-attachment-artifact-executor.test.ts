@@ -899,6 +899,91 @@ describe("IndexedDB Attachment artifact execution", () => {
 		]);
 	});
 
+	test("Device wipe removes every Account across executor restart", async () => {
+		const databaseName = "artifact-device-wipe";
+		const seed = new IndexedDbAttachmentArtifactExecutor({ databaseName });
+		for (const accountId of ["account-1", "account-2"]) {
+			await seed.writeChunk(
+				{ ...owner, accountId },
+				0,
+				"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+				new Uint8Array([1, 2, 3]),
+			);
+		}
+
+		expect(
+			(
+				await invokeControl(
+					new IndexedDbAttachmentArtifactExecutor({ databaseName }),
+					{ type: "wipeDevice" },
+				)
+			).response,
+		).toEqual({ type: "deviceWiped" });
+		const restarted = new IndexedDbAttachmentArtifactExecutor({ databaseName });
+		expect(await restarted.listArtifactIds("account-1")).toEqual([]);
+		expect(await restarted.listArtifactIds("account-2")).toEqual([]);
+	});
+
+	test("Account and Device deletion roll back every artifact store boundary", async () => {
+		for (const scope of ["account", "device"] as const) {
+			for (let boundary = 1; boundary <= 4; boundary += 1) {
+				const databaseName = `artifact-${scope}-rollback-${boundary}`;
+				await seedRawArtifactRows(databaseName, "account-1");
+				await seedRawArtifactRows(databaseName, "account-2");
+				const failing = new IndexedDbAttachmentArtifactExecutor({
+					databaseName,
+					failAfterWrite: boundary,
+				});
+				await expect(
+					scope === "account"
+						? failing.deleteAccount("account-1")
+						: failing.wipeDevice(),
+				).rejects.toThrow("injected IndexedDB");
+				expect(await rawArtifactRowCounts(databaseName, "account-1")).toEqual([
+					1, 1, 1, 1,
+				]);
+				expect(await rawArtifactRowCounts(databaseName, "account-2")).toEqual([
+					1, 1, 1, 1,
+				]);
+
+				const restored = new IndexedDbAttachmentArtifactExecutor({
+					databaseName,
+				});
+				if (scope === "account") {
+					await restored.deleteAccount("account-1");
+					expect(await rawArtifactRowCounts(databaseName, "account-1")).toEqual(
+						[0, 0, 0, 0],
+					);
+					expect(await rawArtifactRowCounts(databaseName, "account-2")).toEqual(
+						[1, 1, 1, 1],
+					);
+					await restored.deleteAccount("account-1");
+				} else {
+					await restored.wipeDevice();
+					expect(await rawArtifactRowCounts(databaseName, "account-1")).toEqual(
+						[0, 0, 0, 0],
+					);
+					expect(await rawArtifactRowCounts(databaseName, "account-2")).toEqual(
+						[0, 0, 0, 0],
+					);
+					await restored.wipeDevice();
+				}
+			}
+		}
+	});
+
+	test("closed deletion rejects an empty explicit Account scope", async () => {
+		const executor = new IndexedDbAttachmentArtifactExecutor({
+			databaseName: "artifact-empty-account-delete",
+		});
+		await expect(
+			executor.invoke(JSON.stringify({ type: "deleteAccount", accountId: "" })),
+		).rejects.toThrow("control request is invalid");
+		await expect(executor.deleteAccount("")).rejects.toThrow(
+			"accountId must not be empty",
+		);
+	});
+
 	test("orphan deletion commits bounded progress and restart resumes", async () => {
 		const databaseName = "artifact-sweep-resume";
 		const seed = new IndexedDbAttachmentArtifactExecutor({ databaseName });
@@ -1036,4 +1121,86 @@ async function seedVersionOneArtifactDatabase(
 		transaction.onabort = () => reject(transaction.error);
 	});
 	database.close();
+}
+
+const artifactStoreNames = [
+	"chunks",
+	"provisional_chunks",
+	"artifacts",
+	"provisional_artifacts",
+] as const;
+
+async function seedRawArtifactRows(
+	databaseName: string,
+	accountId: string,
+): Promise<void> {
+	await new IndexedDbAttachmentArtifactExecutor({
+		databaseName,
+	}).listArtifactIds(accountId);
+	const database = await openRawDatabase(databaseName);
+	const transaction = database.transaction(artifactStoreNames, "readwrite");
+	transaction.objectStore("artifacts").add({
+		accountId,
+		artifactId: "orphan-artifact",
+	});
+	transaction.objectStore("chunks").add({
+		accountId,
+		artifactId: "orphan-chunk-artifact",
+		chunkIndex: 0,
+	});
+	transaction.objectStore("provisional_artifacts").add({
+		accountId,
+		operationId: "orphan-operation",
+		attachmentId: "orphan-attachment",
+		generation: "orphan-generation",
+	});
+	transaction.objectStore("provisional_chunks").add({
+		accountId,
+		operationId: "orphan-chunk-operation",
+		attachmentId: "orphan-chunk-attachment",
+		generation: "orphan-chunk-generation",
+		chunkIndex: 0,
+	});
+	await rawTransactionDone(transaction);
+	database.close();
+}
+
+async function rawArtifactRowCounts(
+	databaseName: string,
+	accountId: string,
+): Promise<number[]> {
+	const database = await openRawDatabase(databaseName);
+	const transaction = database.transaction(artifactStoreNames, "readonly");
+	const counts = await Promise.all(
+		artifactStoreNames.map(
+			(storeName) =>
+				new Promise<number>((resolve, reject) => {
+					const request = transaction
+						.objectStore(storeName)
+						.index("by_account")
+						.count(IDBKeyRange.only(accountId));
+					request.onsuccess = () => resolve(request.result);
+					request.onerror = () => reject(request.error);
+				}),
+		),
+	);
+	await rawTransactionDone(transaction);
+	database.close();
+	return counts;
+}
+
+function openRawDatabase(databaseName: string): Promise<IDBDatabase> {
+	return new Promise((resolve, reject) => {
+		const request = indexedDB.open(databaseName);
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
+
+function rawTransactionDone(transaction: IDBTransaction): Promise<void> {
+	return new Promise((resolve, reject) => {
+		transaction.oncomplete = () => resolve();
+		transaction.onabort = () => reject(transaction.error);
+		transaction.onerror = () => reject(transaction.error);
+	});
 }

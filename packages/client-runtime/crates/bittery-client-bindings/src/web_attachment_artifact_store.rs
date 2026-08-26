@@ -306,6 +306,16 @@ impl JsAttachmentArtifactStore {
             )),
         }
     }
+
+    async fn wipe_device(&self) -> Result<(), JsValue> {
+        let response = control(&self.executor, ArtifactControlRequest::WipeDevice, None).await?;
+        match response.response {
+            ArtifactControlResponse::DeviceWiped => Ok(()),
+            _ => Err(error(
+                "IndexedDB artifact Device wipe returned an invalid result",
+            )),
+        }
+    }
     /// The Runtime calls this only while holding its exclusive startup boundary. Each deletion is
     /// its own durable transaction, so an interrupted sweep safely resumes at the next startup.
     async fn sweep_orphans_at_exclusive_startup(
@@ -454,6 +464,10 @@ impl bittery_client_core::AttachmentArtifactStore for JsAttachmentArtifactStore 
             Request::DeleteAccount { account_id } => {
                 self.delete_account(&account_id).await.map_err(js_error)?;
                 Ok(Response::AccountDeleted)
+            }
+            Request::WipeDevice => {
+                self.wipe_device().await.map_err(js_error)?;
+                Ok(Response::DeviceWiped)
             }
             Request::SweepOrphans {
                 boundary: _,

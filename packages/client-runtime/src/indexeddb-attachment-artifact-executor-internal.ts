@@ -185,6 +185,10 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 				await this.deleteAccount(request.accountId);
 				response = { type: "accountDeleted" };
 				break;
+			case "wipeDevice":
+				await this.wipeDevice();
+				response = { type: "deviceWiped" };
+				break;
 			case "listArtifactIds":
 				{
 					response = {
@@ -748,12 +752,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	}
 
 	async deleteAccount(accountId: string): Promise<void> {
-		while ((await this.#deleteAccountStep(accountId)) !== "deleted") {
-			// Each iteration commits at most one durable record deletion.
-		}
-	}
-
-	async #deleteAccountStep(accountId: string): Promise<"progress" | "deleted"> {
+		requireNonEmpty("accountId", accountId);
 		const database = await openDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[
@@ -766,27 +765,45 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		);
 		const completed = transactionDone(transaction);
 		try {
-			for (const storeName of [
+			const storeNames = [
 				CHUNK_STORE,
 				PROVISIONAL_CHUNK_STORE,
 				METADATA_STORE,
 				PROVISIONAL_METADATA_STORE,
-			]) {
-				const cursor = await requestResult(
-					transaction
-						.objectStore(storeName)
-						.index(ACCOUNT_INDEX)
-						.openCursor(IDBKeyRange.only(accountId)),
-				);
-				if (cursor !== null) {
-					cursor.delete();
-					this.#afterWrite();
-					await completed;
-					return "progress";
-				}
+			] as const;
+			await Promise.all(
+				storeNames.map((storeName) =>
+					deleteIndexedRecords(transaction, storeName, accountId, () =>
+						this.#afterWrite(),
+					),
+				),
+			);
+			await completed;
+		} catch (error) {
+			abort(transaction);
+			await completed.catch(() => undefined);
+			throw error;
+		} finally {
+			database.close();
+		}
+	}
+
+	async wipeDevice(): Promise<void> {
+		const database = await openDatabase(this.#databaseName);
+		const storeNames = [
+			CHUNK_STORE,
+			PROVISIONAL_CHUNK_STORE,
+			METADATA_STORE,
+			PROVISIONAL_METADATA_STORE,
+		] as const;
+		const transaction = database.transaction(storeNames, "readwrite");
+		const completed = transactionDone(transaction);
+		try {
+			for (const storeName of storeNames) {
+				transaction.objectStore(storeName).clear();
+				this.#afterWrite();
 			}
 			await completed;
-			return "deleted";
 		} catch (error) {
 			abort(transaction);
 			await completed.catch(() => undefined);
@@ -1059,6 +1076,41 @@ function parseControlRequest(requestJson: string): ArtifactControlRequest {
 	if (!validateArtifactControlRequest(value))
 		throw new Error("Attachment artifact control request is invalid");
 	return value;
+}
+
+function requireNonEmpty(name: string, value: string): void {
+	if (value.length === 0) throw new Error(`${name} must not be empty`);
+}
+
+function deleteIndexedRecords(
+	transaction: IDBTransaction,
+	storeName: string,
+	accountId: string,
+	afterWrite: () => void,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const store = transaction.objectStore(storeName);
+		const request = store
+			.index(ACCOUNT_INDEX)
+			.openKeyCursor(IDBKeyRange.only(accountId));
+		request.onsuccess = () => {
+			try {
+				const cursor = request.result;
+				if (cursor === null) {
+					resolve();
+					return;
+				}
+				store.delete(cursor.primaryKey);
+				afterWrite();
+				cursor.continue();
+			} catch (error) {
+				abort(transaction);
+				reject(error);
+			}
+		};
+		request.onerror = () =>
+			reject(request.error ?? new Error("IndexedDB cursor failed"));
+	});
 }
 
 async function openDatabase(databaseName: string): Promise<IDBDatabase> {

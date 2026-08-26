@@ -289,6 +289,7 @@
           "additionalProperties": false,
           "properties": {
             "accountId": {
+              "pattern": "^[\\s\\S]+$",
               "type": "string"
             },
             "type": {
@@ -299,6 +300,19 @@
           "required": [
             "type",
             "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "wipeDevice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         },
@@ -498,6 +512,19 @@
           "properties": {
             "type": {
               "const": "accountDeleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "deviceWiped",
               "type": "string"
             }
           },

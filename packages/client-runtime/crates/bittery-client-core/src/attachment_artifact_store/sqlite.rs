@@ -75,6 +75,7 @@ pub(crate) enum SqliteFailureOperation {
     VerifyProvisional,
     FinalizeProvisional,
     DeleteAccount,
+    WipeDevice,
     SweepOrphans,
 }
 
@@ -868,12 +869,22 @@ impl SqliteAttachmentArtifactStore {
     }
 
     pub(crate) fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        if account_id.as_str().is_empty() {
+            return Err(artifact_error("Attachment artifact Account scope is empty"));
+        }
         let mut connection = self.connection()?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         let mut boundary = 0;
         transaction
             .execute(
                 "DELETE FROM attachment_move_provisional_chunks WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sqlite_error)?;
+        self.after_write(SqliteFailureOperation::DeleteAccount, &mut boundary)?;
+        transaction
+            .execute(
+                "DELETE FROM attachment_move_artifact_chunks WHERE account_id = ?1",
                 params![account_id.as_str()],
             )
             .map_err(sqlite_error)?;
@@ -892,6 +903,23 @@ impl SqliteAttachmentArtifactStore {
             )
             .map_err(sqlite_error)?;
         self.after_write(SqliteFailureOperation::DeleteAccount, &mut boundary)?;
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub(crate) fn wipe_device(&self) -> Result<(), RuntimeError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        let mut boundary = 0;
+        for statement in [
+            "DELETE FROM attachment_move_provisional_chunks",
+            "DELETE FROM attachment_move_artifact_chunks",
+            "DELETE FROM attachment_move_provisional_artifacts",
+            "DELETE FROM attachment_move_artifacts",
+        ] {
+            transaction.execute(statement, []).map_err(sqlite_error)?;
+            self.after_write(SqliteFailureOperation::WipeDevice, &mut boundary)?;
+        }
         transaction.commit().map_err(sqlite_error)?;
         Ok(())
     }
@@ -1083,6 +1111,10 @@ impl AttachmentArtifactStore for SqliteAttachmentArtifactStore {
             AttachmentArtifactStoreRequest::DeleteAccount { account_id } => {
                 self.delete_account(&account_id)?;
                 AttachmentArtifactStoreResponse::AccountDeleted
+            }
+            AttachmentArtifactStoreRequest::WipeDevice => {
+                self.wipe_device()?;
+                AttachmentArtifactStoreResponse::DeviceWiped
             }
             AttachmentArtifactStoreRequest::SweepOrphans {
                 boundary,

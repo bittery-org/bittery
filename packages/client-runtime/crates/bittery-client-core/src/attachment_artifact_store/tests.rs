@@ -63,6 +63,70 @@ fn chunks(bytes: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
         .map(|(index, chunk)| (index as u32, chunk))
 }
 
+fn seed_orphan_artifact_rows(path: &PathBuf, account_id: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO attachment_move_artifacts (
+                account_id, artifact_id, operation_id, attachment_id,
+                ciphertext_sha256, byte_length, chunk_count, publication_state
+             ) VALUES (?1, 'orphan-artifact', 'operation', 'attachment', ?2, 1, 1, 2)",
+            params![account_id, "00".repeat(32)],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO attachment_move_artifact_chunks (
+                account_id, artifact_id, chunk_index, ciphertext, ciphertext_sha256
+             ) VALUES (?1, 'missing-artifact', 0, X'01', ?2)",
+            params![account_id, "00".repeat(32)],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO attachment_move_provisional_artifacts (
+                account_id, operation_id, attachment_id, generation, publication_state
+             ) VALUES (?1, 'orphan-operation', 'orphan-attachment', ?2, 0)",
+            params![account_id, "9f20db4b-2cf0-4b73-a2a4-ad93c3615c4d"],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO attachment_move_provisional_chunks (
+                account_id, operation_id, attachment_id, generation,
+                chunk_index, ciphertext, ciphertext_sha256
+             ) VALUES (?1, 'missing-operation', 'missing-attachment', ?2, 0, X'01', ?3)",
+            params![
+                account_id,
+                "9f20db4b-2cf0-4b73-a2a4-ad93c3615c4d",
+                "00".repeat(32)
+            ],
+        )
+        .unwrap();
+}
+
+fn artifact_row_counts(path: &PathBuf, account_id: &str) -> [i64; 4] {
+    let connection = Connection::open(path).unwrap();
+    [
+        "attachment_move_provisional_chunks",
+        "attachment_move_artifact_chunks",
+        "attachment_move_provisional_artifacts",
+        "attachment_move_artifacts",
+    ]
+    .map(|table| {
+        connection
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?1"),
+                params![account_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    })
+}
+
 fn authenticated_target(plaintext: &str) -> (Vec<u8>, AttachmentPublicationProof) {
     authenticated_target_for(
         plaintext,
@@ -1094,6 +1158,27 @@ fn whole_account_delete_is_explicit_and_does_not_use_implicit_active_scope() {
 }
 
 #[test]
+fn whole_device_wipe_removes_every_artifact_row_across_restart() {
+    let database = TestDatabase::new("device-wipe");
+    let bytes = vec![7; 29];
+    let account_1 = owner("account-1", "operation-1", "attachment-1", &bytes);
+    let account_2 = owner("account-2", "operation-2", "attachment-2", &bytes);
+    let store = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+    for owner in [&account_1, &account_2] {
+        store.write_chunk(owner, 0, &bytes).unwrap();
+        store.publish(owner).unwrap();
+    }
+
+    store.wipe_device().unwrap();
+    drop(store);
+
+    let restarted = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+    assert!(restarted.read_chunk(&account_1, 0).is_err());
+    assert!(restarted.read_chunk(&account_2, 0).is_err());
+    restarted.wipe_device().unwrap();
+}
+
+#[test]
 fn sqlite_rolls_back_every_chunk_write_and_publication_boundary() {
     let database = TestDatabase::new("write-failures");
     let bytes = vec![11; 97];
@@ -1165,6 +1250,60 @@ fn sqlite_rolls_back_account_delete_boundary() {
     drop(failing_delete);
     let restored = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
     assert_eq!(restored.read_chunk(&first, 0).unwrap().bytes, bytes);
+}
+
+#[test]
+fn sqlite_account_and_device_deletion_roll_back_every_artifact_table() {
+    for scope in ["account", "device"] {
+        for boundary in 1..=4 {
+            let database = TestDatabase::new(&format!("{scope}-orphan-rollback-{boundary}"));
+            drop(SqliteAttachmentArtifactStore::open(&database.0).unwrap());
+            seed_orphan_artifact_rows(&database.0, "account-1");
+            seed_orphan_artifact_rows(&database.0, "account-2");
+            let operation = if scope == "account" {
+                SqliteFailureOperation::DeleteAccount
+            } else {
+                SqliteFailureOperation::WipeDevice
+            };
+            let failing =
+                SqliteAttachmentArtifactStore::open_failing_after(&database.0, operation, boundary)
+                    .unwrap();
+            let result = if scope == "account" {
+                failing.delete_account(&AccountId::from("account-1"))
+            } else {
+                failing.wipe_device()
+            };
+            assert!(result.is_err());
+            drop(failing);
+            assert_eq!(artifact_row_counts(&database.0, "account-1"), [1; 4]);
+            assert_eq!(artifact_row_counts(&database.0, "account-2"), [1; 4]);
+
+            let restored = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+            if scope == "account" {
+                restored
+                    .delete_account(&AccountId::from("account-1"))
+                    .unwrap();
+                assert_eq!(artifact_row_counts(&database.0, "account-1"), [0; 4]);
+                assert_eq!(artifact_row_counts(&database.0, "account-2"), [1; 4]);
+                restored
+                    .delete_account(&AccountId::from("account-1"))
+                    .unwrap();
+            } else {
+                restored.wipe_device().unwrap();
+                assert_eq!(artifact_row_counts(&database.0, "account-1"), [0; 4]);
+                assert_eq!(artifact_row_counts(&database.0, "account-2"), [0; 4]);
+                restored.wipe_device().unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn sqlite_rejects_an_empty_explicit_artifact_account_scope() {
+    let database = TestDatabase::new("empty-account-delete");
+    let store = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+
+    assert!(store.delete_account(&AccountId::from("")).is_err());
 }
 
 #[test]

@@ -132,8 +132,13 @@ pub(crate) enum ArtifactControlRequest {
         chunk_index: u32,
     },
     DeleteAccount {
+        #[cfg_attr(
+            feature = "artifact-control-contract-schema",
+            schemars(regex(pattern = "^[\\s\\S]+$"))
+        )]
         account_id: String,
     },
+    WipeDevice,
     ListArtifactIds {
         account_id: String,
     },
@@ -225,6 +230,7 @@ pub(crate) enum ArtifactControlResponse {
         result: ArtifactPublicationControl,
     },
     AccountDeleted,
+    DeviceWiped,
     ArtifactIds {
         artifact_ids: Vec<String>,
         provisional: Vec<ProvisionalArtifactTokenControl>,

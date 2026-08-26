@@ -8,9 +8,7 @@ declare global {
 		fileSize: number;
 		scriptHeaderNames: string[];
 	}>;
-	var runConcurrentOpfsUploadSpoolCleanup: (
-		fixtureUrl: string,
-	) => Promise<void>;
+	var runConcurrentOpfsUploadSpoolWipe: (fixtureUrl: string) => Promise<void>;
 }
 
 const chromiumScope = {
@@ -52,9 +50,9 @@ globalThis.runOpfsUploadSpoolNetworkTest = async (uploadUrl, contentSha256) => {
 	return { fileSize, scriptHeaderNames };
 };
 
-globalThis.runConcurrentOpfsUploadSpoolCleanup = async (fixtureUrl) => {
-	await fetch(`${fixtureUrl}/cleanup-started`, { method: "POST" });
+globalThis.runConcurrentOpfsUploadSpoolWipe = async (fixtureUrl) => {
+	await fetch(`${fixtureUrl}/wipe-started`, { method: "POST" });
 	const root = await OpfsUploadSpoolRoot.open();
-	await root.cleanup(chromiumScope);
-	await fetch(`${fixtureUrl}/cleanup-finished`, { method: "POST" });
+	await root.wipeDevice();
+	await fetch(`${fixtureUrl}/wipe-finished`, { method: "POST" });
 };

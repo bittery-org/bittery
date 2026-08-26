@@ -357,6 +357,7 @@ pub enum AttachmentArtifactStoreRequest {
     DeleteAccount {
         account_id: AccountId,
     },
+    WipeDevice,
     SweepOrphans {
         boundary: ExclusiveStartupBoundary,
         account_id: AccountId,
@@ -370,6 +371,7 @@ pub enum AttachmentArtifactStoreResponse {
     Published(ArtifactPublication),
     ChunkRead(PublishedArtifactChunk),
     AccountDeleted,
+    DeviceWiped,
     OrphansSwept { deleted: usize },
 }
 

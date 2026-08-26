@@ -37,12 +37,13 @@ type DirectoryHandle = {
 type LockManager = {
 	request<T>(
 		name: string,
-		options: { mode: "exclusive" },
+		options: { mode: "shared" | "exclusive" },
 		callback: () => Promise<T>,
 	): Promise<T>;
 };
 
 const SPOOL_DIRECTORY = "bittery-ciphertext-upload-spool-v1";
+const DEVICE_LIFECYCLE_LOCK = "bittery-upload-spool-device-lifecycle-v1";
 
 function requireIdentifier(name: string, value: string): string {
 	if (value.length === 0) {
@@ -132,74 +133,98 @@ export class OpfsUploadSpoolRoot {
 		}
 		const directoryName = await accountDirectoryName(scope.accountId);
 		const fileName = await spoolFileName(scope);
-		await this.locks.request(
-			accountLifecycleLockName(directoryName),
-			{ mode: "exclusive" },
-			async () => {
-				const accountDirectory = await this.directory.getDirectoryHandle(
-					directoryName,
-					{ create: true },
+		await this.withAccountLifecycle(directoryName, async () => {
+			const accountDirectory = await this.directory.getDirectoryHandle(
+				directoryName,
+				{ create: true },
+			);
+			try {
+				const file = await writeExactCiphertextFile(
+					accountDirectory,
+					fileName,
+					expectedByteLength,
+					maximumChunkByteLength,
+					chunks,
 				);
-				try {
-					const file = await writeExactCiphertextFile(
-						accountDirectory,
-						fileName,
-						expectedByteLength,
-						maximumChunkByteLength,
-						chunks,
-					);
-					await consume(file);
-				} finally {
-					await removeFileIfPresent(accountDirectory, fileName);
-				}
-			},
-		);
+				await consume(file);
+			} finally {
+				await removeFileIfPresent(accountDirectory, fileName);
+			}
+		});
 	}
 
 	async cleanup(scope: OpfsUploadSpoolScope): Promise<void> {
 		const directoryName = await accountDirectoryName(scope.accountId);
 		const fileName = await spoolFileName(scope);
+		await this.withAccountLifecycle(directoryName, async () => {
+			let accountDirectory: DirectoryHandle;
+			try {
+				accountDirectory =
+					await this.directory.getDirectoryHandle(directoryName);
+			} catch (error) {
+				if (isNotFound(error)) return;
+				throw error;
+			}
+			await removeFileIfPresent(accountDirectory, fileName);
+		});
+	}
+
+	async deleteAccount(accountId: string): Promise<void> {
+		const directoryName = await accountDirectoryName(accountId);
+		await this.withAccountLifecycle(directoryName, async () => {
+			try {
+				await this.directory.removeEntry(directoryName, { recursive: true });
+			} catch (error) {
+				if (!isNotFound(error)) throw error;
+			}
+		});
+	}
+
+	async wipeDevice(): Promise<void> {
 		await this.locks.request(
-			accountLifecycleLockName(directoryName),
+			DEVICE_LIFECYCLE_LOCK,
 			{ mode: "exclusive" },
 			async () => {
-				let accountDirectory: DirectoryHandle;
-				try {
-					accountDirectory =
-						await this.directory.getDirectoryHandle(directoryName);
-				} catch (error) {
-					if (isNotFound(error)) return;
-					throw error;
+				for await (const entry of this.directory.values()) {
+					await this.directory.removeEntry(entry.name, { recursive: true });
 				}
-				await removeFileIfPresent(accountDirectory, fileName);
 			},
 		);
 	}
 
 	async deleteExclusiveAccountOrphans(accountId: string): Promise<number> {
 		const directoryName = await accountDirectoryName(accountId);
-		return this.locks.request(
-			accountLifecycleLockName(directoryName),
-			{ mode: "exclusive" },
-			async () => {
-				let accountDirectory: DirectoryHandle;
-				try {
-					accountDirectory =
-						await this.directory.getDirectoryHandle(directoryName);
-				} catch (error) {
-					if (isNotFound(error)) {
-						return 0;
-					}
-					throw error;
+		return this.withAccountLifecycle(directoryName, async () => {
+			let accountDirectory: DirectoryHandle;
+			try {
+				accountDirectory =
+					await this.directory.getDirectoryHandle(directoryName);
+			} catch (error) {
+				if (isNotFound(error)) {
+					return 0;
 				}
+				throw error;
+			}
 
-				let deleted = 0;
-				for await (const entry of accountDirectory.values()) {
-					await accountDirectory.removeEntry(entry.name, { recursive: true });
-					deleted += 1;
-				}
-				return deleted;
-			},
+			let deleted = 0;
+			for await (const entry of accountDirectory.values()) {
+				await accountDirectory.removeEntry(entry.name, { recursive: true });
+				deleted += 1;
+			}
+			return deleted;
+		});
+	}
+
+	private async withAccountLifecycle<T>(
+		directoryName: string,
+		callback: () => Promise<T>,
+	): Promise<T> {
+		return this.locks.request(DEVICE_LIFECYCLE_LOCK, { mode: "shared" }, () =>
+			this.locks.request(
+				accountLifecycleLockName(directoryName),
+				{ mode: "exclusive" },
+				callback,
+			),
 		);
 	}
 }

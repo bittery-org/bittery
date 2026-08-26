@@ -100,7 +100,7 @@ class SerialLocks {
 
 	async request<T>(
 		name: string,
-		_options: { mode: "exclusive" },
+		_options: { mode: "shared" | "exclusive" },
 		callback: () => Promise<T>,
 	): Promise<T> {
 		this.requests.push(name);
@@ -339,7 +339,7 @@ describe("OPFS upload spool", () => {
 		expect(accountDirectories.map((entry) => entry.files.size).sort()).toEqual([
 			0, 0,
 		]);
-		expect(new Set(locks.requests)).toHaveLength(2);
+		expect(new Set(locks.requests)).toHaveLength(3);
 	});
 
 	test("explicit cleanup is idempotent and requires every scope identifier", async () => {
@@ -355,5 +355,84 @@ describe("OPFS upload spool", () => {
 				async () => {},
 			),
 		).rejects.toThrow("operationId must not be empty");
+	});
+
+	test("whole-Device wipe removes every orphan Account directory and is idempotent", async () => {
+		const { directory, root } = fixture();
+		for (const accountId of ["account-a", "account-b"]) {
+			await root.withUploadFile(
+				{ ...scope, accountId },
+				1,
+				1,
+				chunks([1]),
+				async () => {},
+			);
+		}
+		for (const accountDirectory of directory.directories.values()) {
+			accountDirectory.files.set(
+				"stale-orphan-generation",
+				new MemoryFileHandle(new Uint8Array([9])),
+			);
+		}
+
+		await root.wipeDevice();
+		expect(directory.directories.size).toBe(0);
+		await root.wipeDevice();
+	});
+
+	test("explicit Account deletion preserves opaque colliding and unrelated Account scopes", async () => {
+		const { directory, root } = fixture();
+		for (const accountId of ["a", "a:", "账户-a"]) {
+			await root.withUploadFile(
+				{ ...scope, accountId },
+				1,
+				1,
+				chunks([1]),
+				async () => {},
+			);
+		}
+		for (const accountDirectory of directory.directories.values()) {
+			accountDirectory.files.set(
+				"orphan-generation",
+				new MemoryFileHandle(new Uint8Array([7])),
+			);
+		}
+
+		await root.deleteAccount("a");
+		expect(directory.directories.size).toBe(2);
+		expect(
+			[...directory.directories.values()].map((entry) => entry.files.size),
+		).toEqual([1, 1]);
+		await root.deleteAccount("a");
+		await expect(root.deleteAccount("")).rejects.toThrow(
+			"accountId must not be empty",
+		);
+	});
+
+	test("whole-Device wipe waits for an active File callback before removing its directory", async () => {
+		const { directory, root } = fixture();
+		let release = () => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let entered = () => {};
+		const active = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const upload = root.withUploadFile(scope, 1, 1, chunks([1]), async () => {
+			entered();
+			await released;
+			expect(onlyAccountDirectory(directory).files.size).toBe(1);
+		});
+		await active;
+		let wiped = false;
+		const wipe = root.wipeDevice().then(() => {
+			wiped = true;
+		});
+		await Promise.resolve();
+		expect(wiped).toBe(false);
+		release();
+		await Promise.all([upload, wipe]);
+		expect(directory.directories.size).toBe(0);
 	});
 });

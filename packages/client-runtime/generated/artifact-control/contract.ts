@@ -54,6 +54,8 @@ type: "readPublishedChunk"
 accountId: string
 type: "deleteAccount"
 } | {
+type: "wipeDevice"
+} | {
 accountId: string
 type: "listArtifactIds"
 } | {
@@ -89,6 +91,8 @@ result: ArtifactPublicationControl
 type: "publicationFinished"
 } | {
 type: "accountDeleted"
+} | {
+type: "deviceWiped"
 } | {
 artifactIds: string[]
 provisional: ProvisionalArtifactTokenControl[]

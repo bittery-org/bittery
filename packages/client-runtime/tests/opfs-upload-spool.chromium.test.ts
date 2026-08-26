@@ -24,11 +24,11 @@ describe("OPFS upload spool in an actual MV3 service worker", () => {
 		const uploadResponseReleased = new Promise<void>((resolve) => {
 			releaseUploadResponse = resolve;
 		});
-		let markCleanupStarted = () => {};
-		const cleanupStarted = new Promise<void>((resolve) => {
-			markCleanupStarted = resolve;
+		let markWipeStarted = () => {};
+		const wipeStarted = new Promise<void>((resolve) => {
+			markWipeStarted = resolve;
 		});
-		let cleanupFinished = false;
+		let wipeFinished = false;
 		let observed:
 			| {
 					body: number[];
@@ -41,12 +41,12 @@ describe("OPFS upload spool in an actual MV3 service worker", () => {
 			port: 0,
 			async fetch(request) {
 				const pathname = new URL(request.url).pathname;
-				if (pathname === "/cleanup-started") {
-					markCleanupStarted();
+				if (pathname === "/wipe-started") {
+					markWipeStarted();
 					return new Response(null, { status: 204 });
 				}
-				if (pathname === "/cleanup-finished") {
-					cleanupFinished = true;
+				if (pathname === "/wipe-finished") {
+					wipeFinished = true;
 					return new Response(null, { status: 204 });
 				}
 				observed = {
@@ -115,24 +115,24 @@ describe("OPFS upload spool in an actual MV3 service worker", () => {
 				},
 			);
 			await uploadObserved;
-			const concurrentCleanup = worker.evaluate(
+			const concurrentWipe = worker.evaluate(
 				async ({ fixtureUrl }) =>
-					globalThis.runConcurrentOpfsUploadSpoolCleanup(fixtureUrl),
+					globalThis.runConcurrentOpfsUploadSpoolWipe(fixtureUrl),
 				{ fixtureUrl },
 			);
-			await cleanupStarted;
-			const cleanupState = await Promise.race([
-				concurrentCleanup.then(() => "finished" as const),
+			await wipeStarted;
+			const wipeState = await Promise.race([
+				concurrentWipe.then(() => "finished" as const),
 				new Promise<"blocked">((resolve) =>
 					setTimeout(() => resolve("blocked"), 50),
 				),
 			]);
-			expect(cleanupState).toBe("blocked");
-			expect(cleanupFinished).toBe(false);
+			expect(wipeState).toBe("blocked");
+			expect(wipeFinished).toBe(false);
 			releaseUploadResponse();
 			const result = await networkResult;
-			await concurrentCleanup;
-			expect(cleanupFinished).toBe(true);
+			await concurrentWipe;
+			expect(wipeFinished).toBe(true);
 
 			expect(result).toEqual({
 				fileSize: 6,
