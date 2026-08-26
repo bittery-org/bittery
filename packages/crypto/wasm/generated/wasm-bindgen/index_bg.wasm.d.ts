@@ -1051,6 +1051,10 @@ export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
 export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
   a: bigint,
   b: number,
@@ -1091,6 +1095,10 @@ export const uniffi_bittery_client_bindings_fn_free_loginitemdraft: (
   b: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
   a: bigint,
   b: number,
 ) => void;
@@ -1256,6 +1264,26 @@ export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_
   b: bigint,
   c: number,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_operation_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_link_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_url: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
 export const webclientruntime_cancel: (a: number, b: number, c: number) => void;
 export const webclientruntime_close: (a: number) => any;
 export const webclientruntime_new: () => number;
@@ -1324,6 +1352,10 @@ export const uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
   b: number,
 ) => bigint;
 export const uniffi_bittery_client_bindings_fn_clone_loginitemprojection: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_pendingshareresult: (
   a: bigint,
   b: number,
 ) => bigint;

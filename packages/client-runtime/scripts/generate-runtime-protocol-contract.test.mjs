@@ -207,3 +207,57 @@ test("the Item projection keeps the fields the Web host used to drop", () => {
 		false,
 	);
 });
+
+test("Share result delivery and acknowledgement stay explicit and closed", () => {
+	assert.equal(
+		validateObservationRequest({
+			type: "pendingShareResults",
+			accountId: "account-1",
+		}),
+		true,
+	);
+	assert.equal(
+		validateRuntimeProjection({
+			type: "pendingShareResults",
+			value: {
+				accountId: "account-1",
+				replicaRevision: "12",
+				results: [
+					{
+						operationId: "operation-1",
+						shareLinkId: "share-link-1",
+						shareUrl: "https://app.example.test/share/token#key",
+						expiresAt: "2099-01-02T03:04:05Z",
+					},
+				],
+			},
+		}),
+		true,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "acknowledgeShareResult",
+			accountId: "account-1",
+			operationId: "operation-1",
+		}),
+		true,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "acknowledgeShareResult",
+			operationId: "operation-1",
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "shareResultAcknowledged",
+				accountId: "account-1",
+				operationId: "operation-1",
+			},
+		}),
+		true,
+	);
+});

@@ -14,13 +14,15 @@ use crate::{
     platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
     protocol::Incarnation,
     replica::{
-        InMemoryReplica, OperationRecord, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+        AuthorityItemCategory, AuthorityItemRecord, InMemoryReplica, OperationRecord,
+        ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
-    test_fixtures::{seed_ready_personal_vault, TEST_VAULT_ID},
+    test_fixtures::{personal_vault, seed_ready_personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
     LoginItemDraft,
 };
 use async_trait::async_trait;
-use create::create_item_fingerprint;
+use bittery_crypto_core::{encrypt_with_aad, AadContext};
+use create::{create_item_fingerprint, share_operation_fingerprint};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -235,8 +237,21 @@ pub(super) struct StoredOutcome {
 
 #[derive(Clone)]
 pub(super) enum StoredResult {
-    Applied { item_id: String, version: i32 },
-    Rejected { code: &'static str },
+    Applied {
+        item_id: String,
+        version: i32,
+    },
+    ShareApplied {
+        share_link_id: String,
+        base_share_url: String,
+        expires_at: String,
+    },
+    ItemRejected {
+        code: &'static str,
+    },
+    ShareRejected {
+        code: &'static str,
+    },
 }
 
 /// One Item row the Server actually holds, with the ciphertext the client sent it.
@@ -268,6 +283,8 @@ pub(super) struct FakeServer {
     pub(super) accepted_tokens: Mutex<Vec<String>>,
     pub(super) refresh: Mutex<RefreshBehavior>,
     pub(super) create_calls: AtomicUsize,
+    pub(super) share_calls: AtomicUsize,
+    pub(super) created_share_links: Mutex<Vec<String>>,
     pub(super) refresh_calls: AtomicUsize,
     pub(super) item_calls: AtomicUsize,
     pub(super) outcome_calls: AtomicUsize,
@@ -290,6 +307,8 @@ impl FakeServer {
             accepted_tokens: Mutex::new(vec![FIRST_TOKEN.to_owned()]),
             refresh: Mutex::new(RefreshBehavior::Unauthorized),
             create_calls: AtomicUsize::new(0),
+            share_calls: AtomicUsize::new(0),
+            created_share_links: Mutex::new(Vec::new()),
             refresh_calls: AtomicUsize::new(0),
             item_calls: AtomicUsize::new(0),
             outcome_calls: AtomicUsize::new(0),
@@ -317,6 +336,10 @@ impl FakeServer {
 
     pub(super) fn creates(&self) -> usize {
         self.create_calls.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn shares(&self) -> usize {
+        self.share_calls.load(Ordering::SeqCst)
     }
 
     pub(super) fn outcome_lookups(&self) -> usize {
@@ -392,7 +415,7 @@ impl FakeServer {
             return completed(200, outcome_body(operation_id, &stored.result));
         }
         let result = match self.rejections.lock().unwrap().pop_front() {
-            Some(code) => StoredResult::Rejected { code },
+            Some(code) => StoredResult::ItemRejected { code },
             None => {
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
                 self.created_items.lock().unwrap().push(StoredItem {
@@ -425,6 +448,84 @@ impl FakeServer {
             .is_ok()
         {
             // Committed on the Server, never seen by the client.
+            return json!({ "type": "networkFailure" });
+        }
+        completed(200, outcome_body(operation_id, &result))
+    }
+
+    pub(super) fn handle_share(&self, request: &RecordedRequest) -> Value {
+        self.share_calls.fetch_add(1, Ordering::SeqCst);
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        if let Some(fault) = self.faults.lock().unwrap().pop_front() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
+        }
+        let Some(operation_id) = request.header("idempotency-key") else {
+            return completed(400, b"{}".to_vec());
+        };
+        let item_id = request
+            .url
+            .trim_end_matches("/share-links")
+            .rsplit('/')
+            .next()
+            .unwrap();
+        let fingerprint = share_operation_fingerprint(item_id, &request.body).0;
+        let mut outcomes = self.outcomes.lock().unwrap();
+        if let Some(stored) = outcomes.get(operation_id) {
+            if stored.fingerprint != fingerprint {
+                return completed(
+                    422,
+                    serde_json::to_vec(&json!({
+                        "type": "about:blank",
+                        "title": "Unprocessable Entity",
+                        "status": 422,
+                        "code": "OPERATION_ID_REUSED",
+                    }))
+                    .unwrap(),
+                );
+            }
+            return completed(200, outcome_body(operation_id, &stored.result));
+        }
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert!(body["tokenHash"].as_str().is_some());
+        assert!(body.get("token").is_none());
+        let result = match self.rejections.lock().unwrap().pop_front() {
+            Some(code) => StoredResult::ShareRejected { code },
+            None => {
+                let share_link_id = format!(
+                    "share-link-{}",
+                    self.created_share_links.lock().unwrap().len() + 1
+                );
+                self.created_share_links
+                    .lock()
+                    .unwrap()
+                    .push(share_link_id.clone());
+                StoredResult::ShareApplied {
+                    share_link_id,
+                    base_share_url: "https://app.example.test/share/".into(),
+                    expires_at: "2099-01-02T03:04:05Z".into(),
+                }
+            }
+        };
+        outcomes.insert(
+            operation_id.to_owned(),
+            StoredOutcome {
+                fingerprint,
+                result: result.clone(),
+            },
+        );
+        drop(outcomes);
+        if self
+            .lose_responses
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                pending.checked_sub(1)
+            })
+            .is_ok()
+        {
             return json!({ "type": "networkFailure" });
         }
         completed(200, outcome_body(operation_id, &result))
@@ -546,15 +647,35 @@ pub(super) fn completed(status: u16, body: Vec<u8>) -> Value {
 }
 
 pub(super) fn outcome_body(operation_id: &str, result: &StoredResult) -> Vec<u8> {
-    let result = match result {
-        StoredResult::Applied { item_id, version } => {
-            json!({ "status": "applied", "itemId": item_id, "version": version })
+    let (kind, result) = match result {
+        StoredResult::Applied { item_id, version } => (
+            "create_item",
+            json!({ "status": "applied", "itemId": item_id, "version": version }),
+        ),
+        StoredResult::ShareApplied {
+            share_link_id,
+            base_share_url,
+            expires_at,
+        } => (
+            "create_share",
+            json!({
+                "status": "applied",
+                "shareLinkId": share_link_id,
+                "baseShareUrl": base_share_url,
+                "expiresAt": expires_at,
+            }),
+        ),
+        StoredResult::ItemRejected { code } => {
+            ("create_item", json!({ "status": "rejected", "code": code }))
         }
-        StoredResult::Rejected { code } => json!({ "status": "rejected", "code": code }),
+        StoredResult::ShareRejected { code } => (
+            "create_share",
+            json!({ "status": "rejected", "code": code }),
+        ),
     };
     serde_json::to_vec(&json!({
         "operationId": operation_id,
-        "kind": "create_item",
+        "kind": kind,
         "result": result,
     }))
     .unwrap()
@@ -610,6 +731,8 @@ impl crate::http_transport::SerializedHttpExecutor for FakeServer {
             self.handle_refresh(&request)
         } else if request.method == "PUT" {
             self.handle_create(&request)
+        } else if request.method == "POST" && request.url.ends_with("/share-links") {
+            self.handle_share(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/sync/changes") {
             self.handle_sync_changes(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/sync/events") {
@@ -650,6 +773,14 @@ pub(super) fn auth_config() -> AuthClientConfig {
 }
 
 pub(super) async fn seeded(hold_time: bool) -> Harness {
+    seeded_inner(hold_time, false).await
+}
+
+pub(super) async fn seeded_with_share_item(hold_time: bool) -> Harness {
+    seeded_inner(hold_time, true).await
+}
+
+async fn seeded_inner(hold_time: bool, with_share_item: bool) -> Harness {
     let state = InMemoryReplica::default();
     let account_id = AccountId::from(ACCOUNT);
     state
@@ -659,7 +790,45 @@ pub(super) async fn seeded(hold_time: bool) -> Harness {
             Incarnation::from(INCARNATION),
         )
         .unwrap();
-    seed_ready_personal_vault(&state, &account_id).unwrap();
+    if with_share_item {
+        let sealed = encrypt_with_aad(
+            &serde_json::to_string(&draft()).unwrap(),
+            &TEST_VAULT_KEY,
+            &AadContext {
+                vault_id: TEST_VAULT_ID.into(),
+                entity_id: "item-existing".into(),
+                entity_type: "item".into(),
+                version: 1,
+                user_id: USER.into(),
+            },
+        )
+        .unwrap();
+        state
+            .seed_ready_authority(
+                &account_id,
+                vec![personal_vault(TEST_VAULT_ID, USER)],
+                vec![AuthorityItemRecord {
+                    id: "item-existing".into(),
+                    vault_id: TEST_VAULT_ID.into(),
+                    category: AuthorityItemCategory::Login,
+                    favorite: false,
+                    encrypted_data: sealed.ciphertext,
+                    encryption_iv: sealed.iv,
+                    encryption_algorithm: sealed.algorithm,
+                    version: 1,
+                    encryption_version: 1,
+                    encrypted_by_user_id: USER.into(),
+                    last_modified_by: USER.into(),
+                    created_at: "2026-08-23T00:00:00Z".into(),
+                    updated_at: "2026-08-23T00:00:00Z".into(),
+                    deleted_at: None,
+                    attachments: Vec::new(),
+                }],
+            )
+            .unwrap();
+    } else {
+        seed_ready_personal_vault(&state, &account_id).unwrap();
+    }
     let replica = PlainReplica::new(state);
     let platform = MemoryPlatform::new();
     let server = FakeServer::new();

@@ -17,7 +17,7 @@ use crate::{
 // ---------------------------------------------------------------- the required behavior
 
 #[tokio::test]
-async fn create_share_stays_durable_without_dispatch_until_its_server_contract_lands() {
+async fn create_share_stays_durable_until_the_atomic_cutover_opens_production_dispatch() {
     let harness = seeded(false).await;
     let before = harness
         .runtime

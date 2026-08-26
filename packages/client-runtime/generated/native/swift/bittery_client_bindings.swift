@@ -33,6 +33,11 @@ fileprivate extension RustBuffer {
     func deallocate() {
         try! rustCall { ffi_bittery_client_bindings_rustbuffer_free(self, $0) }
     }
+
+    // The returned Swift String is host-managed. This only wipes the Rust allocation after lift.
+    func deallocateSensitive() {
+        try! rustCall { ffi_bittery_client_bindings_sensitive_rustbuffer_free(self, $0) }
+    }
 }
 
 fileprivate extension ForeignBytes {
@@ -525,6 +530,14 @@ fileprivate struct FfiConverterString: FfiConverter {
 }
 
 
+fileprivate struct FfiConverterSensitiveString {
+    public static func lift(_ value: RustBuffer) throws -> String {
+        defer { value.deallocateSensitive() }
+        if value.data == nil { return String() }
+        let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}
 
 
 public protocol AttachmentProjectionProtocol: AnyObject, Sendable {
@@ -1774,6 +1787,152 @@ public func FfiConverterTypeObservationSink_lower(_ value: ObservationSink) -> U
 
 
 
+public protocol PendingShareResultProtocol: AnyObject, Sendable {
+
+    func expiresAt()  -> String
+
+    func operationId()  -> String
+
+    func shareLinkId()  -> String
+
+    func shareUrl()  -> String
+
+}
+open class PendingShareResult: PendingShareResultProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_pendingshareresult(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_pendingshareresult(handle, $0) }
+    }
+
+
+
+
+open func expiresAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func operationId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_pendingshareresult_operation_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func shareLinkId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_link_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func shareUrl() -> String  {
+    return try!  FfiConverterSensitiveString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_url(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePendingShareResult: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PendingShareResult
+
+    public static func lift(_ handle: UInt64) throws -> PendingShareResult {
+        return PendingShareResult(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PendingShareResult) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PendingShareResult {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PendingShareResult, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePendingShareResult_lift(_ handle: UInt64) throws -> PendingShareResult {
+    return try FfiConverterTypePendingShareResult.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePendingShareResult_lower(_ value: PendingShareResult) -> UInt64 {
+    return FfiConverterTypePendingShareResult.lower(value)
+}
+
+
+
+
+
+
 public protocol SecretStringProtocol: AnyObject, Sendable {
 
 }
@@ -2073,6 +2232,64 @@ public func FfiConverterTypeItemsProjection_lift(_ buf: RustBuffer) throws -> It
 #endif
 public func FfiConverterTypeItemsProjection_lower(_ value: ItemsProjection) -> RustBuffer {
     return FfiConverterTypeItemsProjection.lower(value)
+}
+
+
+public struct PendingShareResultsProjection {
+    public var accountId: String
+    public var replicaRevision: UInt64
+    public var results: [PendingShareResult]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accountId: String, replicaRevision: UInt64, results: [PendingShareResult]) {
+        self.accountId = accountId
+        self.replicaRevision = replicaRevision
+        self.results = results
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PendingShareResultsProjection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePendingShareResultsProjection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PendingShareResultsProjection {
+        return
+            try PendingShareResultsProjection(
+                accountId: FfiConverterString.read(from: &buf),
+                replicaRevision: FfiConverterUInt64.read(from: &buf),
+                results: FfiConverterSequenceTypePendingShareResult.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PendingShareResultsProjection, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.accountId, into: &buf)
+        FfiConverterUInt64.write(value.replicaRevision, into: &buf)
+        FfiConverterSequenceTypePendingShareResult.write(value.results, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePendingShareResultsProjection_lift(_ buf: RustBuffer) throws -> PendingShareResultsProjection {
+    return try FfiConverterTypePendingShareResultsProjection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePendingShareResultsProjection_lower(_ value: PendingShareResultsProjection) -> RustBuffer {
+    return FfiConverterTypePendingShareResultsProjection.lower(value)
 }
 
 
@@ -2588,6 +2805,8 @@ public enum ObservationRequest: Equatable, Hashable {
 
     case items(accountId: String
     )
+    case pendingShareResults(accountId: String
+    )
     case runtimeStatus(accountId: String?
     )
 
@@ -2614,7 +2833,10 @@ public struct FfiConverterTypeObservationRequest: FfiConverterRustBuffer {
         case 1: return .items(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 2: return .runtimeStatus(accountId: try FfiConverterOptionString.read(from: &buf)
+        case 2: return .pendingShareResults(accountId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 3: return .runtimeStatus(accountId: try FfiConverterOptionString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2630,8 +2852,13 @@ public struct FfiConverterTypeObservationRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
 
 
-        case let .runtimeStatus(accountId):
+        case let .pendingShareResults(accountId):
             writeInt(&buf, Int32(2))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case let .runtimeStatus(accountId):
+            writeInt(&buf, Int32(3))
             FfiConverterOptionString.write(accountId, into: &buf)
 
         }
@@ -2770,6 +2997,8 @@ public enum RuntimeProjection {
 
     case items(value: ItemsProjection
     )
+    case pendingShareResults(value: PendingShareResultsProjection
+    )
     case runtimeStatus(value: RuntimeStatusProjection
     )
 
@@ -2796,7 +3025,10 @@ public struct FfiConverterTypeRuntimeProjection: FfiConverterRustBuffer {
         case 1: return .items(value: try FfiConverterTypeItemsProjection.read(from: &buf)
         )
 
-        case 2: return .runtimeStatus(value: try FfiConverterTypeRuntimeStatusProjection.read(from: &buf)
+        case 2: return .pendingShareResults(value: try FfiConverterTypePendingShareResultsProjection.read(from: &buf)
+        )
+
+        case 3: return .runtimeStatus(value: try FfiConverterTypeRuntimeStatusProjection.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2812,8 +3044,13 @@ public struct FfiConverterTypeRuntimeProjection: FfiConverterRustBuffer {
             FfiConverterTypeItemsProjection.write(value, into: &buf)
 
 
-        case let .runtimeStatus(value):
+        case let .pendingShareResults(value):
             writeInt(&buf, Int32(2))
+            FfiConverterTypePendingShareResultsProjection.write(value, into: &buf)
+
+
+        case let .runtimeStatus(value):
+            writeInt(&buf, Int32(3))
             FfiConverterTypeRuntimeStatusProjection.write(value, into: &buf)
 
         }
@@ -2864,6 +3101,8 @@ public enum RuntimeRequest {
     case permanentlyDeleteItem(accountId: String, itemId: String
     )
     case createShare(accountId: String, itemId: String, draft: CreateShareDraft
+    )
+    case acknowledgeShareResult(accountId: String, operationId: String
     )
 
 
@@ -2920,6 +3159,9 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 12: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        )
+
+        case 13: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3007,6 +3249,12 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
+
+        case let .acknowledgeShareResult(accountId,operationId):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(operationId, into: &buf)
+
         }
     }
 }
@@ -3038,6 +3286,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     )
     case accepted(operationId: String, itemId: String, replicaRevision: UInt64
     )
+    case shareResultAcknowledged(accountId: String, operationId: String
+    )
 
 
 
@@ -3068,6 +3318,9 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 3: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
+        case 4: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        )
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -3093,6 +3346,12 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
+
+
+        case let .shareResultAcknowledged(accountId,operationId):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(operationId, into: &buf)
 
         }
     }
@@ -3595,6 +3854,31 @@ fileprivate struct FfiConverterSequenceTypeLoginItemProjection: FfiConverterRust
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypePendingShareResult: FfiConverterRustBuffer {
+    typealias SwiftType = [PendingShareResult]
+
+    public static func write(_ value: [PendingShareResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePendingShareResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PendingShareResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PendingShareResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePendingShareResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer {
     typealias SwiftType = [AccountStatus]
 
@@ -3814,6 +4098,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_observationsink_publish() != 48581) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at() != 54441) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id() != 13793) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id() != 55828) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url() != 58893) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {

@@ -3,8 +3,44 @@
 use bittery_client_core as core;
 use std::fmt;
 use std::sync::Arc;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 uniffi::setup_scaffolding!();
+
+#[cfg(test)]
+static SENSITIVE_RUST_BUFFER_FREE_OBSERVATIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+fn take_sensitive_rust_buffer_free_observations() -> usize {
+    SENSITIVE_RUST_BUFFER_FREE_OBSERVATIONS.swap(0, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Wipes a Rust-owned buffer carrying a native secret before returning it to UniFFI's allocator.
+///
+/// # Safety
+///
+/// `buffer` must be the uniquely owned `RustBuffer` returned by this component. The foreign
+/// caller must not read it or free it again after this call.
+#[no_mangle]
+#[cfg(not(target_arch = "wasm32"))]
+pub unsafe extern "C" fn ffi_bittery_client_bindings_sensitive_rustbuffer_free(
+    buffer: uniffi::RustBuffer,
+    call_status: &mut uniffi::RustCallStatus,
+) {
+    if !buffer.data_pointer().is_null() && !buffer.is_empty() {
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(buffer.data_pointer().cast_mut(), buffer.len())
+        };
+        bytes.zeroize();
+        #[cfg(test)]
+        if bytes.iter().all(|byte| *byte == 0) {
+            SENSITIVE_RUST_BUFFER_FREE_OBSERVATIONS
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    uniffi::ffi::uniffi_rustbuffer_free(buffer, call_status);
+}
 
 #[derive(uniffi::Object)]
 pub struct SecretString {
@@ -243,6 +279,10 @@ pub enum RuntimeRequest {
         item_id: String,
         draft: CreateShareDraft,
     },
+    AcknowledgeShareResult {
+        account_id: String,
+        operation_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -343,6 +383,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("item_id", item_id)
                 .field("draft", draft)
                 .finish(),
+            Self::AcknowledgeShareResult {
+                account_id,
+                operation_id,
+            } => formatter
+                .debug_struct("AcknowledgeShareResult")
+                .field("account_id", account_id)
+                .field("operation_id", operation_id)
+                .finish(),
         }
     }
 }
@@ -362,11 +410,16 @@ pub enum RuntimeResponse {
         item_id: String,
         replica_revision: u64,
     },
+    ShareResultAcknowledged {
+        account_id: String,
+        operation_id: String,
+    },
 }
 
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum ObservationRequest {
     Items { account_id: String },
+    PendingShareResults { account_id: String },
     RuntimeStatus { account_id: Option<String> },
 }
 
@@ -554,6 +607,63 @@ pub struct ItemsProjection {
     pub vaults: Vec<VaultProjection>,
 }
 
+#[derive(Zeroize, ZeroizeOnDrop, uniffi::Object)]
+pub struct PendingShareResult {
+    operation_id: String,
+    share_link_id: String,
+    share_url: String,
+    expires_at: String,
+}
+
+impl fmt::Debug for PendingShareResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingShareResult")
+            .field("operation_id", &self.operation_id)
+            .field("share_link_id", &self.share_link_id)
+            .field("share_url", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+#[uniffi::export]
+impl PendingShareResult {
+    pub fn operation_id(&self) -> String {
+        self.operation_id.clone()
+    }
+
+    pub fn share_link_id(&self) -> String {
+        self.share_link_id.clone()
+    }
+
+    pub fn share_url(&self) -> String {
+        self.share_url.clone()
+    }
+
+    pub fn expires_at(&self) -> String {
+        self.expires_at.clone()
+    }
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct PendingShareResultsProjection {
+    pub account_id: String,
+    pub replica_revision: u64,
+    pub results: Vec<Arc<PendingShareResult>>,
+}
+
+impl fmt::Debug for PendingShareResultsProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingShareResultsProjection")
+            .field("account_id", &self.account_id)
+            .field("replica_revision", &self.replica_revision)
+            .field("result_count", &self.results.len())
+            .finish()
+    }
+}
+
 /// One Vault as an Items reader needs it. Plain data: a Vault name has never been ciphertext.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct VaultProjection {
@@ -635,14 +745,25 @@ pub struct RuntimeStatusProjection {
 
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeProjection {
-    Items { value: ItemsProjection },
-    RuntimeStatus { value: RuntimeStatusProjection },
+    Items {
+        value: ItemsProjection,
+    },
+    PendingShareResults {
+        value: PendingShareResultsProjection,
+    },
+    RuntimeStatus {
+        value: RuntimeStatusProjection,
+    },
 }
 
 impl fmt::Debug for RuntimeProjection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Items { value } => formatter.debug_tuple("Items").field(value).finish(),
+            Self::PendingShareResults { value } => formatter
+                .debug_tuple("PendingShareResults")
+                .field(value)
+                .finish(),
             Self::RuntimeStatus { value } => {
                 formatter.debug_tuple("RuntimeStatus").field(value).finish()
             }
@@ -845,6 +966,13 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                     allowed_emails: draft.allowed_emails,
                 },
             },
+            RuntimeRequest::AcknowledgeShareResult {
+                account_id,
+                operation_id,
+            } => Self::AcknowledgeShareResult {
+                account_id: account_id.into(),
+                operation_id,
+            },
         }
     }
 }
@@ -887,6 +1015,9 @@ impl From<ObservationRequest> for core::ObservationRequest {
             ObservationRequest::Items { account_id } => Self::Items {
                 account_id: account_id.into(),
             },
+            ObservationRequest::PendingShareResults { account_id } => Self::PendingShareResults {
+                account_id: account_id.into(),
+            },
             ObservationRequest::RuntimeStatus { account_id } => Self::RuntimeStatus {
                 account_id: account_id.map(Into::into),
             },
@@ -917,6 +1048,13 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 item_id,
                 replica_revision,
             },
+            core::RuntimeResponse::ShareResultAcknowledged {
+                account_id,
+                operation_id,
+            } => Self::ShareResultAcknowledged {
+                account_id: account_id.into(),
+                operation_id,
+            },
         }
     }
 }
@@ -925,6 +1063,9 @@ impl From<core::RuntimeProjection> for RuntimeProjection {
     fn from(value: core::RuntimeProjection) -> Self {
         match value {
             core::RuntimeProjection::Items(value) => Self::Items {
+                value: value.into(),
+            },
+            core::RuntimeProjection::PendingShareResults(value) => Self::PendingShareResults {
                 value: value.into(),
             },
             core::RuntimeProjection::RuntimeStatus(value) => Self::RuntimeStatus {
@@ -950,6 +1091,31 @@ impl From<core::ItemsProjection> for ItemsProjection {
                 .map(|item| Arc::new(LoginItemProjection::from(item)))
                 .collect(),
             vaults: vaults.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<core::PendingShareResultsProjection> for PendingShareResultsProjection {
+    fn from(value: core::PendingShareResultsProjection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            replica_revision: value.replica_revision,
+            results: value
+                .results
+                .into_iter()
+                .map(|result| Arc::new(PendingShareResult::from(result)))
+                .collect(),
+        }
+    }
+}
+
+impl From<core::PendingShareResult> for PendingShareResult {
+    fn from(value: core::PendingShareResult) -> Self {
+        Self {
+            operation_id: value.operation_id.clone(),
+            share_link_id: value.share_link_id.clone(),
+            share_url: value.share_url.clone(),
+            expires_at: value.expires_at.clone(),
         }
     }
 }
@@ -1244,6 +1410,33 @@ pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 mod tests {
     use super::*;
 
+    fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+
+    #[test]
+    fn native_pending_share_result_storage_zeroizes_when_its_handle_is_freed() {
+        requires_zeroize_on_drop::<PendingShareResult>();
+    }
+
+    #[test]
+    fn native_share_url_uniffi_lowering_is_wiped_before_its_rust_buffer_is_freed() {
+        let pending = PendingShareResult {
+            operation_id: "operation-1".into(),
+            share_link_id: "share-link-1".into(),
+            share_url: "UNIQUE_NATIVE_MARSHALLED_SHARE_URL".into(),
+            expires_at: "2099-01-02T03:04:05Z".into(),
+        };
+        let buffer = <String as uniffi::Lower<UniFfiTag>>::lower(pending.share_url());
+        let bytes = unsafe { std::slice::from_raw_parts(buffer.data_pointer(), buffer.len()) };
+        assert_eq!(bytes, b"UNIQUE_NATIVE_MARSHALLED_SHARE_URL");
+        let mut status = uniffi::RustCallStatus::default();
+
+        unsafe {
+            ffi_bittery_client_bindings_sensitive_rustbuffer_free(buffer, &mut status);
+        }
+
+        assert_eq!(take_sensitive_rust_buffer_free_observations(), 1);
+    }
+
     #[test]
     fn binding_debug_output_redacts_every_plaintext_and_credential_field() {
         let sign_in = RuntimeRequest::SignIn {
@@ -1311,8 +1504,21 @@ mod tests {
                 }],
             },
         };
+        let pending_share = RuntimeProjection::PendingShareResults {
+            value: PendingShareResultsProjection {
+                account_id: "account-1".into(),
+                replica_revision: 2,
+                results: vec![Arc::new(PendingShareResult {
+                    operation_id: "operation-1".into(),
+                    share_link_id: "share-link-1".into(),
+                    share_url: "UNIQUE_PENDING_SHARE_URL".into(),
+                    expires_at: "2099-01-02T03:04:05Z".into(),
+                })],
+            },
+        };
 
-        let output = format!("{sign_in:?} {quick_unlock:?} {create:?} {projection:?}");
+        let output =
+            format!("{sign_in:?} {quick_unlock:?} {create:?} {projection:?} {pending_share:?}");
         for marker in [
             "UNIQUE_MASTER_PASSWORD",
             "UNIQUE_SECRET_KEY",
@@ -1335,6 +1541,7 @@ mod tests {
             "UNIQUE_PROJECTION_PASSWORD",
             "UNIQUE_PROJECTION_NOTES",
             "UNIQUE_PROJECTION_NOTE",
+            "UNIQUE_PENDING_SHARE_URL",
         ] {
             assert!(!output.contains(marker), "debug output leaked {marker}");
         }

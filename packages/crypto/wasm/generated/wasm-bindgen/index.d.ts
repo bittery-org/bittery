@@ -1672,6 +1672,10 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
   readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
     a: bigint,
     b: number,
@@ -1712,6 +1716,10 @@ export interface InitOutput {
     b: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
     a: bigint,
     b: number,
   ) => void;
@@ -1877,6 +1885,26 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_expires_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_operation_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_link_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_url: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
   readonly webclientruntime_cancel: (a: number, b: number, c: number) => void;
   readonly webclientruntime_close: (a: number) => any;
   readonly webclientruntime_new: () => number;
@@ -1945,6 +1973,10 @@ export interface InitOutput {
     b: number,
   ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_loginitemprojection: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_pendingshareresult: (
     a: bigint,
     b: number,
   ) => bigint;

@@ -30,6 +30,8 @@ mod operation_fixtures;
 mod outcome;
 #[cfg(test)]
 mod outcome_tests;
+#[cfg(test)]
+mod share_outcome_tests;
 
 #[doc(hidden)]
 pub use attachment_move_lifecycle::{AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort};
@@ -71,9 +73,10 @@ use crate::{
         SerializedReplicaPersistence,
     },
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
-    ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, RequestCancellation,
-    RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
+    PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
+    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection, VaultProjection,
+    VaultProjectionRole, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -85,6 +88,13 @@ use std::{
     thread::ThreadId,
 };
 use zeroize::{Zeroize, Zeroizing};
+
+#[derive(serde::Deserialize, Zeroize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DecryptedShareCapability {
+    token: String,
+    share_key: String,
+}
 
 thread_local! {
     static ACTIVE_RUNTIME_DELIVERIES: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
@@ -1343,6 +1353,14 @@ impl Runtime {
                 self.accept_create_share(account_id, item_id, draft, cancellation, accepted)
                     .await
             }
+            RuntimeRequest::AcknowledgeShareResult {
+                account_id,
+                operation_id,
+            } => {
+                let _ = accepted;
+                self.acknowledge_share_result(account_id, operation_id, cancellation)
+                    .await
+            }
         }
     }
 
@@ -1735,6 +1753,122 @@ impl Runtime {
                             .unwrap_or_default(),
                         vaults: visible_vaults(&snapshot),
                     }),
+                    generation: Some(generation),
+                    token: Some(token),
+                })
+            }
+            ObservationRequest::PendingShareResults { account_id } => {
+                let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
+                    RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+                })?;
+                if self
+                    .account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .get(account_id)
+                    != Some(&AccountAccessState::Unlocked)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "the selected Account is signed out or locked",
+                    ));
+                }
+                let epoch = *self
+                    .account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .get(account_id)
+                    .unwrap_or(&0);
+                let generation = DeliveryGeneration {
+                    incarnation: snapshot.incarnation.clone(),
+                    epoch,
+                };
+                let token = {
+                    let mut tokens = self
+                        .delivery_tokens
+                        .lock()
+                        .expect("delivery token map poisoned");
+                    let entry = tokens
+                        .entry(account_id.clone())
+                        .or_insert_with(|| (generation.clone(), Arc::new(DeliveryToken::new())));
+                    if entry.0 != generation {
+                        *entry = (generation.clone(), Arc::new(DeliveryToken::new()));
+                    }
+                    Arc::clone(&entry.1)
+                };
+                let master_unlock_key = self
+                    .copy_live_master_unlock_key(account_id, &snapshot.incarnation)
+                    .ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::AuthenticationRequired,
+                            "the selected Account has no live master unlock key",
+                        )
+                    })?;
+                let mut results = Vec::new();
+                for capability in snapshot
+                    .share_capabilities
+                    .iter()
+                    .filter(|capability| capability.result.is_some())
+                {
+                    let context = bittery_crypto_core::ShareCapabilityAadContext::new(
+                        account_id.as_str().to_owned(),
+                        capability.operation_id.clone(),
+                    )
+                    .map_err(|_| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "the pending Share result scope is invalid",
+                        )
+                    })?;
+                    let plaintext = Zeroizing::new(
+                        bittery_crypto_core::decrypt_share_capability(
+                            &bittery_crypto_core::EncryptedData {
+                                ciphertext: capability.ciphertext.clone(),
+                                iv: capability.iv.clone(),
+                                algorithm: capability.algorithm.clone(),
+                            },
+                            master_unlock_key.as_slice(),
+                            &context,
+                        )
+                        .map_err(|_| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the pending Share capability could not be opened",
+                            )
+                        })?,
+                    );
+                    let opened = Zeroizing::new(
+                        serde_json::from_str::<DecryptedShareCapability>(&plaintext).map_err(
+                            |_| {
+                                RuntimeError::new(
+                                    RuntimeErrorCode::InvariantViolation,
+                                    "the pending Share capability is invalid",
+                                )
+                            },
+                        )?,
+                    );
+                    let applied = capability
+                        .result
+                        .as_ref()
+                        .expect("filtered pending Share result must exist");
+                    results.push(PendingShareResult {
+                        operation_id: capability.operation_id.clone(),
+                        share_link_id: applied.share_link_id.clone(),
+                        share_url: format!(
+                            "{}{}#{}",
+                            applied.base_share_url, opened.token, opened.share_key
+                        ),
+                        expires_at: applied.expires_at.clone(),
+                    });
+                }
+                Ok(ProjectedDelivery {
+                    projection: RuntimeProjection::PendingShareResults(
+                        PendingShareResultsProjection {
+                            account_id: account_id.clone(),
+                            replica_revision: snapshot.revision,
+                            results,
+                        },
+                    ),
                     generation: Some(generation),
                     token: Some(token),
                 })

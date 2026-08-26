@@ -449,6 +449,7 @@ impl Runtime {
                         ciphertext: protected_capability.ciphertext,
                         iv: protected_capability.iv,
                         algorithm: protected_capability.algorithm,
+                        result: None,
                     }),
                 ],
             ))

@@ -176,8 +176,8 @@ impl Runtime {
                 continue;
             }
             for operation in &snapshot.operations {
-                // Durable Share acceptance landed before the matching Server request contract.
-                // Keep it owed, but do not put incompatible locally-tokenized bytes on the wire.
+                // The lookup contract exists, but the public mutation route remains legacy until
+                // the atomic cutover removes its TypeScript writer. Keep Share owed until then.
                 if operation.kind == OperationKind::CreateShare {
                     continue;
                 }
@@ -323,9 +323,16 @@ impl Runtime {
                 .await
             {
                 SemanticAnswer::Outcome(outcome) => {
-                    return self
-                        .finish_operation(snapshot, operation, outcome, http, &mut session)
-                        .await;
+                    if operation.kind != OperationKind::CreateShare {
+                        return self
+                            .finish_operation(snapshot, operation, outcome, http, &mut session)
+                            .await;
+                    }
+                    // Share lookup has no request fingerprint and its payload has no Item/token
+                    // correlation. It is only evidence that some same-kind decision exists under
+                    // this ID. Replaying the exact immutable POST is what proves identity: a
+                    // matching fingerprint replays the outcome, while reuse answers 422.
+                    let _share_outcome_hint = outcome;
                 }
                 SemanticAnswer::IdentityReused => {
                     self.fail_account_module_fenced(account_id).await;
@@ -507,6 +514,30 @@ impl Runtime {
             .operations
             .iter()
             .find(|candidate| candidate.operation_id == operation_id)
+            .cloned()
+        else {
+            return;
+        };
+        let _ = self.attempt_dispatch(&snapshot, &operation).await;
+    }
+
+    /// Exercises the decided Share wire lifecycle without opening its production eligibility gate.
+    #[cfg(test)]
+    pub(crate) async fn dispatch_create_share_once_while_gated(
+        &self,
+        account_id: &AccountId,
+        operation_id: &str,
+    ) {
+        let Some(snapshot) = self.replica.snapshot(account_id) else {
+            return;
+        };
+        let Some(operation) = snapshot
+            .operations
+            .iter()
+            .find(|candidate| {
+                candidate.operation_id == operation_id
+                    && candidate.kind == OperationKind::CreateShare
+            })
             .cloned()
         else {
             return;

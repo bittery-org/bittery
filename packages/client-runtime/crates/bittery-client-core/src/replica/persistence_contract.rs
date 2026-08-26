@@ -360,7 +360,8 @@ pub(super) fn prepare_commit(
     for mutation in &plan.mutations {
         // A completion touches several stores at once, so it contributes several writes.
         if let PlanMutation::ReconcileAppliedCreate { outcome, .. }
-        | PlanMutation::RetainRejection { outcome, .. } = mutation
+        | PlanMutation::RetainRejection { outcome, .. }
+        | PlanMutation::ReconcileShareOutcome { outcome, .. } = mutation
         {
             writes.extend(completion_writes(
                 &plan.account_id,
@@ -526,8 +527,16 @@ pub(super) fn prepare_commit(
                     record_id: operation_id.clone(),
                 },
             },
+            PlanMutation::AcknowledgeShareResult { operation_id } => PreparedReplicaWrite::Delete {
+                store: ReplicaStore::ShareCapabilities,
+                key: ReplicaRowKey {
+                    account_id: plan.account_id.clone(),
+                    record_id: operation_id.clone(),
+                },
+            },
             PlanMutation::ReconcileAppliedCreate { .. }
             | PlanMutation::RetainRejection { .. }
+            | PlanMutation::ReconcileShareOutcome { .. }
             | PlanMutation::FailAccount { .. }
             | PlanMutation::FreezeAttachmentMoveRejection { .. }
             | PlanMutation::PromoteAttachmentMovePreparation { .. }
@@ -614,6 +623,36 @@ fn completion_writes(
                     record_id: item.item_id.clone(),
                 },
             });
+        }
+    }
+    if let Some(current_capability) = current
+        .share_capabilities
+        .iter()
+        .find(|capability| capability.operation_id == outcome.operation_id)
+    {
+        match next
+            .share_capabilities
+            .iter()
+            .find(|capability| capability.operation_id == outcome.operation_id)
+        {
+            Some(next_capability) if next_capability != current_capability => {
+                writes.push(PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::ShareCapabilities,
+                        account_id,
+                        &next_capability.operation_id,
+                        next_capability,
+                    )?,
+                });
+            }
+            None => writes.push(PreparedReplicaWrite::Delete {
+                store: ReplicaStore::ShareCapabilities,
+                key: ReplicaRowKey {
+                    account_id: account_id.clone(),
+                    record_id: current_capability.operation_id.clone(),
+                },
+            }),
+            _ => {}
         }
     }
     Ok(writes)

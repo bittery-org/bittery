@@ -20,6 +20,8 @@ mkdir -p "$output_root/kotlin" "$output_root/swift"
 		--out-dir "$output_root/swift"
 )
 
+node "$package_root/scripts/harden-native-secret-bindings.mjs" "$output_root"
+
 # UniFFI's no-format templates contain trailing spaces. Normalize committed output here so both
 # generation and drift checks produce repository-clean files on every host.
 while IFS= read -r -d '' generated_file; do

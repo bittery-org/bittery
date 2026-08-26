@@ -5,6 +5,9 @@ export type ObservationRequest = ({
 accountId: string
 type: "items"
 } | {
+accountId: string
+type: "pendingShareResults"
+} | {
 accountId: (string | null)
 type: "runtimeStatus"
 })
@@ -36,12 +39,19 @@ itemId: string
 operationId: string
 replicaRevision: string
 type: "accepted"
+} | {
+accountId: string
+operationId: string
+type: "shareResultAcknowledged"
 })
 export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
 export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type RuntimeProjection = ({
 type: "items"
 value: ItemsProjection
+} | {
+type: "pendingShareResults"
+value: PendingShareResultsProjection
 } | {
 type: "runtimeStatus"
 value: RuntimeStatusProjection
@@ -104,6 +114,10 @@ accountId: string
 draft: CreateShareDraft
 itemId: string
 type: "createShare"
+} | {
+accountId: string
+operationId: string
+type: "acknowledgeShareResult"
 })
 export type ShareAccessMode = ("anyone" | "email-restricted")
 export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")
@@ -183,6 +197,17 @@ name: string
 role: ("owner" | "admin" | "member" | "read-only")
 vaultId: string
 vaultType: VaultProjectionType
+}
+export interface PendingShareResultsProjection {
+accountId: string
+replicaRevision: string
+results: PendingShareResult[]
+}
+export interface PendingShareResult {
+expiresAt: string
+operationId: string
+shareLinkId: string
+shareUrl: string
 }
 export interface RuntimeStatusProjection {
 accountId: (string | null)

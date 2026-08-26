@@ -14,28 +14,41 @@ use bittery_client_core as core;
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 use tokio::sync::Notify;
 
 pub(crate) struct BufferedSink {
-    queued: Mutex<VecDeque<core::RuntimeProjection>>,
+    queued: Mutex<VecDeque<(u64, core::RuntimeProjection)>>,
     closed: AtomicBool,
     draining: AtomicBool,
+    lifecycle: AtomicU64,
+    retirements: AtomicU64,
     wake: Arc<Notify>,
 }
 
 impl core::ObservationSink for BufferedSink {
     fn publish(&self, projection: core::RuntimeProjection) {
-        if self.closed.load(Ordering::SeqCst) {
+        if self.closed.load(Ordering::SeqCst) || self.retirements.load(Ordering::SeqCst) > 0 {
             return;
         }
-        self.queued
+        // Capture at publication entry. If lifecycle invalidation wins the queue lock while this
+        // publisher is delayed, the stale tag remains stale and the drain still rejects it.
+        let lifecycle = self.lifecycle.load(Ordering::SeqCst);
+        let mut queued = self
+            .queued
             .lock()
-            .expect("Web observation buffer lock poisoned")
-            .push_back(projection);
+            .expect("Web observation buffer lock poisoned");
+        if self.closed.load(Ordering::SeqCst)
+            || self.retirements.load(Ordering::SeqCst) > 0
+            || lifecycle != self.lifecycle.load(Ordering::SeqCst)
+        {
+            return;
+        }
+        queued.push_back((lifecycle, projection));
+        drop(queued);
         self.wake.notify_one();
     }
 }
@@ -46,8 +59,30 @@ impl BufferedSink {
             queued: Mutex::new(VecDeque::new()),
             closed: AtomicBool::new(false),
             draining: AtomicBool::new(false),
+            lifecycle: AtomicU64::new(0),
+            retirements: AtomicU64::new(0),
             wake,
         }
+    }
+
+    /// Suspends this Account observation before an asynchronous Lock or SignOut starts.
+    /// Nested retirements stay suspended until every request finishes.
+    pub(crate) fn begin_retirement(&self) {
+        self.retirements.fetch_add(1, Ordering::SeqCst);
+        self.lifecycle.fetch_add(1, Ordering::SeqCst);
+        self.queued
+            .lock()
+            .expect("Web observation buffer lock poisoned")
+            .clear();
+    }
+
+    /// Resumes delivery after one asynchronous retirement request finishes.
+    pub(crate) fn end_retirement(&self) {
+        self.retirements
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                active.checked_sub(1)
+            })
+            .expect("Web observation retirement must be balanced");
     }
 
     /// Drops what is queued and every later publication. A closed observation and a closed
@@ -79,7 +114,7 @@ impl BufferedSink {
         }
         let _draining = DrainGuard(&self.draining);
         loop {
-            if self.closed.load(Ordering::SeqCst) {
+            if self.closed.load(Ordering::SeqCst) || self.retirements.load(Ordering::SeqCst) > 0 {
                 return Ok(());
             }
             let next = self
@@ -87,9 +122,14 @@ impl BufferedSink {
                 .lock()
                 .expect("Web observation buffer lock poisoned")
                 .pop_front();
-            let Some(projection) = next else {
+            let Some((lifecycle, projection)) = next else {
                 return Ok(());
             };
+            if self.retirements.load(Ordering::SeqCst) > 0
+                || lifecycle != self.lifecycle.load(Ordering::SeqCst)
+            {
+                continue;
+            }
             deliver(projection)?;
         }
     }
@@ -213,6 +253,68 @@ mod tests {
         assert_eq!(delivered.into_inner(), vec![1]);
         assert!(sink.is_closed());
         assert_eq!(collect(&sink), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn lifecycle_invalidation_drops_queued_plaintext_but_preserves_the_subscription() {
+        let sink = sink();
+        sink.publish(status(1));
+
+        sink.begin_retirement();
+        sink.end_retirement();
+        sink.publish(status(2));
+
+        assert_eq!(collect(&sink), vec![2]);
+        assert!(!sink.is_closed());
+    }
+
+    #[test]
+    fn account_retirement_suspends_sensitive_publication_until_a_later_generation() {
+        let sink = sink();
+        sink.publish(core::RuntimeProjection::PendingShareResults(
+            core::PendingShareResultsProjection {
+                account_id: "account-1".into(),
+                replica_revision: 1,
+                results: vec![core::PendingShareResult {
+                    operation_id: "operation-old".into(),
+                    share_link_id: "share-old".into(),
+                    share_url: "https://app.example.test/share/old-token#old-key".into(),
+                    expires_at: "2099-01-02T03:04:05Z".into(),
+                }],
+            },
+        ));
+
+        sink.begin_retirement();
+        sink.publish(core::RuntimeProjection::PendingShareResults(
+            core::PendingShareResultsProjection {
+                account_id: "account-1".into(),
+                replica_revision: 2,
+                results: vec![core::PendingShareResult {
+                    operation_id: "operation-racing".into(),
+                    share_link_id: "share-racing".into(),
+                    share_url: "https://app.example.test/share/racing-token#racing-key".into(),
+                    expires_at: "2099-01-02T03:04:05Z".into(),
+                }],
+            },
+        ));
+        assert!(collect(&sink).is_empty());
+
+        sink.end_retirement();
+        sink.publish(core::RuntimeProjection::PendingShareResults(
+            core::PendingShareResultsProjection {
+                account_id: "account-1".into(),
+                replica_revision: 3,
+                results: vec![core::PendingShareResult {
+                    operation_id: "operation-new".into(),
+                    share_link_id: "share-new".into(),
+                    share_url: "https://app.example.test/share/new-token#new-key".into(),
+                    expires_at: "2099-01-02T03:04:05Z".into(),
+                }],
+            },
+        ));
+
+        assert_eq!(collect(&sink), vec![3]);
+        assert!(!sink.is_closed());
     }
 
     #[test]

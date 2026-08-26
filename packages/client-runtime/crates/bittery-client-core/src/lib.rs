@@ -71,10 +71,10 @@ pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, AttachmentProjection,
     CreateShareDraft, CustomFieldKind, ItemProjectionStatus, ItemsProjection, LoginCustomField,
-    LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink, RequestCancellation,
-    RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest,
-    RuntimeResponse, RuntimeStatusProjection, ShareAccessMode, ShareExpiration, VaultProjection,
-    VaultProjectionRole, VaultProjectionType,
+    LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
+    PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
+    RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    ShareAccessMode, ShareExpiration, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]

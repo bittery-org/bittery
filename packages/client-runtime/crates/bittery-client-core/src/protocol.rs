@@ -6,6 +6,7 @@ use std::sync::{
     Arc,
 };
 use tokio::sync::watch;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -155,6 +156,14 @@ pub enum RuntimeRequest {
         item_id: String,
         draft: CreateShareDraft,
     },
+    AcknowledgeShareResult {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        operation_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -255,6 +264,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("item_id", item_id)
                 .field("draft", draft)
                 .finish(),
+            Self::AcknowledgeShareResult {
+                account_id,
+                operation_id,
+            } => formatter
+                .debug_struct("AcknowledgeShareResult")
+                .field("account_id", account_id)
+                .field("operation_id", operation_id)
+                .finish(),
         }
     }
 }
@@ -272,7 +289,8 @@ impl RuntimeRequest {
             | Self::RestoreItem { account_id, .. }
             | Self::MoveItem { account_id, .. }
             | Self::PermanentlyDeleteItem { account_id, .. }
-            | Self::CreateShare { account_id, .. } => Some(account_id),
+            | Self::CreateShare { account_id, .. }
+            | Self::AcknowledgeShareResult { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -434,6 +452,14 @@ pub enum RuntimeResponse {
         )]
         replica_revision: u64,
     },
+    ShareResultAcknowledged {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        operation_id: String,
+    },
 }
 
 /// The declared envelope every external Runtime request answers with.
@@ -442,7 +468,7 @@ pub enum RuntimeResponse {
 /// contract describes. This adjacent tagging matches `RuntimeProjection`, and it keeps the
 /// success payload intact: `RuntimeResponse` is itself internally tagged on `type`, so an
 /// internally tagged envelope would collide with it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "runtime-protocol-contract-schema",
     derive(schemars::JsonSchema)
@@ -480,6 +506,13 @@ pub enum ObservationRequest {
         )]
         account_id: AccountId,
     },
+    PendingShareResults {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
     RuntimeStatus {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -492,7 +525,9 @@ pub enum ObservationRequest {
 impl ObservationRequest {
     pub fn account_id(&self) -> Option<&AccountId> {
         match self {
-            Self::Items { account_id } => Some(account_id),
+            Self::Items { account_id } | Self::PendingShareResults { account_id } => {
+                Some(account_id)
+            }
             Self::RuntimeStatus { account_id } => account_id.as_ref(),
         }
     }
@@ -506,6 +541,7 @@ impl ObservationRequest {
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum RuntimeProjection {
     Items(ItemsProjection),
+    PendingShareResults(PendingShareResultsProjection),
     RuntimeStatus(RuntimeStatusProjection),
 }
 
@@ -513,6 +549,7 @@ impl RuntimeProjection {
     pub fn revision(&self) -> u64 {
         match self {
             Self::Items(value) => value.replica_revision,
+            Self::PendingShareResults(value) => value.replica_revision,
             Self::RuntimeStatus(value) => value.revision,
         }
     }
@@ -520,8 +557,78 @@ impl RuntimeProjection {
     pub fn item_count(&self) -> usize {
         match self {
             Self::Items(value) => value.items.len(),
+            Self::PendingShareResults(_) => 0,
             Self::RuntimeStatus(_) => 0,
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingShareResultsProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
+    pub account_id: AccountId,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub replica_revision: u64,
+    pub results: Vec<PendingShareResult>,
+}
+
+impl fmt::Debug for PendingShareResultsProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingShareResultsProjection")
+            .field("account_id", &self.account_id)
+            .field("replica_revision", &self.replica_revision)
+            .field("result_count", &self.results.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingShareResult {
+    pub operation_id: String,
+    pub share_link_id: String,
+    pub share_url: String,
+    pub expires_at: String,
+}
+
+impl fmt::Debug for PendingShareResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingShareResult")
+            .field("operation_id", &self.operation_id)
+            .field("share_link_id", &self.share_link_id)
+            .field("share_url", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod pending_share_secret_tests {
+    use super::PendingShareResult;
+
+    fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+
+    #[test]
+    fn core_pending_share_result_owns_its_url_as_a_zeroizing_secret() {
+        requires_zeroize_on_drop::<PendingShareResult>();
     }
 }
 

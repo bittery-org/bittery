@@ -96,6 +96,15 @@ pub(crate) enum PlanMutation {
         outcome: ObservedOutcome,
         cursor: Option<CursorAdvance>,
     },
+    /// Ends a CreateShare and either retains its once-only applied delivery or destroys the
+    /// capability after a terminal rejection, in the same transaction as its receipt.
+    ReconcileShareOutcome {
+        outcome: ObservedOutcome,
+        cursor: Option<CursorAdvance>,
+    },
+    AcknowledgeShareResult {
+        operation_id: String,
+    },
     /// Fails the Account module after a fatal invariant violation.
     ///
     /// The Replica keeps every durable row. Failing is how the Runtime refuses to guess, not a
@@ -136,6 +145,8 @@ pub(crate) enum OperationRejectionCode {
     TargetVaultAccessDenied,
     TargetVaultReadOnly,
     AttachmentStateConflict,
+    ShareEntitlementDenied,
+    ShareLimitReached,
 }
 
 /// What the Server decided about one Operation. Transport status is deliberately absent.
@@ -147,8 +158,18 @@ pub(crate) enum OperationRejectionCode {
     deny_unknown_fields
 )]
 pub(crate) enum OperationOutcomeResult {
-    Applied { entity_id: String, version: i32 },
-    Rejected { code: OperationRejectionCode },
+    Applied {
+        entity_id: String,
+        version: i32,
+    },
+    ShareApplied {
+        share_link_id: String,
+        base_share_url: String,
+        expires_at: String,
+    },
+    Rejected {
+        code: OperationRejectionCode,
+    },
 }
 
 /// One observed semantic outcome, carrying the fingerprint it was answered for.
@@ -249,6 +270,16 @@ pub(crate) struct ProtectedShareCapabilityRecord {
     pub ciphertext: String,
     pub iv: String,
     pub algorithm: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ShareAppliedResultRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ShareAppliedResultRecord {
+    pub share_link_id: String,
+    pub base_share_url: String,
+    pub expires_at: String,
 }
 
 /// One accepted Attachment-bearing Move before its final HTTP request can exist.
@@ -1079,15 +1110,36 @@ impl AccountReplica {
         }
         for capability in self.share_capabilities.values() {
             let matching_operation = self.operations.get(&capability.operation_id);
+            let matching_receipt = self.receipts.get(&capability.operation_id);
+            let accepted = capability.result.is_none()
+                && matching_operation.is_some_and(|operation| {
+                    operation.kind == OperationKind::CreateShare
+                        && operation.operation_id == capability.operation_id
+                });
+            let pending = capability.result.as_ref().is_some_and(|result| {
+                !result.share_link_id.is_empty()
+                    && !result.base_share_url.is_empty()
+                    && !result.expires_at.is_empty()
+                    && matching_receipt.is_some_and(|receipt| {
+                        receipt.kind == OperationKind::CreateShare
+                            && matches!(
+                                &receipt.result,
+                                OperationOutcomeResult::ShareApplied {
+                                    share_link_id,
+                                    base_share_url,
+                                    expires_at,
+                                } if share_link_id == &result.share_link_id
+                                    && base_share_url == &result.base_share_url
+                                    && expires_at == &result.expires_at
+                            )
+                    })
+            });
             if capability.account_id != self.account_id
                 || capability.operation_id.is_empty()
                 || capability.ciphertext.is_empty()
                 || capability.iv.is_empty()
                 || capability.algorithm != "AES-GCM-AAD-V1"
-                || !matching_operation.is_some_and(|operation| {
-                    operation.kind == OperationKind::CreateShare
-                        && operation.operation_id == capability.operation_id
-                })
+                || (!accepted && !pending)
             {
                 return Err(replica_invariant(
                     "protected Share capability is not bound to one active CreateShare Operation",
@@ -1800,6 +1852,80 @@ impl AccountReplica {
                 // created it: a rejection is not permission to destroy their ciphertext.
                 self.operations.remove(&operation.operation_id);
                 self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::ReconcileShareOutcome { outcome, cursor } => {
+                let operation = self.operation_for(&outcome)?;
+                if operation.kind != OperationKind::CreateShare {
+                    return Err(replica_invariant(
+                        "a Share reconciliation needs a CreateShare Operation",
+                    ));
+                }
+                if self
+                    .share_capabilities
+                    .get(&operation.operation_id)
+                    .is_some_and(|capability| {
+                        capability.account_id != self.account_id || capability.result.is_some()
+                    })
+                {
+                    return Err(replica_invariant(
+                        "CreateShare capability is not pending this outcome",
+                    ));
+                }
+                let applied = match &outcome.result {
+                    OperationOutcomeResult::ShareApplied {
+                        share_link_id,
+                        base_share_url,
+                        expires_at,
+                    } if !share_link_id.is_empty()
+                        && !base_share_url.is_empty()
+                        && !expires_at.is_empty() =>
+                    {
+                        Some(ShareAppliedResultRecord {
+                            share_link_id: share_link_id.clone(),
+                            base_share_url: base_share_url.clone(),
+                            expires_at: expires_at.clone(),
+                        })
+                    }
+                    OperationOutcomeResult::Rejected { .. } => None,
+                    _ => {
+                        return Err(replica_invariant(
+                            "a Share reconciliation needs a Share outcome",
+                        ))
+                    }
+                };
+                self.retain_receipt(&operation, &outcome)?;
+                self.operations.remove(&operation.operation_id);
+                match (
+                    self.share_capabilities.get_mut(&operation.operation_id),
+                    applied,
+                ) {
+                    (Some(capability), Some(result)) => capability.result = Some(result),
+                    (Some(_), None) => {
+                        self.share_capabilities.remove(&operation.operation_id);
+                    }
+                    // SignOut deliberately destroys this Device's capability without cancelling
+                    // accepted work. The authoritative outcome still receipts and terminates the
+                    // Operation; an applied result simply has no plaintext delivery to publish.
+                    (None, _) => {}
+                }
+                self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::AcknowledgeShareResult { operation_id } => {
+                let capability = self
+                    .share_capabilities
+                    .get(&operation_id)
+                    .ok_or_else(|| replica_invariant("pending Share result is missing"))?;
+                if capability.result.is_none()
+                    || !self.receipts.get(&operation_id).is_some_and(|receipt| {
+                        receipt.kind == OperationKind::CreateShare
+                            && matches!(receipt.result, OperationOutcomeResult::ShareApplied { .. })
+                    })
+                {
+                    return Err(replica_invariant(
+                        "Share result acknowledgement has no applied delivery",
+                    ));
+                }
+                self.share_capabilities.remove(&operation_id);
             }
             PlanMutation::FailAccount { code } => {
                 self.failure = Some(code);
@@ -2861,6 +2987,7 @@ mod share_capability_invariant_tests {
             ciphertext: "ciphertext".into(),
             iv: "iv".into(),
             algorithm: "AES-GCM-AAD-V1".into(),
+            result: None,
         }
     }
 

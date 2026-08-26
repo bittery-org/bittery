@@ -7,7 +7,8 @@ use crate::{
     platform_storage::SerializedPlatformStorageExecutor,
     protocol::Incarnation,
     replica::{
-        InMemoryReplica, ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+        InMemoryReplica, ObservedOutcome, OperationOutcomeResult, ReplicaPersistence,
+        ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
     server_contract::{
         AuthVaultKeyResponse, LoginUserResponse, TravelModeResponse, VaultRole, VaultType,
@@ -2689,8 +2690,8 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
     first.close().await;
 
     let restored = Runtime::with_configured_serialized_executors(
-        replica,
-        platform,
+        replica.clone(),
+        platform.clone(),
         http.clone(),
         AuthClientConfig::new(
             "client-routing".into(),
@@ -2730,15 +2731,83 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
         live_muk.as_slice(),
         &bittery_crypto_core::ShareCapabilityAadContext::new(
             account_id.as_str().into(),
-            share_operation_id,
+            share_operation_id.clone(),
         )
         .unwrap(),
     )
     .is_ok());
+    let operation = recovered
+        .operations
+        .iter()
+        .find(|operation| operation.operation_id == share_operation_id)
+        .unwrap()
+        .clone();
+    let reconciled = restored
+        .replica
+        .execute_recomputing(GuardedCommitPlan::new(
+            account_id.clone(),
+            recovered.incarnation,
+            recovered.revision,
+            recovered.lock_epoch,
+            vec![PlanMutation::ReconcileShareOutcome {
+                outcome: ObservedOutcome {
+                    operation_id: share_operation_id.clone(),
+                    request_fingerprint: operation.request_fingerprint,
+                    result: OperationOutcomeResult::ShareApplied {
+                        share_link_id: "share-link-after-restart".into(),
+                        base_share_url: "https://app.example.test/share/".into(),
+                        expires_at: "2099-01-02T03:04:05Z".into(),
+                    },
+                },
+                cursor: None,
+            }],
+        ))
+        .await
+        .unwrap();
+    let RecomputedPlanResult::Applied { snapshot } = reconciled else {
+        panic!("Share reconciliation must commit");
+    };
+    restored.replica.cache(snapshot);
+    restored.close().await;
+
+    let restored_again = Runtime::with_configured_serialized_executors(
+        replica,
+        platform,
+        http.clone(),
+        AuthClientConfig::new(
+            "client-routing".into(),
+            ClientPlatform::Desktop,
+            "0.5.2-test".into(),
+        )
+        .unwrap(),
+    );
+    restored_again.open().await.unwrap();
+    restored_again
+        .request(
+            quick_unlock_request(account_id.as_str()),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let RuntimeProjection::PendingShareResults(pending) = restored_again
+        .projection(&ObservationRequest::PendingShareResults {
+            account_id: account_id.clone(),
+        })
+        .unwrap()
+        .projection
+    else {
+        panic!("expected PendingShareResults after Quick Unlock");
+    };
+    assert_eq!(pending.results.len(), 1);
+    assert_eq!(pending.results[0].operation_id, share_operation_id);
+    assert!(pending.results[0]
+        .share_url
+        .starts_with("https://app.example.test/share/"));
+    assert!(pending.results[0].share_url.contains('#'));
     http.disconnect();
     http.clear_requests();
     let sink = Arc::new(Sink::default());
-    let _items = restored
+    let _items = restored_again
         .observe(
             ObservationRequest::Items {
                 account_id: account_id.clone(),
@@ -3090,7 +3159,7 @@ fn last_status_access(sink: &Sink, account_id: &AccountId) -> Option<AccountAcce
         .rev()
         .find_map(|projection| match projection {
             RuntimeProjection::RuntimeStatus(status) => Some(status.clone()),
-            RuntimeProjection::Items(_) => None,
+            RuntimeProjection::Items(_) | RuntimeProjection::PendingShareResults(_) => None,
         })?
         .accounts
         .into_iter()

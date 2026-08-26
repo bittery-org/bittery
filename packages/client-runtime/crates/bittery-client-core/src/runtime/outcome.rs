@@ -16,6 +16,8 @@ use crate::{
         OperationRejectionCode, ReplicaSnapshot, SyncCursor,
     },
     server_contract::{
+        CreateShareOperationRejectionCode as WireShareRejectionCode,
+        CreateShareOperationResult as WireCreateShareOperationResult,
         ItemOperationResult as WireItemOperationResult, OperationOutcome as WireOperationOutcome,
         OperationRejectionCode as WireOperationRejectionCode,
     },
@@ -49,6 +51,117 @@ pub(super) enum CompletionResult {
 }
 
 impl Runtime {
+    pub(super) async fn acknowledge_share_result(
+        &self,
+        account_id: AccountId,
+        operation_id: String,
+        cancellation: RequestCancellation,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_open()?;
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before Share result acknowledgement",
+            ));
+        }
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
+        let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if snapshot.failure.is_some() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountFailed,
+                "the selected Account module has failed",
+            ));
+        }
+        if self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .get(&account_id)
+            != Some(&AccountAccessState::Unlocked)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account is signed out or locked",
+            ));
+        }
+        if self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(&account_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch persistence is pending",
+            ));
+        }
+        let lock_epoch = *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(snapshot.lock_epoch);
+        if lock_epoch != snapshot.lock_epoch {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account lifecycle changed",
+            ));
+        }
+        let already_acknowledged = !snapshot
+            .share_capabilities
+            .iter()
+            .any(|capability| capability.operation_id == operation_id)
+            && snapshot.receipts.iter().any(|receipt| {
+                receipt.operation_id == operation_id
+                    && receipt.kind == OperationKind::CreateShare
+                    && matches!(receipt.result, OperationOutcomeResult::ShareApplied { .. })
+            });
+        if already_acknowledged {
+            return Ok(RuntimeResponse::ShareResultAcknowledged {
+                account_id,
+                operation_id,
+            });
+        }
+        let result = self
+            .replica
+            .execute_recomputing(GuardedCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation,
+                snapshot.revision,
+                lock_epoch,
+                vec![PlanMutation::AcknowledgeShareResult {
+                    operation_id: operation_id.clone(),
+                }],
+            ))
+            .await?;
+        let RecomputedPlanResult::Applied { snapshot } = result else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account lifecycle changed during acknowledgement",
+            ));
+        };
+        let publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.cache(snapshot);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(publication);
+        drop(_execution_guard);
+        self.publish_all_unless_closed();
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled after Share result acknowledgement",
+            ));
+        }
+        Ok(RuntimeResponse::ShareResultAcknowledged {
+            account_id,
+            operation_id,
+        })
+    }
+
     /// Reads a create dispatch response as a semantic answer, and never as a status code.
     pub(super) fn read_dispatch_answer(
         &self,
@@ -198,8 +311,15 @@ impl Runtime {
                     cursor,
                 }
             }
+            OperationOutcomeResult::ShareApplied { .. } => {
+                PlanMutation::ReconcileShareOutcome { outcome, cursor }
+            }
             OperationOutcomeResult::Rejected { .. } => {
-                PlanMutation::RetainRejection { outcome, cursor }
+                if operation.kind == OperationKind::CreateShare {
+                    PlanMutation::ReconcileShareOutcome { outcome, cursor }
+                } else {
+                    PlanMutation::RetainRejection { outcome, cursor }
+                }
             }
         };
         if fence_already_held {
@@ -454,6 +574,12 @@ impl Runtime {
             .await
         {
             SemanticAnswer::Outcome(outcome) => {
+                if operation.kind == OperationKind::CreateShare {
+                    // The lookup cannot prove the Share request fingerprint. Sync is a reader
+                    // and must not turn the hint into the POST that proves it while production
+                    // CreateShare dispatch remains gated for the atomic cutover.
+                    return CompletionResult::Retry;
+                }
                 self.complete_operation_fenced(
                     account_id, &operation, outcome, http, session, cursor,
                 )
@@ -483,39 +609,85 @@ impl Runtime {
 /// Device durably accepted? A `kind` this Runtime does not carry fails to deserialize; a `kind` it
 /// carries but did not ask for is identity reuse. Neither is ever read as this Operation's answer.
 fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) -> SemanticAnswer {
-    let WireOperationOutcome::CreateItem {
-        operation_id,
-        result,
-    } = outcome
-    else {
-        // This Device only owns creates so far. Any other kind under this ID answers work this
-        // Device never accepted.
-        return SemanticAnswer::IdentityReused;
+    let (operation_id, expected_kind, result) = match outcome {
+        WireOperationOutcome::CreateItem {
+            operation_id,
+            result,
+        } => {
+            let result = match result {
+                WireItemOperationResult::Applied { item_id, version } => {
+                    if item_id != operation.item_id || version < 1 {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::Applied {
+                        entity_id: item_id,
+                        version,
+                    }
+                }
+                WireItemOperationResult::Rejected { code, .. } => {
+                    OperationOutcomeResult::Rejected {
+                        code: rejection_code(code),
+                    }
+                }
+            };
+            (operation_id, OperationKind::CreateItem, result)
+        }
+        WireOperationOutcome::CreateShare {
+            operation_id,
+            result,
+        } => {
+            let result = match result {
+                WireCreateShareOperationResult::Applied {
+                    base_share_url,
+                    expires_at,
+                    share_link_id,
+                } => {
+                    if base_share_url.is_empty()
+                        || expires_at.is_empty()
+                        || share_link_id.is_empty()
+                    {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::ShareApplied {
+                        share_link_id,
+                        base_share_url,
+                        expires_at,
+                    }
+                }
+                WireCreateShareOperationResult::Rejected { code } => {
+                    OperationOutcomeResult::Rejected {
+                        code: share_rejection_code(code),
+                    }
+                }
+            };
+            (operation_id, OperationKind::CreateShare, result)
+        }
+        _ => {
+            // Another kind under this ID answers work this Device never accepted.
+            return SemanticAnswer::IdentityReused;
+        }
     };
-    if operation_id != operation.operation_id || operation.kind != OperationKind::CreateItem {
+    if operation_id != operation.operation_id || operation.kind != expected_kind {
+        // The Operation ID is ours; the kind is not. Keeping the fingerprint independent of the
+        // Operation ID is what makes that visible at all.
         return SemanticAnswer::IdentityReused;
     }
-    let result = match result {
-        WireItemOperationResult::Applied { item_id, version } => {
-            if item_id != operation.item_id || version < 1 {
-                // The Operation ID is ours; the entity is not. Keeping the fingerprint
-                // independent of the Operation ID is what makes that visible at all.
-                return SemanticAnswer::IdentityReused;
-            }
-            OperationOutcomeResult::Applied {
-                entity_id: item_id,
-                version,
-            }
-        }
-        WireItemOperationResult::Rejected { code, .. } => OperationOutcomeResult::Rejected {
-            code: rejection_code(code),
-        },
-    };
     SemanticAnswer::Outcome(ObservedOutcome {
         operation_id: operation.operation_id.clone(),
         request_fingerprint: operation.request_fingerprint,
         result,
     })
+}
+
+fn share_rejection_code(code: WireShareRejectionCode) -> OperationRejectionCode {
+    match code {
+        WireShareRejectionCode::ItemNotFound => OperationRejectionCode::ItemNotFound,
+        WireShareRejectionCode::VaultReadOnly => OperationRejectionCode::VaultReadOnly,
+        WireShareRejectionCode::ShareEntitlementDenied => {
+            OperationRejectionCode::ShareEntitlementDenied
+        }
+        WireShareRejectionCode::ShareLimitReached => OperationRejectionCode::ShareLimitReached,
+    }
 }
 
 pub(super) fn rejection_code(code: WireOperationRejectionCode) -> OperationRejectionCode {
