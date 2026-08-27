@@ -92,6 +92,31 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 	const accountId = snapshot.local.bittery_active_account ?? "";
 	expect(accountId).not.toBe("");
 	const accountKey = (name: string) => `bittery_account_${accountId}_${name}`;
+	const accountsDocument = JSON.parse(
+		snapshot.local.bittery_accounts_list ?? "",
+	) as {
+		version: number;
+		accounts: Array<{ accountId: string }>;
+	};
+	const webAccountId = snapshot.local.bittery_web_account_id ?? "";
+	const runtimeAccountId = snapshot.local.bittery_runtime_account_id ?? "";
+
+	// Browser initialization's synthetic id is only the pre-login seed. The
+	// transitional active pointer and Accounts list must name the login Account.
+	expect(webAccountId).not.toBe("");
+	expect(accountId).not.toBe(webAccountId);
+	expect(accountsDocument.version).toBe(2);
+	expect(accountsDocument.accounts.map((account) => account.accountId)).toEqual(
+		[accountId],
+	);
+	// Runtime scope has its own pointer; deletion's persisted Server fact is
+	// absent in an ordinary signed-in snapshot.
+	expect(runtimeAccountId).not.toBe("");
+	expect(runtimeAccountId).not.toBe(accountId);
+	expect(runtimeAccountId).not.toBe(webAccountId);
+	expect(snapshot.local).not.toHaveProperty(
+		"bittery_deleted_server_account_id",
+	);
 
 	for (const name of ["jwt_token", "vault_keys", "encrypted_private_key"]) {
 		expect(snapshot.session).toHaveProperty(accountKey(name));
@@ -112,6 +137,8 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 		"bittery_device_key",
 		"bittery_accounts_list",
 		"bittery_active_account",
+		"bittery_web_account_id",
+		"bittery_runtime_account_id",
 	]) {
 		expect(snapshot.local).toHaveProperty(key);
 	}

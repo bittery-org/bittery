@@ -292,9 +292,7 @@ export async function signUp(
 		// Keep the Secret Key before switching the form, then perform the full Rust
 		// Sign-in that creates that installation.
 		secretKey = await readSecretKey(page);
-		await page
-			.getByRole("button", { name: "Sign in with a different account" })
-			.click();
+		await switchToFullSignIn(page, timeout);
 		await page.locator("#email").fill(user.email);
 		await page.locator("#secretKey").fill(secretKey);
 		await page.locator("#password").fill(user.password);
@@ -304,6 +302,53 @@ export async function signUp(
 	await waitForAppReady(page);
 
 	return { ...user, secretKey: secretKey ?? (await readSecretKey(page)) };
+}
+
+/**
+ * Retire the locked account and converge on the full sign-in form.
+ *
+ * A Runtime refusal deliberately keeps the page in place. The first refusal
+ * leaves the ordinary retry available; the second also exposes the labelled
+ * browser-only escape. The signup fixture must drive that public contract
+ * instead of assuming every press reloads the document.
+ */
+async function switchToFullSignIn(page: Page, timeout: number): Promise<void> {
+	const fullSignIn = page.locator("#secretKey");
+	const retry = page.getByTestId("use-different-account");
+	const browserOnlyEscape = page.getByTestId("use-different-account-escape");
+	const deadline = Date.now() + timeout;
+	let action = retry;
+
+	for (;;) {
+		await action.click();
+		// Let React publish the running state before accepting the same enabled
+		// button as the settled retry from this attempt.
+		await page.waitForTimeout(100);
+
+		while (Date.now() < deadline) {
+			if (await fullSignIn.isVisible()) {
+				return;
+			}
+			if (
+				(await browserOnlyEscape.isVisible()) &&
+				(await browserOnlyEscape.isEnabled())
+			) {
+				action = browserOnlyEscape;
+				break;
+			}
+			if ((await retry.isVisible()) && (await retry.isEnabled())) {
+				action = retry;
+				break;
+			}
+			await page.waitForTimeout(100);
+		}
+
+		if (Date.now() >= deadline) {
+			throw new Error(
+				"The account retirement neither reached full sign-in nor exposed a retry/escape before the signup timeout.",
+			);
+		}
+	}
 }
 
 export interface SelfHostedSignUpOptions {
@@ -415,6 +460,8 @@ export async function signIn(page: Page, user: TestUser): Promise<void> {
 export async function signOut(page: Page): Promise<void> {
 	await page.getByTestId("user-menu").click();
 	await page.getByTestId("sign-out-button").click();
+	await expect(page.getByTestId("log-out-dialog")).toBeVisible();
+	await page.getByTestId("log-out-confirm").click();
 	await page.waitForURL("**/login", { timeout: COLD_START_TIMEOUT_MS });
 }
 

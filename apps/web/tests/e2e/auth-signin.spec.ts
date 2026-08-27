@@ -45,6 +45,31 @@ function secretKeyHint(secretKey: string): string {
 	return secretKey.split("-").slice(0, 2).join("-");
 }
 
+/** The exact transitional and Runtime names one signed-in browser stores. */
+async function accountStorageShape(page: Page) {
+	return page.evaluate(() => {
+		const rawAccounts = localStorage.getItem("bittery_accounts_list");
+		const accountsDocument = rawAccounts
+			? (JSON.parse(rawAccounts) as {
+					version?: number;
+					accounts?: Array<{ accountId: string }>;
+				})
+			: null;
+		return {
+			activeAccountId: localStorage.getItem("bittery_active_account"),
+			accounts: accountsDocument,
+			webAccountId: localStorage.getItem("bittery_web_account_id"),
+			runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
+			deletedServerAccountId: localStorage.getItem(
+				"bittery_deleted_server_account_id",
+			),
+			secretKeyNames: Object.keys(localStorage)
+				.filter((key) => key.endsWith("_secret_key"))
+				.sort(),
+		};
+	});
+}
+
 let user: TestUser;
 
 test.beforeAll(async ({ browser }) => {
@@ -126,12 +151,13 @@ test("a wrong master password is refused and keeps the user on /login", async ({
 	await expect(errorToast(page)).toBeVisible({ timeout: SIGN_IN_MS });
 	await expect(page).toHaveURL(/\/login/);
 	await expect(form.locator("#secretKey")).toBeVisible();
-	// Nothing was unlocked: no account material reached this device.
-	expect(
-		await page.evaluate(() =>
-			Object.keys(localStorage).filter((key) => key.endsWith("_secret_key")),
-		),
-	).toEqual([]);
+	// Nothing was unlocked: no named Account material reached this device.
+	const failedShape = await accountStorageShape(page);
+	expect(failedShape.secretKeyNames).toEqual([]);
+	expect(failedShape.accounts).toBeNull();
+	expect(failedShape.activeAccountId).toBe(failedShape.webAccountId);
+	expect(failedShape.runtimeAccountId).toBeNull();
+	expect(failedShape.deletedServerAccountId).toBeNull();
 });
 
 test("signing out removes the account from the device and forces a full sign-in", async ({
@@ -140,11 +166,23 @@ test("signing out removes the account from the device and forces a full sign-in"
 	test.setTimeout(SIGN_IN_MS + COLD_START_MS);
 
 	await signIn(page, user);
+	const signedInShape = await accountStorageShape(page);
+	expect(signedInShape.activeAccountId).not.toBeNull();
+	expect(signedInShape.webAccountId).not.toBeNull();
+	expect(signedInShape.activeAccountId).not.toBe(signedInShape.webAccountId);
+	expect(signedInShape.accounts?.version).toBe(2);
 	expect(
-		await page.evaluate(() =>
-			Object.keys(localStorage).filter((key) => key.endsWith("_secret_key")),
-		),
-	).toHaveLength(1);
+		signedInShape.accounts?.accounts?.map((account) => account.accountId),
+	).toEqual([signedInShape.activeAccountId]);
+	expect(signedInShape.secretKeyNames).toEqual([
+		`bittery_account_${signedInShape.activeAccountId}_secret_key`,
+	]);
+	expect(signedInShape.runtimeAccountId).not.toBeNull();
+	expect(signedInShape.runtimeAccountId).not.toBe(
+		signedInShape.activeAccountId,
+	);
+	expect(signedInShape.runtimeAccountId).not.toBe(signedInShape.webAccountId);
+	expect(signedInShape.deletedServerAccountId).toBeNull();
 
 	await signOut(page);
 
@@ -156,11 +194,15 @@ test("signing out removes the account from the device and forces a full sign-in"
 	await expect(form.locator("#email")).toHaveValue("");
 	// Sign-out on web removes the account outright, so no Secret Key is left for
 	// the next person at this browser profile.
-	expect(
-		await page.evaluate(() =>
-			Object.keys(localStorage).filter((key) => key.endsWith("_secret_key")),
-		),
-	).toEqual([]);
+	const signedOutShape = await accountStorageShape(page);
+	expect(signedOutShape).toEqual({
+		activeAccountId: null,
+		accounts: { version: 2, accounts: [] },
+		webAccountId: null,
+		runtimeAccountId: null,
+		deletedServerAccountId: null,
+		secretKeyNames: [],
+	});
 });
 
 test("an expired session keeps password-only Quick Unlock available", async ({
@@ -169,28 +211,23 @@ test("an expired session keeps password-only Quick Unlock available", async ({
 	test.setTimeout(SIGN_IN_MS + COLD_START_MS);
 
 	await signIn(page, user);
+	const accountId = (await accountStorageShape(page)).activeAccountId;
+	expect(accountId).not.toBeNull();
 
 	// Backdate both legacy Session expiry fields without deleting the Device-bound
 	// Secret Key or pinned KDF profile used by the fresh online SRP ceremony.
-	const expiredCount = await page.evaluate(() => {
-		const suffix = "_session_data";
+	const expired = await page.evaluate((activeAccountId) => {
 		const past = Date.now() - 24 * 60 * 60 * 1000;
-		let count = 0;
-		for (const key of Object.keys(localStorage)) {
-			if (!key.startsWith("bittery_account_") || !key.endsWith(suffix)) {
-				continue;
-			}
-			const raw = localStorage.getItem(key);
-			if (!raw) continue;
-			const session = JSON.parse(raw);
-			session.expiresAt = past;
-			session.serverExpiresAt = past;
-			localStorage.setItem(key, JSON.stringify(session));
-			count += 1;
-		}
-		return count;
-	});
-	expect(expiredCount).toBe(1);
+		const key = `bittery_account_${activeAccountId}_session_data`;
+		const raw = localStorage.getItem(key);
+		if (!raw) return false;
+		const session = JSON.parse(raw);
+		session.expiresAt = past;
+		session.serverExpiresAt = past;
+		localStorage.setItem(key, JSON.stringify(session));
+		return true;
+	}, accountId);
+	expect(expired).toBe(true);
 
 	await page.goto("/login");
 	const form = page.getByTestId("signin-form");

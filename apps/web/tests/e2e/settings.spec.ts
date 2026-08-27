@@ -83,15 +83,48 @@ async function openSettingsTab(
 
 /** The accountId every per-account storage key is built from. */
 async function activeAccountId(page: Page): Promise<string> {
-	const accountId = await page.evaluate(() =>
-		localStorage.getItem("bittery_active_account"),
-	);
+	const { accountId, webAccountId } = await page.evaluate(() => ({
+		accountId: localStorage.getItem("bittery_active_account"),
+		webAccountId: localStorage.getItem("bittery_web_account_id"),
+	}));
 	if (!accountId) {
 		throw new Error(
 			"No active account on this device; the sign-in never finished.",
 		);
 	}
+	if (!webAccountId || accountId === webAccountId) {
+		throw new Error(
+			"The transitional store still points at the synthetic pre-login seed instead of the login Account.",
+		);
+	}
 	return accountId;
+}
+
+/** Retry the existing dialog until its Runtime-led teardown reports success. */
+async function finishAccountDeletion(page: Page): Promise<void> {
+	const deadline = Date.now() + VAULT_READY_TIMEOUT_MS;
+	const retry = page.getByTestId("delete-account-confirm");
+	const success = toastWithText(
+		page,
+		uiText("settings_delete_account_dialog_toast_deleted"),
+	);
+	// Do not read the still-enabled confirmation button from the render that
+	// dispatched the first attempt as an immediate retry.
+	await page.waitForTimeout(100);
+
+	while (Date.now() < deadline) {
+		if (await success.isVisible()) {
+			return;
+		}
+		if ((await retry.isVisible()) && (await retry.isEnabled())) {
+			await retry.click();
+		}
+		await page.waitForTimeout(100);
+	}
+
+	throw new Error(
+		"Account deletion did not reach the Runtime's complete teardown outcome before the settings timeout.",
+	);
 }
 
 /** The Secret Key hint the server keeps: the key's first two segments. */
@@ -555,6 +588,7 @@ test("deleting the account destroys it on the server and removes it from the dev
 }) => {
 	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
 	await signIn(page, user);
+	const accountId = await activeAccountId(page);
 	await openSettings(page);
 	await openSettingsTab(page, "general");
 
@@ -578,15 +612,47 @@ test("deleting the account destroys it on the server and removes it from the dev
 		.fill(uiText("settings_delete_account_dialog_confirm_phrase"));
 	await expect(submit).toBeEnabled();
 	await submit.click();
+	await finishAccountDeletion(page);
 
 	await expect(
 		toastWithText(page, uiText("settings_delete_account_dialog_toast_deleted")),
 	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 	// `/` bounces an unauthenticated visitor to `/login`.
 	await page.waitForURL("**/login", { timeout: VAULT_READY_TIMEOUT_MS });
-	expect(
-		await page.evaluate(() => localStorage.getItem("bittery_active_account")),
-	).toBeNull();
+	const removedShape = await page.evaluate((removedAccountId) => {
+		const rawAccounts = localStorage.getItem("bittery_accounts_list");
+		const accounts = rawAccounts
+			? (JSON.parse(rawAccounts) as {
+					version?: number;
+					accounts?: Array<{ accountId: string }>;
+				})
+			: null;
+		const accountPrefix = `bittery_account_${removedAccountId}_`;
+		return {
+			activeAccountId: localStorage.getItem("bittery_active_account"),
+			accounts,
+			webAccountId: localStorage.getItem("bittery_web_account_id"),
+			runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
+			deletedServerAccountId: localStorage.getItem(
+				"bittery_deleted_server_account_id",
+			),
+			localAccountKeys: Object.keys(localStorage)
+				.filter((key) => key.startsWith(accountPrefix))
+				.sort(),
+			sessionAccountKeys: Object.keys(sessionStorage)
+				.filter((key) => key.startsWith(accountPrefix))
+				.sort(),
+		};
+	}, accountId);
+	expect(removedShape).toEqual({
+		activeAccountId: null,
+		accounts: { version: 2, accounts: [] },
+		webAccountId: null,
+		runtimeAccountId: null,
+		deletedServerAccountId: null,
+		localAccountKeys: [],
+		sessionAccountKeys: [],
+	});
 
 	// The account is gone on the server too, so even a device that never held it
 	// cannot sign in.
