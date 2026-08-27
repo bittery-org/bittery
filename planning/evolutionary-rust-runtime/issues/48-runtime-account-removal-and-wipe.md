@@ -66,6 +66,68 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — slice-4 frontier decided: wedged Device, destructive log out, no wipe screen
+
+The maintainer answered the three open slice-4 questions. These answers are binding.
+
+**A wedged Device must stay wipeable.** Device `Wipe` now requires only `ensure_not_closed()`, not
+`ensure_open()`. `open()` fails permanently for an incarnation when the platform catalog or the
+Replica cannot load, when an active Account has no durable Replica or no generation metadata, when
+Replica and metadata disagree, or when a catalog incarnation cannot be reconciled. A user who clears
+IndexedDB but keeps `localStorage` reaches exactly that state. The relaxed precondition is safe: the
+Device phases are namespace-wide, they read no catalog, and `catalog_transition`
+(`packages/client-runtime/crates/bittery-client-core/src/runtime.rs:437`) still serializes them
+against a concurrent `open()`. The Web SharedWorker must also accept a `Wipe` after `open()` has
+thrown; `packages/client-runtime/src/worker-runtime.ts` rethrows and resets the runtime task today,
+so no Runtime object survives to receive the request. The Runtime stays the single destruction
+authority. A second host-side deletion path was rejected: removing exactly that path is the purpose
+of this ticket. Account-scope `RemoveAccount` keeps its `ensure_open()` precondition.
+
+**Web "Log out" keeps destroying, and now asks first.** The sidebar action removes the whole Account
+from the Device on one menu click. That meaning is deliberate for a browser and stays. "Log out"
+routes through Runtime `RemoveAccount`. Because the action is irreversible, it asks for confirmation
+before it destroys. An `incomplete` outcome shows its failed phases with a retry instead of
+navigating away. Today the Runtime error is swallowed and navigation happens regardless
+(`apps/web/src/components/layout/sidebar.tsx:99-102`), so a partial failure is invisible. Model the
+new failure handling on `apps/web/src/router.tsx:37-74`, the one Web path that reads a lifecycle
+outcome correctly. This changes an established gesture, so the same effort must update the sign-out
+flow in `apps/web/tests/e2e/auth-signin.spec.ts` and the shared `signOut` fixture at
+`apps/web/tests/fixtures/auth.ts:411-419`.
+
+**No Web Device-wipe screen in this slice.** Web has no Device-wipe interface; only Desktop has one,
+in the macOS menu. `Wipe` stays reachable through the Runtime API and is proven by tests, not by a
+screen. Slice 4 moves ownership; it adds no product surface. A Web wipe screen can follow later.
+
+Slice 4 therefore runs as four sequential sub-slices. Each gets a fresh implementer and an
+independent reviewer, and each is green before the next starts.
+
+1. **4a — host-cleanup seam.** Install a real `TeardownHostCleanup` on Web so `RemoveAccount` and
+   `Wipe` can reach `complete`. Drive the slice-2 OPFS spool cleanup from it. Add the
+   `RemoveAccount` arm to the retirement match in
+   `packages/client-runtime/crates/bittery-client-bindings/src/web.rs:324-328`. Expose
+   `removeAccount` and `wipe` on `RuntimeClient`
+   (`packages/client-runtime/src/client/index.ts:104`). No app changes.
+2. **4b — wedged-Device recovery.** `ensure_not_closed()` for Device `Wipe` in Core, plus the
+   SharedWorker escape hatch. Each needs a reproducing test first.
+3. **4c — Web routing.** Route the Web entry points through the Runtime, add the confirmation,
+   render `incomplete` with a retry, and decide who deletes the leftover transitional
+   `bittery_account_*` keys and the `bittery_runtime_account_id` pointer
+   (`packages/client-runtime/src/client/session.ts:69`).
+4. **4d — audit and gates.** Prove `apps/web` no longer reaches
+   `@bittery/core/services/account-lifecycle`. Update the end-to-end assertions that pin
+   transitional key shapes. Add the missing negative tests. Run `pnpm check:ci` and
+   `pnpm check:ci:rust` from a clean tree.
+
+Two constraints, recorded so nobody rediscovers them:
+
+- `packages/core/src/services/account-lifecycle.ts` **cannot be deleted** in slice 4. Desktop,
+  Mobile, and the Extension still depend on it. Slice 4 removes Web reachability only. The module
+  and its tests stay.
+- The transitional Web store keys its Accounts by a synthetic `bittery_web_account_id`
+  (`apps/web/src/lib/storage.ts:50-60`). That id is **not** the Runtime's `AccountId`.
+  `clearActiveAccountData()` and `runtimeClient.removeAccount(runtimeAccountId)` name different
+  things and cannot be swapped one for one.
+
 ### 2026-08-27 — Core teardown state machine delivered
 
 Commit `40220d09` delivers slice 3. The Runtime protocol now carries explicit
