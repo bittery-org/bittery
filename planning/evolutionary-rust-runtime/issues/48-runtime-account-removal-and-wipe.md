@@ -66,6 +66,94 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — slice 4b delivered: a wedged Device stays wipeable
+
+Commit `043a5938` delivers sub-slice 4b. A user reaches for "wipe this device" exactly when the
+Device is wedged, and until now the Runtime refused that request.
+
+`teardown()` required `ensure_open()`, which fails unless the Runtime reached `ready`. `open()`
+fails permanently for an incarnation when the platform catalog or the Replica cannot load, when an
+active Account has no durable Replica or no generation metadata, when the two disagree, or when a
+catalog incarnation cannot be reconciled. Clearing IndexedDB but not `localStorage` reaches that
+state. At the Web layer it was worse: the worker closed the created Runtime and rethrew, so no
+Runtime object survived to receive a `Wipe` at all. The transitional owner has no readiness
+precondition and works fine there, so routing Web teardown through the Runtime unchanged would have
+been a straight recovery regression.
+
+Device `Wipe` now requires only `ensure_not_closed()`
+(`packages/client-runtime/crates/bittery-client-core/src/runtime/teardown.rs:129`). That is safe
+because the Device phases are namespace-wide and read no catalog, and `catalog_transition`
+(`packages/client-runtime/crates/bittery-client-core/src/runtime.rs:437`) still serializes a wipe
+against a concurrent `open()`. Account-scope `RemoveAccount` keeps `ensure_open()`. The Web worker
+keeps a Runtime whose `open()` threw and forwards an exact `{"type":"wipe"}` to it, so the Runtime
+stays the single destruction authority; the host adds no deletion code.
+
+A `terminalFailure` wedge deliberately gets no escape hatch. It is in-memory and dies with the
+worker, and a reload reaches the durable wedged-`open()` path where the hatch does apply. It is also
+only ever set after `close()` rejected, so serving a wipe would mean a second Runtime over the same
+IndexedDB and OPFS handles while the first may still be writing.
+
+Three real defects, found by independent review and fixed here. The first two share one shape, a
+request racing a closing Runtime:
+
+- `retire()` tested its holder count synchronously, but a wipe takes its hold only after it yields.
+  Any other request arriving first closed the Runtime under the live wipe, and the next request
+  opened a second Runtime over the same storage, where `open()` could write a reconciled catalog
+  after the wipe deleted the namespace. A `wipesPending` count is now taken before the first await.
+- `retire()` then still cleared the Runtime slot before awaiting the close, so a request arriving
+  mid-close built a second Runtime anyway. A restart barrier now makes callers wait. Nothing had
+  guarded this by design; it happened to be safe only because IndexedDB serializes overlapping
+  transactions.
+- `close()` reported a clean shutdown when a retiring close failed, which contradicts the two
+  sibling paths in the same function that exist to surface exactly that failure.
+
+Coverage gaps closed, not production defects: the hold and release mechanism had no behavioural test
+at all, and deleting its guard left the whole suite passing. Both continuation orderings are now
+covered separately, because the defect appears in only one of them. The post-wipe asymmetry, where a
+wipe keeps its answer while later requests are poisoned, gained a comment and a test.
+
+Recorded, deliberately not changed here:
+
+- After a wedged wipe the Runtime stays not `ready`. That is load-bearing rather than a gap: the
+  dispatcher idles on an empty snapshot list and preparation eligibility idles on `ready`, so no
+  background writer races the destroy.
+- Two deviations in the barrier fix are correct but untested: escalating the failure inside the
+  rejection handler rather than after the await, and clearing the barrier by identity. Both matter
+  only in an ordering the current test doubles cannot produce.
+
+**Three independent reviews.** The first found the Core relaxation sound. It verified that each
+Device phase genuinely destroys on a never-opened Runtime rather than silently finding nothing, that
+`open()` and `Wipe` are serialized by `catalog_transition`, and it probed the host-side
+`isDeviceWipe` predicate (`packages/client-runtime/src/worker-runtime.ts:176`) with fifteen hostile
+payloads, including duplicate keys, unicode escapes, and prototype-polluting keys. It found one
+blocker. The second review cleared that fix and found the second defect of the same shape, which two
+earlier reviews had missed. The third cleared the result as ship. It also overruled a proposal to
+merely record the `close()` reporting bug: the two sibling paths in the same function exist
+specifically to surface that failure, so resolving there was an inconsistency, not a design choice.
+
+Two gate facts that outlive this slice:
+
+- `pnpm --filter @bittery/client-runtime check` runs **no** TypeScript tests, and neither does
+  `pnpm check:ci:rust`. Only `pnpm check:ci` runs `bun test src`. A slice that moves TypeScript and
+  runs only the Rust gate ships untested. Every slice in this migration must run both.
+- The kernel OOM killer ended this session three times, because reviewers copied the repository into
+  the RAM-backed `/tmp` and built Rust there on a 15 GB box with no swap. A subagent must never copy
+  the repository and never build Rust under `/tmp`; scratch belongs under `/home/julian/.cache/`.
+  See `../handoff-2026-08-27.md` for the detail.
+
+What 4c inherits from 4b, on top of the two 4c dependencies 4a already recorded — the post-wipe
+silent observation, and clearing the active-Account pointer and the transitional `bittery_account_*`
+keys:
+
+- Retiring a wedged incarnation after an **incomplete** wipe discards Core's in-memory pending-scope
+  tombstone. The host, not Core, owns driving that retry.
+- The recovery path covers an `open()` that **throws**. An `open()` that **hangs**, for example on
+  an IndexedDB version-change block from another tab, produces no wedged incarnation and therefore
+  no wipe path. 4c must not assume every wedge is recoverable.
+
+`pnpm --filter @bittery/client-runtime check` passes and `bun test src` is 216 passing. Nothing
+under `apps/` changed. `Status:` stays `ready-for-agent`; 4c and 4d are still owed.
+
 ### 2026-08-27 — slice 4a delivered: the Web host-cleanup seam
 
 Commit `8d4aa7e7` delivers sub-slice 4a. Web `RemoveAccount` and `Wipe` now reach `complete`, and
