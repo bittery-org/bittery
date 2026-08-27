@@ -66,6 +66,71 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — slice 4c-2 delivered: Web account switching and deletion route through the Runtime
+
+Commit `c663f3ec` delivers slice 4c-2. The last two Web teardown gestures now go through the
+Runtime and report what survived, reusing the orchestrator slice 4c-1 built rather than adding a
+second one.
+
+"Use a different account" retires the Session. It does not destroy the Account. That button sits on
+the locked screen, so anyone at the keyboard reaches it, and a one-click irreversible removal there
+could destroy a Replica still holding Operations this Device never sent. A retirement already drops
+every secret that matters and leaves ciphertext under keys the Device no longer holds, so the
+user's intent is fully served. The gesture's dependencies carry no removal call, so escalating it
+later is a compile error rather than a judgement.
+
+The Danger Zone deletion keeps its server-first ordering, which the Runtime cannot express because
+it has no notion of a Server delete. Names resolve first, then the Server deletes, and only then does
+the Runtime become the authority over the local half. A Server refusal destroys nothing locally. An
+Account this Device cannot name stops before the Server is asked, because deleting it there would
+strand a local copy nothing could afterwards name.
+
+Real defects fixed here, all found by independent review:
+
+- The dialog reported success while local data survived, because only the Server step surfaced and
+  every local failure was dropped. It also never signed the Runtime out, so the live master unlock
+  key and decrypted Items outlived a Server-side Account deletion.
+- The fact that the Server had already deleted the Account was held in React memory. Deleting the
+  Account makes the next request answer 401, and the 401 handler replaces the whole document, so
+  that memory died exactly when it was needed. The retry then asked the Server for an Account it no
+  longer had, took the failure as "still there", and blocked local destruction permanently. The
+  fact is now persisted, keyed by the Account name it belongs to, and believed only when it matches
+  the name the attempt just resolved.
+- Routing "Use a different account" through the Runtime made it inherit the Runtime's ability to be
+  wedged, and it is the only control on that screen: the email field stays disabled while a quick
+  unlock is offered. A wedged Device therefore trapped the user with no way to sign in as anybody
+  else. After repeated refusal the gesture now offers to forget this browser's sign-in alone, and
+  says plainly that the Account stays on the Device.
+- That escape dropped the Secret Key but left the same disabled field on screen, because the query
+  gating it is stale-timed and nothing invalidated it. It now invalidates, so the screen becomes an
+  ordinary sign-in.
+- A comment claimed a failed switch left the user where they started and an ordinary retry was the
+  whole answer. That was false, and it was the one piece of recorded reasoning in the slice that was
+  wrong.
+
+Coverage gaps closed, not production defects: the two behaviours this slice was written to
+establish were the two that survived mutation. A record this browser cannot read must never stand
+in for a Server delete, and a record it cannot write must never block a destruction the Server
+already completed. Three source tripwires were also re-bounded to their own branch: each previously
+survived the exact mutation its comment warned about.
+
+Recorded, deliberately not changed here:
+
+- The deletion dialog has no browser-only escape. After a Server deletion a wedged Device leaves the
+  Secret Key in plain storage for an Account that no longer exists. Persisting the Server fact
+  shrinks this to a true Runtime wedge; the escape and its copy are a follow-up slice, because the
+  existing wording would be false there.
+- After the 401 replaces the document the Danger Zone dialog does not mount, so the retry the
+  persisted record enables is not yet reachable end to end. That is wiring, and belongs with the
+  other Web coverage slice 4d owes.
+- An unnamed transitional Account still stops both gestures for the rest of the page load. The
+  refusal is right; the start-up seeding rule owns the cause.
+
+`bun test src` in `apps/web` is 375 passing. At the package root `bun test` also reports 20
+failures, all pre-existing Playwright specs that cannot run under bun. Type checks, Biome and en/de
+key parity are clean. `Status:` stays `ready-for-agent`; the start-up seeding rule, the deletion
+dialog's browser-only escape, and 4d are still owed.
+
 ### 2026-08-27 — slice 4c-1 delivered: Web log out routes through the Runtime
 
 **Slice 4c was split in two.** The frontier comment below plans 4c as one sub-slice. In practice it
