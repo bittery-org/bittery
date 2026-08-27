@@ -29,11 +29,12 @@
  * report success over surviving `secret_key` material. A transitional id that resolves to
  * `null` is that half-removal, so it is reported as one and never cleared under.
  *
- * A wedged Runtime refuses its side forever, so two gestures carry one bounded escape
- * each, offered only after repeated refusal: `clearBrowserStoredDataOnly` for the log out
- * and `forgetBrowserSessionOnly` for the retirement. Both touch the transitional store
- * alone, both report what the Runtime kept, and neither calls itself a removal. The Danger
- * Zone deletion has no escape yet.
+ * A wedged Runtime refuses its side forever, so all three gestures carry a bounded escape,
+ * offered only after repeated refusal. Log out and Danger Zone deletion reuse
+ * `clearBrowserStoredDataOnly`; deletion adds the stronger condition that the Server Account
+ * is already deleted. Retirement uses `forgetBrowserSessionOnly`. Both escape behaviors touch
+ * the transitional store alone, report what the Runtime kept, and never call themselves a
+ * removal.
  *
  * Every decision lives here rather than in a component, so a unit test can reach it.
  */
@@ -144,8 +145,12 @@ export interface AccountRemovalIncomplete extends TeardownIncomplete {
  */
 export type AccountRemovalResult =
 	| { readonly status: "removed" }
-	| { readonly status: "browserDataCleared" }
+	| BrowserDataCleared
 	| AccountRemovalIncomplete;
+
+export interface BrowserDataCleared {
+	readonly status: "browserDataCleared";
+}
 
 /**
  * The order a report lists surviving stores in, widest first.
@@ -380,22 +385,45 @@ export async function removeAccountFromDevice(
  * `bittery_runtime_account_id` alone: the Runtime stays the single authority over its own
  * data. It is a legacy-store escape hatch, not a second deletion path.
  *
- * Its outcome is `browserDataCleared`, never `removed`, because the Account was not removed.
+ * Its outcome is `browserDataCleared`, never `removed`, because the Runtime Account was not
+ * removed from the Device.
  */
-export async function clearBrowserStoredDataOnly(
+export function clearBrowserStoredDataOnly(
+	previous: AccountDeletionIncomplete,
+	deps: AccountRemovalDeps,
+): Promise<AccountDeletionResult>;
+export function clearBrowserStoredDataOnly(
 	previous: AccountRemovalIncomplete,
 	deps: AccountRemovalDeps,
-): Promise<AccountRemovalResult> {
+): Promise<AccountRemovalResult>;
+export async function clearBrowserStoredDataOnly(
+	previous: AccountRemovalIncomplete | AccountDeletionIncomplete,
+	deps: AccountRemovalDeps,
+): Promise<AccountRemovalResult | AccountDeletionResult> {
+	// A Danger Zone escape is narrower than log out's: deleting only the browser's
+	// transitional data is authorised only after the Server deletion is authoritative and
+	// repeated local attempts have earned the offer. A caller cannot bypass either gate.
+	if (
+		"serverAccountDeleted" in previous &&
+		(!previous.serverAccountDeleted || !previous.canClearBrowserDataOnly)
+	) {
+		return previous;
+	}
 	const attempts = previous.attempts + 1;
 	const target = previous.target;
 	if (target === null) {
-		return incomplete(null, attempts, previous.areas, previous.code);
+		return browserEscapeIncomplete(
+			previous,
+			attempts,
+			previous.areas,
+			previous.code,
+		);
 	}
 	// The same empty pointer, and worse here: this outcome tells the user their Secret Key
 	// is gone from this browser, which is the whole reason they pressed the button.
 	if (target.transitionalAccountId === null) {
-		return incomplete(
-			target,
+		return browserEscapeIncomplete(
+			previous,
 			attempts,
 			[...previous.areas, "transitionalStore"],
 			previous.code,
@@ -406,8 +434,8 @@ export async function clearBrowserStoredDataOnly(
 			target.transitionalAccountId,
 		);
 		if (transitional.failures.length > 0) {
-			return incomplete(
-				target,
+			return browserEscapeIncomplete(
+				previous,
 				attempts,
 				[...previous.areas, "transitionalStore"],
 				null,
@@ -415,14 +443,32 @@ export async function clearBrowserStoredDataOnly(
 		}
 		deps.forgetTransitionalAccountId();
 	} catch (error) {
-		return incomplete(
-			target,
+		return browserEscapeIncomplete(
+			previous,
 			attempts,
 			[...previous.areas, "transitionalStore"],
 			transportErrorCode(error),
 		);
 	}
 	return { status: "browserDataCleared" };
+}
+
+function browserEscapeIncomplete(
+	previous: AccountRemovalIncomplete | AccountDeletionIncomplete,
+	attempts: number,
+	areas: readonly AccountRemovalArea[],
+	code: RuntimeErrorCode | null,
+): AccountRemovalIncomplete | AccountDeletionIncomplete {
+	if ("serverAccountDeleted" in previous) {
+		return {
+			...baseReport(previous.target, attempts, areas, code),
+			serverAccountDeleted: previous.serverAccountDeleted,
+			canClearBrowserDataOnly:
+				previous.serverAccountDeleted &&
+				canOfferBrowserEscape(previous.target, attempts),
+		};
+	}
+	return incomplete(previous.target, attempts, areas, code);
 }
 
 // ---------------------------------------------------------------------------
@@ -642,10 +688,13 @@ export interface AccountDeletionDeps extends AccountRemovalDeps {
  */
 export interface AccountDeletionIncomplete extends TeardownIncomplete {
 	readonly serverAccountDeleted: boolean;
+	/** Whether the already-deleted Server Account may use the browser-only escape. */
+	readonly canClearBrowserDataOnly: boolean;
 }
 
 export type AccountDeletionResult =
 	| { readonly status: "deleted" }
+	| BrowserDataCleared
 	| AccountDeletionIncomplete;
 
 /**
@@ -668,11 +717,15 @@ export async function deleteAccountEverywhereFromDevice(
 
 	const resolved = await resolveNamedTarget(previous, deps);
 	if (resolved.named === null) {
+		const serverAccountDeleted = previous?.serverAccountDeleted ?? false;
 		return {
 			...baseReport(resolved.target, attempts, resolved.areas, resolved.code),
 			// Nothing was named, so the written record cannot be matched against
 			// anything. Only the carried report can answer here.
-			serverAccountDeleted: previous?.serverAccountDeleted ?? false,
+			serverAccountDeleted,
+			canClearBrowserDataOnly:
+				serverAccountDeleted &&
+				canOfferBrowserEscape(resolved.target, attempts),
 		};
 	}
 	const named = resolved.named;
@@ -689,6 +742,7 @@ export async function deleteAccountEverywhereFromDevice(
 			return {
 				...baseReport(resolved.target, attempts, ["serverAccount"], null),
 				serverAccountDeleted: false,
+				canClearBrowserDataOnly: false,
 			};
 		}
 		// Written before the first local step, and before the 401 that the deleted
@@ -701,6 +755,7 @@ export async function deleteAccountEverywhereFromDevice(
 		return {
 			...baseReport(resolved.target, attempts, failure.areas, failure.code),
 			serverAccountDeleted: true,
+			canClearBrowserDataOnly: canOfferBrowserEscape(resolved.target, attempts),
 		};
 	}
 	// The record outlived every step it guarded, and `destroyLocalAccount` cleared it in

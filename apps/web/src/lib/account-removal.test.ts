@@ -1211,3 +1211,92 @@ describe("deleting the Account deletes it on the Server first", () => {
 		expect(deps.serverCalls).toEqual([]);
 	});
 });
+
+describe("a deleted Server Account can still drop this browser's own data", () => {
+	test("a repeated local failure offers the existing browser-only escape", async () => {
+		const deps = deletionRecorder({
+			removal: {
+				async removeAccount(accountId) {
+					deps.removed.push(accountId);
+					throw new RuntimeRequestError("RUNTIME_CLOSED", "open() threw");
+				},
+			},
+		});
+
+		const first = deletionReport(
+			await deleteAccountEverywhereFromDevice(null, deps),
+		);
+		expect(first.canClearBrowserDataOnly).toBe(false);
+		expect(await clearBrowserStoredDataOnly(first, deps)).toBe(first);
+		expect(deps.cleared).toEqual([]);
+		const second = deletionReport(
+			await deleteAccountEverywhereFromDevice(first, deps),
+		);
+		expect(second.canClearBrowserDataOnly).toBe(true);
+
+		const escaped = await clearBrowserStoredDataOnly(second, deps);
+
+		expect(escaped).toEqual({ status: "browserDataCleared" });
+		// The two failed deletion attempts made the one Server call and the only Runtime
+		// calls. The escape itself reaches neither and leaves the Runtime pointer alone.
+		expect(deps.serverCalls).toEqual([0]);
+		expect(deps.removed).toEqual(["account-1", "account-1"]);
+		expect(deps.selected).toEqual([]);
+		expect(deps.cleared).toEqual(["web-account-1"]);
+		expect(deps.forgotten).toHaveLength(1);
+	});
+
+	test("a Server refusal cannot be bypassed by the browser-only escape", async () => {
+		const deps = deletionRecorder({
+			server: async () => {
+				throw new Error("500");
+			},
+		});
+
+		const first = deletionReport(
+			await deleteAccountEverywhereFromDevice(null, deps),
+		);
+		const second = deletionReport(
+			await deleteAccountEverywhereFromDevice(first, deps),
+		);
+		expect(second.canClearBrowserDataOnly).toBe(false);
+
+		const refused = await clearBrowserStoredDataOnly(second, deps);
+
+		expect(refused).toBe(second);
+		expect(deps.serverCalls).toEqual([0, 1]);
+		expect(deps.removed).toEqual([]);
+		expect(deps.cleared).toEqual([]);
+		expect(deps.forgotten).toEqual([]);
+	});
+
+	test("an escape with no transitional target stays incomplete and clears nothing", async () => {
+		const deps = deletionRecorder();
+		const unnamed: AccountDeletionIncomplete = {
+			status: "incomplete",
+			target: null,
+			attempts: 2,
+			areas: ["replica"],
+			code: "RUNTIME_CLOSED",
+			serverAccountDeleted: true,
+			// Deliberately stale: even a caller presenting an offer may not turn an
+			// unnamed clear into success.
+			canClearBrowserDataOnly: true,
+		};
+
+		const result = await clearBrowserStoredDataOnly(unnamed, deps);
+
+		expect(result).toMatchObject({
+			status: "incomplete",
+			target: null,
+			attempts: 3,
+			serverAccountDeleted: true,
+			canClearBrowserDataOnly: false,
+		});
+		expect(deps.serverCalls).toEqual([]);
+		expect(deps.removed).toEqual([]);
+		expect(deps.cleared).toEqual([]);
+		expect(deps.forgotten).toEqual([]);
+		expect(deps.selected).toEqual([]);
+	});
+});

@@ -21,6 +21,7 @@ import { useRef, useState } from "react";
 import {
 	type AccountDeletionDeps,
 	type AccountDeletionIncomplete,
+	clearBrowserStoredDataOnly,
 	deleteAccountEverywhereFromDevice,
 	retryCannotFinish,
 } from "@/lib/account-removal";
@@ -40,12 +41,16 @@ type DeletionState =
 	| { readonly phase: "confirming" }
 	| {
 			readonly phase: "deleting";
+			readonly action: DeletionAction;
 			readonly previous: AccountDeletionIncomplete | null;
 	  }
 	| {
 			readonly phase: "incomplete";
 			readonly result: AccountDeletionIncomplete;
-	  };
+	  }
+	| { readonly phase: "browserDataCleared" };
+
+type DeletionAction = "delete" | "clearBrowserData";
 
 const CONFIRMING: DeletionState = { phase: "confirming" };
 
@@ -90,12 +95,16 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		writeDeletedServerAccountId,
 	});
 
-	const runDeletion = async (previous: AccountDeletionIncomplete | null) => {
-		setDeletion({ phase: "deleting", previous });
-		const result = await deleteAccountEverywhereFromDevice(
-			previous,
-			deletionDeps(confirmEmail),
-		);
+	const runDeletion = async (
+		action: DeletionAction,
+		previous: AccountDeletionIncomplete | null,
+	) => {
+		setDeletion({ phase: "deleting", action, previous });
+		const deps = deletionDeps(confirmEmail);
+		const result =
+			action === "clearBrowserData" && previous !== null
+				? await clearBrowserStoredDataOnly(previous, deps)
+				: await deleteAccountEverywhereFromDevice(previous, deps);
 		if (result.status === "deleted") {
 			lastIncompleteReport.current = null;
 			setDeletion(CONFIRMING);
@@ -110,11 +119,23 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			}
 			return;
 		}
+		if (result.status === "browserDataCleared") {
+			// The Server Account is gone and this browser let go, but the Runtime did not.
+			// This is its own terminal status: no navigation and no removal retry.
+			lastIncompleteReport.current = null;
+			queryClient.clear();
+			setDeletion({ phase: "browserDataCleared" });
+			return;
+		}
 		// Never a success toast and never a navigation: the Server, the Runtime or this
 		// browser still holds something the user asked to be gone.
 		lastIncompleteReport.current = result;
 		setDeletion({ phase: "incomplete", result });
-		toast.error(m.settings_delete_account_dialog_toast_delete_failed());
+		toast.error(
+			action === "clearBrowserData"
+				? m.settings_delete_account_dialog_toast_clear_browser_data_failed()
+				: m.settings_delete_account_dialog_toast_delete_failed(),
+		);
 	};
 
 	const report =
@@ -124,6 +145,9 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				? deletion.previous
 				: null;
 	const busy = deletion.phase === "deleting";
+	const clearingBrowserData =
+		deletion.phase === "deleting" && deletion.action === "clearBrowserData";
+	const cleared = deletion.phase === "browserDataCleared";
 	// An empty transitional pointer is refused on every attempt for the rest of this page
 	// load, so this dialog offers no retry there. A button that cannot work is worse than
 	// no button: it asks the user to keep pressing a promise nothing can keep.
@@ -131,7 +155,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	// The typed email is what the Server checks, so the confirmation stands until the
 	// Server has let go. After that the remaining work is local and already authorised.
 	const needsConfirmation =
-		!stranded && (report === null || !report.serverAccountDeleted);
+		!cleared && !stranded && (report === null || !report.serverAccountDeleted);
 	const confirmed =
 		confirmEmail.toLowerCase() === userEmail.toLowerCase() &&
 		confirmText === confirmPhrase;
@@ -149,7 +173,13 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				return;
 			}
 		}
-		void runDeletion(report);
+		void runDeletion("delete", report);
+	};
+
+	const handleClearBrowserData = () => {
+		if (report !== null) {
+			void runDeletion("clearBrowserData", report);
+		}
 	};
 
 	const handleOpenChange = (newOpen: boolean) => {
@@ -158,6 +188,9 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		}
 		setOpen(newOpen);
 		if (newOpen) {
+			if (cleared) {
+				return;
+			}
 			// Reopening shows the held report rather than a fresh confirmation, so a
 			// second attempt reuses the names and the Server step the first one settled.
 			setDeletion(
@@ -187,12 +220,18 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			>
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{report
-							? m.settings_delete_account_dialog_incomplete_title()
-							: m.settings_delete_account_dialog_title()}
+						{cleared
+							? m.settings_delete_account_dialog_browser_cleared_title()
+							: report
+								? m.settings_delete_account_dialog_incomplete_title()
+								: m.settings_delete_account_dialog_title()}
 					</AlertDialogTitle>
 					<AlertDialogDescription asChild>
-						{report ? (
+						{cleared ? (
+							<p>
+								{m.settings_delete_account_dialog_browser_cleared_description()}
+							</p>
+						) : report ? (
 							<p>
 								{stranded
 									? report.serverAccountDeleted
@@ -239,6 +278,24 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 						))}
 					</ul>
 				) : null}
+				{report?.canClearBrowserDataOnly ? (
+					<div className="space-y-2 rounded-md border border-border/60 p-3">
+						<p className="text-muted-foreground text-sm">
+							{m.settings_delete_account_dialog_clear_browser_data_hint()}
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={handleClearBrowserData}
+							disabled={busy}
+							data-testid="delete-account-clear-browser-data"
+						>
+							{clearingBrowserData
+								? m.settings_delete_account_dialog_clear_browser_data_busy()
+								: m.settings_delete_account_dialog_clear_browser_data()}
+						</Button>
+					</div>
+				) : null}
 				{needsConfirmation ? (
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
@@ -276,11 +333,13 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 						disabled={busy}
 						data-testid="delete-account-cancel"
 					>
-						{report
-							? m.settings_delete_account_dialog_incomplete_close()
-							: m.settings_common_action_cancel()}
+						{cleared
+							? m.settings_delete_account_dialog_browser_cleared_close()
+							: report
+								? m.settings_delete_account_dialog_incomplete_close()
+								: m.settings_common_action_cancel()}
 					</AlertDialogCancel>
-					{stranded ? null : (
+					{cleared || stranded ? null : (
 						<Button
 							variant="destructive"
 							onClick={handleDelete}

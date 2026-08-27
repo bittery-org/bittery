@@ -260,6 +260,66 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		expect(deletedBranch).toContain('navigate({ to: "/" })');
 	});
 
+	test("a repeated local deletion failure offers a truthful browser-only terminal action", () => {
+		const dialog = source("../components/settings/delete-account-dialog.tsx");
+		expect(dialog).toContain("report?.canClearBrowserDataOnly");
+		expect(dialog).toContain("delete-account-clear-browser-data");
+		expect(dialog).toContain('result.status === "browserDataCleared"');
+
+		// Bounded to the driver. An import or an unrelated handler mentioning the escape
+		// does not prove the clear action dispatches to it instead of deleting again.
+		const runDeletionStart = dialog.indexOf("const runDeletion = async (");
+		const runDeletion = dialog.slice(
+			runDeletionStart,
+			dialog.indexOf("\n\tconst report =", runDeletionStart),
+		);
+		expect(runDeletion).toContain('action === "clearBrowserData"');
+		expect(runDeletion).toContain(
+			"await clearBrowserStoredDataOnly(previous, deps)",
+		);
+		expect(runDeletion).toContain(
+			"await deleteAccountEverywhereFromDevice(previous, deps)",
+		);
+
+		const terminalStart = dialog.indexOf(
+			'result.status === "browserDataCleared"',
+		);
+		const terminalBranch = dialog.slice(
+			terminalStart,
+			dialog.indexOf("\n\t\t\treturn;", terminalStart),
+		);
+		expect(terminalBranch).not.toContain("navigate");
+		expect(terminalBranch).not.toContain("toast.success");
+		expect(terminalBranch).not.toContain("incomplete_retry");
+		expect(terminalBranch).not.toContain("needsConfirmation");
+		expect(terminalBranch).toContain('phase: "browserDataCleared"');
+		expect(dialog).toContain("cleared || stranded ? null");
+		expect(dialog).toContain("!cleared &&");
+
+		const english = JSON.parse(
+			source("../../../../packages/i18n/messages/en.json"),
+		) as Record<string, string>;
+		const german = JSON.parse(
+			source("../../../../packages/i18n/messages/de.json"),
+		) as Record<string, string>;
+		expect(english.settings_delete_account_dialog_clear_browser_data_hint).toBe(
+			"The Server Account is already deleted. Removing the surviving Device data keeps failing. You can still clear what this browser stored, including your Secret Key. Runtime-owned Account data can remain on this Device.",
+		);
+		expect(
+			english.settings_delete_account_dialog_browser_cleared_description,
+		).toBe(
+			"The Server Account is deleted. This browser's transitional Account data is gone, including your Secret Key. The Account was not removed from this Device; Runtime-owned data can remain.",
+		);
+		expect(german.settings_delete_account_dialog_clear_browser_data_hint).toBe(
+			"Das Server-Konto ist bereits gelöscht. Das Entfernen der verbliebenen Gerätedaten schlägt weiterhin fehl. Du kannst trotzdem löschen, was dieser Browser gespeichert hat, einschließlich deines Secret Keys. Runtime-eigene Kontodaten können auf diesem Gerät verbleiben.",
+		);
+		expect(
+			german.settings_delete_account_dialog_browser_cleared_description,
+		).toBe(
+			"Das Server-Konto ist gelöscht. Die Übergangsdaten dieses Browsers sind weg, einschließlich deines Secret Keys. Das Konto wurde nicht von diesem Gerät entfernt; Runtime-eigene Daten können verbleiben.",
+		);
+	});
+
 	// A report that dies with the dialog takes `serverAccountDeleted` with it, and the next
 	// attempt asks the Server for an Account it no longer has. That answer is an error, and
 	// reading it as "the Server still holds it" strands this Device's copy forever.
