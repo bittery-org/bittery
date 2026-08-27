@@ -153,6 +153,17 @@ pub(crate) enum TransferControlRequest {
         )]
         transfer_id: String,
     },
+    /// Destroys one named Account's ciphertext spool. The identity is opaque to the host, so the
+    /// only constraint is that it names something.
+    DeleteAccount {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^[\\s\\S]+$"))
+        )]
+        account_id: String,
+    },
+    /// Destroys every Account's ciphertext spool on this Device.
+    WipeDevice,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +195,8 @@ pub(crate) enum TransferControlResponse {
     UploadBegun,
     UploadChunkAccepted,
     UploadFinished,
+    AccountDeleted,
+    DeviceWiped,
     Cancelled,
     NetworkFailure,
     ResponseTooLarge,
@@ -264,6 +277,14 @@ pub fn transfer_control_contract_fixture() -> serde_json::Value {
             {
                 "request": { "type": "finishUpload", "transferId": "upload-1" },
                 "response": { "type": "uploadFinished" }
+            },
+            {
+                "request": { "type": "deleteAccount", "accountId": "account-1" },
+                "response": { "type": "accountDeleted" }
+            },
+            {
+                "request": { "type": "wipeDevice" },
+                "response": { "type": "deviceWiped" }
             }
         ]
     })

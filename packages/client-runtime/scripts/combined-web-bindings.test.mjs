@@ -470,3 +470,365 @@ test(
 		closingHarness.free();
 	},
 );
+
+test("Web teardown destroys the ciphertext spool and converges", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+
+	const composed = (spoolResponse) => {
+		const spoolRequests = [];
+		const artifactRequests = [];
+		const replicaRequests = [];
+		const platformRequests = [];
+		const runtime =
+			bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
+				async (requestJson) => {
+					const request = JSON.parse(requestJson);
+					replicaRequests.push(request);
+					if (request.type === "deleteAccount")
+						return '{"type":"accountDeleted"}';
+					if (request.type === "wipeDevice") return '{"type":"deviceWiped"}';
+					throw new Error(`unexpected Replica request ${request.type}`);
+				},
+				async (requestJson) => {
+					const request = JSON.parse(requestJson);
+					platformRequests.push(request);
+					return request.type === "get"
+						? '{"type":"value","value":null}'
+						: '{"type":"done"}';
+				},
+				async () => '{"type":"networkFailure"}',
+				() => undefined,
+				{
+					invoke: async (requestJson) => {
+						const request = JSON.parse(requestJson);
+						artifactRequests.push(request);
+						return {
+							controlResponseJson: JSON.stringify(
+								request.type === "wipeDevice"
+									? { type: "deviceWiped" }
+									: { type: "accountDeleted" },
+							),
+						};
+					},
+				},
+				{
+					invoke: async (requestJson) => {
+						const request = JSON.parse(requestJson);
+						spoolRequests.push(request);
+						return {
+							controlResponseJson: JSON.stringify(spoolResponse(request)),
+						};
+					},
+					close: () => undefined,
+				},
+				{ acquire: async () => null },
+				"client-teardown",
+				"web",
+				"1.0.0",
+				() => undefined,
+			);
+		return {
+			runtime,
+			spoolRequests,
+			artifactRequests,
+			replicaRequests,
+			platformRequests,
+		};
+	};
+
+	const honest = (request) =>
+		request.type === "wipeDevice"
+			? { type: "deviceWiped" }
+			: { type: "accountDeleted" };
+
+	const removal = composed(honest);
+	await removal.runtime.open();
+	assert.deepEqual(
+		JSON.parse(
+			await removal.runtime.request_json(
+				"remove",
+				'{"type":"removeAccount","accountId":"account-teardown"}',
+			),
+		),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "account", accountId: "account-teardown" },
+				status: "complete",
+			},
+		},
+	);
+	assert.deepEqual(removal.spoolRequests, [
+		{ type: "deleteAccount", accountId: "account-teardown" },
+	]);
+	await removal.runtime.close();
+	removal.runtime.free();
+
+	const wipe = composed(honest);
+	await wipe.runtime.open();
+	assert.deepEqual(
+		JSON.parse(await wipe.runtime.request_json("wipe", '{"type":"wipe"}')),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "device" },
+				status: "complete",
+			},
+		},
+	);
+	assert.deepEqual(wipe.spoolRequests, [{ type: "wipeDevice" }]);
+	await wipe.runtime.close();
+	wipe.runtime.free();
+
+	// A right-shaped answer for the wrong scope is a failure, not convergence.
+	const crossed = composed(() => ({ type: "deviceWiped" }));
+	await crossed.runtime.open();
+	assert.deepEqual(
+		JSON.parse(
+			await crossed.runtime.request_json(
+				"remove",
+				'{"type":"removeAccount","accountId":"account-teardown"}',
+			),
+		),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "account", accountId: "account-teardown" },
+				status: "incomplete",
+				failures: ["hostCleanup"],
+			},
+		},
+	);
+	await crossed.runtime.close();
+	crossed.runtime.free();
+});
+
+test("an observation admitted while a Wipe waits is caught up before it is resumed", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+
+	// The Wipe waits behind a Sign-in that holds the teardown admission lock across its
+	// transport call. That wait is the one window where an observation is admitted after the
+	// Wipe suspended every live sink and before the Runtime fences new observations.
+	let releaseTransport;
+	let markTransportEntered;
+	const transportReleased = new Promise((resolve) => {
+		releaseTransport = resolve;
+	});
+	const transportEntered = new Promise((resolve) => {
+		markTransportEntered = resolve;
+	});
+	const runtime = bindings.WebClientRuntime.withConfiguredExecutors(
+		async (requestJson) =>
+			JSON.parse(requestJson).type === "wipeDevice"
+				? '{"type":"deviceWiped"}'
+				: '{"type":"accountDeleted"}',
+		async (requestJson) =>
+			JSON.parse(requestJson).type === "get"
+				? '{"type":"value","value":null}'
+				: '{"type":"done"}',
+		async () => {
+			markTransportEntered();
+			await transportReleased;
+			return '{"type":"networkFailure"}';
+		},
+		() => undefined,
+		"client-balance",
+		"web",
+		"1.0.0",
+	);
+	await runtime.open();
+
+	const signingIn = runtime.request_json(
+		"sign-in",
+		JSON.stringify({
+			type: "signIn",
+			serverUrl: "https://server.test",
+			email: "person@example.test",
+			masterPassword: "UNIQUE_MASTER_PASSWORD",
+			secretKey: "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
+			insecureTransportConfirmed: false,
+		}),
+	);
+	await transportEntered;
+	const wiping = runtime.request_json("wipe", '{"type":"wipe"}');
+	await Promise.resolve();
+
+	const projections = [];
+	runtime.observe_json(
+		"admitted-mid-wipe",
+		JSON.stringify({ type: "runtimeStatus", accountId: null }),
+		(json) => projections.push(JSON.parse(json)),
+	);
+	// The Wipe already suspended every live sink, so this one must stay silent too.
+	assert.deepEqual(projections, []);
+
+	releaseTransport();
+	assert.equal(JSON.parse(await signingIn).type, "failed");
+	// Resuming a sink that was never suspended traps the WebAssembly module. Reaching this
+	// answer at all is the proof that suspend, catch-up, and resume stayed balanced.
+	const wiped = JSON.parse(await wiping);
+	assert.equal(wiped.type, "succeeded");
+	assert.equal(wiped.value.type, "teardown");
+	assert.deepEqual(wiped.value.scope, { type: "device" });
+
+	runtime.unobserve("admitted-mid-wipe");
+	await runtime.close();
+	runtime.free();
+});
+
+// One composition for the two host-cleanup failure tests. Every seam but the ciphertext spool
+// answers honestly, so whatever the teardown reports is the spool's doing and nothing else's.
+const teardownRuntime = (bindings, spoolInvoke) => {
+	const spoolRequests = [];
+	const runtime =
+		bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
+			async (requestJson) => {
+				const request = JSON.parse(requestJson);
+				if (request.type === "deleteAccount")
+					return '{"type":"accountDeleted"}';
+				if (request.type === "wipeDevice") return '{"type":"deviceWiped"}';
+				throw new Error(`unexpected Replica request ${request.type}`);
+			},
+			async (requestJson) =>
+				JSON.parse(requestJson).type === "get"
+					? '{"type":"value","value":null}'
+					: '{"type":"done"}',
+			async () => '{"type":"networkFailure"}',
+			() => undefined,
+			{
+				invoke: async (requestJson) => ({
+					controlResponseJson: JSON.stringify(
+						JSON.parse(requestJson).type === "wipeDevice"
+							? { type: "deviceWiped" }
+							: { type: "accountDeleted" },
+					),
+				}),
+			},
+			{
+				invoke: async (requestJson) => {
+					const request = JSON.parse(requestJson);
+					spoolRequests.push(request);
+					return spoolInvoke(request, spoolRequests.length);
+				},
+				close: () => undefined,
+			},
+			{ acquire: async () => null },
+			"client-teardown",
+			"web",
+			"1.0.0",
+			() => undefined,
+		);
+	return { runtime, spoolRequests };
+};
+
+test("a spool answer that smuggles side-channel bytes cannot converge a teardown", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+
+	// The scope is the one that was asked for, but destruction has no side channel. A host that
+	// returns bytes anyway is not answering the question this phase asked.
+	const { runtime, spoolRequests } = teardownRuntime(bindings, (request) => ({
+		controlResponseJson: JSON.stringify(
+			request.type === "wipeDevice"
+				? { type: "deviceWiped" }
+				: { type: "accountDeleted" },
+		),
+		bytes: new ArrayBuffer(8),
+	}));
+	await runtime.open();
+
+	assert.deepEqual(
+		JSON.parse(
+			await runtime.request_json(
+				"remove",
+				'{"type":"removeAccount","accountId":"account-teardown"}',
+			),
+		),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "account", accountId: "account-teardown" },
+				status: "incomplete",
+				failures: ["hostCleanup"],
+			},
+		},
+	);
+	assert.deepEqual(spoolRequests, [
+		{ type: "deleteAccount", accountId: "account-teardown" },
+	]);
+
+	await runtime.close();
+	runtime.free();
+});
+
+test("a throwing spool executor reports host cleanup and an identical retry converges", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+
+	// This joins the two halves the earlier tests prove apart: the TypeScript executor throws an
+	// opaque invocation error, and Core turns a failed host-cleanup call into the named phase.
+	const { runtime, spoolRequests } = teardownRuntime(
+		bindings,
+		(request, attempt) => {
+			if (attempt === 1) throw new Error("OPFS_QUOTA_DETAIL");
+			return {
+				controlResponseJson: JSON.stringify(
+					request.type === "wipeDevice"
+						? { type: "deviceWiped" }
+						: { type: "accountDeleted" },
+				),
+			};
+		},
+	);
+	await runtime.open();
+
+	assert.deepEqual(
+		JSON.parse(await runtime.request_json("wipe-1", '{"type":"wipe"}')),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "device" },
+				status: "incomplete",
+				failures: ["hostCleanup"],
+			},
+		},
+	);
+
+	assert.deepEqual(
+		JSON.parse(await runtime.request_json("wipe-2", '{"type":"wipe"}')),
+		{
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "device" },
+				status: "complete",
+			},
+		},
+	);
+	assert.deepEqual(spoolRequests, [
+		{ type: "wipeDevice" },
+		{ type: "wipeDevice" },
+	]);
+
+	await runtime.close();
+	runtime.free();
+});

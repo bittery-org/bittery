@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { validateTransferControlRequest } from "../generated/transfer-control/validator.js";
+import { OpfsUploadSpoolRoot } from "./opfs-upload-spool-internal.ts";
 import {
 	type BinaryTransferFetch,
 	ConfigurableWebBinaryTransferExecutor,
@@ -33,6 +34,8 @@ const memorySpoolRoot = () => ({
 			throw new Error("wrong length");
 		await consume(new File(parts, "opaque.ciphertext"));
 	},
+	async deleteAccount(_accountId: string) {},
+	async wipeDevice() {},
 });
 
 const control = async (
@@ -932,6 +935,7 @@ test("spools canonical chunks and lets the user agent own Content-Length for the
 	let spoolCalls = 0;
 	const executor = new ConfigurableWebBinaryTransferExecutor({
 		spoolRoot: {
+			...memorySpoolRoot(),
 			async withUploadFile(
 				_scope,
 				expectedByteLength,
@@ -987,4 +991,129 @@ test("spools canonical chunks and lets the user agent own Content-Length for the
 		"content-type",
 		"x-amz-content-sha256",
 	]);
+});
+
+test("deletes one named Account's ciphertext spool over the closed control seam", async () => {
+	const deleted: string[] = [];
+	let wipes = 0;
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async deleteAccount(accountId: string) {
+				deleted.push(accountId);
+			},
+			async wipeDevice() {
+				wipes += 1;
+			},
+		},
+	});
+
+	expect(
+		(await control(executor, { type: "deleteAccount", accountId: "account-a" }))
+			.response,
+	).toEqual({ type: "accountDeleted" });
+
+	expect(deleted).toEqual(["account-a"]);
+	expect(wipes).toBe(0);
+});
+
+test("wipes the whole Device ciphertext spool over the closed control seam", async () => {
+	const deleted: string[] = [];
+	let wipes = 0;
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async deleteAccount(accountId: string) {
+				deleted.push(accountId);
+			},
+			async wipeDevice() {
+				wipes += 1;
+			},
+		},
+	});
+
+	expect((await control(executor, { type: "wipeDevice" })).response).toEqual({
+		type: "deviceWiped",
+	});
+
+	expect(wipes).toBe(1);
+	expect(deleted).toEqual([]);
+});
+
+test("reports a failed spool cleanup instead of answering that it converged", async () => {
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async deleteAccount() {
+				throw new Error("OPFS_QUOTA_DETAIL");
+			},
+			async wipeDevice() {
+				throw new Error("OPFS_QUOTA_DETAIL");
+			},
+		},
+	});
+
+	await expect(
+		control(executor, { type: "deleteAccount", accountId: "account-a" }),
+	).rejects.toThrow("Binary transfer invocation failed");
+	await expect(control(executor, { type: "wipeDevice" })).rejects.toThrow(
+		"Binary transfer invocation failed",
+	);
+});
+
+test("refuses a spool deletion that names no Account", async () => {
+	let deletions = 0;
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async deleteAccount() {
+				deletions += 1;
+			},
+		},
+	});
+
+	await expect(
+		control(executor, { type: "deleteAccount", accountId: "" }),
+	).rejects.toThrow("Binary transfer invocation failed");
+	expect(deletions).toBe(0);
+});
+
+test("re-opens the ciphertext spool after a transient failure so an identical retry converges", async () => {
+	// The production path opens the spool root itself, so this test has to reach the static.
+	// `open` is a writable property of the one class object both modules share, so replacing it
+	// here is what the executor calls. The original goes back in `finally`.
+	const originalOpen = OpfsUploadSpoolRoot.open;
+	const deleted: string[] = [];
+	let opens = 0;
+	OpfsUploadSpoolRoot.open = (async () => {
+		opens += 1;
+		if (opens === 1) throw new Error("OPFS_TRANSIENT_DETAIL");
+		return {
+			...memorySpoolRoot(),
+			async deleteAccount(accountId: string) {
+				deleted.push(accountId);
+			},
+		};
+	}) as typeof OpfsUploadSpoolRoot.open;
+
+	try {
+		const executor = new ConfigurableWebBinaryTransferExecutor();
+
+		await expect(
+			control(executor, { type: "deleteAccount", accountId: "account-a" }),
+		).rejects.toThrow("Binary transfer invocation failed");
+
+		expect(
+			(
+				await control(executor, {
+					type: "deleteAccount",
+					accountId: "account-a",
+				})
+			).response,
+		).toEqual({ type: "accountDeleted" });
+		expect(deleted).toEqual(["account-a"]);
+		expect(opens).toBe(2);
+	} finally {
+		OpfsUploadSpoolRoot.open = originalOpen;
+	}
 });

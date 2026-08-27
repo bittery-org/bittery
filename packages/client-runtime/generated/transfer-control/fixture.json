@@ -76,6 +76,23 @@
       "response": {
         "type": "uploadFinished"
       }
+    },
+    {
+      "request": {
+        "accountId": "account-1",
+        "type": "deleteAccount"
+      },
+      "response": {
+        "type": "accountDeleted"
+      }
+    },
+    {
+      "request": {
+        "type": "wipeDevice"
+      },
+      "response": {
+        "type": "deviceWiped"
+      }
     }
   ]
 }

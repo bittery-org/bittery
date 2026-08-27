@@ -41,6 +41,11 @@ type: "finishUpload"
 } | {
 transferId: string
 type: "cancelTransfer"
+} | {
+accountId: string
+type: "deleteAccount"
+} | {
+type: "wipeDevice"
 })
 export type TransferControlResponse = ({
 type: "downloadOpened"
@@ -56,6 +61,10 @@ type: "uploadBegun"
 type: "uploadChunkAccepted"
 } | {
 type: "uploadFinished"
+} | {
+type: "accountDeleted"
+} | {
+type: "deviceWiped"
 } | {
 type: "cancelled"
 } | {

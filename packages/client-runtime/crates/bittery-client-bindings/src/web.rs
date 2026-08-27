@@ -1,4 +1,5 @@
 use crate::{
+    account_retirement::{retirement_scope, RetirableObservation, RetirementLedger},
     observation_buffer::BufferedSink,
     observation_slots::ObservationSlots,
     web_attachment_move_bridge::{configured_runtime, WebAttachmentMoveResources},
@@ -108,7 +109,7 @@ pub struct WebClientRuntime {
     // The drain task holds a weak reference to this table and nothing else, so it can never keep
     // a freed Runtime alive: it stops the first time it wakes and finds the table gone.
     observations: Rc<ObservationSlots<WebObservation>>,
-    account_retirements: Mutex<HashMap<core::AccountId, u64>>,
+    retirements: RetirementLedger,
     wake: Arc<Notify>,
     attachment_move_resources: Option<WebAttachmentMoveResources>,
 }
@@ -118,6 +119,20 @@ struct WebObservation {
     sink: Arc<BufferedSink>,
     callback: js_sys::Function,
     account_id: Option<core::AccountId>,
+}
+
+impl RetirableObservation for WebObservation {
+    fn retired_account(&self) -> Option<&core::AccountId> {
+        self.account_id.as_ref()
+    }
+
+    fn begin_retirement(&self) {
+        self.sink.begin_retirement();
+    }
+
+    fn end_retirement(&self) {
+        self.sink.end_retirement();
+    }
 }
 
 impl WebObservation {
@@ -292,7 +307,7 @@ impl WebClientRuntime {
             inner,
             cancellations: Mutex::new(HashMap::new()),
             observations,
-            account_retirements: Mutex::new(HashMap::new()),
+            retirements: RetirementLedger::default(),
             wake,
             attachment_move_resources: None,
         }
@@ -321,13 +336,9 @@ impl WebClientRuntime {
     ) -> Result<String, JsValue> {
         let request: core::RuntimeRequest = serde_json::from_str(&request_json)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let retired_account = match &request {
-            core::RuntimeRequest::Lock { account_id }
-            | core::RuntimeRequest::SignOut { account_id } => Some(account_id.clone()),
-            _ => None,
-        };
-        if let Some(account_id) = &retired_account {
-            self.begin_account_retirement(account_id);
+        let retired = retirement_scope(&request);
+        if let Some(scope) = &retired {
+            self.retirements.begin(scope, &self.live_observations());
         }
         let cancellation = core::RequestCancellation::new();
         self.cancellations
@@ -335,8 +346,10 @@ impl WebClientRuntime {
             .expect("cancellation lock poisoned")
             .insert(request_id.clone(), cancellation.clone());
         let result = self.inner.request(request, cancellation).await;
-        if let Some(account_id) = &retired_account {
-            self.end_account_retirement(account_id);
+        if let Some(scope) = &retired {
+            // The Runtime may have closed some of these part-way through a destructive scope.
+            // Resuming a closed sink is silent, and the ledger stays balanced either way.
+            self.retirements.end(scope, &self.live_observations());
         }
         self.cancellations
             .lock()
@@ -358,18 +371,6 @@ impl WebClientRuntime {
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let account_id = request.account_id().cloned();
         let sink = Arc::new(BufferedSink::new(Arc::clone(&self.wake)));
-        if let Some(account_id) = &account_id {
-            let active_retirements = self
-                .account_retirements
-                .lock()
-                .expect("Account retirement lock poisoned")
-                .get(account_id)
-                .copied()
-                .unwrap_or(0);
-            for _ in 0..active_retirements {
-                sink.begin_retirement();
-            }
-        }
         let handle = self
             .inner
             .observe(request, sink.clone())
@@ -380,6 +381,9 @@ impl WebClientRuntime {
             callback,
             account_id,
         });
+        // Nothing awaits between this catch-up and publication, so no in-flight retirement can
+        // finish in between and resume a sink it never suspended.
+        self.retirements.admit(&observation);
         // A repeated id is a host defect. Closing the previous handle instead would strand
         // its consumer and hand its `unobserve` to whoever claimed the id last.
         self.observations
@@ -453,41 +457,12 @@ fn client_platform(platform: &str) -> Result<core::ClientPlatform, JsValue> {
 }
 
 impl WebClientRuntime {
-    fn begin_account_retirement(&self, account_id: &core::AccountId) {
-        *self
-            .account_retirements
-            .lock()
-            .expect("Account retirement lock poisoned")
-            .entry(account_id.clone())
-            .or_insert(0) += 1;
-        for id in self.observations.ids() {
-            if let Some(observation) = self.observations.get(&id) {
-                if observation.account_id.as_ref() == Some(account_id) {
-                    observation.sink.begin_retirement();
-                }
-            }
-        }
-    }
-
-    fn end_account_retirement(&self, account_id: &core::AccountId) {
-        for id in self.observations.ids() {
-            if let Some(observation) = self.observations.get(&id) {
-                if observation.account_id.as_ref() == Some(account_id) {
-                    observation.sink.end_retirement();
-                }
-            }
-        }
-        let mut retirements = self
-            .account_retirements
-            .lock()
-            .expect("Account retirement lock poisoned");
-        let active = retirements
-            .get_mut(account_id)
-            .expect("Account retirement must be balanced");
-        *active -= 1;
-        if *active == 0 {
-            retirements.remove(account_id);
-        }
+    fn live_observations(&self) -> Vec<Arc<WebObservation>> {
+        self.observations
+            .ids()
+            .iter()
+            .filter_map(|id| self.observations.get(id))
+            .collect()
     }
 
     fn flush_observations(&self) -> Result<(), JsValue> {

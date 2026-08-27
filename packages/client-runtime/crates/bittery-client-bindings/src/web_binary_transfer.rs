@@ -148,6 +148,41 @@ impl JsBinaryTransferExecutor {
         }
     }
 
+    /// Destroys one named Account's spooled ciphertext.
+    pub(crate) async fn delete_account(&self, account_id: String) -> Result<(), ()> {
+        self.destroy(
+            TransferControlRequest::DeleteAccount { account_id },
+            TransferControlResponse::AccountDeleted,
+        )
+        .await
+    }
+
+    /// Destroys every Account's spooled ciphertext on this Device.
+    pub(crate) async fn wipe_device(&self) -> Result<(), ()> {
+        self.destroy(
+            TransferControlRequest::WipeDevice,
+            TransferControlResponse::DeviceWiped,
+        )
+        .await
+    }
+
+    /// Destruction converges only on the exact expected answer. A transient classification would
+    /// be a lie here: the host either destroyed the named scope or it did not.
+    async fn destroy(
+        &self,
+        request: TransferControlRequest,
+        expected: TransferControlResponse,
+    ) -> Result<(), ()> {
+        let result = invoke(&self.executor, request, None)
+            .await
+            .map_err(|_| ())?;
+        if result.response == expected && result.bytes.is_none() {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
     pub(crate) fn close(&self) {
         if let Ok(close) = function(&self.executor, "close") {
             let _ = close.call0(&self.executor);

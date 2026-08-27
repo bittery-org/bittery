@@ -97,6 +97,21 @@ export type RuntimeShareResultAcknowledged = Omit<
 	"type"
 >;
 
+type RuntimeTeardownResponse = Extract<RuntimeResponse, { type: "teardown" }>;
+
+/**
+ * The whole scoped teardown outcome, phases included. An `incomplete` teardown is a normal
+ * answer, not an error: it names the phases that still hold data so a host can show them and
+ * retry the identical scope. Collapsing it to a boolean would hide surviving material.
+ *
+ * The wire omits an empty phase list; this one is always present, so a caller renders the same
+ * expression either way.
+ */
+export type RuntimeTeardown = Omit<
+	RuntimeTeardownResponse,
+	"type" | "failures"
+> & { readonly failures: NonNullable<RuntimeTeardownResponse["failures"]> };
+
 export interface RuntimeCallOptions {
 	signal?: AbortSignal;
 }
@@ -125,6 +140,16 @@ export interface RuntimeClient {
 		accountId: string,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccessChanged>;
+	/**
+	 * Destroys one named Account on this Device. Irreversible, and never inferred from the
+	 * active-Account pointer. An identical retry converges after an `incomplete` outcome.
+	 */
+	removeAccount(
+		accountId: string,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeTeardown>;
+	/** Destroys every Account and all Runtime state on this Device. Irreversible. */
+	wipe(options?: RuntimeCallOptions): Promise<RuntimeTeardown>;
 	createLoginItem(
 		input: CreateLoginItemInput,
 		options?: RuntimeCallOptions,
@@ -244,6 +269,20 @@ export function createRuntimeClient(
 			);
 			return { accountId: answer.accountId, access: answer.access };
 		},
+		async removeAccount(accountId, callOptions) {
+			return teardownOutcome(
+				await call(
+					{ type: "removeAccount", accountId },
+					"teardown",
+					callOptions,
+				),
+			);
+		},
+		async wipe(callOptions) {
+			return teardownOutcome(
+				await call({ type: "wipe" }, "teardown", callOptions),
+			);
+		},
 		async createLoginItem(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(
 				{ type: "createLoginItem", ...input },
@@ -299,6 +338,11 @@ export function createRuntimeClient(
 			return transport.close();
 		},
 	};
+}
+
+function teardownOutcome(answer: RuntimeTeardownResponse): RuntimeTeardown {
+	const { scope, status, failures } = answer;
+	return { scope, status, failures: failures ?? [] };
 }
 
 /**

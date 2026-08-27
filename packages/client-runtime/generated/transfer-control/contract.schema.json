@@ -214,6 +214,39 @@
             "transferId"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Destroys one named Account's ciphertext spool. The identity is opaque to the host, so the\nonly constraint is that it names something.",
+          "properties": {
+            "accountId": {
+              "pattern": "^[\\s\\S]+$",
+              "type": "string"
+            },
+            "type": {
+              "const": "deleteAccount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Destroys every Account's ciphertext spool on this Device.",
+          "properties": {
+            "type": {
+              "const": "wipeDevice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -301,6 +334,32 @@
           "properties": {
             "type": {
               "const": "uploadFinished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "accountDeleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "deviceWiped",
               "type": "string"
             }
           },

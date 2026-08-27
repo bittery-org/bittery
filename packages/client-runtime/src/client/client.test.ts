@@ -183,6 +183,57 @@ describe("Runtime client requests", () => {
 		});
 	});
 
+	test("removes one named Account and answers the whole teardown outcome", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		const removing = client.removeAccount("account-1");
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "removeAccount",
+			accountId: "account-1",
+		});
+
+		transport.answer({
+			type: "succeeded",
+			// The Runtime omits an empty phase list on the wire.
+			value: {
+				type: "teardown",
+				scope: { type: "account", accountId: "account-1" },
+				status: "complete",
+			},
+		});
+		expect(await removing).toEqual({
+			scope: { type: "account", accountId: "account-1" },
+			status: "complete",
+			failures: [],
+		});
+	});
+
+	test("keeps an incomplete teardown renderable and retryable instead of collapsing it", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		const wiping = client.wipe();
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({ type: "wipe" });
+
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "device" },
+				status: "incomplete",
+				failures: ["hostCleanup", "replica"],
+			},
+		});
+		expect(await wiping).toEqual({
+			scope: { type: "device" },
+			status: "incomplete",
+			failures: ["hostCleanup", "replica"],
+		});
+	});
+
 	test("closes the transport", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });

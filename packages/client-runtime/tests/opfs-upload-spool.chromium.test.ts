@@ -152,3 +152,78 @@ describe("OPFS upload spool in an actual MV3 service worker", () => {
 		}
 	}, 30_000);
 });
+
+describe("Runtime-driven spool teardown in an actual MV3 service worker", () => {
+	test("the production transfer executor destroys one Account's spool, then the whole Device", async () => {
+		const extensionDirectory = await mkdtemp(
+			path.join(tmpdir(), "bittery-opfs-teardown-mv3-"),
+		);
+		const userDataDirectory = await mkdtemp(
+			path.join(tmpdir(), "bittery-opfs-teardown-profile-"),
+		);
+		temporaryPaths.push(extensionDirectory, userDataDirectory);
+		const build = await Bun.build({
+			entrypoints: [
+				path.join(import.meta.dir, "opfs-upload-spool-mv3-harness.ts"),
+			],
+			target: "browser",
+			format: "esm",
+			minify: false,
+		});
+		expect(build.success).toBe(true);
+		await Bun.write(
+			path.join(extensionDirectory, "background.js"),
+			await build.outputs[0].text(),
+		);
+		await Bun.write(
+			path.join(extensionDirectory, "manifest.json"),
+			JSON.stringify({
+				manifest_version: 3,
+				name: "Bittery OPFS spool teardown acceptance fixture",
+				version: "1.0.0",
+				background: { service_worker: "background.js", type: "module" },
+			}),
+		);
+
+		const context = await chromium.launchPersistentContext(userDataDirectory, {
+			headless: false,
+			args: [
+				`--disable-extensions-except=${extensionDirectory}`,
+				`--load-extension=${extensionDirectory}`,
+				"--no-sandbox",
+			],
+		});
+		try {
+			const worker =
+				context.serviceWorkers()[0] ??
+				(await context.waitForEvent("serviceworker"));
+			const result = await worker.evaluate(async () =>
+				globalThis.runOpfsUploadSpoolTeardown(),
+			);
+
+			const named = new Map(
+				result.directories.map(([accountId, name]) => [accountId, name]),
+			);
+			const removed = named.get("teardown-a");
+			const retained = named.get("teardown-b");
+			expect(removed).toBeDefined();
+			expect(retained).toBeDefined();
+			expect(result.spooled).toEqual(
+				[
+					[removed as string, "orphan.ciphertext"],
+					[retained as string, "orphan.ciphertext"],
+				].sort((left, right) => left[0].localeCompare(right[0])),
+			);
+			expect(result.responses).toEqual([
+				'{"type":"accountDeleted"}',
+				'{"type":"deviceWiped"}',
+			]);
+			expect(result.afterAccountDeletion).toEqual([
+				[retained as string, "orphan.ciphertext"],
+			]);
+			expect(result.afterDeviceWipe).toEqual([]);
+		} finally {
+			await context.close();
+		}
+	}, 30_000);
+});

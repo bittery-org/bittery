@@ -624,6 +624,36 @@ mod wasm {
     #[cfg(not(feature = "binding-test-harness"))]
     fn record_lifecycle_cancellation() {}
 
+    /// The Runtime's host-cleanup phase over the one production owner of the ciphertext spool.
+    ///
+    /// Only this executor holds the OPFS spool root, so the destructive scopes travel the same
+    /// closed transfer-control seam as an upload. Runtime policy stays in Rust: the host answers
+    /// the exact scope it destroyed or it answers nothing this phase can accept.
+    struct JsSpoolTeardown(Arc<JsBinaryTransferExecutor>);
+
+    #[async_trait(?Send)]
+    impl core::TeardownHostCleanup for JsSpoolTeardown {
+        async fn invoke(
+            &self,
+            request: core::TeardownHostCleanupRequest,
+        ) -> Result<core::TeardownHostCleanupResponse, core::RuntimeError> {
+            let (destroyed, answer) = match request {
+                core::TeardownHostCleanupRequest::DeleteAccount { account_id } => (
+                    self.0.delete_account(account_id.as_str().to_owned()).await,
+                    core::TeardownHostCleanupResponse::AccountDeleted,
+                ),
+                core::TeardownHostCleanupRequest::WipeDevice => (
+                    self.0.wipe_device().await,
+                    core::TeardownHostCleanupResponse::DeviceWiped,
+                ),
+            };
+            destroyed.map(|()| answer).map_err(|()| core::RuntimeError {
+                code: core::RuntimeErrorCode::InvariantViolation,
+                message: "Ciphertext spool cleanup failed".into(),
+            })
+        }
+    }
+
     pub(crate) struct WebAttachmentMoveResources {
         binary: Arc<JsBinaryTransferExecutor>,
         leases: Arc<JsAttachmentMoveAccountLeasePort>,
@@ -680,6 +710,7 @@ mod wasm {
                 preparation,
                 lease_port,
             );
+        runtime.install_teardown_host_cleanup(Arc::new(JsSpoolTeardown(Arc::clone(&binary))));
         let lifecycle = PreparationLifecycleTask::start(Arc::clone(&runtime), lifecycle_error);
         Ok((
             runtime,

@@ -13,9 +13,18 @@ export type BinaryTransferFetch = (
 	init?: RequestInit,
 ) => Promise<Response>;
 
+/**
+ * The spool operations this executor drives. Teardown lives here, not beside the upload path,
+ * because this executor is the one production owner of the OPFS spool root.
+ */
+type UploadSpool = Pick<
+	OpfsUploadSpoolRoot,
+	"withUploadFile" | "deleteAccount" | "wipeDevice"
+>;
+
 export interface WebBinaryTransferExecutorOptions {
 	readonly fetch?: BinaryTransferFetch;
-	readonly spoolRoot?: Pick<OpfsUploadSpoolRoot, "withUploadFile">;
+	readonly spoolRoot?: UploadSpool;
 }
 
 interface DownloadSession {
@@ -43,7 +52,7 @@ export interface BinaryTransferInvocationResult {
 
 export class ConfigurableWebBinaryTransferExecutor {
 	readonly #fetch: BinaryTransferFetch;
-	#spoolRoot: Promise<Pick<OpfsUploadSpoolRoot, "withUploadFile">> | undefined;
+	#spoolRoot: Promise<UploadSpool> | undefined;
 	readonly #downloads = new Map<string, DownloadSession>();
 	readonly #uploads = new Map<string, UploadSession>();
 	#closed = false;
@@ -86,6 +95,16 @@ export class ConfigurableWebBinaryTransferExecutor {
 			case "cancelTransfer":
 				await this.#cancel(request.transferId);
 				response = { type: "cancelled" };
+				break;
+			case "deleteAccount":
+				await this.#cleanSpool((spool) =>
+					spool.deleteAccount(request.accountId),
+				);
+				response = { type: "accountDeleted" };
+				break;
+			case "wipeDevice":
+				await this.#cleanSpool((spool) => spool.wipeDevice());
+				response = { type: "deviceWiped" };
 				break;
 		}
 		return {
@@ -337,10 +356,7 @@ export class ConfigurableWebBinaryTransferExecutor {
 		chunks: UploadChunkQueue,
 	): Promise<TransferControlResponse> {
 		try {
-			if (this.#spoolRoot === undefined) {
-				this.#spoolRoot = OpfsUploadSpoolRoot.open();
-			}
-			const spoolRoot = await this.#spoolRoot;
+			const spoolRoot = await this.#spool();
 			let result: TransferControlResponse | undefined;
 			await spoolRoot.withUploadFile(
 				{
@@ -395,6 +411,38 @@ export class ConfigurableWebBinaryTransferExecutor {
 			return result;
 		} catch {
 			if (controller.signal.aborted) return { type: "cancelled" };
+			throw new BinaryTransferInvocationError();
+		}
+	}
+
+	// One lazily opened root per executor. Teardown opens it too: a Device that never uploaded
+	// still has a spool directory from an earlier incarnation to destroy.
+	//
+	// A failed open is forgotten rather than cached. Caching it would make one transient failure
+	// permanent for this executor: every later retry would re-await the same rejection, so a
+	// teardown could never converge until the worker restarted.
+	#spool(): Promise<UploadSpool> {
+		if (this.#spoolRoot === undefined) {
+			const opening = OpfsUploadSpoolRoot.open();
+			this.#spoolRoot = opening;
+			opening.catch(() => {
+				if (this.#spoolRoot === opening) this.#spoolRoot = undefined;
+			});
+		}
+		return this.#spoolRoot;
+	}
+
+	/**
+	 * Destruction answers `accountDeleted` or `deviceWiped` only after it converged. Anything
+	 * else becomes the opaque invocation error, so the Runtime records the failed phase and no
+	 * storage detail escapes.
+	 */
+	async #cleanSpool(
+		destroy: (spool: UploadSpool) => Promise<void>,
+	): Promise<void> {
+		try {
+			await destroy(await this.#spool());
+		} catch {
 			throw new BinaryTransferInvocationError();
 		}
 	}
