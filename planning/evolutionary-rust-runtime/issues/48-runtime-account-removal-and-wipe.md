@@ -66,6 +66,113 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — slice 4c-1 delivered: Web log out routes through the Runtime
+
+**Slice 4c was split in two.** The frontier comment below plans 4c as one sub-slice. In practice it
+became **4c-1**, the sidebar "Log out" gesture, delivered here in commit `093ebb9b`; and **4c-2**,
+the other two Web entry points, still owed and defined at the end of this comment. Any later
+reference to "4c-2" means that remainder.
+
+The Web "Log out" button removes the Account from this Device. That meaning is deliberate for a
+browser and stays. It now runs through the Runtime, asks before it destroys, and says what survived
+when it cannot finish. Before, one menu click ran a Runtime sign-out whose error was swallowed,
+cleared the transitional store through a function returning `Promise<void>`, and navigated to the
+login screen regardless. A partial failure was invisible.
+
+The gesture resolves both Account names once, runs Runtime `RemoveAccount` as the authority, and
+clears the transitional Web store only on `complete`. The two name different things: the Runtime
+owns the Replica, its platform namespace, Attachment artifacts and the OPFS spool, while the
+transitional store owns the `bittery_account_*` keys and the item cache. They are composed, not
+swapped. The reverse order would let the interface look signed out over a surviving Replica.
+
+An `incomplete` outcome keeps the dialog open, lists the surviving areas in user language rather
+than phase names, and offers a retry. Retry is unbounded by construction, because convergence can
+need three attempts. It reuses the carried Account name instead of resolving again: once catalog
+detachment succeeds the catalog no longer answers for that Account, and a second resolve could
+return a different one.
+
+Account-scope removal still requires an open Runtime, so a wedged Device refuses it forever, and the
+local Secret Key would become unreachable with it. Per the maintainer's decision, a second action
+appears after repeated failure. It clears this browser's stored data only and says exactly that. It
+touches no Runtime-owned state, reports its own `browserDataCleared` status, never claims the
+Account was removed, and does not navigate.
+
+Four real defects, found by independent review and fixed here:
+
+- A retry could report success while `secret_key`, `session_data`, `vault_keys` and `jwt_token`
+  survived. The store nulls its active pointer before it sweeps values and never rethrows, so a
+  half-finished clear left a null pointer that the next attempt read as nothing to do. Both Account
+  names now travel across attempts, and an unnamed target is `incomplete`, never success. The shape
+  that allowed it is deleted, so the guard is a type error rather than a check somebody can drop.
+- A throw from any dependency other than the Runtime call locked the dialog on "Removing…" forever,
+  with both buttons disabled and Escape blocked. Every step after the Runtime call is now wrapped in
+  the module the tests can reach.
+- Closing the dialog discarded the report, so the next attempt resolved again and could report
+  success over the same surviving data. The report now outlives the dialog.
+- The failure copy claimed nothing had been deleted. That is wrong for a Runtime that answered, and
+  wrong for a transport that dropped mid-request.
+
+Coverage gaps closed, not production defects: a test double asserted the unnamed-sweep bug as
+intended behaviour, which is why no test caught it; the fix that closed the last defect had no test
+of its own; one guard clause was pinned only by a vacuous assertion; and a navigation tripwire
+counted one of the two ways this file reaches the login screen.
+
+Recorded, deliberately not changed here:
+
+- A dependency that never settles still holds the dialog, because Escape is blocked while busy. That
+  trade-off is deliberate.
+- Reloading after a half-removal re-seeds the store under the synthetic pre-login name rather than
+  the login name the surviving keys use, so a later log out can again report success over live
+  material. The maintainer has since answered this; see the start-up rule comment above. It is the
+  same false-success class as the first defect above, one within a page load and one across a
+  reload.
+- Every other host on the shared lifecycle module has the same retry hazard. Only Web works around
+  it.
+
+**Three independent reviews.** The first confirmed the Runtime-first ordering, the retry contract
+that carries `accountId`, the observation-scope claim, and that no phase name reaches the user. It
+returned five should-fix items. The second found a **blocker**: the same false-success defect had
+moved rather than died. Closing the dialog discarded the report, so the next attempt re-resolved,
+read a null pointer as "nothing to do", and reported `removed` while `secret_key`, `session_data`,
+`vault_keys` and `jwt_token` survived. The third cleared the slice and proved the fix holds
+structurally: deleting either guard is now a **compile error**, not a silent regression. The test
+double that had asserted the bug as intended behaviour was flipped, and four coverage gaps were
+closed, including one where the fix that closed the blocker had no test of its own.
+
+**What 4c-2 still owes.** Both entry points must reuse `apps/web/src/lib/account-removal.ts` rather
+than adding a second orchestrator.
+
+- `apps/web/src/components/sign-in-form.tsx` — "Use a different account". Today it calls
+  `runtimeClient.signOut(accountId).catch(() => undefined)`, then `forgetActiveSession(...)`, then
+  an unconditional `window.location.reload()`. The outcome is discarded.
+- `apps/web/src/components/settings/delete-account-dialog.tsx` — the Danger Zone deletion. It must
+  **keep its server-first ordering**. `deleteAccountEverywhere` is the only place in the codebase
+  where a failed server call prevents local destruction, and the Runtime has no notion of a server
+  delete, so the Web handler must re-express that ordering itself. Today only the server step
+  surfaces, every local failure is dropped, and it never signs the Runtime out. So the Runtime keeps
+  the live master unlock key and decrypted Items after a server-side Account deletion.
+
+**What 4d inherits from 4c-1.**
+
+- The confirmation dialog breaks the shared end-to-end `signOut` fixture at
+  `apps/web/tests/fixtures/auth.ts`, which now hangs waiting for a navigation that no longer
+  happens. Three specs break with it: `apps/web/tests/e2e/smoke.spec.ts`,
+  `apps/web/tests/e2e/auth-signin.spec.ts` and `apps/web/tests/e2e/auth-recovery.spec.ts`. The
+  fixture needs the confirm click. The new test ids are `log-out-dialog`, `log-out-confirm`,
+  `log-out-cancel` and `log-out-incomplete-areas`.
+- `apps/web` has **no DOM test harness**, so 4c-1 kept every decision in a pure module and left the
+  wiring untested. 4d owes Playwright coverage for: the menu item destroying nothing until
+  confirmed; a successful removal clearing the query cache and landing on `/login`; an incomplete
+  removal keeping the dialog open without navigating; a throw from `manager.refresh()` or
+  `localStorage` re-enabling the buttons instead of wedging on "Removing…"; the escape hatch
+  appearing only on the second failure and leaving `bittery_runtime_account_id` in place;
+  `browserDataCleared` showing its own title, offering no retry, and not navigating; and the
+  transitional id read resolving to the **login** id rather than the synthetic seed for a signed-in
+  user.
+
+`pnpm --filter web test` is 366 passing. `turbo -F web check-types` and `biome check .` are clean.
+`Status:` stays `ready-for-agent`; 4c-2, the start-up seeding rule, and 4d are still owed.
+
 ### 2026-08-27 — start-up rule decided: a null pointer with accounts is an abandoned removal
 
 The maintainer answered the hazard that slice 4c-1 recorded and deliberately left open. This answer
