@@ -629,6 +629,7 @@
               "const": "signIn"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "serverUrl",
@@ -652,6 +653,7 @@
               "const": "quickUnlock"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -670,6 +672,7 @@
               "const": "lock"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId"
@@ -687,9 +690,43 @@
               "const": "signOut"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId"
+          ]
+        },
+        {
+          "description": "Irreversibly removes exactly the explicitly named Account from this Device.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "removeAccount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "description": "Irreversibly removes every Runtime-owned Account and Device record.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "wipe"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
           ]
         },
         {
@@ -709,6 +746,7 @@
               "type": "string"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -733,6 +771,7 @@
               "const": "updateLoginItem"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -757,6 +796,7 @@
               "const": "setItemFavorite"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -778,6 +818,7 @@
               "const": "trashItem"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -798,6 +839,7 @@
               "const": "restoreItem"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -821,6 +863,7 @@
               "const": "moveItem"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -842,6 +885,7 @@
               "const": "permanentlyDeleteItem"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -865,6 +909,7 @@
               "const": "createShare"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -886,6 +931,7 @@
               "const": "acknowledgeShareResult"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -910,6 +956,7 @@
               "type": "string"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -931,6 +978,7 @@
               "const": "accessChanged"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
@@ -955,6 +1003,7 @@
               "const": "accepted"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "operationId",
@@ -976,10 +1025,39 @@
               "const": "shareResultAcknowledged"
             }
           },
+          "additionalProperties": false,
           "required": [
             "type",
             "accountId",
             "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "failures": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TeardownPhase"
+              },
+              "maxItems": 4
+            },
+            "scope": {
+              "$ref": "#/$defs/TeardownScope"
+            },
+            "status": {
+              "$ref": "#/$defs/TeardownStatus"
+            },
+            "type": {
+              "type": "string",
+              "const": "teardown"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "scope",
+            "status"
           ]
         }
       ]
@@ -1029,6 +1107,58 @@
         "7days",
         "14days",
         "30days"
+      ]
+    },
+    "TeardownPhase": {
+      "description": "Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.",
+      "type": "string",
+      "enum": [
+        "attachmentArtifacts",
+        "hostCleanup",
+        "platformStorage",
+        "replica"
+      ]
+    },
+    "TeardownScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "account"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "device"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "TeardownStatus": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "incomplete"
       ]
     },
     "VaultProjection": {

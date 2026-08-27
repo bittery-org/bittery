@@ -47,13 +47,13 @@ pub(crate) use domain::{
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use persistence_contract::persistence_contract_schema;
-pub(crate) use persistence_contract::ReplicaPersistenceRequest;
+use persistence_contract::ReplicaHead;
 use persistence_contract::{
     apply_prepared_writes_to_rows, prepare_bootstrap_commit, prepare_commit, prepare_install,
     reconstruct_snapshot, replica_invariant, snapshot_rows, ExpectedReplicaInstall,
     LockEpochAdvanceResult, PreparedCommitOutcome, PreparedLockEpochAdvance, ReplicaInstallResult,
 };
-use persistence_contract::{ReplicaHead, ReplicaPersistenceResponse};
+pub(crate) use persistence_contract::{ReplicaPersistenceRequest, ReplicaPersistenceResponse};
 #[cfg(test)]
 use persistence_contract::{ReplicaRowKey, ReplicaStore, StoredReplicaRow};
 
@@ -1152,10 +1152,6 @@ impl Replica {
         reconstruct_snapshot(account_id, head, rows)
     }
 
-    #[allow(
-        dead_code,
-        reason = "consumed by Ticket 48's sequential Core teardown slice"
-    )]
     pub(crate) async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let response = self
             .persistence
@@ -1175,10 +1171,6 @@ impl Replica {
         Ok(())
     }
 
-    #[allow(
-        dead_code,
-        reason = "consumed by Ticket 48's sequential Core teardown slice"
-    )]
     pub(crate) async fn wipe_device(&self) -> Result<(), RuntimeError> {
         let response = self
             .persistence

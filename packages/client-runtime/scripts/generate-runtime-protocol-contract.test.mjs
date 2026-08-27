@@ -262,3 +262,65 @@ test("Share result delivery and acknowledgement stay explicit and closed", () =>
 		true,
 	);
 });
+
+test("teardown scope and partial failures stay explicit, closed, and redacted", () => {
+	assert.equal(
+		validateRuntimeRequest({ type: "removeAccount", accountId: "account-1" }),
+		true,
+	);
+	assert.equal(
+		validateRuntimeRequest({ type: "removeAccount", accountId: "" }),
+		false,
+	);
+	assert.equal(validateRuntimeRequest({ type: "wipe" }), true);
+	assert.equal(
+		validateRuntimeRequest({ type: "wipe", accountId: "account-1" }),
+		false,
+	);
+
+	const incomplete = {
+		type: "succeeded",
+		value: {
+			type: "teardown",
+			scope: { type: "account", accountId: "account-1" },
+			status: "incomplete",
+			failures: ["hostCleanup", "platformStorage"],
+		},
+	};
+	assert.equal(validateRuntimeOutcome(incomplete), true);
+	assert.equal(
+		validateRuntimeOutcome({
+			...incomplete,
+			value: { ...incomplete.value, failures: ["hostCleanupFailedForever"] },
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			...incomplete,
+			value: {
+				...incomplete.value,
+				failures: Array(5).fill("hostCleanup"),
+			},
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			...incomplete,
+			value: { ...incomplete.value, detail: "host exception" },
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "teardown",
+				scope: { type: "device" },
+				status: "complete",
+			},
+		}),
+		true,
+	);
+});

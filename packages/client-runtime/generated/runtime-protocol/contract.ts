@@ -43,8 +43,27 @@ type: "accepted"
 accountId: string
 operationId: string
 type: "shareResultAcknowledged"
+} | {
+/**
+ * @maxItems 4
+ */
+failures?: []|[TeardownPhase]|[TeardownPhase, TeardownPhase]|[TeardownPhase, TeardownPhase, TeardownPhase]|[TeardownPhase, TeardownPhase, TeardownPhase, TeardownPhase]
+scope: TeardownScope
+status: TeardownStatus
+type: "teardown"
 })
 export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
+/**
+ * Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.
+ */
+export type TeardownPhase = ("attachmentArtifacts" | "hostCleanup" | "platformStorage" | "replica")
+export type TeardownScope = ({
+accountId: string
+type: "account"
+} | {
+type: "device"
+})
+export type TeardownStatus = ("complete" | "incomplete")
 export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
 export type RuntimeProjection = ({
 type: "items"
@@ -77,6 +96,11 @@ type: "lock"
 } | {
 accountId: string
 type: "signOut"
+} | {
+accountId: string
+type: "removeAccount"
+} | {
+type: "wipe"
 } | {
 accountId: string
 draft: LoginItemDraft

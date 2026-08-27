@@ -5241,6 +5241,18 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class RemoveAccount(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    object Wipe : RuntimeRequest()
+
+
     data class CreateLoginItem(
         val `accountId`: kotlin.String,
         val `vaultId`: kotlin.String,
@@ -5374,6 +5386,15 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.RemoveAccount -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.Wipe -> {// Nothing to destroy
+            }
             is RuntimeRequest.CreateLoginItem -> {
 
     Disposable.destroy(
@@ -5485,44 +5506,48 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             4 -> RuntimeRequest.SignOut(
                 FfiConverterString.read(buf),
                 )
-            5 -> RuntimeRequest.CreateLoginItem(
+            5 -> RuntimeRequest.RemoveAccount(
+                FfiConverterString.read(buf),
+                )
+            6 -> RuntimeRequest.Wipe
+            7 -> RuntimeRequest.CreateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
                 )
-            6 -> RuntimeRequest.UpdateLoginItem(
+            8 -> RuntimeRequest.UpdateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
                 )
-            7 -> RuntimeRequest.SetItemFavorite(
+            9 -> RuntimeRequest.SetItemFavorite(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            8 -> RuntimeRequest.TrashItem(
+            10 -> RuntimeRequest.TrashItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            9 -> RuntimeRequest.RestoreItem(
+            11 -> RuntimeRequest.RestoreItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            10 -> RuntimeRequest.MoveItem(
+            12 -> RuntimeRequest.MoveItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> RuntimeRequest.PermanentlyDeleteItem(
+            13 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            12 -> RuntimeRequest.CreateShare(
+            14 -> RuntimeRequest.CreateShare(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateShareDraft.read(buf),
                 )
-            13 -> RuntimeRequest.AcknowledgeShareResult(
+            15 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -5562,6 +5587,19 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.RemoveAccount -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.Wipe -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
             )
         }
         is RuntimeRequest.CreateLoginItem -> {
@@ -5670,61 +5708,70 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is RuntimeRequest.CreateLoginItem -> {
+            is RuntimeRequest.RemoveAccount -> {
                 buf.putInt(5)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.Wipe -> {
+                buf.putInt(6)
+                Unit
+            }
+            is RuntimeRequest.CreateLoginItem -> {
+                buf.putInt(7)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.UpdateLoginItem -> {
-                buf.putInt(6)
+                buf.putInt(8)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.SetItemFavorite -> {
-                buf.putInt(7)
+                buf.putInt(9)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterBoolean.write(value.`favorite`, buf)
                 Unit
             }
             is RuntimeRequest.TrashItem -> {
-                buf.putInt(8)
+                buf.putInt(10)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.RestoreItem -> {
-                buf.putInt(9)
+                buf.putInt(11)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.MoveItem -> {
-                buf.putInt(10)
+                buf.putInt(12)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`targetVaultId`, buf)
                 Unit
             }
             is RuntimeRequest.PermanentlyDeleteItem -> {
-                buf.putInt(11)
+                buf.putInt(13)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateShare -> {
-                buf.putInt(12)
+                buf.putInt(14)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.AcknowledgeShareResult -> {
-                buf.putInt(13)
+                buf.putInt(15)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
@@ -5780,6 +5827,17 @@ sealed class RuntimeResponse {
         companion object
     }
 
+    data class Teardown(
+        val `scope`: uniffi.bittery_client_bindings.TeardownScope,
+        val `status`: uniffi.bittery_client_bindings.TeardownStatus,
+        val `failures`: List<uniffi.bittery_client_bindings.TeardownPhase>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
 
 
 
@@ -5812,6 +5870,11 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
             4 -> RuntimeResponse.ShareResultAcknowledged(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
+                )
+            5 -> RuntimeResponse.Teardown(
+                FfiConverterTypeTeardownScope.read(buf),
+                FfiConverterTypeTeardownStatus.read(buf),
+                FfiConverterSequenceTypeTeardownPhase.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -5851,6 +5914,15 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 + FfiConverterString.allocationSize(value.`operationId`)
             )
         }
+        is RuntimeResponse.Teardown -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeTeardownScope.allocationSize(value.`scope`)
+                + FfiConverterTypeTeardownStatus.allocationSize(value.`status`)
+                + FfiConverterSequenceTypeTeardownPhase.allocationSize(value.`failures`)
+            )
+        }
     }
 
     override fun write(value: RuntimeResponse, buf: ByteBuffer) {
@@ -5878,6 +5950,13 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 buf.putInt(4)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.Teardown -> {
+                buf.putInt(5)
+                FfiConverterTypeTeardownScope.write(value.`scope`, buf)
+                FfiConverterTypeTeardownStatus.write(value.`status`, buf)
+                FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -5951,6 +6030,149 @@ public object FfiConverterTypeShareExpiration: FfiConverterRustBuffer<ShareExpir
     override fun allocationSize(value: ShareExpiration) = 4UL
 
     override fun write(value: ShareExpiration, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class TeardownPhase {
+
+    ATTACHMENT_ARTIFACTS,
+    HOST_CLEANUP,
+    PLATFORM_STORAGE,
+    REPLICA;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTeardownPhase: FfiConverterRustBuffer<TeardownPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        TeardownPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TeardownPhase) = 4UL
+
+    override fun write(value: TeardownPhase, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class TeardownScope {
+
+    data class Account(
+        val `accountId`: kotlin.String) : TeardownScope()
+
+    {
+
+
+        companion object
+    }
+
+    object Device : TeardownScope()
+
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTeardownScope : FfiConverterRustBuffer<TeardownScope>{
+    override fun read(buf: ByteBuffer): TeardownScope {
+        return when(buf.getInt()) {
+            1 -> TeardownScope.Account(
+                FfiConverterString.read(buf),
+                )
+            2 -> TeardownScope.Device
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: TeardownScope) = when(value) {
+        is TeardownScope.Account -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is TeardownScope.Device -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: TeardownScope, buf: ByteBuffer) {
+        when(value) {
+            is TeardownScope.Account -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is TeardownScope.Device -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class TeardownStatus {
+
+    COMPLETE,
+    INCOMPLETE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTeardownStatus: FfiConverterRustBuffer<TeardownStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        TeardownStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TeardownStatus) = 4UL
+
+    override fun write(value: TeardownStatus, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -6318,6 +6540,34 @@ public object FfiConverterSequenceTypeVaultProjection: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeVaultProjection.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer<List<TeardownPhase>> {
+    override fun read(buf: ByteBuffer): List<TeardownPhase> {
+        val len = buf.getInt()
+        return List<TeardownPhase>(len) {
+            FfiConverterTypeTeardownPhase.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TeardownPhase>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTeardownPhase.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TeardownPhase>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTeardownPhase.write(it, buf)
         }
     }
 }

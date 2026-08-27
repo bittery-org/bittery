@@ -3096,6 +3096,9 @@ public enum RuntimeRequest {
     )
     case signOut(accountId: String
     )
+    case removeAccount(accountId: String
+    )
+    case wipe
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
     case updateLoginItem(accountId: String, itemId: String, draft: LoginItemDraft
@@ -3147,31 +3150,36 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         case 4: return .signOut(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 5: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 5: return .removeAccount(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 6: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 6: return .wipe
+
+        case 7: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
-        case 7: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
+        case 8: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
-        case 8: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 9: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
         )
 
-        case 9: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 10: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 10: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
+        case 11: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 11: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 12: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
         )
 
-        case 12: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        case 13: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 13: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 14: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        )
+
+        case 15: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3207,61 +3215,70 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
 
 
-        case let .createLoginItem(accountId,vaultId,draft):
+        case let .removeAccount(accountId):
             writeInt(&buf, Int32(5))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case .wipe:
+            writeInt(&buf, Int32(6))
+
+
+        case let .createLoginItem(accountId,vaultId,draft):
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
 
 
         case let .updateLoginItem(accountId,itemId,draft):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
 
 
         case let .setItemFavorite(accountId,itemId,favorite):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterBool.write(favorite, into: &buf)
 
 
         case let .trashItem(accountId,itemId):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .restoreItem(accountId,itemId):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .moveItem(accountId,itemId,targetVaultId):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterString.write(targetVaultId, into: &buf)
 
 
         case let .permanentlyDeleteItem(accountId,itemId):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .createShare(accountId,itemId,draft):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
 
         case let .acknowledgeShareResult(accountId,operationId):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
@@ -3298,6 +3315,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     )
     case shareResultAcknowledged(accountId: String, operationId: String
     )
+    case teardown(scope: TeardownScope, status: TeardownStatus, failures: [TeardownPhase]
+    )
 
 
 
@@ -3331,6 +3350,9 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 4: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
+        case 5: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        )
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -3362,6 +3384,13 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             writeInt(&buf, Int32(4))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
+
+
+        case let .teardown(scope,status,failures):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeTeardownScope.write(scope, into: &buf)
+            FfiConverterTypeTeardownStatus.write(status, into: &buf)
+            FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
 
         }
     }
@@ -3535,6 +3564,224 @@ public func FfiConverterTypeShareExpiration_lift(_ buf: RustBuffer) throws -> Sh
 #endif
 public func FfiConverterTypeShareExpiration_lower(_ value: ShareExpiration) -> RustBuffer {
     return FfiConverterTypeShareExpiration.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TeardownPhase: Equatable, Hashable {
+
+    case attachmentArtifacts
+    case hostCleanup
+    case platformStorage
+    case replica
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TeardownPhase: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTeardownPhase: FfiConverterRustBuffer {
+    typealias SwiftType = TeardownPhase
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TeardownPhase {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .attachmentArtifacts
+
+        case 2: return .hostCleanup
+
+        case 3: return .platformStorage
+
+        case 4: return .replica
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TeardownPhase, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .attachmentArtifacts:
+            writeInt(&buf, Int32(1))
+
+
+        case .hostCleanup:
+            writeInt(&buf, Int32(2))
+
+
+        case .platformStorage:
+            writeInt(&buf, Int32(3))
+
+
+        case .replica:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownPhase_lift(_ buf: RustBuffer) throws -> TeardownPhase {
+    return try FfiConverterTypeTeardownPhase.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownPhase_lower(_ value: TeardownPhase) -> RustBuffer {
+    return FfiConverterTypeTeardownPhase.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TeardownScope: Equatable, Hashable {
+
+    case account(accountId: String
+    )
+    case device
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TeardownScope: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTeardownScope: FfiConverterRustBuffer {
+    typealias SwiftType = TeardownScope
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TeardownScope {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .account(accountId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 2: return .device
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TeardownScope, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case let .account(accountId):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case .device:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownScope_lift(_ buf: RustBuffer) throws -> TeardownScope {
+    return try FfiConverterTypeTeardownScope.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownScope_lower(_ value: TeardownScope) -> RustBuffer {
+    return FfiConverterTypeTeardownScope.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TeardownStatus: Equatable, Hashable {
+
+    case complete
+    case incomplete
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TeardownStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTeardownStatus: FfiConverterRustBuffer {
+    typealias SwiftType = TeardownStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TeardownStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .complete
+
+        case 2: return .incomplete
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TeardownStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .complete:
+            writeInt(&buf, Int32(1))
+
+
+        case .incomplete:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownStatus_lift(_ buf: RustBuffer) throws -> TeardownStatus {
+    return try FfiConverterTypeTeardownStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTeardownStatus_lower(_ value: TeardownStatus) -> RustBuffer {
+    return FfiConverterTypeTeardownStatus.lower(value)
 }
 
 
@@ -3931,6 +4178,31 @@ fileprivate struct FfiConverterSequenceTypeVaultProjection: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeVaultProjection.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer {
+    typealias SwiftType = [TeardownPhase]
+
+    public static func write(_ value: [TeardownPhase], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTeardownPhase.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TeardownPhase] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TeardownPhase]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTeardownPhase.read(from: &buf))
         }
         return seq
     }

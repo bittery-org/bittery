@@ -275,7 +275,11 @@ impl SerializedPlatformStorageExecutor for InstallationPlatform {
                 self.values.lock().unwrap().remove(&(area, key));
                 Ok(Zeroizing::new(json!({"type": "done"}).to_string()))
             }
-            _ => unreachable!(),
+            // A namespace delete must fail an assertion, not abort the test harness.
+            "deletePrefix" => Err(startup_invariant(
+                "installation reached a platform namespace delete",
+            )),
+            other => panic!("unexpected platform request {other}"),
         }
     }
 }
@@ -924,8 +928,12 @@ fn create_request(account_id: &str) -> RuntimeRequest {
 }
 
 fn sign_in_request(email: &str) -> RuntimeRequest {
+    sign_in_request_to("https://vault.example.com", email)
+}
+
+fn sign_in_request_to(server_url: &str, email: &str) -> RuntimeRequest {
     RuntimeRequest::SignIn {
-        server_url: "https://vault.example.com".into(),
+        server_url: server_url.into(),
         email: email.into(),
         master_password: MASTER_PASSWORD.into(),
         secret_key: SECRET_KEY.into(),
@@ -1021,6 +1029,97 @@ async fn sign_in_routes_the_verified_ceremony_into_one_published_unlocked_accoun
     assert_eq!(status.accounts.len(), 1);
     assert_eq!(status.accounts[0].account_id, account_id);
     assert_eq!(status.accounts[0].access, AccountAccessState::Unlocked);
+}
+
+#[tokio::test]
+async fn pending_account_teardown_fences_only_the_sign_in_that_resolves_to_that_account() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn {
+        account_id: removed,
+        ..
+    } = runtime
+        .request(
+            sign_in_request_to("https://vault.example.com", NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("Sign-in returned another response");
+    };
+    let RuntimeResponse::SignedIn {
+        account_id: unrelated,
+        ..
+    } = runtime
+        .request(
+            sign_in_request_to("https://other.example.com", NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("Sign-in returned another response");
+    };
+    assert_ne!(removed, unrelated);
+
+    // A failed catalog detach keeps the removed Account in the catalog, so its Sign-in identity
+    // still resolves to the tombstoned Account instead of a fresh one.
+    platform.fail_at(PersistenceStep::PromotedCatalog);
+    let teardown = runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: removed.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let RuntimeResponse::Teardown { status, .. } = teardown else {
+        panic!("removal returned another response");
+    };
+    assert_eq!(status, TeardownStatus::Incomplete);
+    assert!(platform
+        .catalog()
+        .unwrap()
+        .accounts
+        .iter()
+        .any(|account| account.account_id == removed));
+
+    platform.clear_events();
+    let permitted = runtime
+        .request(
+            sign_in_request_to("https://other.example.com", NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        permitted,
+        RuntimeResponse::SignedIn {
+            account_id: unrelated,
+            user_id: "user-1".into(),
+        }
+    );
+
+    platform.clear_events();
+    let rejected = runtime
+        .request(
+            sign_in_request_to("https://vault.example.com", NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(rejected.code, RuntimeErrorCode::AccountMissing);
+    assert_eq!(rejected.message, "Account teardown is pending");
+    assert!(
+        platform.events().is_empty(),
+        "a fenced Sign-in must not mutate catalog, generation, or Replica state"
+    );
 }
 
 #[tokio::test]

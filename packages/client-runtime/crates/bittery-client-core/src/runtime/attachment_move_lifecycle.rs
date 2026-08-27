@@ -83,6 +83,10 @@ impl AttachmentMoveLifecycle {
             .any(|(account, generation)| account == account_id && generation == incarnation)
     }
 
+    pub(crate) fn artifacts(&self) -> Arc<dyn AttachmentArtifactStore> {
+        Arc::clone(&self.artifacts)
+    }
+
     pub(crate) async fn run_account(
         &self,
         runtime: &Arc<Runtime>,

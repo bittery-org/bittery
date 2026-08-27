@@ -84,7 +84,7 @@ impl Drop for DispatchLease {
 }
 
 /// What one scan of every Account's accepted work decided to do next.
-enum DispatchPass {
+pub(super) enum DispatchPass {
     /// Something was attempted or something durable moved. Read the Replica again.
     Progressed,
     /// Nothing is eligible and no clock can change that. Only an event can.
@@ -155,14 +155,17 @@ impl Runtime {
     }
 
     /// Finds the first Operation this Device may send right now, and says what to do afterwards.
-    async fn dispatch_eligible_operations(&self) -> DispatchPass {
+    pub(super) async fn dispatch_eligible_operations(&self) -> DispatchPass {
         let Ok(now_ms) = self.clock.now_ms() else {
             return DispatchPass::Parked;
         };
         let mut earliest: Option<u64> = None;
         let mut leased_elsewhere = false;
         for snapshot in self.replica.snapshots() {
-            if snapshot.operations.is_empty() || snapshot.failure.is_some() {
+            if snapshot.operations.is_empty()
+                || snapshot.failure.is_some()
+                || self.account_teardown_is_pending(&snapshot.account_id)
+            {
                 continue;
             }
             if self
@@ -225,7 +228,7 @@ impl Runtime {
             Err(_) => return AttemptOutcome::Parked,
         };
         let _execution_guard = execution_lock.lock().await;
-        if self.is_closed() {
+        if self.is_closed() || self.account_teardown_is_pending(&account_id) {
             return AttemptOutcome::Parked;
         }
         let Some(snapshot) = self.replica.snapshot(&account_id) else {

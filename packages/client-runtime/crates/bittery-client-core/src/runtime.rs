@@ -32,6 +32,9 @@ mod outcome;
 mod outcome_tests;
 #[cfg(test)]
 mod share_outcome_tests;
+mod teardown;
+#[cfg(test)]
+mod teardown_tests;
 
 #[doc(hidden)]
 pub use attachment_move_lifecycle::{AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort};
@@ -49,6 +52,7 @@ use attachment_move_scheduler::{
 };
 use dispatch::DispatchLeases;
 use lock::AccessRetirement;
+pub use teardown::{TeardownHostCleanup, TeardownHostCleanupRequest, TeardownHostCleanupResponse};
 
 #[cfg(test)]
 use crate::replica::PlanResult;
@@ -75,8 +79,8 @@ use crate::{
     AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
     ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
     PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
-    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection, VaultProjection,
-    VaultProjectionRole, VaultProjectionType,
+    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection, TeardownPhase,
+    TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -452,6 +456,9 @@ pub struct Runtime {
     attachment_move_lifecycle: Mutex<Option<Arc<AttachmentMoveLifecycle>>>,
     attachment_move_lifecycle_active: AtomicBool,
     attachment_move_account_cursor: AtomicU64,
+    teardown_admission: tokio::sync::RwLock<()>,
+    teardown_host_cleanup: Mutex<Arc<dyn TeardownHostCleanup>>,
+    pending_teardown: Mutex<teardown::PendingTeardown>,
 }
 
 struct AttachmentMoveLifecycleLease {
@@ -653,6 +660,69 @@ impl Runtime {
         runtime
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_teardown_environment(
+        persistence: Arc<dyn ReplicaPersistence>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        artifacts: Arc<dyn crate::attachment_artifact_store::AttachmentArtifactStore>,
+        cleanup: Arc<dyn TeardownHostCleanup>,
+    ) -> Arc<Self> {
+        let runtime = Self::with_persistence(
+            persistence,
+            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(HttpTransport::unavailable()),
+            Some(
+                AuthClientConfig::new("test-client".into(), crate::ClientPlatform::Web, "1".into())
+                    .expect("test auth config is valid"),
+            ),
+            None,
+            true,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
+            None,
+        );
+        *runtime
+            .attachment_move_lifecycle
+            .lock()
+            .expect("Attachment Move lifecycle lock poisoned") =
+            Some(Arc::new(AttachmentMoveLifecycle::new(
+                Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+                artifacts,
+            )));
+        runtime.install_teardown_host_cleanup(cleanup);
+        runtime
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restart_test_teardown_environment(
+        persistence: Arc<dyn ReplicaPersistence>,
+        platform: Arc<dyn SerializedPlatformStorageExecutor>,
+        artifacts: Arc<dyn crate::attachment_artifact_store::AttachmentArtifactStore>,
+        cleanup: Arc<dyn TeardownHostCleanup>,
+    ) -> Arc<Self> {
+        let runtime = Self::with_persistence(
+            persistence,
+            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(HttpTransport::unavailable()),
+            None,
+            None,
+            false,
+            Arc::new(SystemClock),
+            Arc::new(SystemDeviceTimer),
+            None,
+        );
+        *runtime
+            .attachment_move_lifecycle
+            .lock()
+            .expect("Attachment Move lifecycle lock poisoned") =
+            Some(Arc::new(AttachmentMoveLifecycle::new(
+                Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+                artifacts,
+            )));
+        runtime.install_teardown_host_cleanup(cleanup);
+        runtime
+    }
+
     #[doc(hidden)]
     #[cfg_attr(
         target_arch = "wasm32",
@@ -768,6 +838,9 @@ impl Runtime {
             attachment_move_lifecycle: Mutex::new(None),
             attachment_move_lifecycle_active: AtomicBool::new(false),
             attachment_move_account_cursor: AtomicU64::new(0),
+            teardown_admission: tokio::sync::RwLock::new(()),
+            teardown_host_cleanup: Mutex::new(Arc::new(teardown::UnavailableTeardownHostCleanup)),
+            pending_teardown: Mutex::new(teardown::PendingTeardown::default()),
         });
         if let Some((facade, lease_port)) = attachment_move_preparation {
             runtime.install_attachment_move_preparation_with_lease(facade, lease_port);
@@ -806,6 +879,15 @@ impl Runtime {
             .attachment_move_lifecycle
             .lock()
             .expect("Attachment Move lifecycle lock poisoned") = Some(lifecycle);
+    }
+
+    /// Installs the host-owned ciphertext-spool cleanup primitive. Runtime policy remains in Rust.
+    #[doc(hidden)]
+    pub fn install_teardown_host_cleanup(&self, cleanup: Arc<dyn TeardownHostCleanup>) {
+        *self
+            .teardown_host_cleanup
+            .lock()
+            .expect("teardown host cleanup lock poisoned") = cleanup;
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.
@@ -1050,6 +1132,17 @@ impl Runtime {
         before_acceptance: impl FnOnce(),
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
+        match &request {
+            RuntimeRequest::RemoveAccount { account_id } => {
+                return self.remove_account(account_id.clone()).await;
+            }
+            RuntimeRequest::Wipe => {
+                return self.wipe_device().await;
+            }
+            _ => {}
+        }
+        let _admission = self.teardown_admission.read().await;
+        self.reject_request_during_pending_teardown(&request)?;
         match request {
             RuntimeRequest::SignIn {
                 server_url,
@@ -1361,6 +1454,12 @@ impl Runtime {
                 self.acknowledge_share_result(account_id, operation_id, cancellation)
                     .await
             }
+            // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
+            // so this reports an error rather than panicking on the request path.
+            RuntimeRequest::RemoveAccount { .. } | RuntimeRequest::Wipe => Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "teardown requests are handled before ordinary admission",
+            )),
         }
     }
 
@@ -1415,6 +1514,12 @@ impl Runtime {
     ) -> Result<Arc<ObservationHandle>, RuntimeError> {
         let publication = self.publication.lock().expect("publication lock poisoned");
         self.ensure_open()?;
+        if self.observation_teardown_is_pending(&request) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountMissing,
+                "Account teardown is pending",
+            ));
+        }
         let id = self.next_observer_id.fetch_add(1, Ordering::SeqCst);
         let subscription = Arc::new(Subscription::new(request, sink, self.identity()));
         self.observers
@@ -1599,6 +1704,7 @@ impl Runtime {
     fn generation_is_preparation_eligible(&self, snapshot: &ReplicaSnapshot) -> bool {
         !self.is_closed()
             && self.ready.load(Ordering::SeqCst)
+            && !self.account_teardown_is_pending(&snapshot.account_id)
             && snapshot.failure.is_none()
             && self
                 .account_access

@@ -10,7 +10,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 macro_rules! string_id {
     ($name:ident) => {
-        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -51,7 +51,8 @@ string_id!(Incarnation);
 #[serde(
     tag = "type",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum RuntimeRequest {
     SignIn {
@@ -87,6 +88,16 @@ pub enum RuntimeRequest {
         )]
         account_id: AccountId,
     },
+    /// Irreversibly removes exactly the explicitly named Account from this Device.
+    RemoveAccount {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String", regex(pattern = "^[\\s\\S]+$"))
+        )]
+        account_id: AccountId,
+    },
+    /// Irreversibly removes every Runtime-owned Account and Device record.
+    Wipe,
     CreateLoginItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -190,6 +201,8 @@ impl fmt::Debug for RuntimeRequest {
                 .debug_struct("SignOut")
                 .field("account_id", account_id)
                 .finish(),
+            Self::RemoveAccount { .. } => formatter.write_str("RemoveAccount([redacted scope])"),
+            Self::Wipe => formatter.write_str("Wipe"),
             Self::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -282,6 +295,8 @@ impl RuntimeRequest {
             Self::SignIn { .. } => None,
             Self::QuickUnlock { account_id, .. } => Some(account_id),
             Self::Lock { account_id } | Self::SignOut { account_id } => Some(account_id),
+            Self::RemoveAccount { account_id } => Some(account_id),
+            Self::Wipe => None,
             Self::CreateLoginItem { account_id, .. }
             | Self::UpdateLoginItem { account_id, .. }
             | Self::SetItemFavorite { account_id, .. }
@@ -421,7 +436,8 @@ pub enum CustomFieldKind {
 #[serde(
     tag = "type",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum RuntimeResponse {
     SignedIn {
@@ -460,6 +476,63 @@ pub enum RuntimeResponse {
         account_id: AccountId,
         operation_id: String,
     },
+    Teardown {
+        scope: TeardownScope,
+        status: TeardownStatus,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(max = 4))
+        )]
+        failures: Vec<TeardownPhase>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TeardownScope {
+    Account {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String", regex(pattern = "^[\\s\\S]+$"))
+        )]
+        account_id: AccountId,
+    },
+    Device,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum TeardownStatus {
+    Complete,
+    Incomplete,
+}
+
+/// Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum TeardownPhase {
+    AttachmentArtifacts,
+    HostCleanup,
+    PlatformStorage,
+    Replica,
 }
 
 /// The declared envelope every external Runtime request answers with.

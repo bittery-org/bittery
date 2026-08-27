@@ -74,7 +74,8 @@ pub use protocol::{
     LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
     PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
     RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
-    ShareAccessMode, ShareExpiration, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus,
+    VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
@@ -92,5 +93,6 @@ pub use runtime::{
     AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort, AttachmentMoveDownload,
     AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade, AttachmentMoveTransferError,
     AttachmentMoveTransferPort, AttachmentMoveUpload, AttachmentMoveUploadGrant,
+    TeardownHostCleanup, TeardownHostCleanupRequest, TeardownHostCleanupResponse,
 };
 pub use runtime::{ObservationHandle, Runtime};

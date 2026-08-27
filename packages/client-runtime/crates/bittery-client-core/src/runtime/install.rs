@@ -178,6 +178,14 @@ impl Runtime {
                 "generated Account identity collides with the Device catalog",
             ));
         }
+        // This is the first point at which the Account identity is known, and it is still before any
+        // installation write. A pending teardown of exactly this Account must fence it here.
+        if self.account_teardown_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountMissing,
+                "Account teardown is pending",
+            ));
+        }
         let previous_metadata = active_metadata.get(&account_id);
         let existing_catalog_account = catalog
             .accounts

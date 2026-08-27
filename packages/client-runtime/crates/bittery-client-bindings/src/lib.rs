@@ -242,6 +242,10 @@ pub enum RuntimeRequest {
     SignOut {
         account_id: String,
     },
+    RemoveAccount {
+        account_id: String,
+    },
+    Wipe,
     CreateLoginItem {
         account_id: String,
         vault_id: String,
@@ -309,6 +313,8 @@ impl fmt::Debug for RuntimeRequest {
                 .debug_struct("SignOut")
                 .field("account_id", account_id)
                 .finish(),
+            Self::RemoveAccount { .. } => formatter.write_str("RemoveAccount([redacted scope])"),
+            Self::Wipe => formatter.write_str("Wipe"),
             Self::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -414,6 +420,31 @@ pub enum RuntimeResponse {
         account_id: String,
         operation_id: String,
     },
+    Teardown {
+        scope: TeardownScope,
+        status: TeardownStatus,
+        failures: Vec<TeardownPhase>,
+    },
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum TeardownScope {
+    Account { account_id: String },
+    Device,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum TeardownStatus {
+    Complete,
+    Incomplete,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum TeardownPhase {
+    AttachmentArtifacts,
+    HostCleanup,
+    PlatformStorage,
+    Replica,
 }
 
 #[derive(Clone, Debug, uniffi::Enum)]
@@ -901,6 +932,10 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             RuntimeRequest::SignOut { account_id } => Self::SignOut {
                 account_id: account_id.into(),
             },
+            RuntimeRequest::RemoveAccount { account_id } => Self::RemoveAccount {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::Wipe => Self::Wipe,
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,
@@ -1061,6 +1096,46 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 account_id: account_id.into(),
                 operation_id,
             },
+            core::RuntimeResponse::Teardown {
+                scope,
+                status,
+                failures,
+            } => Self::Teardown {
+                scope: scope.into(),
+                status: status.into(),
+                failures: failures.into_iter().map(Into::into).collect(),
+            },
+        }
+    }
+}
+
+impl From<core::TeardownScope> for TeardownScope {
+    fn from(value: core::TeardownScope) -> Self {
+        match value {
+            core::TeardownScope::Account { account_id } => Self::Account {
+                account_id: account_id.into(),
+            },
+            core::TeardownScope::Device => Self::Device,
+        }
+    }
+}
+
+impl From<core::TeardownStatus> for TeardownStatus {
+    fn from(value: core::TeardownStatus) -> Self {
+        match value {
+            core::TeardownStatus::Complete => Self::Complete,
+            core::TeardownStatus::Incomplete => Self::Incomplete,
+        }
+    }
+}
+
+impl From<core::TeardownPhase> for TeardownPhase {
+    fn from(value: core::TeardownPhase) -> Self {
+        match value {
+            core::TeardownPhase::AttachmentArtifacts => Self::AttachmentArtifacts,
+            core::TeardownPhase::HostCleanup => Self::HostCleanup,
+            core::TeardownPhase::PlatformStorage => Self::PlatformStorage,
+            core::TeardownPhase::Replica => Self::Replica,
         }
     }
 }
