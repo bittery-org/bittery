@@ -165,7 +165,12 @@ export async function initializeStorage(): Promise<void> {
 			await itemCache.initialize();
 
 			if ((await storage.getActiveAccount()) === null) {
-				await storage.setActiveAccount(getOrCreateWebAccountId());
+				// A surviving Account list means removal abandoned after clearing its pointer.
+				// Re-select that Account so the next removal names its surviving material.
+				const accounts = await storage.getAccountsList();
+				await storage.setActiveAccount(
+					accounts[0]?.accountId ?? getOrCreateWebAccountId(),
+				);
 			}
 		})();
 	}
