@@ -29,6 +29,30 @@ interface WebClientRuntimeLike {
 interface RuntimeIncarnation {
 	runtime: WebClientRuntimeLike;
 	failed: boolean;
+	/** Present only when `open()` rejected. See `WedgedRuntime`. */
+	wedged?: WedgedRuntime;
+}
+
+/**
+ * A Runtime that was built but could not open.
+ *
+ * `open()` fails for as long as the persisted Device state is unreadable or disagrees with itself,
+ * so it fails again on every reload. That is exactly the Device a user asks to wipe, and the
+ * Runtime stays the only authority that may destroy Device storage. The un-opened Runtime is
+ * therefore kept alive for a Device wipe alone. Every other request retires it first and reports
+ * the `open()` failure, which keeps the established behaviour: the next request builds and opens a
+ * new Runtime.
+ */
+interface WedgedRuntime {
+	error: unknown;
+	/** Keeps the un-opened Runtime alive while a wipe is still using it. */
+	hold(): void;
+	release(): void;
+	/**
+	 * Closes the un-opened Runtime unless a wipe still holds it, and drops it from the cache so the
+	 * next request starts over.
+	 */
+	retire(): Promise<void>;
 }
 
 export interface AttachmentArtifactExecutor {
@@ -143,6 +167,25 @@ function hasExactKeys(
 	);
 }
 
+/**
+ * Whether this command is the whole-Device wipe, and nothing wider.
+ *
+ * The Runtime denies unknown fields, so `{"type":"wipe","accountId":"x"}` is not a wipe. Matching
+ * loosely here would hand a Runtime that never opened to a request the Runtime itself refuses.
+ */
+function isDeviceWipe(command: RuntimeCommand): boolean {
+	if (command.type !== "request") return false;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(command.requestJson);
+	} catch {
+		return false;
+	}
+	if (typeof parsed !== "object" || parsed === null) return false;
+	const request = parsed as Record<string, unknown>;
+	return request.type === "wipe" && hasExactKeys(request, ["type"]);
+}
+
 function parseCommand(value: unknown): RuntimeCommand {
 	if (typeof value !== "object" || value === null) {
 		throw invalidInput("Runtime commands must be plain objects.");
@@ -183,6 +226,16 @@ export function createRuntimeWorkerService(
 	let lifecycleFailure: Error | undefined;
 	let terminalFailure: Error | undefined;
 	let closing = false;
+	/**
+	 * Device wipes that were accepted but have not taken their hold on the Runtime yet.
+	 *
+	 * A wipe can only `hold()` the un-opened Runtime after its own `await runtime()` resumes. Every
+	 * concurrent request awaits the same cached Runtime task, so a request that resumes first would
+	 * otherwise see no holder, retire the Runtime, and close it under the wipe. Counting the wipe
+	 * before it yields keeps its Runtime alive, and keeps a second Runtime from opening over storage
+	 * the first one is still destroying.
+	 */
+	let wipesPending = 0;
 	const runtimeClosers = new WeakMap<
 		WebClientRuntimeLike,
 		() => Promise<void>
@@ -303,17 +356,49 @@ export function createRuntimeWorkerService(
 			try {
 				await created.open();
 			} catch (error) {
-				const cleanupFailed = await closeCreated().then(
-					() => false,
-					() => true,
-				);
-				if (lifecycleFailed) return await rejectLifecycleFailure();
-				if (cleanupFailed && deps.authClient !== undefined) {
-					const failure = attachmentPreparationFailed();
-					terminalFailure = failure;
-					throw failure;
+				if (lifecycleFailed) {
+					await closeCreated().then(
+						() => undefined,
+						() => undefined,
+					);
+					return await rejectLifecycleFailure();
 				}
-				throw error;
+				let holders = 0;
+				incarnation.wedged = {
+					error,
+					hold: () => {
+						holders += 1;
+					},
+					release: () => {
+						holders -= 1;
+					},
+					retire: async () => {
+						if (holders > 0 || wipesPending > 0) return;
+						if (runtimeTask === started) runtimeTask = undefined;
+						// Dropping the cached task alone would let the next request build and open a
+						// second Runtime over storage this one is still writing, because `close()`
+						// keeps writing after every in-process lock is gone. Hold the rebuild behind
+						// the close, exactly as a failed lifecycle does.
+						let barrier!: Promise<void>;
+						const reopen = () => {
+							if (restartBarrier === barrier) restartBarrier = undefined;
+						};
+						barrier = closeCreated().then(reopen, () => {
+							// A close that rejects leaves the Attachment Move preparation lifecycle in
+							// an unknown state, so no later request may reuse this worker. Decide that
+							// here, before anyone waiting on the barrier resumes.
+							if (deps.authClient !== undefined) {
+								terminalFailure ??= attachmentPreparationFailed();
+							}
+							reopen();
+						});
+						restartBarrier = barrier;
+						// The barrier never rejects. A caller that this close did not poison should get
+						// a fresh Runtime, not the close's error.
+						await barrier;
+					},
+				};
+				return incarnation;
 			}
 			if (lifecycleFailed) return await rejectLifecycleFailure();
 			return incarnation;
@@ -330,44 +415,81 @@ export function createRuntimeWorkerService(
 	return {
 		async request(payload, signal, notify) {
 			const command = parseCommand(payload);
-			const incarnation = await runtime();
-			if (incarnation.failed) return await rejectLifecycleFailure();
-			const ready = incarnation.runtime;
-			if (closing) throw closed();
-			if (command.type === "observe") {
-				if (signal.aborted) return undefined;
-				let cancelled = false;
-				const cancel = () => {
-					if (cancelled) return;
-					cancelled = true;
-					ready.unobserve(command.observationId);
-				};
-				signal.addEventListener("abort", cancel, { once: true });
-				ready.observe_json(
-					command.observationId,
-					command.requestJson,
-					(projectionJson) =>
-						notify({
-							type: "observation",
-							observationId: command.observationId,
-							projectionJson,
-						} satisfies RuntimeNotification),
-				);
-				if (signal.aborted) cancel();
-				signal.removeEventListener("abort", cancel);
-				return undefined;
-			}
-			if (command.type === "unobserve") {
-				ready.unobserve(command.observationId);
-				return undefined;
-			}
-			const cancel = () => ready.cancel(command.requestId);
-			signal.addEventListener("abort", cancel, { once: true });
-			if (signal.aborted) cancel();
+			// A wipe can only hold the Runtime after `runtime()` resumes it. Claim its interest here,
+			// before the first `await`, where no other request's continuation can run.
+			let counted = isDeviceWipe(command);
+			if (counted) wipesPending += 1;
+			const uncount = () => {
+				if (!counted) return;
+				counted = false;
+				wipesPending -= 1;
+			};
 			try {
-				return await ready.request_json(command.requestId, command.requestJson);
+				const incarnation = await runtime();
+				if (incarnation.failed) return await rejectLifecycleFailure();
+				const wedged = incarnation.wedged;
+				// `counted` still carries `isDeviceWipe(command)` here: nothing has called `uncount`
+				// yet, and the command cannot change. Reuse it rather than parse the request again.
+				if (wedged !== undefined && !counted) {
+					await wedged.retire();
+					if (terminalFailure !== undefined) throw terminalFailure;
+					throw wedged.error;
+				}
+				const ready = incarnation.runtime;
+				if (closing) throw closed();
+				if (command.type === "observe") {
+					if (signal.aborted) return undefined;
+					let cancelled = false;
+					const cancel = () => {
+						if (cancelled) return;
+						cancelled = true;
+						ready.unobserve(command.observationId);
+					};
+					signal.addEventListener("abort", cancel, { once: true });
+					ready.observe_json(
+						command.observationId,
+						command.requestJson,
+						(projectionJson) =>
+							notify({
+								type: "observation",
+								observationId: command.observationId,
+								projectionJson,
+							} satisfies RuntimeNotification),
+					);
+					if (signal.aborted) cancel();
+					signal.removeEventListener("abort", cancel);
+					return undefined;
+				}
+				if (command.type === "unobserve") {
+					ready.unobserve(command.observationId);
+					return undefined;
+				}
+				const cancel = () => ready.cancel(command.requestId);
+				signal.addEventListener("abort", cancel, { once: true });
+				if (signal.aborted) cancel();
+				wedged?.hold();
+				// The hold now keeps this Runtime alive, so the wipe must stop blocking its own retire.
+				uncount();
+				try {
+					return await ready.request_json(
+						command.requestId,
+						command.requestJson,
+					);
+				} finally {
+					signal.removeEventListener("abort", cancel);
+					if (wedged !== undefined) {
+						// The wipe destroyed the storage that `open()` choked on, so the next request should
+						// build a Runtime that can open. Retire this one either way: an incomplete wipe is
+						// retried against a fresh Runtime.
+						wedged.release();
+						// A retire that sets `terminalFailure` does not take the wipe's answer away. The
+						// wipe finished; only the worker is spent. Later requests carry that failure, so
+						// this stays deliberately asymmetric with the non-wipe path above, which throws it.
+						await wedged.retire();
+					}
+				}
 			} finally {
-				signal.removeEventListener("abort", cancel);
+				uncount();
 			}
 		},
 		close() {
@@ -375,15 +497,30 @@ export function createRuntimeWorkerService(
 				closing = true;
 				closeTask =
 					terminalFailure === undefined
-						? (restartBarrier ??
-							(runtimeTask === undefined
+						? restartBarrier !== undefined
+							? restartBarrier.then(() => {
+									// The barrier hides a failed close from `runtime()` so a caller it did not
+									// poison gets a fresh Runtime. `close()` owns the shutdown, so it must
+									// report that failure instead of a clean shutdown that never happened.
+									if (terminalFailure !== undefined) throw terminalFailure;
+								})
+							: runtimeTask === undefined
 								? Promise.resolve()
 								: runtimeTask.then(
-										(ready) => closeRuntime(ready.runtime),
+										(ready) =>
+											closeRuntime(ready.runtime).catch((error: unknown) => {
+												// A Runtime that never opened escalates a failed close the same way
+												// startup does, so the redacted terminal failure stays authoritative.
+												if (ready.wedged === undefined) throw error;
+												if (deps.authClient !== undefined) {
+													terminalFailure ??= attachmentPreparationFailed();
+												}
+												throw terminalFailure ?? error;
+											}),
 										() => {
 											if (terminalFailure !== undefined) throw terminalFailure;
 										},
-									)))
+									)
 						: Promise.reject(terminalFailure);
 				void closeTask.catch(() => undefined);
 			}

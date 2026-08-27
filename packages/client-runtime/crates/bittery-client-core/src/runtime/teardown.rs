@@ -116,10 +116,27 @@ impl Runtime {
         self.teardown(TeardownScope::Device).await
     }
 
+    /// How far this Runtime must have started before a scope may destroy.
+    ///
+    /// A Device `Wipe` needs only a Runtime that is not closed. Its phases are namespace-wide and
+    /// read no catalog, and `catalog_transition` still serializes them against a concurrent
+    /// `open()`. That relaxation is the whole point: `open()` fails for as long as the Device
+    /// catalog and the durable Replica disagree, which is what a cleared IndexedDB beside a kept
+    /// `localStorage` leaves behind, and a wipe is the only way out of it.
+    ///
+    /// Account scope reads the Device catalog and detaches one entry from it, so it keeps the
+    /// full precondition.
+    fn ensure_teardown_precondition(&self, scope: &TeardownScope) -> Result<(), RuntimeError> {
+        match scope {
+            TeardownScope::Account { .. } => self.ensure_open(),
+            TeardownScope::Device => self.ensure_not_closed(),
+        }
+    }
+
     async fn teardown(&self, scope: TeardownScope) -> Result<RuntimeResponse, RuntimeError> {
-        self.ensure_open()?;
+        self.ensure_teardown_precondition(&scope)?;
         let _admission = self.teardown_admission.write().await;
-        self.ensure_open()?;
+        self.ensure_teardown_precondition(&scope)?;
         {
             let _publication = self.publication.lock().expect("publication lock poisoned");
             self.pending_teardown

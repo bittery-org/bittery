@@ -245,6 +245,16 @@ struct Harness {
 }
 
 fn teardown_harness(fault: Fault) -> Harness {
+    build_teardown_harness(fault, true)
+}
+
+/// A Runtime that has not finished `open()`. A user reaches for "wipe this Device" exactly here,
+/// so every Device phase has to work with no restored Account and no Replica cache.
+fn wedged_teardown_harness(fault: Fault) -> Harness {
+    build_teardown_harness(fault, false)
+}
+
+fn build_teardown_harness(fault: Fault, opened: bool) -> Harness {
     let events = Arc::new(Mutex::new(Vec::new()));
     let persistence = Arc::new(InMemoryReplica::default());
     persistence
@@ -300,12 +310,21 @@ fn teardown_harness(fault: Fault) -> Harness {
         events: Arc::clone(&events),
         scopes: Mutex::new(Vec::new()),
     });
-    let runtime = Runtime::with_test_teardown_environment(
-        replica.clone(),
-        platform.clone(),
-        artifacts.clone(),
-        host.clone(),
-    );
+    let runtime = if opened {
+        Runtime::with_test_teardown_environment(
+            replica.clone(),
+            platform.clone(),
+            artifacts.clone(),
+            host.clone(),
+        )
+    } else {
+        Runtime::restart_test_teardown_environment(
+            replica.clone(),
+            platform.clone(),
+            artifacts.clone(),
+            host.clone(),
+        )
+    };
     Harness {
         runtime,
         persistence,
@@ -1220,4 +1239,189 @@ async fn pending_device_wipe_rejects_every_request_including_sign_in() {
             ..
         }
     ));
+}
+
+/// The Device a user clears IndexedDB on while `localStorage` keeps the catalog. The catalog names
+/// an Account with no durable Replica, so `open()` can never converge on this Device again. A
+/// `Wipe` is the only way out, and it must reach every namespace-wide authority.
+#[tokio::test]
+async fn a_wedged_device_is_still_wipeable_after_open_fails() {
+    let harness = wedged_teardown_harness(Fault::None);
+    let catalog = DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
+        account_id: AccountId::from("account-3"),
+        active_incarnation: Some(crate::protocol::Incarnation::from("incarnation-3")),
+        pending_install: None,
+    }])
+    .unwrap();
+    harness.platform.values.lock().unwrap().insert(
+        (
+            "devicePlain".into(),
+            "bittery:runtime:platform-storage:device-catalog".into(),
+        ),
+        serde_json::to_string(&catalog).unwrap(),
+    );
+    let wedged = harness.runtime.open().await.unwrap_err();
+    assert_eq!(wedged.code, RuntimeErrorCode::InvariantViolation);
+
+    let response = harness
+        .runtime
+        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response,
+        RuntimeResponse::Teardown {
+            scope: TeardownScope::Device,
+            status: TeardownStatus::Complete,
+            failures: vec![]
+        }
+    );
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_none());
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-2"))
+        .is_none());
+    assert!(harness.platform.values.lock().unwrap().is_empty());
+    assert_eq!(
+        *harness.host.scopes.lock().unwrap(),
+        [TeardownHostCleanupRequest::WipeDevice]
+    );
+    assert_eq!(
+        *harness.events.lock().unwrap(),
+        ["artifact", "host", "platform", "platform", "platform", "replica"]
+    );
+}
+
+/// Relaxing `Wipe` must not relax Account removal. An Account scope reads the Device catalog and
+/// detaches one entry from it, so it still needs the Runtime to have opened.
+#[tokio::test]
+async fn account_removal_still_requires_an_open_runtime() {
+    let harness = wedged_teardown_harness(Fault::None);
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: AccountId::from("account-1"),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(
+        error.message,
+        "Runtime must finish opening before it accepts work"
+    );
+    assert!(harness.events.lock().unwrap().is_empty());
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_some());
+}
+
+/// A wedged Device reports a failed phase honestly instead of claiming success, and an identical
+/// retry on the same wedged Runtime converges.
+#[tokio::test]
+async fn a_wedged_wipe_reports_incomplete_and_converges_on_an_identical_retry() {
+    let harness = wedged_teardown_harness(Fault::Platform);
+    let first = harness
+        .runtime
+        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        first,
+        RuntimeResponse::Teardown {
+            scope: TeardownScope::Device,
+            status: TeardownStatus::Incomplete,
+            failures: vec![TeardownPhase::PlatformStorage, TeardownPhase::Replica]
+        }
+    );
+    assert!(!serde_json::to_string(&first).unwrap().contains("SECRET_"));
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_some());
+
+    let retry = harness
+        .runtime
+        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        retry,
+        RuntimeResponse::Teardown {
+            scope: TeardownScope::Device,
+            status: TeardownStatus::Complete,
+            failures: vec![]
+        }
+    );
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_none());
+    assert!(harness.platform.values.lock().unwrap().is_empty());
+}
+
+/// A failed namespace wipe from a Runtime that never opened must not strand restart. The Device
+/// catalog and its Replica still agree, so a fresh Runtime opens and the retry converges.
+#[tokio::test]
+async fn a_failed_wedged_wipe_leaves_a_fresh_runtime_able_to_open_and_retry() {
+    let harness = wedged_teardown_harness(Fault::Platform);
+    seed_restartable_catalog(&harness);
+    let platform = Arc::clone(&harness.platform);
+
+    let first = harness
+        .runtime
+        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        first,
+        RuntimeResponse::Teardown {
+            scope: TeardownScope::Device,
+            status: TeardownStatus::Incomplete,
+            failures: vec![TeardownPhase::PlatformStorage, TeardownPhase::Replica]
+        }
+    );
+    assert!(harness
+        .platform
+        .values
+        .lock()
+        .unwrap()
+        .keys()
+        .any(|(_, key)| key.ends_with("device-catalog")));
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_some());
+
+    let restarted = Runtime::restart_test_teardown_environment(
+        harness.replica_port,
+        harness.platform,
+        harness.artifacts,
+        harness.host,
+    );
+    restarted.open().await.unwrap();
+    let retry = restarted
+        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        retry,
+        RuntimeResponse::Teardown {
+            scope: TeardownScope::Device,
+            status: TeardownStatus::Complete,
+            failures: vec![]
+        }
+    );
+    assert!(platform.values.lock().unwrap().is_empty());
+    assert!(harness
+        .persistence
+        .snapshot(&AccountId::from("account-1"))
+        .is_none());
 }

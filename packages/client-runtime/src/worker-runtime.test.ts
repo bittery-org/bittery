@@ -5,6 +5,9 @@ import {
 	type RuntimeWasm,
 } from "./worker-runtime";
 
+/** Lets every pending microtask run, so anything that was going to start has started. */
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 class RuntimeDouble {
 	readonly cancelled: string[] = [];
 	readonly observations = new Map<string, (projectionJson: string) => void>();
@@ -1006,6 +1009,511 @@ describe("Runtime worker service", () => {
 				() => undefined,
 			),
 		).rejects.toMatchObject({ code: "closed" });
+	});
+
+	test("wipes a Device whose open cannot succeed", async () => {
+		const wedged = new RuntimeDouble();
+		wedged.requestResult = Promise.resolve(
+			'{"type":"teardown","scope":{"type":"device"},"status":"complete","failures":[]}',
+		);
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		const { service } = runtimeService(wedged);
+
+		const wiped = await service.request(
+			{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+			new AbortController().signal,
+			() => undefined,
+		);
+
+		expect(wiped).toBe(
+			'{"type":"teardown","scope":{"type":"device"},"status":"complete","failures":[]}',
+		);
+		expect(wedged.requests).toEqual([
+			{ requestId: "wipe", requestJson: '{"type":"wipe"}' },
+		]);
+	});
+
+	test("retires the wedged Runtime after a wipe so the next request opens a fresh one", async () => {
+		const wedged = new RuntimeDouble();
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		const recovered = new RuntimeDouble();
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			loadWasm: async () => {
+				const runtime = loads++ === 0 ? wedged : recovered;
+				return {
+					WebClientRuntime: { withExecutors: () => runtime },
+				} as unknown as RuntimeWasm;
+			},
+		});
+
+		await service.request(
+			{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+			new AbortController().signal,
+			() => undefined,
+		);
+		expect(wedged.closeCalls).toBe(1);
+
+		expect(
+			await service.request(
+				{ type: "request", requestId: "after-wipe", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).toBe('{"type":"AuthenticationUnavailable"}');
+		expect(loads).toBe(2);
+		expect(recovered.openCalls).toBe(1);
+		expect(recovered.requests).toEqual([
+			{ requestId: "after-wipe", requestJson: "{}" },
+		]);
+	});
+
+	const wipeOutcome =
+		'{"type":"teardown","scope":{"type":"device"},"status":"complete","failures":[]}';
+
+	/**
+	 * Puts an observation and a Device wipe on one wedged Runtime, with a wipe that stays in flight.
+	 *
+	 * Both requests await the same cached Runtime task, so the call order decides which continuation
+	 * resumes first. `first` selects that order: the wipe must survive either one.
+	 */
+	async function wedgedWipeContention(first: "observe" | "wipe") {
+		const wedged = new RuntimeDouble();
+		const events: string[] = [];
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		wedged.close = async () => {
+			wedged.closeCalls += 1;
+			events.push("close");
+		};
+		let finishWipe!: () => void;
+		wedged.requestResult = new Promise<string>((resolve) => {
+			finishWipe = () => resolve(wipeOutcome);
+		});
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			loadWasm: async () => {
+				loads += 1;
+				events.push(`load#${loads}`);
+				return {
+					WebClientRuntime: { withExecutors: () => wedged },
+				} as unknown as RuntimeWasm;
+			},
+		});
+		const observe = () =>
+			service.request(
+				{ type: "observe", observationId: "status", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			);
+		const wipe = () =>
+			service.request(
+				{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+				new AbortController().signal,
+				() => undefined,
+			);
+		let observed: Promise<unknown>;
+		let wiped: Promise<unknown>;
+		if (first === "observe") {
+			observed = observe();
+			wiped = wipe();
+		} else {
+			wiped = wipe();
+			observed = observe();
+		}
+		void observed.catch(() => undefined);
+		return {
+			events,
+			finishWipe,
+			loads: () => loads,
+			observed,
+			request: (requestId: string) =>
+				service.request(
+					{ type: "request", requestId, requestJson: "{}" },
+					new AbortController().signal,
+					() => undefined,
+				),
+			wedged,
+			wiped,
+		};
+	}
+
+	// The bug this protects against depends on which request registers first, so both orders run.
+	for (const first of ["observe", "wipe"] as const) {
+		test(`a concurrent request may not close the Runtime a wipe is using, ${first} first`, async () => {
+			const contention = await wedgedWipeContention(first);
+
+			await expect(contention.observed).rejects.toThrow(
+				"active Account has no durable Replica",
+			);
+			expect(contention.wedged.closeCalls).toBe(0);
+
+			contention.finishWipe();
+			expect(await contention.wiped).toBe(wipeOutcome);
+			expect(contention.wedged.closeCalls).toBe(1);
+			expect(contention.events).toEqual(["load#1", "close"]);
+			expect(contention.wedged.requests).toEqual([
+				{ requestId: "wipe", requestJson: '{"type":"wipe"}' },
+			]);
+		});
+
+		test(`no second Runtime opens over the storage a wipe is destroying, ${first} first`, async () => {
+			const contention = await wedgedWipeContention(first);
+			await expect(contention.observed).rejects.toThrow(
+				"active Account has no durable Replica",
+			);
+
+			await expect(contention.request("late")).rejects.toThrow(
+				"active Account has no durable Replica",
+			);
+			expect(contention.loads()).toBe(1);
+			expect(contention.wedged.openCalls).toBe(1);
+
+			contention.finishWipe();
+			expect(await contention.wiped).toBe(wipeOutcome);
+			expect(contention.loads()).toBe(1);
+		});
+	}
+
+	test("only an exact Device wipe may use a Runtime that failed to open", async () => {
+		for (const requestJson of [
+			'{"type":"wipe","accountId":"account-1"}',
+			'{"type":"removeAccount","accountId":"account-1"}',
+			'{"type":"wipe"',
+		]) {
+			const wedged = new RuntimeDouble();
+			wedged.open = async () => {
+				wedged.openCalls += 1;
+				throw new Error("active Account has no durable Replica");
+			};
+			const { service } = runtimeService(wedged);
+
+			await expect(
+				service.request(
+					{ type: "request", requestId: "not-a-wipe", requestJson },
+					new AbortController().signal,
+					() => undefined,
+				),
+			).rejects.toThrow("active Account has no durable Replica");
+			expect(wedged.requests).toEqual([]);
+			expect(wedged.closeCalls).toBe(1);
+		}
+	});
+
+	test("an observation may not use a Runtime that failed to open", async () => {
+		const wedged = new RuntimeDouble();
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		const { service } = runtimeService(wedged);
+
+		await expect(
+			service.request(
+				{ type: "observe", observationId: "status", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toThrow("active Account has no durable Replica");
+		expect(wedged.observations.size).toBe(0);
+		expect(wedged.closeCalls).toBe(1);
+	});
+
+	test("a terminal lifecycle failure refuses a Device wipe", async () => {
+		const runtime = new RuntimeDouble();
+		runtime.close = async () => {
+			runtime.closeCalls += 1;
+			throw new Error("close leaked credential=close-secret");
+		};
+		let lifecycleError!: (errorJson: string) => void;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () =>
+				({
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation(
+							_replica: unknown,
+							_platform: unknown,
+							_http: unknown,
+							_cancel: unknown,
+							_artifact: unknown,
+							_binary: unknown,
+							_lease: unknown,
+							_clientId: unknown,
+							_platformName: unknown,
+							_version: unknown,
+							onLifecycleError: (errorJson: string) => void,
+						) {
+							lifecycleError = onLifecycleError;
+							return runtime;
+						},
+					},
+				}) as unknown as RuntimeWasm,
+		});
+
+		await service.request(
+			{ type: "request", requestId: "start", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		lifecycleError('{"message":"another signed secret"}');
+
+		const refused = await service
+			.request(
+				{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+
+		expect(refused).toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			message: "Attachment Move preparation lifecycle failed.",
+		});
+		expect(runtime.requests.map((request) => request.requestJson)).toEqual([
+			"{}",
+		]);
+	});
+
+	/**
+	 * A wedged Runtime whose `close()` stays in flight until the test releases it.
+	 *
+	 * Retiring it opens the window this suite protects: the cached Runtime is already gone, but the
+	 * storage writes of its close are not finished.
+	 */
+	function gatedWedgedRetire() {
+		const wedged = new RuntimeDouble();
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		let releaseClose!: () => void;
+		const closeGate = new Promise<void>((resolve) => {
+			releaseClose = resolve;
+		});
+		wedged.close = async () => {
+			wedged.closeCalls += 1;
+			await closeGate;
+		};
+		const second = new RuntimeDouble();
+		second.requestResult = Promise.resolve(wipeOutcome);
+		let loads = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			loadWasm: async () => {
+				const runtime = loads++ === 0 ? wedged : second;
+				return {
+					WebClientRuntime: { withExecutors: () => runtime },
+				} as unknown as RuntimeWasm;
+			},
+		});
+		const retiring = service.request(
+			{ type: "request", requestId: "plain", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		void retiring.catch(() => undefined);
+		return {
+			loads: () => loads,
+			releaseClose,
+			retiring,
+			second,
+			service,
+			wedged,
+		};
+	}
+
+	test("no second Runtime opens while a retiring one is still closing", async () => {
+		const gated = gatedWedgedRetire();
+		await flush();
+		expect(gated.wedged.closeCalls).toBe(1);
+
+		const duringClose = gated.service.request(
+			{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+			new AbortController().signal,
+			() => undefined,
+		);
+		await flush();
+
+		expect(gated.second.requests).toEqual([]);
+		expect(gated.second.openCalls).toBe(0);
+		expect(gated.loads()).toBe(1);
+
+		gated.releaseClose();
+		await expect(gated.retiring).rejects.toThrow(
+			"active Account has no durable Replica",
+		);
+		expect(await duringClose).toBe(wipeOutcome);
+		expect(gated.loads()).toBe(2);
+		expect(gated.second.openCalls).toBe(1);
+	});
+
+	test("close waits for a retiring Runtime to finish closing", async () => {
+		const gated = gatedWedgedRetire();
+		await flush();
+		expect(gated.wedged.closeCalls).toBe(1);
+
+		let closed = false;
+		const closeTask = gated.service.close().then(() => {
+			closed = true;
+		});
+		await flush();
+		expect(closed).toBe(false);
+
+		gated.releaseClose();
+		await closeTask;
+		expect(closed).toBe(true);
+		await expect(gated.retiring).rejects.toThrow(
+			"active Account has no durable Replica",
+		);
+	});
+
+	test("close reports the terminal failure when a retiring close fails", async () => {
+		const wedged = new RuntimeDouble();
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		let releaseClose!: () => void;
+		const closeGate = new Promise<void>((resolve) => {
+			releaseClose = resolve;
+		});
+		wedged.close = async () => {
+			wedged.closeCalls += 1;
+			await closeGate;
+			throw new Error("close leaked credential=close-secret");
+		};
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () =>
+				({
+					WebClientRuntime: {
+						withExecutors: () => wedged,
+						withConfiguredAttachmentMovePreparation: () => wedged,
+					},
+				}) as unknown as RuntimeWasm,
+		});
+
+		const retiring = service.request(
+			{ type: "request", requestId: "plain", requestJson: "{}" },
+			new AbortController().signal,
+			() => undefined,
+		);
+		void retiring.catch(() => undefined);
+		await flush();
+		expect(wedged.closeCalls).toBe(1);
+
+		const closeTask = service.close();
+		void closeTask.catch(() => undefined);
+		releaseClose();
+
+		await expect(closeTask).rejects.toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+		});
+		// `close()` is memoized, so a later caller must see the same failed shutdown.
+		await expect(service.close()).rejects.toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+		});
+		await expect(retiring).rejects.toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+		});
+	});
+
+	test("a wipe reports success even when retiring its Runtime afterwards fails", async () => {
+		const wedged = new RuntimeDouble();
+		wedged.open = async () => {
+			wedged.openCalls += 1;
+			throw new Error("active Account has no durable Replica");
+		};
+		wedged.close = async () => {
+			wedged.closeCalls += 1;
+			throw new Error("close leaked credential=close-secret");
+		};
+		wedged.requestResult = Promise.resolve(wipeOutcome);
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () =>
+				({
+					WebClientRuntime: {
+						withExecutors: () => wedged,
+						withConfiguredAttachmentMovePreparation: () => wedged,
+					},
+				}) as unknown as RuntimeWasm,
+		});
+
+		const wiped = await service.request(
+			{ type: "request", requestId: "wipe", requestJson: '{"type":"wipe"}' },
+			new AbortController().signal,
+			() => undefined,
+		);
+
+		expect(wiped).toBe(wipeOutcome);
+		expect(wedged.requests).toEqual([
+			{ requestId: "wipe", requestJson: '{"type":"wipe"}' },
+		]);
+		expect(wedged.closeCalls).toBe(1);
+
+		const later = await service
+			.request(
+				{ type: "request", requestId: "after-wipe", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			)
+			.catch((error: unknown) => error);
+		expect(later).toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			message: "Attachment Move preparation lifecycle failed.",
+		});
 	});
 
 	test("close preserves an explicit failure from an opened Runtime", async () => {
