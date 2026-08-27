@@ -66,6 +66,69 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — Core teardown state machine delivered
+
+Commit `40220d09` delivers slice 3. The Runtime protocol now carries explicit
+`RemoveAccount { accountId }` and `Wipe` as irreversible local-destruction authority. Each returns a
+bounded four-phase `complete | incomplete` outcome that names the explicit Account or Device scope.
+Core fences before it destroys: a Device admission write fence, catalog serialization, sorted
+Account execution locks, delivery invalidation, observation closure, and key/plaintext/access
+retirement all run before the first deletion. The phases compose the slice-1 and slice-2 primitives.
+Catalog detachment is a dependency of namespace and Replica destruction, so a fresh Runtime can open
+and retry after a catalog write failure. An `incomplete` outcome leaves a same-Runtime pending-scope
+tombstone, and selected requests, dispatch, and Attachment preparation stay fenced until an
+identical retry returns `complete`. Host cleanup answers with a closed
+`AccountDeleted | DeviceWiped` response and rejects a wrong scope. `RuntimeRequest` and
+`RuntimeResponse` now deny unknown fields, so `{"type":"wipe","accountId":"x"}` is rejected instead
+of silently widened to a whole-Device destroy.
+
+Independent review found real defects, now fixed:
+
+- An incomplete removal of one Account rejected every `SignIn`, so it blocked sign-in to an
+  unrelated Account. The Account-scope check now runs inside installation, after the authenticated
+  Account identity is resolved and before the first installation write. Device scope still rejects
+  every request globally.
+- A pending Account tombstone refused `Wipe` and refused removal of any unrelated Account with
+  `InvariantViolation`, permanently, because the tombstone lives in memory. The single slot is now a
+  set of a Device flag plus Account ids, so a partial failure no longer withdraws the user's
+  whole-Device destruction authority.
+- From the earlier review round: an incomplete scope could revive; observation admission raced and
+  `Wipe` retained global observers; a catalog failure could strand restart; host cleanup had no
+  scope-specific response. Each now has a behavioral regression test.
+
+Coverage and fixture gaps, not defects: the routing harness always reports `incomplete` because it
+installs no attachment-move lifecycle and no host cleanup, so that assertion is not load-bearing;
+the installation platform harness gained a `deletePrefix` arm and a named catch-all; the protocol
+generator test needed Biome formatting.
+
+Behavior recorded, not changed. Later hosts must not misread it:
+
+- A Device wipe whose platform namespace and Replica both fail converges in **three** attempts, not
+  two. A platform-namespace failure forbids the Replica phase, because the Device catalog lives in
+  that namespace and destroying the Replica while the catalog survives would strand restart. Slice-4
+  hosts must not implement "retry once, then report permanent failure".
+- When catalog detachment succeeds but the Replica delete fails, the catalog no longer names the
+  Account while its rows remain. The identical retry still converges without consulting an active
+  Account, and a later sign-in for that Server identity resolves to a fresh Account id.
+- `RemoveAccount` and `Wipe` ignore `RequestCancellation`. That is intended for an irreversible
+  authority.
+
+Slice 4 debt. No host calls these requests yet, so today they return `incomplete` with
+`hostCleanup`. Slice 4 owes Web lifecycle composition, adaptation of the committed OPFS cleanup
+primitive to the Core host-cleanup seam, a `RemoveAccount` arm in the `web.rs` retirement match
+(`packages/client-runtime/crates/bittery-client-bindings/src/web.rs:324-328` drops it into
+`_ => None` today, so observation sinks would not be quiesced across the destroy), and removal of
+reachability to `packages/core/src/services/account-lifecycle.ts`. Slice 4 should also weigh two
+recorded risks. `teardown` calls `ensure_open()`, so `Wipe` is unavailable exactly when a Device is
+wedged, which would regress recovery against the transitional owner that has no such precondition.
+And the admission read lock is held across a slow Sign-in, so a queued `Wipe` can stall behind it.
+
+Gates: `pnpm --filter @bittery/client-runtime check` passed and 347 crate tests pass. Formatting,
+Clippy over the workspace and all targets with warnings denied, the protocol generator `--check`,
+generator tests 7/7, the native binding drift check, and `git diff --check` are all clean.
+Repository-wide `pnpm check:ci` and `pnpm check:ci:rust` have not yet run from a clean tree. Ticket
+48 still owes that before it resolves.
+
 ### 2026-08-26 — Artifact and upload-spool deletion primitives delivered
 
 Commit `10fcb46f` delivers slice 2. The closed Attachment artifact control seam now supports
