@@ -101,18 +101,16 @@ impl Runtime {
         &self,
         account_id: &AccountId,
         http: &AuthHttpClient<'_>,
-        mut session: CurrentSessionDocument,
+        session: CurrentSessionDocument,
         cancellation: RequestCancellation,
     ) -> Result<(), RuntimeError> {
-        session = self
+        let session = self
             .hydrate_bootstrap_generation(account_id, http, session, cancellation.clone())
             .await?;
-        session = self
-            .catch_up_changes(account_id, http, session, cancellation.clone())
+        self.catch_up_changes(account_id, http, session, cancellation)
             .await?;
-        let _ = self
-            .observe_sse_hint(http, session.token.as_ref(), cancellation)
-            .await?;
+        // SSE is a long-lived hint, not bounded Bootstrap authority. Ticket 30 owns the Runtime
+        // loop that will hold and cancel that connection for the unlocked Account lifetime.
         self.decrypt_visible_items(account_id)?;
         Ok(())
     }
@@ -467,22 +465,6 @@ impl Runtime {
         }
     }
 
-    async fn observe_sse_hint(
-        &self,
-        http: &AuthHttpClient<'_>,
-        token: &str,
-        cancellation: RequestCancellation,
-    ) -> Result<Vec<u8>, RuntimeError> {
-        match http.sse_wakeup(token, cancellation).await? {
-            AuthenticatedOutcome::Ok(body) => Ok(body),
-            AuthenticatedOutcome::ReauthenticationRequired => Err(RuntimeError::new(
-                RuntimeErrorCode::AuthenticationRequired,
-                "Session is missing or expired",
-            )),
-            AuthenticatedOutcome::Transient => Ok(Vec::new()),
-        }
-    }
-
     pub(super) async fn renew_session(
         &self,
         account_id: &AccountId,
@@ -522,6 +504,9 @@ impl Runtime {
 
     pub(super) fn decrypt_visible_items(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let snapshot = self.require_snapshot(account_id)?;
+        if self.account_access_retirement_is_pending(account_id) {
+            return Ok(());
+        }
         let access = self
             .account_access
             .lock()
@@ -665,6 +650,22 @@ impl Runtime {
             });
         }
         projections.sort_by(|left, right| left.item_id.cmp(&right.item_id));
+        #[cfg(test)]
+        if let Some(hook) = self
+            .before_plaintext_commit
+            .lock()
+            .expect("before plaintext commit hook lock poisoned")
+            .clone()
+        {
+            hook();
+        }
+        let retirement_intent = self.account_access_retirement_intent(account_id);
+        let pending_retirements = retirement_intent
+            .lock()
+            .expect("pending Account access retirement lock poisoned");
+        if *pending_retirements > 0 {
+            return Ok(());
+        }
         let current_epoch = *self
             .account_lock_epochs
             .lock()
@@ -687,7 +688,19 @@ impl Runtime {
             .insert(account_id.clone(), projections);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all_unless_closed();
+        drop(pending_retirements);
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_before_plaintext_commit_hook(
+        &self,
+        hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    ) {
+        *self
+            .before_plaintext_commit
+            .lock()
+            .expect("before plaintext commit hook lock poisoned") = hook;
     }
 
     async fn abandon_staging(&self, account_id: &AccountId) -> Result<(), RuntimeError> {

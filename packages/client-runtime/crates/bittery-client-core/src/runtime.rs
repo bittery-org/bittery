@@ -443,6 +443,9 @@ pub struct Runtime {
     recovery_accounts: Mutex<HashMap<AccountId, RecoveryAccountStatus>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
+    account_access_retirement_intents: Mutex<HashMap<AccountId, Arc<Mutex<usize>>>>,
+    #[cfg(test)]
+    before_plaintext_commit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     waiting_reasons: Mutex<HashMap<AccountId, AccountWaitingReason>>,
     delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
@@ -827,6 +830,9 @@ impl Runtime {
             recovery_accounts: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
             lock_epoch_pending: Mutex::new(HashMap::new()),
+            account_access_retirement_intents: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            before_plaintext_commit: Mutex::new(None),
             waiting_reasons: Mutex::new(HashMap::new()),
             delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),

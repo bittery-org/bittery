@@ -1,5 +1,49 @@
 use super::*;
 
+struct PendingAccessRetirement {
+    intent: Arc<Mutex<usize>>,
+    active: bool,
+}
+
+impl PendingAccessRetirement {
+    fn new(intent: Arc<Mutex<usize>>) -> Self {
+        let mut pending = intent
+            .lock()
+            .expect("pending Account access retirement lock poisoned");
+        *pending += 1;
+        drop(pending);
+        Self {
+            intent,
+            active: true,
+        }
+    }
+
+    fn finish(mut self) {
+        self.remove();
+        self.active = false;
+    }
+
+    fn remove(&self) {
+        let mut pending = self
+            .intent
+            .lock()
+            .expect("pending Account access retirement lock poisoned");
+        assert!(
+            *pending > 0,
+            "pending Account access retirement was registered"
+        );
+        *pending -= 1;
+    }
+}
+
+impl Drop for PendingAccessRetirement {
+    fn drop(&mut self) {
+        if self.active {
+            self.remove();
+        }
+    }
+}
+
 /// How far one request retires an Account's access on this Device.
 ///
 /// Both forms destroy the same live material. They differ only in what the Device keeps: `Lock`
@@ -95,6 +139,11 @@ impl Runtime {
         retirement: AccessRetirement,
     ) -> Result<AccountAccessState, RuntimeError> {
         let execution_lock = self.account_execution_lock(account_id)?;
+        // Register before waiting on the Account execution fence. Work already inside the fence
+        // may finish its durable commit, but it must not publish newly decrypted plaintext ahead
+        // of a Lock or Sign-out that is already queued behind it.
+        let pending_retirement =
+            PendingAccessRetirement::new(self.account_access_retirement_intent(account_id));
         let execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
         let Some(mut snapshot) = self.replica.snapshot(account_id) else {
@@ -142,6 +191,7 @@ impl Runtime {
                 .insert(account_id.clone(), desired_epoch);
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        pending_retirement.finish();
         drop(_publication);
         drop(execution_guard);
         if let Some(token) = invalidated_delivery {
@@ -211,6 +261,26 @@ impl Runtime {
             .expect("pending lock epoch lock poisoned")
             .remove(account_id);
         Ok(access)
+    }
+
+    pub(super) fn account_access_retirement_is_pending(&self, account_id: &AccountId) -> bool {
+        *self
+            .account_access_retirement_intent(account_id)
+            .lock()
+            .expect("pending Account access retirement lock poisoned")
+            > 0
+    }
+
+    pub(super) fn account_access_retirement_intent(
+        &self,
+        account_id: &AccountId,
+    ) -> Arc<Mutex<usize>> {
+        self.account_access_retirement_intents
+            .lock()
+            .expect("Account access retirement intent map poisoned")
+            .entry(account_id.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(0)))
+            .clone()
     }
 
     /// Deletes what a later password-only unlock would need. Account metadata and the durable

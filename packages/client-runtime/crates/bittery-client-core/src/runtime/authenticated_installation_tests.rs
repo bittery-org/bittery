@@ -82,8 +82,8 @@ impl Pause {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HttpPauseStep {
-    SyncBootstrap,
-    SyncEvents,
+    Bootstrap,
+    Events,
 }
 
 struct HttpPause {
@@ -108,8 +108,8 @@ impl HttpPause {
     fn matches(&self, route: V1Route<'_>) -> bool {
         matches!(
             (self.step, route),
-            (HttpPauseStep::SyncBootstrap, V1Route::SyncBootstrap)
-                | (HttpPauseStep::SyncEvents, V1Route::SyncEvents)
+            (HttpPauseStep::Bootstrap, V1Route::SyncBootstrap)
+                | (HttpPauseStep::Events, V1Route::SyncEvents)
         )
     }
 
@@ -2513,6 +2513,46 @@ async fn bootstrap_promotes_captured_empty_distinct_from_cold() {
 }
 
 #[tokio::test]
+async fn full_sign_in_completes_without_waiting_for_the_live_sse_body() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let held_sse = HttpPause::new(HttpPauseStep::Events);
+    http.pause_at(held_sse.clone());
+    let (runtime, _replica, _platform) = routing_harness(http).await;
+
+    let signing_in = tokio::spawn(async move {
+        runtime
+            .request(
+                sign_in_request(NORMALIZED_EMAIL),
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    for _ in 0..128 {
+        if signing_in.is_finished() || held_sse.reached.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    assert!(
+        signing_in.is_finished(),
+        "full Sign-in remained blocked after bounded Bootstrap entered the held SSE response"
+    );
+    assert!(
+        !held_sse.reached.load(Ordering::SeqCst),
+        "full Sign-in must not synchronously open the live SSE endpoint"
+    );
+    assert!(matches!(
+        signing_in.await.unwrap().unwrap(),
+        RuntimeResponse::SignedIn { .. }
+    ));
+}
+
+#[tokio::test]
 async fn bootstrap_decrypts_login_items_and_sse_hint_is_not_authority() {
     let http = Arc::new(RoutingAuthHttp::new(
         current_kdf_profile(),
@@ -2984,7 +3024,7 @@ async fn expired_cursor_starts_staging_while_old_projection_stays_readable() {
     })];
     http.state.lock().unwrap().bootstrap_index = 0;
     http.state.lock().unwrap().changes_index = 0;
-    let pause = HttpPause::new(HttpPauseStep::SyncBootstrap);
+    let pause = HttpPause::new(HttpPauseStep::Bootstrap);
     http.pause_at(pause.clone());
     let running = {
         let runtime = runtime.clone();
@@ -3039,7 +3079,7 @@ async fn expired_cursor_starts_staging_while_old_projection_stays_readable() {
 }
 
 #[tokio::test]
-async fn lock_during_decrypt_publishes_no_plaintext() {
+async fn lock_during_bootstrap_publishes_no_plaintext() {
     let http = Arc::new(RoutingAuthHttp::new(
         current_kdf_profile(),
         RoutingAuthBehavior::Success,
@@ -3052,9 +3092,16 @@ async fn lock_during_decrypt_publishes_no_plaintext() {
         "nextCursor": null,
         "syncCursor": { "id": "evt-1" }
     })];
-    let pause = HttpPause::new(HttpPauseStep::SyncEvents);
+    let pause = HttpPause::new(HttpPauseStep::Bootstrap);
     http.pause_at(pause.clone());
     let (runtime, _replica, _platform) = routing_harness(http).await;
+    let reached_plaintext_commit = Arc::new(AtomicBool::new(false));
+    runtime.set_before_plaintext_commit_hook(Some(Arc::new({
+        let reached_plaintext_commit = reached_plaintext_commit.clone();
+        move || {
+            reached_plaintext_commit.store(true, Ordering::SeqCst);
+        }
+    })));
     let running = {
         let runtime = runtime.clone();
         tokio::spawn(async move {
@@ -3082,7 +3129,7 @@ async fn lock_during_decrypt_publishes_no_plaintext() {
         let account_id = account_id.clone();
         async move { runtime.mark_account_locked(&account_id).await }
     });
-    for _ in 0..10 {
+    while !runtime.account_access_retirement_is_pending(&account_id) {
         tokio::task::yield_now().await;
     }
     assert!(
@@ -3107,6 +3154,153 @@ async fn lock_during_decrypt_publishes_no_plaintext() {
     for item in snapshot.bootstrap.items.values() {
         assert!(!item.encrypted_data.contains("secret-password"));
     }
+    assert!(
+        !reached_plaintext_commit.load(Ordering::SeqCst),
+        "queued Lock must fence Bootstrap before plaintext reaches the final commit boundary"
+    );
+}
+
+#[tokio::test]
+async fn lock_at_the_final_bootstrap_boundary_publishes_no_plaintext() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (_wrapped, item) = sealed_login_item("item-1", "Bank", "secret-password");
+    *http.bootstrap_pages.lock().unwrap() = vec![json!({
+        "hasMore": false,
+        "items": [item],
+        "nextCursor": null,
+        "syncCursor": { "id": "evt-1" }
+    })];
+    let bootstrap_pause = HttpPause::new(HttpPauseStep::Bootstrap);
+    http.pause_at(bootstrap_pause.clone());
+    let (runtime, _replica, _platform) = routing_harness(http).await;
+    let reached_plaintext_commit = Arc::new(AtomicBool::new(false));
+    let release_plaintext_commit = Arc::new(AtomicBool::new(false));
+    runtime.set_before_plaintext_commit_hook(Some(Arc::new({
+        let reached = reached_plaintext_commit.clone();
+        let release = release_plaintext_commit.clone();
+        move || {
+            reached.store(true, Ordering::SeqCst);
+            while !release.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+        }
+    })));
+    let signing_in = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(runtime.request(
+                    sign_in_request(NORMALIZED_EMAIL),
+                    RequestCancellation::new(),
+                ))
+        }
+    });
+    bootstrap_pause.wait_until_reached().await;
+    let account_id = runtime.replica.snapshots()[0].account_id.clone();
+    let sink = Arc::new(Sink::default());
+    let _items = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    bootstrap_pause.release();
+    while !reached_plaintext_commit.load(Ordering::SeqCst) {
+        tokio::task::yield_now().await;
+    }
+    let locking = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    while !runtime.account_access_retirement_is_pending(&account_id) {
+        tokio::task::yield_now().await;
+    }
+
+    release_plaintext_commit.store(true, Ordering::SeqCst);
+    signing_in.join().unwrap().unwrap();
+    locking.await.unwrap().unwrap();
+    for projection in sink.0.lock().unwrap().clone() {
+        let RuntimeProjection::Items(items) = projection else {
+            continue;
+        };
+        for item in items.items {
+            assert_ne!(item.password.as_deref(), Some("secret-password"));
+            assert_ne!(item.title.as_str(), "Bank");
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancelled_lock_waiter_does_not_fence_bootstrap_decryption() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (_wrapped, item) = sealed_login_item("item-1", "Bank", "secret-password");
+    *http.bootstrap_pages.lock().unwrap() = vec![json!({
+        "hasMore": false,
+        "items": [item],
+        "nextCursor": null,
+        "syncCursor": { "id": "evt-1" }
+    })];
+    let pause = HttpPause::new(HttpPauseStep::Bootstrap);
+    http.pause_at(pause.clone());
+    let (runtime, _replica, _platform) = routing_harness(http).await;
+    let signing_in = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .request(
+                    sign_in_request(NORMALIZED_EMAIL),
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    pause.wait_until_reached().await;
+    let account_id = runtime.replica.snapshots()[0].account_id.clone();
+    let locking = tokio::spawn({
+        let runtime = runtime.clone();
+        let account_id = account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    while !runtime.account_access_retirement_is_pending(&account_id) {
+        tokio::task::yield_now().await;
+    }
+
+    locking.abort();
+    assert!(locking.await.unwrap_err().is_cancelled());
+    assert!(!runtime.account_access_retirement_is_pending(&account_id));
+    pause.release();
+    signing_in.await.unwrap().unwrap();
+
+    let sink = Arc::new(Sink::default());
+    let _items = runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let RuntimeProjection::Items(projection) = sink.0.lock().unwrap().last().cloned().unwrap()
+    else {
+        panic!("expected Items");
+    };
+    assert_eq!(
+        projection.items[0].password.as_deref(),
+        Some("secret-password")
+    );
 }
 
 #[tokio::test]
