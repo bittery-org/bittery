@@ -66,6 +66,109 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — slice 4a delivered: the Web host-cleanup seam
+
+Commit `8d4aa7e7` delivers sub-slice 4a. Web `RemoveAccount` and `Wipe` now reach `complete`, and
+observation sinks quiesce across the destroy. Until now no host installed the Core host-cleanup
+seam, so every teardown returned `incomplete` with `hostCleanup`.
+
+Host cleanup rides the transfer-control contract, which mirrors the artifact control arms slice 2
+added. `ConfigurableWebBinaryTransferExecutor` is the one production owner of the OPFS
+ciphertext-spool root, so `deleteAccount` and `wipeDevice` reach it over that existing seam instead
+of a second handle. `JsSpoolTeardown` implements `TeardownHostCleanup` and installs in
+`configured_runtime`. It converges only on the exact expected response with no side-channel bytes,
+so a wrong-scope answer stays a `HostCleanup` failure. The upload path now shares the same lazy
+opener, so a Device that never uploaded still destroys a directory an earlier incarnation left
+behind.
+
+`RemoveAccount` and `Wipe` now retire observations. The bookkeeping moved out of the binding into
+`packages/client-runtime/crates/bittery-client-bindings/src/account_retirement.rs`, where one rule
+decides suspend, resume, and catch-up alike, so they cannot drift apart. `Wipe` retires every
+observation including the Device-wide one: a projection already queued in a sink is otherwise
+delivered to the host while the destroy runs, which is the leak retirement exists to stop.
+`RuntimeClient` gains `removeAccount` and `wipe` and returns the whole outcome, so a caller can
+render `incomplete` and retry.
+
+Real defects fixed here:
+
+- A `RemoveAccount` that retired nothing let the host receive plaintext of the Account it was
+  destroying. Reproduced end to end in real WebAssembly: without the catch-up for an observation
+  admitted while a `Wipe` waits behind a slow Sign-in, the sink first leaks a projection, then the
+  unbalanced resume traps the module and the request never settles.
+- The retirement ledger held its lock across the counter update but not the iteration beside it, in
+  all three of `begin`, `end`, and `admit`. The type advertised a protection it did not have. The
+  guard now spans each operation whole. No sink re-enters the ledger, and lock order stays counts
+  before sink queue on every path, so this adds no inversion.
+- A rejected `OpfsUploadSpoolRoot.open()` was cached forever, so an identical teardown retry could
+  never converge until the worker restarted. It reported `incomplete` rather than false success, so
+  nothing lied about having deleted data, but it broke convergence within one executor lifetime.
+
+Coverage gaps closed, not production defects: a spool answer that smuggles bytes alongside the right
+scope; and the joined host-cleanup failure path, where TypeScript proved the executor throws and
+Core proved an error becomes a `HostCleanup` failure, but nothing drove both halves together.
+
+Recorded residual, deliberately not changed here. The retirement snapshot is still built outside the
+guard. `observe_json` admits before it inserts, which is what keeps the current window safe. The
+residual is that `request_json` builds the live observation list outside the guard; on a threaded
+host that would under-suspend a sink and panic it on resume. `mod web` compiles only for wasm32 and
+the executor is single threaded, so it is unreachable. Closing it means the ledger owning the
+observation table, which is a design change.
+
+**Two independent reviews, no blockers.** The first mutation-tested twelve production hunks. All
+were caught, and no test passed with its production code reverted. It raised three should-fix items,
+all since implemented. The second re-reviewed those corrections. It confirmed independently that the
+new lock nesting goes one way only, retirement counts before sink queue; that nothing in the sink
+path re-enters the ledger; and that the cleared queue holds no type with a `Drop` impl that could
+re-enter. It also verified that the static-stub test at
+`packages/client-runtime/src/web-binary-transfer-executor.test.ts:1081` fails loudly, not vacuously,
+if its module-identity assumption ever breaks.
+
+Four note-level follow-ups, recorded so they are not lost. None blocks 4b:
+
+- `packages/client-runtime/crates/bittery-client-bindings/src/account_retirement.rs`: sink calls now
+  happen under the guard, so a sink balance panic would poison the retirement mutex and every later
+  lock would panic. On wasm32 a panic already traps the module, so this is theoretical, but it is a
+  real widening of the blast radius. Worth one sentence in the doc comment.
+- Same file, `counter_guard_is_held` (line 176): it returns `true` for a poisoned mutex as well as a
+  would-block. A poisoned mutex would therefore make the test witness report "guarded" for every
+  later change. The current tests cannot reach that. Matching only `TryLockError::WouldBlock` would
+  make it airtight.
+- `packages/client-runtime/crates/bittery-client-bindings/src/web.rs:351`: the comment "Resuming a
+  closed sink is silent" is imprecise. `BufferedSink::end_retirement` does not check `closed` and
+  would panic at zero. The path is safe only because `close()` never resets the retirement counter,
+  so that counter is always at least one there. State the actual reason.
+- `every_suspension_change_happens_under_the_counter_guard` asserts that unguarded changes are zero
+  and that final depth is zero, but never that a suspension happened at all. Four sibling tests
+  catch the combined no-op mutation, so the suite is sound. One positive assertion would make the
+  test self-contained.
+
+Two gate facts:
+
+- Commit `d306bf85` is formatting only.
+  `packages/client-runtime/scripts/combined-web-bindings.test.mjs` had failed `biome check` since
+  commit `99e92c58`, so repository `pnpm check:ci` was already failing before this migration work.
+  Nobody caught it because the repository-wide gate has not run from a clean tree.
+  `pnpm exec biome check .` now exits 0 repo-wide.
+- The actual-Chromium tests under `packages/client-runtime/tests/*.chromium.test.ts` are reachable
+  from no repository gate, because the package `test` script is `bun test src`. This is pre-existing
+  since slice 2. Slice 4d owes a decision: wire them into a gate, or record deliberately why a
+  destructive-storage proof runs only on demand.
+
+What the remaining sub-slices inherit:
+
+- **4b** is next and unchanged: `ensure_not_closed()` for Device `Wipe`, plus the SharedWorker
+  escape hatch, per the recorded frontier decision.
+- **4c** inherits a hard dependency. After a `Wipe`, Core closes every subscription while the
+  binding's sink stays open, so the host's status observation goes silent with no signal. 4c must
+  reopen its observations rather than render the emptied Device through the old one. The real fix
+  belongs in Core and was deliberately out of 4a's scope. 4c still owns clearing the active-Account
+  pointer and the transitional `bittery_account_*` keys.
+- **4d** keeps the audit, the gates, and the Chromium-reachability decision above.
+
+`pnpm --filter @bittery/client-runtime check` passes. 394 crate tests, 203 package TypeScript tests,
+and the actual-Chromium OPFS run all pass. Nothing under `apps/` or `crates/bittery-client-core/`
+changed. `Status:` stays `ready-for-agent`; 4b, 4c, and 4d are still owed.
+
 ### 2026-08-27 — slice-4 frontier decided: wedged Device, destructive log out, no wipe screen
 
 The maintainer answered the three open slice-4 questions. These answers are binding.
