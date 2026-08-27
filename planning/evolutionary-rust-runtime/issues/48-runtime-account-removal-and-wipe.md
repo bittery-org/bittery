@@ -66,6 +66,52 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — start-up rule decided: a null pointer with accounts is an abandoned removal
+
+The maintainer answered the hazard that slice 4c-1 recorded and deliberately left open. This answer
+is binding.
+
+**Start-up must treat "no active-Account pointer, non-empty Accounts list" as an abandoned removal,
+not as a fresh browser.** `initializeStorage` (`apps/web/src/lib/storage.ts:118`) re-points the
+store at the listed Account. It mints a synthetic `bittery_web_account_id` only when the Accounts
+list is empty.
+
+Today it does the opposite. It reads the pointer, finds none, and seeds a new synthetic id
+(`apps/web/src/lib/storage.ts:52-60`). An abandoned Account removal leaves exactly that state.
+`removeAccount` writes `active_account` to `null` **before** it sweeps the Account values
+(`packages/storage/src/account-store.ts:1070`), and `step()` records a failure instead of rethrowing
+(`packages/core/src/services/account-lifecycle.ts:193`). So one `localStorage` failure part-way
+through leaves no pointer while the Accounts list, `secret_key`, `session_data`, `vault_keys` and
+`jwt_token` all survive under the login Account id.
+
+After a reload the store therefore points at an empty synthetic Account. The next log out sweeps
+that empty Account, finds nothing to delete, and reports **success**. The real key material
+survives while the screen says it is gone. This is the same false-`removed` class that slice 4c-1
+fixed inside one page load, reached across a reload instead.
+
+Fixing the seeding rule removes the cause. The next log out then names the real keys, so the false
+success cannot happen. Three alternatives lost:
+
+- **Check `LifecycleOutcome.remaining` after the sweep.** The independent 4c-1 review ruled this
+  unsound as a fix. It looks like a fix and leaves the cause in place. It is blind to a failed
+  `clear_item_cache`, which never touches the Accounts list. And it reports `incomplete` forever in
+  a browser that genuinely holds more than one Account.
+- **Surface the half state in the interface.** This adds new surface and new copy to a path almost
+  nobody reaches.
+- **Leave it recorded and change nothing.** This keeps a screen that says the user's secret material
+  is gone while it is still there. A post-sweep check is no better: it treats the symptom and
+  strands the user with an error they cannot clear.
+
+One risk, named plainly: this changes the start-up path. It runs in every session, not only at log
+out. It needs careful tests, and the slice must budget for them.
+
+Where it belongs: its own bounded slice, sequenced after 4c-2 and before or within 4d, and finished
+before Ticket 48 resolves. It touches `apps/web/src/lib/storage.ts` — `initializeStorage` and the
+seeding rule — and its tests. That file has no test file today, so the slice adds one. Note that
+`initializeStorage()` memoises its promise, so the rule applies once per page load, not per call.
+
+`Status:` stays `ready-for-agent`.
+
 ### 2026-08-27 — slice 4b delivered: a wedged Device stays wipeable
 
 Commit `043a5938` delivers sub-slice 4b. A user reaches for "wipe this device" exactly when the
