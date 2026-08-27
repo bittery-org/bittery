@@ -53,6 +53,17 @@ const TEST_BUDGET_MS = 180000;
  */
 const CREDENTIAL_CHANGE_BUDGET_MS = 300000;
 
+const RUNTIME_STORAGE_PREFIX = "bittery:runtime:platform-storage:";
+const TRANSITIONAL_CREDENTIAL_SUFFIXES = [
+	"session_data",
+	"jwt_token",
+	"vault_keys",
+	"encrypted_private_key",
+	"secret_key",
+	"pinned_kdf_params",
+	"last_biometric_auth",
+].map((name) => `_${name}`);
+
 /** Rewritten in place by each credential test; later tests sign in with it. */
 let user: TestUser;
 
@@ -68,7 +79,16 @@ test.beforeAll(async ({ browser }) => {
 
 /** Open `/settings` and wait for the tab strip, which the header renders last. */
 async function openSettings(page: Page): Promise<void> {
-	await gotoRoute(page, "/settings", page.getByTestId("settings-tab-account"));
+	const ready = page.getByTestId("settings-tab-account");
+	const liveSettingsLink = page.locator('a[href="/settings"]').first();
+	if (await liveSettingsLink.isVisible()) {
+		// Runtime startup intentionally restores the Account locked. Preserve the
+		// live unlock when the preceding Sign-in already rendered an app route.
+		await liveSettingsLink.click();
+		await expect(ready).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		return;
+	}
+	await gotoRoute(page, "/settings", ready);
 }
 
 /** Switch to one settings tab and wait for it to become the active one. */
@@ -83,18 +103,21 @@ async function openSettingsTab(
 
 /** The accountId every per-account storage key is built from. */
 async function activeAccountId(page: Page): Promise<string> {
-	const { accountId, webAccountId } = await page.evaluate(() => ({
-		accountId: localStorage.getItem("bittery_active_account"),
-		webAccountId: localStorage.getItem("bittery_web_account_id"),
-	}));
+	const { accountId, runtimeAccountId, webAccountId } = await page.evaluate(
+		() => ({
+			accountId: localStorage.getItem("bittery_active_account"),
+			runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
+			webAccountId: localStorage.getItem("bittery_web_account_id"),
+		}),
+	);
 	if (!accountId) {
 		throw new Error(
 			"No active account on this device; the sign-in never finished.",
 		);
 	}
-	if (!webAccountId || accountId === webAccountId) {
+	if (!webAccountId || !runtimeAccountId || accountId === runtimeAccountId) {
 		throw new Error(
-			"The transitional store still points at the synthetic pre-login seed instead of the login Account.",
+			`The signed-in browser must name distinct transitional and Runtime Accounts: active=${accountId}, web=${webAccountId ?? "null"}, runtime=${runtimeAccountId ?? "null"}.`,
 		);
 	}
 	return accountId;
@@ -589,6 +612,12 @@ test("deleting the account destroys it on the server and removes it from the dev
 	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
 	await signIn(page, user);
 	const accountId = await activeAccountId(page);
+	const removedRuntimeAccountId = await page.evaluate(() =>
+		localStorage.getItem("bittery_runtime_account_id"),
+	);
+	if (!removedRuntimeAccountId) {
+		throw new Error("Sign-in did not persist the Runtime Account id.");
+	}
 	await openSettings(page);
 	await openSettingsTab(page, "general");
 
@@ -619,31 +648,64 @@ test("deleting the account destroys it on the server and removes it from the dev
 	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 	// `/` bounces an unauthenticated visitor to `/login`.
 	await page.waitForURL("**/login", { timeout: VAULT_READY_TIMEOUT_MS });
-	const removedShape = await page.evaluate((removedAccountId) => {
-		const rawAccounts = localStorage.getItem("bittery_accounts_list");
-		const accounts = rawAccounts
-			? (JSON.parse(rawAccounts) as {
-					version?: number;
-					accounts?: Array<{ accountId: string }>;
-				})
-			: null;
-		const accountPrefix = `bittery_account_${removedAccountId}_`;
-		return {
-			activeAccountId: localStorage.getItem("bittery_active_account"),
-			accounts,
-			webAccountId: localStorage.getItem("bittery_web_account_id"),
-			runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
-			deletedServerAccountId: localStorage.getItem(
-				"bittery_deleted_server_account_id",
-			),
-			localAccountKeys: Object.keys(localStorage)
-				.filter((key) => key.startsWith(accountPrefix))
-				.sort(),
-			sessionAccountKeys: Object.keys(sessionStorage)
-				.filter((key) => key.startsWith(accountPrefix))
-				.sort(),
-		};
-	}, accountId);
+	const removedShape = await page.evaluate(
+		({
+			forbiddenSuffixes,
+			removedAccountId,
+			runtimeAccountId,
+			runtimePrefix,
+		}) => {
+			const rawAccounts = localStorage.getItem("bittery_accounts_list");
+			const accounts = rawAccounts
+				? (JSON.parse(rawAccounts) as {
+						version?: number;
+						accounts?: Array<{ accountId: string }>;
+					})
+				: null;
+			const accountPrefix = `bittery_account_${removedAccountId}_`;
+			const runtimeAccountPrefix = `${runtimePrefix}account:${new TextEncoder().encode(runtimeAccountId).byteLength}:${runtimeAccountId}:`;
+			const matchingKeys = (store: Storage, prefix: string) =>
+				Object.keys(store)
+					.filter((key) => key.startsWith(prefix))
+					.sort();
+			const transitionalCredentialKeys = (store: Storage) =>
+				Object.keys(store)
+					.filter((key) => key.startsWith("bittery_account_"))
+					.filter((key) =>
+						forbiddenSuffixes.some((suffix) => key.endsWith(suffix)),
+					)
+					.sort();
+			return {
+				activeAccountId: localStorage.getItem("bittery_active_account"),
+				accounts,
+				webAccountId: localStorage.getItem("bittery_web_account_id"),
+				runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
+				deletedServerAccountId: localStorage.getItem(
+					"bittery_deleted_server_account_id",
+				),
+				localAccountKeys: matchingKeys(localStorage, accountPrefix),
+				sessionAccountKeys: matchingKeys(sessionStorage, accountPrefix),
+				localRuntimeAccountKeys: matchingKeys(
+					localStorage,
+					runtimeAccountPrefix,
+				),
+				sessionRuntimeAccountKeys: matchingKeys(
+					sessionStorage,
+					runtimeAccountPrefix,
+				),
+				localTransitionalCredentialKeys:
+					transitionalCredentialKeys(localStorage),
+				sessionTransitionalCredentialKeys:
+					transitionalCredentialKeys(sessionStorage),
+			};
+		},
+		{
+			forbiddenSuffixes: TRANSITIONAL_CREDENTIAL_SUFFIXES,
+			removedAccountId: accountId,
+			runtimeAccountId: removedRuntimeAccountId,
+			runtimePrefix: RUNTIME_STORAGE_PREFIX,
+		},
+	);
 	expect(removedShape).toEqual({
 		activeAccountId: null,
 		accounts: { version: 2, accounts: [] },
@@ -652,6 +714,10 @@ test("deleting the account destroys it on the server and removes it from the dev
 		deletedServerAccountId: null,
 		localAccountKeys: [],
 		sessionAccountKeys: [],
+		localRuntimeAccountKeys: [],
+		sessionRuntimeAccountKeys: [],
+		localTransitionalCredentialKeys: [],
+		sessionTransitionalCredentialKeys: [],
 	});
 
 	// The account is gone on the server too, so even a device that never held it

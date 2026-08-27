@@ -48,6 +48,7 @@ const itemUsername = `restore_user_${suffix}`;
 let user: TestUser;
 let snapshot: AuthSnapshot;
 let vaultId: string;
+let seedPromise: Promise<void> | undefined;
 const openedContexts: { close: () => Promise<void> }[] = [];
 
 /** A fresh context restored from the snapshot, torn down after the file. */
@@ -63,23 +64,30 @@ test.beforeAll(async ({ browser }) => {
 	test.setTimeout(SETUP_BUDGET_MS);
 
 	({ user, snapshot } = await signUpForSpec(browser));
-
-	// The seed data is written from a *restored* context, so the file also proves
-	// a replayed session can create, not only read.
-	const setupContext = await browser.newContext();
-	try {
-		const setupPage = await setupContext.newPage();
-		await restoreSession(setupPage, snapshot);
-		vaultId = await createVault(setupPage, vaultName);
-		await createItem(setupPage, "login", async (sheet) => {
-			await sheet.locator("#title").fill(itemTitle);
-			await sheet.locator("#username").fill(itemUsername);
-			await sheet.locator("#password").fill(`Restore-Pass-${suffix}!`);
-		});
-	} finally {
-		await setupContext.close();
-	}
 });
+
+/** Create the ciphertext fixture only for scenarios that actually read it. */
+async function ensureSeedData(browser: Browser): Promise<void> {
+	if (seedPromise) return seedPromise;
+	seedPromise = (async () => {
+		// The seed data is written from a *restored* context, so the file also proves
+		// a replayed session can create, not only read.
+		const setupContext = await browser.newContext();
+		try {
+			const setupPage = await setupContext.newPage();
+			await restoreSession(setupPage, snapshot);
+			vaultId = await createVault(setupPage, vaultName);
+			await createItem(setupPage, "login", async (sheet) => {
+				await sheet.locator("#title").fill(itemTitle);
+				await sheet.locator("#username").fill(itemUsername);
+				await sheet.locator("#password").fill(`Restore-Pass-${suffix}!`);
+			});
+		} finally {
+			await setupContext.close();
+		}
+	})();
+	return seedPromise;
+}
 
 test.afterAll(async () => {
 	await Promise.all(openedContexts.map((context) => context.close()));
@@ -98,13 +106,12 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 		version: number;
 		accounts: Array<{ accountId: string }>;
 	};
-	const webAccountId = snapshot.local.bittery_web_account_id ?? "";
+	const webAccountId = snapshot.local.bittery_web_account_id ?? null;
 	const runtimeAccountId = snapshot.local.bittery_runtime_account_id ?? "";
 
-	// Browser initialization's synthetic id is only the pre-login seed. The
-	// transitional active pointer and Accounts list must name the login Account.
-	expect(webAccountId).not.toBe("");
-	expect(accountId).not.toBe(webAccountId);
+	// Signup may reuse the pre-login id as its transitional Account. Runtime
+	// authentication owns a distinct Account id and does not mirror its Session.
+	expect(webAccountId === null || webAccountId === accountId).toBe(true);
 	expect(accountsDocument.version).toBe(2);
 	expect(accountsDocument.accounts.map((account) => account.accountId)).toEqual(
 		[accountId],
@@ -113,31 +120,59 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 	// absent in an ordinary signed-in snapshot.
 	expect(runtimeAccountId).not.toBe("");
 	expect(runtimeAccountId).not.toBe(accountId);
-	expect(runtimeAccountId).not.toBe(webAccountId);
+	if (webAccountId !== null) expect(runtimeAccountId).not.toBe(webAccountId);
 	expect(snapshot.local).not.toHaveProperty(
 		"bittery_deleted_server_account_id",
 	);
 
-	for (const name of ["jwt_token", "vault_keys", "encrypted_private_key"]) {
-		expect(snapshot.session).toHaveProperty(accountKey(name));
-		expect(snapshot.local).not.toHaveProperty(accountKey(name));
-	}
-
-	for (const name of [
+	const forbiddenCredentialSuffixes = [
+		"jwt_token",
+		"vault_keys",
+		"encrypted_private_key",
 		"session_data",
 		"secret_key",
 		"pinned_kdf_params",
-		"server_url",
-	]) {
-		expect(snapshot.local).toHaveProperty(accountKey(name));
-		expect(snapshot.session).not.toHaveProperty(accountKey(name));
+		"last_biometric_auth",
+	].map((name) => `_${name}`);
+	for (const entries of [snapshot.local, snapshot.session]) {
+		expect(
+			Object.keys(entries)
+				.filter((key) => key.startsWith("bittery_account_"))
+				.filter((key) =>
+					forbiddenCredentialSuffixes.some((suffix) => key.endsWith(suffix)),
+				)
+				.sort(),
+		).toEqual([]);
 	}
+	for (const name of ["biometric_enabled", "server_url", "travel_mode_cache"]) {
+		expect(snapshot.local).toHaveProperty(accountKey(name));
+	}
+
+	const runtimePrefix = "bittery:runtime:platform-storage:";
+	const runtimeAccountPrefix = `${runtimePrefix}account:${new TextEncoder().encode(runtimeAccountId).byteLength}:${runtimeAccountId}:incarnation:`;
+	const runtimeLocalKeys = Object.keys(snapshot.local).filter((key) =>
+		key.startsWith(runtimePrefix),
+	);
+	const runtimeAccountLocalKeys = runtimeLocalKeys.filter((key) =>
+		key.startsWith(runtimeAccountPrefix),
+	);
+	expect(runtimeLocalKeys).toContain(`${runtimePrefix}device-catalog`);
+	expect(runtimeLocalKeys).toContain(`${runtimePrefix}device-key`);
+	expect(runtimeLocalKeys).toHaveLength(4);
+	expect(
+		runtimeAccountLocalKeys.map((key) => key.split(":").at(-1)).sort(),
+	).toEqual(["metadata", "quick-unlock"]);
+	const runtimeSessionKeys = Object.keys(snapshot.session).filter((key) =>
+		key.startsWith(runtimePrefix),
+	);
+	expect(runtimeSessionKeys).toHaveLength(1);
+	expect(runtimeSessionKeys[0]?.startsWith(runtimeAccountPrefix)).toBe(true);
+	expect(runtimeSessionKeys[0]?.endsWith(":current-session")).toBe(true);
 
 	for (const key of [
 		"bittery_device_key",
 		"bittery_accounts_list",
 		"bittery_active_account",
-		"bittery_web_account_id",
 		"bittery_runtime_account_id",
 	]) {
 		expect(snapshot.local).toHaveProperty(key);
@@ -155,6 +190,7 @@ test("a restored context is signed in, unlocked, and decrypts an item written el
 	browser,
 }) => {
 	test.setTimeout(TEST_BUDGET_MS);
+	await ensureSeedData(browser);
 
 	const page = await restoredPage(browser);
 	expect(new URL(page.url()).pathname).toBe("/home");
@@ -180,6 +216,7 @@ test("two concurrently restored contexts are two sync clients of one account", a
 	browser,
 }) => {
 	test.setTimeout(TEST_BUDGET_MS);
+	await ensureSeedData(browser);
 
 	const [first, second] = await Promise.all([
 		restoredPage(browser),

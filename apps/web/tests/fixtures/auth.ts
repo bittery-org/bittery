@@ -466,10 +466,8 @@ export async function signOut(page: Page): Promise<void> {
 }
 
 /**
- * One browser profile's whole Bittery auth state, split by the store it came
- * from - `packages/storage/src/tiers.ts` puts the session-bound values in
- * `sessionStorage` and the device-bound ones in `localStorage`, and Playwright's
- * own `storageState` carries only the latter.
+ * One browser profile's transitional and Runtime platform documents, split by
+ * the Web Storage area that owns each value.
  */
 export interface AuthSnapshot {
 	local: Record<string, string>;
@@ -483,14 +481,8 @@ export interface AuthSnapshot {
  */
 const SYNC_KEY_PREFIX = "bittery_sync_";
 
-const ACCOUNT_KEY_PREFIX = "bittery_account_";
-
-/** Session-bound per-account values; `STORAGE_TIERS` lines 59-61. */
-const SESSION_BOUND_VALUES = [
-	"jwt_token",
-	"vault_keys",
-	"encrypted_private_key",
-] as const;
+const RUNTIME_STORAGE_PREFIX = "bittery:runtime:platform-storage:";
+const RUNTIME_ACTIVE_ACCOUNT_KEY = "bittery_runtime_account_id";
 
 /**
  * Load-bearing as a pair with `bittery_device_key`: `session_data` carries the
@@ -504,87 +496,84 @@ const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 
 /**
- * Copy every `bittery_` value the profile holds, out of both stores.
+ * Copy every transitional and Runtime value the profile holds, out of both stores.
  *
- * Throws unless the five values a restore actually needs are present, and in
- * the store this suite expects them in: a tier moved in
- * `packages/storage/src/tiers.ts` then fails here, by name, instead of
- * degrading into unreadable UI flake in every spec that restores.
+ * Throws unless the exact signed-in pointers and Runtime documents are present
+ * in the expected store, so an ownership move fails here by name.
  */
 export async function captureAuthSnapshot(page: Page): Promise<AuthSnapshot> {
-	const snapshot = await page.evaluate((syncPrefix) => {
-		const copy = (store: Storage): Record<string, string> => {
-			const entries: Record<string, string> = {};
-			for (let index = 0; index < store.length; index += 1) {
-				const key = store.key(index);
-				if (!key?.startsWith("bittery_") || key.startsWith(syncPrefix)) {
-					continue;
+	const snapshot = await page.evaluate(
+		({ runtimePrefix, syncPrefix }) => {
+			const copy = (store: Storage): Record<string, string> => {
+				const entries: Record<string, string> = {};
+				for (let index = 0; index < store.length; index += 1) {
+					const key = store.key(index);
+					if (
+						(!key?.startsWith("bittery_") && !key?.startsWith(runtimePrefix)) ||
+						key.startsWith(syncPrefix)
+					) {
+						continue;
+					}
+					const value = store.getItem(key);
+					if (value !== null) {
+						entries[key] = value;
+					}
 				}
-				const value = store.getItem(key);
-				if (value !== null) {
-					entries[key] = value;
-				}
-			}
-			return entries;
-		};
-		return { local: copy(localStorage), session: copy(sessionStorage) };
-	}, SYNC_KEY_PREFIX);
-
+				return entries;
+			};
+			return { local: copy(localStorage), session: copy(sessionStorage) };
+		},
+		{ runtimePrefix: RUNTIME_STORAGE_PREFIX, syncPrefix: SYNC_KEY_PREFIX },
+	);
 	assertSnapshotComplete(snapshot);
 	return snapshot;
 }
 
-/** `bittery_account_<id>_<name>` for every key naming `name`, id extracted. */
-function accountIdsFor(
-	entries: Record<string, string>,
-	name: string,
-): Set<string> {
-	const suffix = `_${name}`;
-	return new Set(
-		Object.keys(entries)
-			.filter((key) => key.startsWith(ACCOUNT_KEY_PREFIX))
-			.filter((key) => key.endsWith(suffix))
-			.map((key) => key.slice(ACCOUNT_KEY_PREFIX.length, -suffix.length)),
-	);
-}
-
 /**
- * The account a restore would come back as. The active pointer decides, because
- * a re-login mints a fresh accountId and leaves the old account's keys behind;
- * the single-id fallback only covers a pointer that has not caught up.
+ * The transitional Account whose metadata this snapshot names.
+ * Runtime authentication has its own Account id and credential documents.
  */
 function snapshotAccountId(snapshot: AuthSnapshot): string | null {
-	const active = snapshot.local[ACTIVE_ACCOUNT_KEY];
-	if (active) {
-		return active;
-	}
-	const ids = accountIdsFor(snapshot.session, "jwt_token");
-	return ids.size === 1 ? ([...ids][0] ?? null) : null;
+	return snapshot.local[ACTIVE_ACCOUNT_KEY] ?? null;
 }
 
 function assertSnapshotComplete(snapshot: AuthSnapshot): void {
-	const accountId = snapshotAccountId(snapshot);
+	const transitionalAccountId = snapshotAccountId(snapshot);
+	const runtimeAccountId = snapshot.local[RUNTIME_ACTIVE_ACCOUNT_KEY];
 	const missing: string[] = [];
 
-	if (accountId) {
-		for (const name of SESSION_BOUND_VALUES) {
-			const key = `${ACCOUNT_KEY_PREFIX}${accountId}_${name}`;
-			if (!(key in snapshot.session)) {
-				missing.push(`sessionStorage: ${key}`);
-			}
-		}
-		const sessionData = `${ACCOUNT_KEY_PREFIX}${accountId}_session_data`;
-		if (!(sessionData in snapshot.local)) {
-			missing.push(`localStorage: ${sessionData}`);
-		}
-	} else {
-		missing.push(
-			`localStorage: ${ACTIVE_ACCOUNT_KEY} (and no single signed-in account to fall back on)`,
-		);
+	if (!transitionalAccountId)
+		missing.push(`localStorage: ${ACTIVE_ACCOUNT_KEY}`);
+	if (!runtimeAccountId)
+		missing.push(`localStorage: ${RUNTIME_ACTIVE_ACCOUNT_KEY}`);
+	if (
+		transitionalAccountId &&
+		runtimeAccountId &&
+		transitionalAccountId === runtimeAccountId
+	) {
+		missing.push("distinct transitional and Runtime Account ids");
 	}
 
 	if (!(DEVICE_KEY in snapshot.local)) {
 		missing.push(`localStorage: ${DEVICE_KEY}`);
+	}
+	if (!(ACCOUNTS_LIST_KEY in snapshot.local)) {
+		missing.push(`localStorage: ${ACCOUNTS_LIST_KEY}`);
+	}
+	for (const [storeName, entries, suffix] of [
+		["localStorage", snapshot.local, "device-catalog"],
+		["localStorage", snapshot.local, "device-key"],
+		["localStorage", snapshot.local, "metadata"],
+		["localStorage", snapshot.local, "quick-unlock"],
+		["sessionStorage", snapshot.session, "current-session"],
+	] as const) {
+		const keys = Object.keys(entries).filter(
+			(key) =>
+				key.startsWith(RUNTIME_STORAGE_PREFIX) && key.endsWith(`:${suffix}`),
+		);
+		if (keys.length !== 1) {
+			missing.push(`${storeName}: exactly one Runtime ${suffix} document`);
+		}
 	}
 
 	if (missing.length > 0) {

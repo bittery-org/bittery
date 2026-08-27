@@ -25,6 +25,17 @@ const COLD_START_MS = 60000;
 /** One SRP handshake, which re-derives the master key from the password. */
 const SIGN_IN_MS = 120000;
 
+const RUNTIME_STORAGE_PREFIX = "bittery:runtime:platform-storage:";
+const TRANSITIONAL_CREDENTIAL_SUFFIXES = [
+	"session_data",
+	"jwt_token",
+	"vault_keys",
+	"encrypted_private_key",
+	"secret_key",
+	"pinned_kdf_params",
+	"last_biometric_auth",
+].map((name) => `_${name}`);
+
 /**
  * Any `toast.error`, whatever its wording.
  *
@@ -68,6 +79,48 @@ async function accountStorageShape(page: Page) {
 				.sort(),
 		};
 	});
+}
+
+/** Account teardown evidence without rejecting legitimate Device-wide Runtime documents. */
+async function removedAccountStorageShape(
+	page: Page,
+	runtimeAccountId: string,
+) {
+	return page.evaluate(
+		({ forbiddenSuffixes, runtimeAccountId, runtimePrefix }) => {
+			const runtimeAccountPrefix = `${runtimePrefix}account:${new TextEncoder().encode(runtimeAccountId).byteLength}:${runtimeAccountId}:`;
+			const matchingKeys = (store: Storage, prefix: string) =>
+				Object.keys(store)
+					.filter((key) => key.startsWith(prefix))
+					.sort();
+			const transitionalCredentialKeys = (store: Storage) =>
+				Object.keys(store)
+					.filter((key) => key.startsWith("bittery_account_"))
+					.filter((key) =>
+						forbiddenSuffixes.some((suffix) => key.endsWith(suffix)),
+					)
+					.sort();
+			return {
+				localRuntimeAccountKeys: matchingKeys(
+					localStorage,
+					runtimeAccountPrefix,
+				),
+				sessionRuntimeAccountKeys: matchingKeys(
+					sessionStorage,
+					runtimeAccountPrefix,
+				),
+				localTransitionalCredentialKeys:
+					transitionalCredentialKeys(localStorage),
+				sessionTransitionalCredentialKeys:
+					transitionalCredentialKeys(sessionStorage),
+			};
+		},
+		{
+			forbiddenSuffixes: TRANSITIONAL_CREDENTIAL_SUFFIXES,
+			runtimeAccountId,
+			runtimePrefix: RUNTIME_STORAGE_PREFIX,
+		},
+	);
 }
 
 let user: TestUser;
@@ -169,20 +222,21 @@ test("signing out removes the account from the device and forces a full sign-in"
 	const signedInShape = await accountStorageShape(page);
 	expect(signedInShape.activeAccountId).not.toBeNull();
 	expect(signedInShape.webAccountId).not.toBeNull();
-	expect(signedInShape.activeAccountId).not.toBe(signedInShape.webAccountId);
-	expect(signedInShape.accounts?.version).toBe(2);
-	expect(
-		signedInShape.accounts?.accounts?.map((account) => account.accountId),
-	).toEqual([signedInShape.activeAccountId]);
-	expect(signedInShape.secretKeyNames).toEqual([
-		`bittery_account_${signedInShape.activeAccountId}_secret_key`,
-	]);
+	// A fresh browser may keep using its pre-login transitional id. Runtime
+	// Sign-in owns a different Account and mirrors no credentials into that store.
+	expect(signedInShape.activeAccountId).toBe(signedInShape.webAccountId);
+	expect(signedInShape.accounts).toBeNull();
+	expect(signedInShape.secretKeyNames).toEqual([]);
 	expect(signedInShape.runtimeAccountId).not.toBeNull();
 	expect(signedInShape.runtimeAccountId).not.toBe(
 		signedInShape.activeAccountId,
 	);
 	expect(signedInShape.runtimeAccountId).not.toBe(signedInShape.webAccountId);
 	expect(signedInShape.deletedServerAccountId).toBeNull();
+	const removedRuntimeAccountId = signedInShape.runtimeAccountId;
+	if (!removedRuntimeAccountId) {
+		throw new Error("Sign-in did not persist the Runtime Account id.");
+	}
 
 	await signOut(page);
 
@@ -202,6 +256,14 @@ test("signing out removes the account from the device and forces a full sign-in"
 		runtimeAccountId: null,
 		deletedServerAccountId: null,
 		secretKeyNames: [],
+	});
+	expect(
+		await removedAccountStorageShape(page, removedRuntimeAccountId),
+	).toEqual({
+		localRuntimeAccountKeys: [],
+		sessionRuntimeAccountKeys: [],
+		localTransitionalCredentialKeys: [],
+		sessionTransitionalCredentialKeys: [],
 	});
 });
 
