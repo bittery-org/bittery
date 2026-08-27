@@ -17,12 +17,45 @@ import {
 	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { forgetActiveSession, storage } from "@/lib/storage";
+import { useMemo, useRef, useState } from "react";
+import {
+	type AccountRemovalArea,
+	forgetBrowserSessionOnly,
+	retireAccountSession,
+	retryCannotFinish,
+	type SessionRetirementDeps,
+	type SessionRetirementIncomplete,
+	type SessionRetirementResult,
+} from "@/lib/account-removal";
+import {
+	forgetAccountSession,
+	getTransitionalAccountId,
+	storage,
+} from "@/lib/storage";
+import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
+
+/** Retiring the Session, or the browser-only escape. Never the same thing. */
+type RetirementAction = "retire" | "forgetBrowserSession";
+
+/** Idle, running one of the two gestures, or holding what did not finish. */
+type RetirementState =
+	| { readonly phase: "idle" }
+	| {
+			readonly phase: "running";
+			readonly action: RetirementAction;
+			/** Held while it runs, so the offer it came from stays on screen. */
+			readonly previous: SessionRetirementIncomplete | null;
+	  }
+	| {
+			readonly phase: "incomplete";
+			readonly result: SessionRetirementIncomplete;
+	  };
+
+const RETIREMENT_IDLE: RetirementState = { phase: "idle" };
 
 export default function SignInForm({
 	onSwitchToSignUp,
@@ -186,10 +219,134 @@ function SignInFormContent({
 	const { manager } = useAccountRuntime();
 	const runtimeClient = useRuntimeClient();
 	const { m } = useI18n();
+	// `isQuickUnlock` is computed by the parent from `useSessionState`. The query lives in
+	// the same cache, so invalidating it here is what re-renders the parent.
+	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
+	const [retirement, setRetirement] =
+		useState<RetirementState>(RETIREMENT_IDLE);
+
+	// The last report, held across attempts. Both names were resolved at the first press,
+	// and re-resolving is unsafe: a half-failed sweep leaves the transitional store with an
+	// empty pointer, which the next attempt would read as nothing to do.
+	const lastIncompleteReport = useRef<SessionRetirementIncomplete | null>(null);
+
+	// "Use a different account" retires the Session. It does not remove the Account.
+	// This screen runs before anybody proved they own it, so the irreversible request
+	// belongs to the sidebar's "Log out", behind an unlocked vault and a confirmation.
+	// `SessionRetirementDeps` carries no `removeAccount`, so that stays a type error.
+	const retirementDeps: SessionRetirementDeps = {
+		// The Account this form offers wins over any stored pointer, exactly as it does
+		// for the unlock above.
+		resolveRuntimeAccountId: () =>
+			runtimeClient.resolveAccount(quickUnlockAccountId),
+		resolveTransitionalAccountId: getTransitionalAccountId,
+		signOutRuntimeAccount: async (accountId: string) => {
+			await runtimeClient.signOut(accountId);
+		},
+		forgetTransitionalSession: (accountId: string) =>
+			forgetAccountSession(accountId, () => manager.refresh()),
+		selectAccount: (accountId: string | null) =>
+			runtimeClient.selectAccount(accountId),
+	};
+
+	const namedAreas = (areas: readonly AccountRemovalArea[]) =>
+		areas.map((area) => getTeardownAreaLabel(area, m)).join(", ");
+
+	const runRetirement = async (
+		action: RetirementAction,
+		previous: SessionRetirementIncomplete | null,
+		run: () => Promise<SessionRetirementResult>,
+	) => {
+		setRetirement({ phase: "running", action, previous });
+		const result = await run();
+		if (result.status === "retired") {
+			lastIncompleteReport.current = null;
+			// The success effect, and only here. A reload rebuilds the screen from stores
+			// that have let go; running it over a failed retirement would show the same
+			// offer again and call that a switch.
+			window.location.reload();
+			return;
+		}
+		if (result.status === "browserSessionForgotten") {
+			// No reload: nothing was retired, so there is nothing to rebuild from. But the
+			// Quick Unlock offer this screen renders comes from a cached `useSessionState`
+			// query, and the escape refreshes no query on its own. Without this the Secret
+			// Key really is gone and the email field stays disabled — the dead end the
+			// escape exists to break. The other half of `isQuickUnlock`,
+			// `runtimeSession.state === "locked"`, cannot hold here: every refusal this
+			// escape follows is a Device that is closed or not ready, and `deriveSession`
+			// reads closed as `unavailable`. So the field re-enables in this page load.
+			await queryClient.invalidateQueries({
+				queryKey: ["auth", "sessionState"],
+			});
+			// The report is kept: it still names the Account, and the Runtime still holds it.
+			setRetirement(RETIREMENT_IDLE);
+			toast.warning(m.auth_signin_different_account_forgotten(), {
+				description: m.auth_signin_different_account_forgotten_areas({
+					areas: namedAreas(result.areas),
+				}),
+			});
+			return;
+		}
+		lastIncompleteReport.current = result;
+		setRetirement({ phase: "incomplete", result });
+		const areas = namedAreas(result.areas);
+		toast.error(
+			// A retry that cannot finish is never offered as one: an empty transitional
+			// pointer is refused for the rest of this page load.
+			retryCannotFinish(result)
+				? m.auth_signin_different_account_stranded()
+				: m.auth_signin_different_account_incomplete(),
+			{
+				description:
+					areas.length > 0
+						? m.auth_signin_different_account_incomplete_areas({ areas })
+						: undefined,
+			},
+		);
+	};
+
+	// A retry hands the previous report back, so both names are the ones the first attempt
+	// resolved. A closed toast is only a closed toast, so the held report drives this too.
+	const handleUseDifferentAccount = () => {
+		const previous = lastIncompleteReport.current;
+		return runRetirement("retire", previous, () =>
+			retireAccountSession(previous, retirementDeps),
+		);
+	};
+
+	// The escape: forget what this browser stored, and nothing else. It appears only after
+	// repeated refusals, because a wedged Runtime refuses `SignOut` forever and this screen
+	// is otherwise a dead end — the email field stays disabled while the Quick Unlock
+	// inputs are still here, so the user cannot sign in as anybody else in this browser.
+	const handleForgetBrowserSession = () => {
+		const previous = lastIncompleteReport.current;
+		if (previous === null) {
+			return;
+		}
+		return runRetirement("forgetBrowserSession", previous, () =>
+			forgetBrowserSessionOnly(previous, retirementDeps),
+		);
+	};
+
+	const busy = retirement.phase === "running";
+	// The held report, while it is held and while the next attempt runs, so the offer it
+	// carries does not blink out from under the button the user just pressed.
+	const heldReport =
+		retirement.phase === "incomplete"
+			? retirement.result
+			: retirement.phase === "running"
+				? retirement.previous
+				: null;
+	const canForgetBrowserSession =
+		heldReport?.canForgetBrowserSessionOnly === true;
+	// An empty transitional pointer is refused for the rest of this page load, so the retry
+	// is withdrawn rather than left there to fail again. The toast already said as much.
+	const stranded = heldReport !== null && retryCannotFinish(heldReport);
 	const { data: emailCheck } = useQuery({
 		queryKey: [
 			"api",
@@ -471,26 +628,47 @@ function SignInFormContent({
 
 			{isQuickUnlock && (
 				<>
-					<Button
-						type="button"
-						variant="link"
-						onClick={async () => {
-							// "Use a different account" must remove the quick-unlock offer,
-							// which a lock would keep. The Runtime owns that offer, so the
-							// request that deletes its material has to reach the Runtime too.
-							const accountId =
-								runtimeClient.resolveAccount(quickUnlockAccountId);
-							if (accountId !== null) {
-								await runtimeClient.signOut(accountId).catch(() => undefined);
-								runtimeClient.selectAccount(null);
-							}
-							await forgetActiveSession(() => manager.refresh());
-							window.location.reload();
-						}}
-						className="w-full text-muted-foreground"
-					>
-						{m.auth_signin_button_different_account()}
-					</Button>
+					{stranded ? null : (
+						<Button
+							type="button"
+							variant="link"
+							disabled={busy}
+							onClick={() => {
+								void handleUseDifferentAccount();
+							}}
+							className="w-full text-muted-foreground"
+							data-testid="use-different-account"
+						>
+							{retirement.phase === "running" && retirement.action === "retire"
+								? m.auth_signin_button_different_account_busy()
+								: m.auth_signin_button_different_account()}
+						</Button>
+					)}
+					{canForgetBrowserSession ? (
+						// Offered only after repeated refusals, and it says what it leaves
+						// behind. The Account stays installed and the Runtime keeps access
+						// to it; all this drops is what this browser stored.
+						<div className="space-y-2 rounded-md border border-border/60 p-3">
+							<p className="text-muted-foreground text-sm">
+								{m.auth_signin_different_account_escape_hint()}
+							</p>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								disabled={busy}
+								onClick={() => {
+									void handleForgetBrowserSession();
+								}}
+								data-testid="use-different-account-escape"
+							>
+								{retirement.phase === "running" &&
+								retirement.action === "forgetBrowserSession"
+									? m.auth_signin_different_account_escape_busy()
+									: m.auth_signin_different_account_escape()}
+							</Button>
+						</div>
+					) : null}
 					{canShowSignup && (
 						<div className="mt-2 text-center text-muted-foreground text-sm">
 							{m.auth_signin_signup_need_different_account()}{" "}

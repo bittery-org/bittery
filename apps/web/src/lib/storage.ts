@@ -66,7 +66,10 @@ function getOrCreateWebAccountId(): string {
  * or reuses an id for the (server, user) pair and `setActiveAccount` points the store at
  * that one instead. So for a signed-in user this key is a stale seed, and
  * `clearActiveAccountData` has already destroyed the `bittery_account_*` keys under the
- * login id. Dropping it leaves no stray `bittery_*` key behind; the next sign-in mints again.
+ * login id. The next sign-in mints again.
+ *
+ * It is not the last `bittery_*` key a removal has to drop: `bittery_deleted_server_account_id`
+ * outlives an abandoned deletion, so `account-removal.ts` clears that one in the same tail.
  *
  * Still only ever call it after a removal reported no failures. On a browser that never
  * signed in, this id is the sole name for those keys, and dropping it first would orphan
@@ -77,6 +80,43 @@ export function forgetWebAccountId(): void {
 		return;
 	}
 	localStorage.removeItem(WEB_ACCOUNT_ID_KEY);
+}
+
+/**
+ * The transitional name of an Account whose Server copy is already deleted.
+ *
+ * The Danger Zone deletion deletes on the Server first, and after that the next
+ * authenticated request answers 401 and `router.tsx` sends the document to `/login`. So the
+ * one fact a retry cannot re-derive has to survive a page load, and React memory does not.
+ * Asking the Server a second time for an Account it no longer has answers with an error,
+ * and reading that as "the Server still holds it" strands this Device's copy forever.
+ *
+ * Keyed by the transitional account id, so the record cannot speak for another Account:
+ * `resolveOrCreateAccountId` keys on (serverUrl, userId), and a re-registered user is a new
+ * userId, which mints a new id.
+ *
+ * A deletion clears the key when it finishes. An abandoned one does not, so every removal
+ * clears it in its success tail as well — see `destroyLocalAccount`. Until then the key
+ * stays, and it can mislead nobody: it only ever answers for the one name it holds.
+ */
+const DELETED_SERVER_ACCOUNT_KEY = "bittery_deleted_server_account_id";
+
+export function readDeletedServerAccountId(): string | null {
+	if (typeof window === "undefined") {
+		return null;
+	}
+	return localStorage.getItem(DELETED_SERVER_ACCOUNT_KEY);
+}
+
+export function writeDeletedServerAccountId(accountId: string | null): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+	if (accountId === null) {
+		localStorage.removeItem(DELETED_SERVER_ACCOUNT_KEY);
+		return;
+	}
+	localStorage.setItem(DELETED_SERVER_ACCOUNT_KEY, accountId);
 }
 
 /**
@@ -141,16 +181,29 @@ export async function initializeStorage(): Promise<void> {
 // refresh the AccountSessionManager so AccountVaultRuntime publishes their new scope.
 // ---------------------------------------------------------------------------
 
-/** Sign out of the active account: no quick-unlock offer and no cached ciphertext survive. */
-export async function forgetActiveSession(
+/**
+ * Sign one named account out of the transitional store: no Quick Unlock offer, no stored
+ * Secret Key and no cached ciphertext survive. The account row itself stays.
+ *
+ * The id is a transitional-store id, not the Runtime's `AccountId`. Before the first
+ * sign-in that is the synthetic `bittery_web_account_id`; afterwards it is the id
+ * `resolveOrCreateAccountId` minted for the (server, user) pair.
+ *
+ * The name is required, and the type says so. A sign-out under no name forgets nothing and
+ * reports no failure, which every caller reads as success — over a `secret_key` that is
+ * still in plain `localStorage`.
+ *
+ * The outcome is returned rather than dropped, for the same reason `clearActiveAccountData`
+ * returns one: `failures.length === 0` is the only honest success test.
+ */
+export async function forgetAccountSession(
+	accountId: string,
 	refresh?: RefreshAccountRuntime,
-): Promise<void> {
+): Promise<LifecycleOutcome> {
 	await initializeStorage();
-	const accountId = await storage.getActiveAccount();
-	if (accountId) {
-		await signOutAccount(accountId, lifecycleDeps);
-	}
+	const outcome = await signOutAccount(accountId, lifecycleDeps);
 	await refresh?.();
+	return outcome;
 }
 
 /**

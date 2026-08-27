@@ -14,7 +14,7 @@ import { itemCache, storage } from "./storage";
 // Accessors, not values, and this is load-bearing — do not "simplify" it to eager
 // values to match the other apps.
 //
-// The cause is that web puts its destructive-flow wrappers (`forgetActiveSession`,
+// The cause is that web puts its destructive-flow wrappers (`forgetAccountSession`,
 // `clearActiveAccountData`) inside `storage.ts`, so `storage.ts` imports
 // `lifecycleDeps` back. `router.tsx` reaches `./lib/storage` first, so this module
 // is evaluated from partway down `storage.ts` — above the `export const storage`

@@ -170,6 +170,126 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		expect(sidebar).not.toContain("runtimeClient.signOut");
 	});
 
+	// "Use a different account" sits on the locked screen, before anybody proved they own
+	// the Account, so it retires the Session instead of destroying it. What it must not do
+	// is discard the outcome: a swallowed refusal reloaded the page over a Runtime that
+	// still held live access, and the same offer came straight back.
+	test("switching account retires the session and reports what did not finish", () => {
+		const form = source("../components/sign-in-form.tsx");
+		expect(form).toContain("retireAccountSession");
+		expect(form).toContain("runtimeClient.signOut");
+		expect(form).not.toContain(".catch(() => undefined)");
+		// The unnamed sign-out, which forgets nothing when the pointer is already empty.
+		expect(form).not.toContain("forgetActiveSession");
+		// Reload only where the retirement finished. It is the success effect, and a
+		// reload over a refusal shows the same offer again and calls that a switch. The
+		// branch is sliced to its own `return;`, not to the end of the file: a proximity
+		// match passes even when the reload has been moved out of the branch entirely.
+		const reloads = form.match(/location\.reload\(\)/g) ?? [];
+		expect(reloads).toHaveLength(1);
+		const retiredStart = form.indexOf('result.status === "retired"');
+		const retiredBranch = form.slice(
+			retiredStart,
+			form.indexOf("\n\t\t\treturn;", retiredStart),
+		);
+		expect(retiredBranch).toContain("location.reload()");
+		// The escape is not a switch: it forgets this browser's sign-in and says the
+		// Runtime kept the Account. It may not reach the Runtime at all.
+		expect(form).toContain("forgetBrowserSessionOnly");
+		expect(form).toContain("auth_signin_different_account_forgotten");
+		// Never the destroying request from a screen that cannot prove who is pressing it.
+		expect(form).not.toContain("removeAccountFromDevice");
+		expect(form).not.toContain("runtimeClient.removeAccount");
+	});
+
+	// The escape drops the Secret Key and deliberately does not reload. That leaves it
+	// owing the user the thing it exists for: a usable email field. `isQuickUnlock` is read
+	// from a cached `useSessionState` query with a five-second `staleTime` and no
+	// invalidation of its own, and nothing here remounts the screen, so without an explicit
+	// refresh the user stares at the same disabled field the escape was pressed to unblock.
+	test("the browser-only escape re-enables the sign-in it just unblocked", () => {
+		const form = source("../components/sign-in-form.tsx");
+		const forgottenStart = form.indexOf(
+			'result.status === "browserSessionForgotten"',
+		);
+		expect(forgottenStart).toBeGreaterThan(-1);
+		// Bounded to the branch's own `return;`. A refresh outside it either never runs or
+		// runs over a retirement that failed, which is a different screen entirely.
+		const forgottenBranch = form.slice(
+			forgottenStart,
+			form.indexOf("\n\t\t\treturn;", forgottenStart),
+		);
+		expect(forgottenBranch).toContain("queryClient.invalidateQueries");
+		expect(forgottenBranch).toContain('queryKey: ["auth", "sessionState"]');
+	});
+
+	// A retry the copy has just called impossible is not a retry. An empty transitional
+	// pointer is refused for the rest of this page load, so the button goes away instead of
+	// standing there inviting the same failure — exactly as the delete dialog does.
+	test("the sign-in screen withdraws a retry that cannot finish", () => {
+		const form = source("../components/sign-in-form.tsx");
+		expect(form).toContain("retryCannotFinish(heldReport)");
+		expect(form).toMatch(
+			/\{stranded \? null : \([\s\S]{0,400}?"use-different-account"/,
+		);
+	});
+
+	// The Danger Zone keeps the one ordering the Runtime cannot express: the Server first.
+	// Everything after it is the Runtime's, and every local failure has to reach the user —
+	// the transitional orchestrator surfaced only the server step and dropped the rest.
+	test("account deletion deletes on the Server first, then destroys through the Runtime", () => {
+		const dialog = source("../components/settings/delete-account-dialog.tsx");
+		expect(dialog).toContain("deleteAccountEverywhereFromDevice");
+		expect(dialog).toContain("runtimeClient.removeAccount");
+		expect(dialog).toContain("clearActiveAccountData");
+		expect(dialog).toContain("forgetWebAccountId");
+		expect(dialog).not.toContain("@bittery/core/services/account-lifecycle");
+		expect(dialog).not.toContain("deleteAccountEverywhere(");
+		expect(dialog).not.toContain('failure.step === "delete_server_account"');
+		// The success effects belong to the deleted arm alone. Navigating on anything
+		// else claims a deletion that did not happen.
+		const navigations = dialog.match(/navigate\(\{ to: "\/" \}\)/g) ?? [];
+		expect(navigations).toHaveLength(1);
+		// Bounded to the branch's own `return;`. Slicing to the end of the file swallows
+		// the failure arm below it, so moving the navigation there would still pass.
+		const deletedStart = dialog.indexOf('result.status === "deleted"');
+		const deletedBranch = dialog.slice(
+			deletedStart,
+			dialog.indexOf("\n\t\t\treturn;", deletedStart),
+		);
+		expect(deletedBranch).toContain('navigate({ to: "/" })');
+	});
+
+	// A report that dies with the dialog takes `serverAccountDeleted` with it, and the next
+	// attempt asks the Server for an Account it no longer has. That answer is an error, and
+	// reading it as "the Server still holds it" strands this Device's copy forever.
+	test("an incomplete deletion report outlives the dialog that showed it", () => {
+		const dialog = source("../components/settings/delete-account-dialog.tsx");
+		expect(dialog).toContain("useRef<AccountDeletionIncomplete | null>(null)");
+		expect(dialog).toMatch(
+			/lastIncompleteReport\.current = result;[\s\S]{0,120}?setDeletion\(\{ phase: "incomplete"/,
+		);
+		// The read, not only the write. A ref nothing reads back is a ref that carries
+		// nothing: the reopened dialog would show a fresh confirmation and the next
+		// attempt would ask the Server for an Account it no longer has.
+		expect(dialog).toContain("result: lastIncompleteReport.current");
+	});
+
+	// A ref dies with the document, and this one is guaranteed a document swap: the Server
+	// Account is gone, so the next authenticated request answers 401 and `router.tsx` sends
+	// the browser to `/login`. The fact the retry cannot re-derive is written down.
+	test("the deleted Server Account is remembered outside React memory", () => {
+		const dialog = source("../components/settings/delete-account-dialog.tsx");
+		expect(dialog).toContain("readDeletedServerAccountId");
+		expect(dialog).toContain("writeDeletedServerAccountId");
+
+		const store = source("./storage.ts");
+		// Keyed by the account it is about, so it can never speak for another one.
+		expect(store).toMatch(
+			/writeDeletedServerAccountId\([\s\S]{0,200}?setItem\(\s*DELETED_SERVER_ACCOUNT_KEY,\s*accountId/,
+		);
+	});
+
 	// The dialog can be dismissed on an incomplete report — "Not now", or Escape while
 	// nothing is running. Closing it must not throw the report away: the next gesture would
 	// re-resolve two names the stores no longer answer to, and the failed-attempt count that
@@ -202,12 +322,36 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		expect(sidebar).toContain("clearBrowserStoredDataOnly");
 
 		const module = source("./account-removal.ts");
-		const hatch = module.slice(
-			module.indexOf("export async function clearBrowserStoredDataOnly"),
+		// Bounded to the function. The file holds three gestures now, and two of them
+		// legitimately move the pointer this one may not touch.
+		const start = module.indexOf(
+			"export async function clearBrowserStoredDataOnly",
 		);
+		const hatch = module.slice(start, module.indexOf("\n}\n", start));
 		expect(hatch).toContain("clearTransitionalAccountData");
 		expect(hatch).not.toContain("deps.removeAccount");
 		expect(hatch).not.toContain("deps.selectAccount");
+	});
+
+	// The sign-in screen's sibling wedge: `SignOut` reaches `retire_account_access`, which
+	// keeps `ensure_open()`, so a wedged Runtime refuses it every time. Without an escape
+	// the screen is a dead end — the email field stays disabled while this browser holds a
+	// Quick Unlock. The escape forgets this browser's sign-in and nothing else.
+	test("the sign-in escape forgets this browser's session and nothing else", () => {
+		const form = source("../components/sign-in-form.tsx");
+		expect(form).toContain("use-different-account-escape");
+
+		const module = source("./account-removal.ts");
+		const start = module.indexOf(
+			"export async function forgetBrowserSessionOnly",
+		);
+		const hatch = module.slice(start, module.indexOf("\n}\n", start));
+		expect(hatch).toContain("forgetTransitionalSession");
+		expect(hatch).not.toContain("deps.signOutRuntimeAccount");
+		expect(hatch).not.toContain("deps.selectAccount");
+		// Its outcome says what the Runtime kept, so no screen can read it as a switch.
+		expect(hatch).toContain('status: "browserSessionForgotten"');
+		expect(hatch).toContain('areas: ["runtimeSession"]');
 	});
 
 	test("the Worker gets a per-browser client id and the build's version", () => {

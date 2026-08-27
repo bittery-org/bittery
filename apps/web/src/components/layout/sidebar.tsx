@@ -42,7 +42,6 @@ import { useRef, useState } from "react";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
 import {
-	type AccountRemovalArea,
 	type AccountRemovalDeps,
 	type AccountRemovalResult,
 	clearBrowserStoredDataOnly,
@@ -58,7 +57,9 @@ import {
 	clearActiveAccountData,
 	forgetWebAccountId,
 	getTransitionalAccountId,
+	writeDeletedServerAccountId,
 } from "@/lib/storage";
+import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -80,25 +81,6 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 			return m.nav_item_settings();
 		default:
 			return path;
-	}
-}
-
-/** What a store that kept data is called on screen. Never a phase name. */
-function getRemovalAreaLabel(
-	area: AccountRemovalArea,
-	m: ReturnType<typeof useI18n>["m"],
-) {
-	switch (area) {
-		case "replica":
-			return m.nav_log_out_area_replica();
-		case "platformStorage":
-			return m.nav_log_out_area_platform_storage();
-		case "attachmentArtifacts":
-			return m.nav_log_out_area_attachment_artifacts();
-		case "hostCleanup":
-			return m.nav_log_out_area_host_cleanup();
-		case "transitionalStore":
-			return m.nav_log_out_area_transitional_store();
 	}
 }
 
@@ -154,6 +136,9 @@ function UserNav() {
 		clearTransitionalAccountData: (accountId: string) =>
 			clearActiveAccountData(accountId, () => manager.refresh()),
 		forgetTransitionalAccountId: forgetWebAccountId,
+		// A deletion the user abandoned leaves this record behind. A log out destroys
+		// everything this browser holds for the Account, so it takes the record too.
+		writeDeletedServerAccountId,
 	};
 
 	// One driver for both actions: neither may navigate away or close over data it did not
@@ -372,7 +357,7 @@ function LogOutDialog({
 						data-testid="log-out-incomplete-areas"
 					>
 						{report.areas.map((area) => (
-							<li key={area}>{getRemovalAreaLabel(area, m)}</li>
+							<li key={area}>{getTeardownAreaLabel(area, m)}</li>
 						))}
 					</ul>
 				) : null}
