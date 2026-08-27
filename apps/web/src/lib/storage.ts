@@ -59,6 +59,38 @@ function getOrCreateWebAccountId(): string {
 	return accountId;
 }
 
+/**
+ * Forget the synthetic pre-login id.
+ *
+ * This id is the active account only until a sign-in: `resolveOrCreateAccountId` then mints
+ * or reuses an id for the (server, user) pair and `setActiveAccount` points the store at
+ * that one instead. So for a signed-in user this key is a stale seed, and
+ * `clearActiveAccountData` has already destroyed the `bittery_account_*` keys under the
+ * login id. Dropping it leaves no stray `bittery_*` key behind; the next sign-in mints again.
+ *
+ * Still only ever call it after a removal reported no failures. On a browser that never
+ * signed in, this id is the sole name for those keys, and dropping it first would orphan
+ * whatever survived.
+ */
+export function forgetWebAccountId(): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+	localStorage.removeItem(WEB_ACCOUNT_ID_KEY);
+}
+
+/**
+ * Which account the transitional store is pointed at right now.
+ *
+ * Read once, at the gesture that destroys it. `removeAccount` writes the active pointer to
+ * `null` before it sweeps the values, so a second read after a half-failed clear answers
+ * `null` and would let a caller destroy nothing and call it success.
+ */
+export async function getTransitionalAccountId(): Promise<string | null> {
+	await initializeStorage();
+	return storage.getActiveAccount();
+}
+
 /** Reconcile direct storage ceremonies with the process-owned account runtime. */
 export type RefreshAccountRuntime = () => void | Promise<void>;
 
@@ -135,16 +167,35 @@ export async function lockRejectedAccountSession(
 	return outcome;
 }
 
-/** Wipe everything stored for the active account, including its encrypted item cache. */
+/**
+ * Wipe everything the transitional store holds for one named account, including its
+ * encrypted item cache.
+ *
+ * The id is a transitional-store id, not the Runtime's `AccountId`. Before the first sign-in
+ * that is the synthetic `bittery_web_account_id`; afterwards it is the id
+ * `resolveOrCreateAccountId` minted for the (server, user) pair. This clears the
+ * `bittery_account_${id}_*` keys, the accounts list, `device_key` once the list empties, and
+ * the cached ciphertext. It reaches no Replica and no Runtime platform state.
+ *
+ * The caller names the account rather than letting this re-resolve it: `removeAccount`
+ * clears the active pointer before it sweeps the values, so a retry that resolved again
+ * would find nothing and report a success over surviving data.
+ *
+ * The name is required, and the type says so. An unnamed sweep destroys nothing and reports
+ * no failure, which every caller reads as success. `account-removal.ts` reports a pointer
+ * that resolved to `null` as the half-removal it is, and never asks for a sweep under it.
+ *
+ * The outcome is returned rather than dropped: a caller that navigates away on a half-failed
+ * removal would claim a teardown that did not happen. `failures.length === 0` is success.
+ */
 export async function clearActiveAccountData(
+	accountId: string,
 	refresh?: RefreshAccountRuntime,
-): Promise<void> {
+): Promise<LifecycleOutcome> {
 	await initializeStorage();
-	const accountId = await storage.getActiveAccount();
-	if (accountId) {
-		await removeAccount(accountId, lifecycleDeps);
-	}
+	const outcome = await removeAccount(accountId, lifecycleDeps);
 	await refresh?.();
+	return outcome;
 }
 
 // Re-export types for convenience
