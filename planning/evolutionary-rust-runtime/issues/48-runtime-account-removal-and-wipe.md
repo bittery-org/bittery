@@ -66,6 +66,46 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — deletion dialog browser-only escape delivered
+
+Commit `96ade6a5` delivers the Danger Zone deletion's browser-only escape. It appears only after the
+Server Account is authoritatively deleted and repeated local removal attempts still fail. It reuses
+`clearBrowserStoredDataOnly`, but the deletion overload enforces the narrower authority at the pure
+module boundary: a Server refusal, a first local failure, or a report without a named transitional
+target cannot be turned into permission to clear anything.
+
+The escape clears only the transitional Account data this browser stored, including the Secret Key,
+then forgets that transitional Account id. It does not call the Server or the Runtime and leaves
+`bittery_runtime_account_id` in place. Its terminal outcome is `browserDataCleared`, never
+`deleted`: the dialog clears its query cache, stays on the page, offers no removal retry, emits no
+successful Account-deletion toast, and states in both English and German that Runtime-owned Account
+data can remain on the Device. A failed clear stays `incomplete`, retains the already-deleted Server
+fact, and reports its own failure instead of claiming deletion succeeded.
+
+Focused behavioral coverage proves that two failed deletion attempts make one Server call and two
+Runtime calls, while the escape itself makes neither; that the Server-side authority gate cannot be
+bypassed; and that a null target remains incomplete and clears nothing. The component source
+tripwire proves the clear button dispatches the browser-only action, bounds the terminal branch so
+navigation and a success toast cannot hide elsewhere in the file, and pins the terminal controls and
+truthful bilingual copy. The final focused run passed 66 tests with 0 failures and 261 expectations.
+`turbo -F web check-types` completed 11/11 tasks, the en/de key-parity check passed, Biome on the four
+changed TypeScript/TSX files was clean, i18n generation produced no tracked changes, and
+`git diff --check` was clean.
+
+Independent review found no production defect. It found three coverage gaps and the writer corrected
+all three: the dispatch assertion had not proved that the clear action called
+`clearBrowserStoredDataOnly`; the terminal assertion had not proved that the browser-cleared branch
+could not emit the successful Account-deletion toast; and the null-target guard had no exact
+regression proof. Fresh re-review killed each corresponding mutation: routing both actions back to
+`deleteAccountEverywhereFromDevice`, adding `toast.success` to the browser-cleared arm, and returning
+`browserDataCleared` for a null target each failed its focused test. The source was restored after
+every mutation and the final focused suite passed.
+
+Ticket 48 now owes only slice 4d: repair and extend the end-to-end wiring, update transitional-key
+shape assertions, complete the Web reachability audit, decide whether the Chromium Runtime tests join
+a repository gate, and run the full TypeScript and Rust gates from a clean tree. `Status:` stays
+`ready-for-agent`.
+
 ### 2026-08-27 — start-up seeding rule delivered: abandoned removal re-selects its Account
 
 Commit `78eed595` delivers the binding start-up rule. When `initializeStorage()` finds no active
