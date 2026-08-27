@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
-import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
+import { generateStandaloneValidator } from "./generate-standalone-validator.mjs";
 
 const run = promisify(execFile);
 const packageRoot = path.resolve(
@@ -60,18 +60,10 @@ ajv.addSchema({ $id: requestId, $ref: `${schemaId}#/$defs/HttpRequest` });
 ajv.addSchema({ $id: responseId, $ref: `${schemaId}#/$defs/HttpResponse` });
 ajv.getSchema(requestId);
 ajv.getSchema(responseId);
-const standaloneValidator = standaloneCode(ajv, {
+const standaloneValidator = generateStandaloneValidator(ajv, {
 	validateHttpRequestJson: requestId,
 	validateHttpResponseJson: responseId,
-}).replace(
-	/const (func\d+) = require\("ajv\/dist\/runtime\/ucs2length"\)\.default;/g,
-	"const $1 = (value) => Array.from(value).length;",
-);
-if (standaloneValidator.includes("require(")) {
-	throw new Error(
-		"Generated HTTP validator contains a CommonJS runtime dependency",
-	);
-}
+});
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
 import type { HttpRequest, HttpResponse } from "./contract";

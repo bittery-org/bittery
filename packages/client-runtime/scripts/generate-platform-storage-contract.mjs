@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
-import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
+import { generateStandaloneValidator } from "./generate-standalone-validator.mjs";
 
 const run = promisify(execFile);
 const packageRoot = path.resolve(
@@ -65,7 +65,7 @@ ajv.addSchema({
 });
 ajv.getSchema(requestId);
 ajv.getSchema(responseId);
-const validatorText = `/* This file is generated. Do not edit. */\n${standaloneCode(
+const validatorText = `/* This file is generated. Do not edit. */\n${generateStandaloneValidator(
 	ajv,
 	{
 		validatePlatformStorageRequest: requestId,

@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
-import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
+import { generateStandaloneValidator } from "./generate-standalone-validator.mjs";
 
 const run = promisify(execFile);
 const packageRoot = path.resolve(
@@ -65,18 +65,10 @@ ajv.addSchema({
 	$id: responseId,
 	$ref: `${schemaId}#/$defs/TransferControlResponse`,
 });
-const standaloneValidator = standaloneCode(ajv, {
+const standaloneValidator = generateStandaloneValidator(ajv, {
 	validateTransferControlRequest: requestId,
 	validateTransferControlResponse: responseId,
-}).replace(
-	/const (func\d+) = require\("ajv\/dist\/runtime\/ucs2length"\)\.default;/g,
-	"const $1 = (value) => Array.from(value).length;",
-);
-if (standaloneValidator.includes("require(")) {
-	throw new Error(
-		"Generated transfer validator contains a CommonJS runtime dependency",
-	);
-}
+});
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
 import type { TransferControlRequest, TransferControlResponse } from "./contract";
