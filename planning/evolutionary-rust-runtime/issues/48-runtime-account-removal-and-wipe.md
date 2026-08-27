@@ -66,6 +66,36 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-27 — start-up seeding rule delivered: abandoned removal re-selects its Account
+
+Commit `78eed595` delivers the binding start-up rule. When `initializeStorage()` finds no active
+Account pointer, it now reads the ordered Accounts list and re-points at its first Account. It mints
+or reuses the synthetic `bittery_web_account_id` only when that list is empty. An existing pointer
+still wins, SSR remains a no-op without consuming the browser initialization, and the memoized rule
+still runs only once per page load.
+
+The behavioral RED was exact. Before the production change,
+`pnpm --filter web exec bun test src/lib/storage.test.ts -t "re-points an abandoned removal at the listed transitional Account"`
+exited 1 with 0 passing and 1 failing: it expected `login-account` and received the generated UUID
+`4aa477c2-ef2d-4f09-8667-67f78fb3599f`. That proves the old path minted a synthetic name over the
+surviving login Account rather than merely failing during setup.
+
+The new focused file covers an existing pointer, an abandoned removal, synthetic-id creation and
+reuse for an empty list, once-per-page-load memoization, and SSR followed by browser initialization.
+Its final run passed 5 tests, 0 failed, with 14 expectations. The adjacent false-success regression,
+`account-removal.test.ts -t "a retry never reports removed while transitional values survive"`,
+passed with 1 test, 40 filtered and 0 failed. `turbo -F web check-types` completed 11/11 tasks;
+Biome on both changed files and `git diff --check` were clean.
+
+Independent review found no production defect. It did find that the original single-Account fixture
+could not kill a first-to-last selection mutation: changing `accounts[0]` to the last Account left
+all 5 tests green. The writer added a second Account with a distinct ordering. Re-review applied the
+same mutation and obtained the intended failure—expected `login-account`, received
+`other-account`, with 4 passing and 1 failing—then restored the source and confirmed 5/5 passing.
+
+Ticket 48 still owes the deletion dialog's browser-only escape and slice 4d's end-to-end wiring,
+reachability audit, gate decisions, and full gates. `Status:` stays `ready-for-agent`.
+
 ### 2026-08-27 — slice 4c-2 delivered: Web account switching and deletion route through the Runtime
 
 Commit `c663f3ec` delivers slice 4c-2. The last two Web teardown gestures now go through the
