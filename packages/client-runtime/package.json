@@ -70,7 +70,8 @@
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
 		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generated-validator-esm.test.mjs",
 		"test:bindings:web": "./scripts/test-web-binding-harness.sh",
-		"test:binary-transfer:chromium": "bun test tests/web-binary-transfer.chromium.test.ts",
+		"test:chromium": "node ./scripts/test-chromium.mjs",
+		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",
 		"check-types": "tsc --noEmit",
 		"test": "bun test src"
 	},
