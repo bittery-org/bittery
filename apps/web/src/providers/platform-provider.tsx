@@ -13,7 +13,6 @@ import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-
 import type { IAutolockService } from "@bittery/core/services/autolock";
 import type { ReactNode } from "react";
 import { crypto } from "@/lib/crypto";
-import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import { vaultCrypto } from "@/lib/vault-runtime";
 import { useAccountRuntime } from "./account-runtime-provider";
@@ -23,6 +22,13 @@ import { useTransitionalSync } from "./transitional-sync-provider";
  * Web autolock service instance (singleton)
  */
 let autolockService: IAutolockService | null = null;
+
+// Web mirrors no credentials outside AccountStore. The remaining transitional hooks still
+// require an explicit adapter so another host cannot silently omit one.
+const webCredentialMirror = {
+	async purge(): Promise<void> {},
+	async forgetQuickUnlock(): Promise<void> {},
+};
 
 function getAutolockService(): IAutolockService {
 	if (!autolockService) {
@@ -54,7 +60,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
-			credentialMirror={lifecycleDeps.credentialMirror}
+			credentialMirror={webCredentialMirror}
 			vaultCrypto={vaultCrypto}
 			vaultRuntime={vaultRuntime}
 			accountManager={manager}

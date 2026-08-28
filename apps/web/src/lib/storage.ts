@@ -11,12 +11,6 @@
  */
 
 import {
-	type LifecycleOutcome,
-	lockInvalidSession,
-	removeAccount,
-	signOutAccount,
-} from "@bittery/core/services/account-lifecycle";
-import {
 	type AccountStore,
 	createAccountStore,
 	createItemCache,
@@ -32,7 +26,12 @@ import {
 	decodeAccountDeletionMarker,
 } from "./account-deletion";
 import { crypto } from "./crypto";
-import { lifecycleDeps } from "./lifecycle";
+import {
+	clearTransitionalAccount,
+	forgetTransitionalSession,
+	lockRejectedTransitionalSession,
+	type TransitionalAccountCleanupOutcome,
+} from "./transitional-account-cleanup";
 
 const platformPort = createWebPlatformPort();
 const recordPort = createWebRecordPort();
@@ -108,9 +107,9 @@ export function writeAccountDeletionMarker(
 /**
  * Which account the transitional store is pointed at right now.
  *
- * Read once, at the gesture that destroys it. `removeAccount` writes the active pointer to
- * `null` before it sweeps the values, so a second read after a half-failed clear answers
- * `null` and would let a caller destroy nothing and call it success.
+ * Read once, at the gesture that destroys it. `AccountStore.clearAllStoredData` writes the
+ * active pointer to `null` before it sweeps the values, so a second read after a half-failed
+ * clear answers `null` and would let a caller destroy nothing and call it success.
  */
 export async function getTransitionalAccountId(): Promise<string | null> {
 	await initializeStorage();
@@ -164,13 +163,16 @@ export async function initializeStorage(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Destructive flows — web platform adapters
+// Destructive flows — Web-owned transitional store cleanup
 //
-// The sequencing lives in `@bittery/core/services/account-lifecycle`; what stays here is
-// the web-only reactivity around it: `initializeStorage()` first, because every
-// account-scoped call needs the synthetic account to exist. Direct storage ceremonies
-// refresh the AccountSessionManager so AccountVaultRuntime publishes their new scope.
+// The Rust Runtime owns Account lifecycle. What stays here is the browser-only tail over
+// the sibling transitional AccountStore and ItemCache, which the Runtime cannot reach.
+// `initializeStorage()` runs first because every account-scoped call needs a transitional
+// name. Direct storage ceremonies refresh AccountSessionManager so AccountVaultRuntime
+// publishes their new scope.
 // ---------------------------------------------------------------------------
+
+const transitionalCleanupDeps = { storage, itemCache };
 
 /**
  * Sign one named account out of the transitional store: no Quick Unlock offer, no stored
@@ -190,9 +192,12 @@ export async function initializeStorage(): Promise<void> {
 export async function forgetAccountSession(
 	accountId: string,
 	refresh?: RefreshAccountRuntime,
-): Promise<LifecycleOutcome> {
+): Promise<TransitionalAccountCleanupOutcome> {
 	await initializeStorage();
-	const outcome = await signOutAccount(accountId, lifecycleDeps);
+	const outcome = await forgetTransitionalSession(
+		accountId,
+		transitionalCleanupDeps,
+	);
 	await refresh?.();
 	return outcome;
 }
@@ -204,9 +209,12 @@ export async function forgetAccountSession(
 export async function lockRejectedAccountSession(
 	accountId: string,
 	refresh?: RefreshAccountRuntime,
-): Promise<LifecycleOutcome> {
+): Promise<TransitionalAccountCleanupOutcome> {
 	await initializeStorage();
-	const outcome = await lockInvalidSession({ accountId }, lifecycleDeps);
+	const outcome = await lockRejectedTransitionalSession(
+		accountId,
+		transitionalCleanupDeps,
+	);
 	await refresh?.();
 	return outcome;
 }
@@ -221,9 +229,9 @@ export async function lockRejectedAccountSession(
  * `bittery_account_${id}_*` keys, the accounts list, `device_key` once the list empties, and
  * the cached ciphertext. It reaches no Replica and no Runtime platform state.
  *
- * The caller names the account rather than letting this re-resolve it: `removeAccount`
- * clears the active pointer before it sweeps the values, so a retry that resolved again
- * would find nothing and report a success over surviving data.
+ * The caller names the account rather than letting this re-resolve it:
+ * `AccountStore.clearAllStoredData` clears the active pointer before it sweeps the values,
+ * so a retry that resolved again would find nothing and report a success over surviving data.
  *
  * The name is required, and the type says so. An unnamed sweep destroys nothing and reports
  * no failure, which every caller reads as success. `account-removal.ts` reports a pointer
@@ -235,9 +243,12 @@ export async function lockRejectedAccountSession(
 export async function clearActiveAccountData(
 	accountId: string,
 	refresh?: RefreshAccountRuntime,
-): Promise<LifecycleOutcome> {
+): Promise<TransitionalAccountCleanupOutcome> {
 	await initializeStorage();
-	const outcome = await removeAccount(accountId, lifecycleDeps);
+	const outcome = await clearTransitionalAccount(
+		accountId,
+		transitionalCleanupDeps,
+	);
 	await refresh?.();
 	return outcome;
 }

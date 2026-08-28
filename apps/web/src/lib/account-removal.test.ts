@@ -99,7 +99,8 @@ function report(result: { status: string }): AccountRemovalIncomplete {
  * Models the real transitional store.
  *
  * `account-store.ts:1070` writes the active pointer to `null` before it sweeps
- * `ACCOUNT_VALUES`, and `account-lifecycle.ts` records a failed step rather than rethrowing.
+ * `ACCOUNT_VALUES`, and the Web transitional cleanup records a failed step rather than
+ * rethrowing.
  * So a half-failed clear leaves no active account and every value in place.
  */
 function transitionalStoreDouble() {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import {
 	auditTransitionalReachability,
 	describeAudit,
@@ -11,6 +12,25 @@ const graph = buildWebImportGraph();
 const audit = auditTransitionalReachability(graph);
 
 describe("the Web entry graph", () => {
+	test("sees every statically named runtime-loading import form", () => {
+		const fixture = buildWebImportGraph([
+			resolve(
+				import.meta.dirname,
+				"fixtures/web-import-graph/static-forms.fixture.txt",
+			),
+		]);
+
+		expect(
+			fixture.imports.map(({ module, symbol }) => `${module} ${symbol}`),
+		).toEqual([
+			"@bittery/core/services/account-lifecycle *",
+			"@fixture/dynamic-import *",
+			"@fixture/import-equals *",
+			"@fixture/static-require *",
+			"@fixture/type-only-reexport *",
+		]);
+	});
+
 	test("reaches the whole app, lazy routes included", () => {
 		expect(graph.files.length).toBeGreaterThan(80);
 		expect(graph.files).toContain("src/router.tsx");
@@ -43,6 +63,17 @@ describe("the Web entry graph", () => {
 });
 
 describe("what the Web may still reach in the transitional stack", () => {
+	test("no Web entry reaches the transitional account lifecycle owner", () => {
+		const lifecycleImports = graph.imports
+			.filter(
+				(imported) =>
+					imported.module === "@bittery/core/services/account-lifecycle",
+			)
+			.map((imported) => `${imported.symbol} ${imported.file}`);
+
+		expect(lifecycleImports).toEqual([]);
+	});
+
 	test("no read path and no create path reaches a transitional owner", () => {
 		expect(describeAudit(audit)).toBe("");
 		expect(audit.violations).toEqual([]);

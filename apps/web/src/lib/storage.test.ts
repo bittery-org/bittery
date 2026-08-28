@@ -95,7 +95,6 @@ beforeAll(() => {
 		createWebRecordPort: createRecordPort,
 	}));
 	mock.module("./crypto", () => ({ crypto: {} as CryptoPort }));
-	mock.module("./lifecycle", () => ({ lifecycleDeps: {} }));
 });
 
 async function importStorage(pageLoad: string) {

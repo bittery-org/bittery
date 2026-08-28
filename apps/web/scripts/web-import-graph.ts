@@ -76,8 +76,15 @@ interface Edge {
 /**
  * The value imports of one file.
  *
- * `import type` and per-specifier `type` markers are dropped: a type is erased before the
- * bundle exists, so it reaches no owner and can never read or write anything.
+ * A declaration-level `import type` is dropped because it is erased completely. Under this
+ * app's `verbatimModuleSyntax`, a value declaration containing only per-specifier `type`
+ * markers emits an empty side-effect import, so it is conservatively recorded as `*`.
+ *
+ * ESM imports/re-exports and literal dynamic `import()` are the production forms. Literal
+ * import-equals and `require()` are classified conservatively too: the current browser build
+ * rejects CommonJS-shaped source, but the audit should fail closed before relying on that.
+ * A runtime-computed specifier cannot be resolved to an owner statically and is deliberately
+ * outside this graph.
  */
 function readEdges(file: string): Edge[] {
 	const source = ts.createSourceFile(
@@ -88,6 +95,11 @@ function readEdges(file: string): Edge[] {
 		file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
 	);
 	const edges: Edge[] = [];
+	const staticSpecifier = (expression: ts.Expression): string | null =>
+		ts.isStringLiteral(expression) ||
+		ts.isNoSubstitutionTemplateLiteral(expression)
+			? expression.text
+			: null;
 	const visit = (node: ts.Node): void => {
 		if (
 			ts.isImportDeclaration(node) &&
@@ -95,7 +107,9 @@ function readEdges(file: string): Edge[] {
 		) {
 			const symbols: string[] = [];
 			const clause = node.importClause;
-			if (clause && !clause.isTypeOnly) {
+			if (clause === undefined) {
+				symbols.push("*");
+			} else if (!clause.isTypeOnly) {
 				if (clause.name) symbols.push("default");
 				const bindings = clause.namedBindings;
 				if (bindings && ts.isNamespaceImport(bindings)) symbols.push("*");
@@ -105,8 +119,19 @@ function readEdges(file: string): Edge[] {
 						symbols.push((element.propertyName ?? element.name).text);
 					}
 				}
+				// With `verbatimModuleSyntax`, `import { type X } from "owner"`
+				// becomes `import {} from "owner"` and still executes the owner.
+				if (symbols.length === 0) symbols.push("*");
 			}
 			edges.push({ specifier: node.moduleSpecifier.text, symbols });
+		} else if (
+			ts.isImportEqualsDeclaration(node) &&
+			!node.isTypeOnly &&
+			ts.isExternalModuleReference(node.moduleReference) &&
+			node.moduleReference.expression
+		) {
+			const specifier = staticSpecifier(node.moduleReference.expression);
+			if (specifier !== null) edges.push({ specifier, symbols: ["*"] });
 		} else if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
@@ -121,16 +146,19 @@ function readEdges(file: string): Edge[] {
 						symbols.push((element.propertyName ?? element.name).text);
 					}
 				}
-				if (!clause) symbols.push("*");
+				if (!clause || symbols.length === 0) symbols.push("*");
 			}
 			edges.push({ specifier: node.moduleSpecifier.text, symbols });
 		} else if (
 			ts.isCallExpression(node) &&
-			node.expression.kind === ts.SyntaxKind.ImportKeyword
+			(node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+				(ts.isIdentifier(node.expression) &&
+					node.expression.text === "require"))
 		) {
 			const argument = node.arguments[0];
-			if (argument && ts.isStringLiteral(argument)) {
-				edges.push({ specifier: argument.text, symbols: ["*"] });
+			if (argument) {
+				const specifier = staticSpecifier(argument);
+				if (specifier !== null) edges.push({ specifier, symbols: ["*"] });
 			}
 		}
 		ts.forEachChild(node, visit);

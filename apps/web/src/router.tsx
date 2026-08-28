@@ -2,7 +2,6 @@ import {
 	isApiTransportError,
 	isUnauthorizedApiError,
 } from "@bittery/api-contract";
-import { requireCompleteLifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { ApiProvider } from "@bittery/shared/api";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
@@ -55,12 +54,17 @@ async function handleUnauthorizedError(originAccountId: string | null) {
 	// A rejected Server Session requires online reauthentication, not a local Sign-out.
 	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
 	lockRejectedAccountSession(originAccountId)
-		.then((outcome) =>
-			requireCompleteLifecycleOutcome(outcome, {
-				operation: "Web session reauthentication",
-				requireAffected: true,
-			}),
-		)
+		.then((outcome) => {
+			if (outcome.failures.length > 0 || !outcome.targetPresent) {
+				throw new Error(
+					"Web session reauthentication did not complete safely",
+					{
+						cause: outcome.failures,
+					},
+				);
+			}
+			return outcome;
+		})
 		.then(() => {
 			queryClient.clear();
 			toast.error(m.toast_auth_session_expired());
