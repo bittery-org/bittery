@@ -1336,3 +1336,86 @@ assertions, and `git diff --check` passes.
 Deliberately left open: the dedicated Attachment Runtime service and C4b2b authenticated browser
 acceptance, final Web cutover, `idempotency_record` removal, native host Share creation, and Ticket
 30's held-SSE work. Ticket 28 remains claimed.
+
+### 2026-08-28 — Attachment Runtime frontier resolved and split before implementation
+
+The maintainer confirmed the remaining ordinary Attachment contract. Upload, download, rename, and
+delete are foreground Runtime requests outside the durable `Operation` union. They have no durable
+retry loop: one request may renew its Session once, but caller cancellation or Runtime restart ends
+that attempt. After an ambiguous upload, rename, or delete response, Rust probes authoritative
+Attachment and Item state before deciding whether the requested effect happened; if authority does
+not prove the effect, the request returns the closed retryable error instead of reporting success or
+silently retrying a mutation.
+
+The external Runtime interface stays small and carries only explicit Account/entity addresses,
+bounded metadata, opaque capability identities, and closed results. Binary data never appears as
+Base64 or unbounded byte arrays in JSON or generated bindings. The production host capability
+registry and its adapter are part of this external seam: the host grants each upload plaintext source
+or download plaintext sink as an opaque, single-use capability scoped to the Account, Runtime
+incarnation, and request. Rust consumes the capability through lower internal binary-chunk ports and
+adapters, while its owned HTTP port and adapter remain at an internal seam and retain authenticated
+route, Session-renewal, response-classification, and authoritative-probe policy. Capabilities close
+on success, error, cancellation, Lock, or Runtime close. A download writes plaintext only to an
+atomic host sink: publication occurs after complete authenticated success, and every partial output
+is discarded.
+
+The existing unlocked `AttachmentProjection` already owns decrypted `name` and `contentType`. It is
+retained, but public `storageKey` is removed from that projection and the generated bindings because
+storage identity remains a Runtime implementation detail under the opaque-capability and minimal-
+addressing decisions. Lock removes the decrypted Attachment fields with the rest of the decrypted
+projection. The minimal external addressing is `Account + Item` for upload and
+`Account + Attachment` for download, rename, and delete. Rust derives the Item, Vault, uploader, and
+Attachment envelope version from authoritative Replica state rather than asking a host to repeat or
+choose them. A successful mutation is published only after an authoritative Attachment/Item fetch
+and a guarded Replica commit; transport success alone cannot manufacture local success.
+
+The interface exposes a closed success/result vocabulary and closed errors for authentication,
+retryable transport, cancellation, missing authority, access denial/read-only authority, quota or
+size rejection, source failure, sink failure, and invariant violation. Per Item, one mutation writer
+serializes upload, rename, and delete. Every request reuses the existing Runtime teardown/admission
+owner and Account lifecycle fencing. Mutation authority and Replica phases acquire the established
+Account execution fence; long parallel downloads do not hold that exclusive fence across their whole
+transfer. The deep module may retain internal per-Account cancellation and cleanup tracking for Lock
+and close, but creates no second authority owner. Lock, Sign-out, Account removal, Wipe, and Runtime
+close cancel every affected transfer and wait for capability and atomic-sink cleanup before retiring
+the corresponding key or Account authority. These rules keep streaming, cryptographic, network,
+reconciliation, and cleanup complexity local to one deep Rust module behind one small external
+Runtime interface. Only the host capability registry and adapter occupy its production seam; the
+owned HTTP and lower binary-chunk ports and adapters remain internal seams.
+
+Implementation is split before code along independently green failure domains, amending the
+historical single Attachment Runtime module slice without changing Rust ownership:
+
+1. **A1 — projection cleanup and Rename vertical:** introduce the shared Rust-defined closed module
+   interface, generated request/result contracts, and error foundation; retain the existing decrypted
+   projection while removing its public `storageKey`; and route Rename alone through the unchanged
+   existing PATCH endpoint. It owns the exact ambiguous-response authority probe, authoritative
+   Attachments/Item fetch, guarded Replica commit, per-Item writer, and lifecycle tests, with no
+   binary path. The common interface foundation travels here because it is the minimum needed to make
+   this first public Rename path usable and testable through the Runtime seam.
+2. **A2 — Delete vertical:** route Delete alone through the unchanged existing DELETE endpoint,
+   reuse A1's interface, writer, lifecycle, probe, and reconciliation machinery, and prove that a lost
+   response cannot report success until authoritative absence is fetched and committed to the
+   Replica.
+3. **B — atomic download vertical:** land the generated Runtime download request/result contract and
+   production Web sink-capability registry and adapter, then add the authenticated source grant,
+   encrypted binary read, decryption, atomic plaintext sink, parallel-read behavior, and complete
+   cancellation/cleanup proofs. It reuses the existing binary executor policy and includes a focused
+   browser proof through the production executor rather than only fake Core ports.
+4. **C — foreground upload vertical:** land the generated Runtime upload request/result contract and
+   production Web source-capability registry and adapter, then add the opaque plaintext source,
+   format-preserving encryption, authenticated grant, digest and size enforcement, PUT, metadata
+   creation, exact ambiguous-response probe, and authoritative reconciliation. It includes a focused
+   browser proof through the production executor rather than only fake Core ports, and creates or
+   retains no durable `Operation`.
+5. **D — C4b2b authenticated real-Core browser acceptance:** only after A1 through C, use the
+   production Worker, generated Runtime, authenticated Server ceremony, and production artifact and
+   binary executors to prove exclusive startup sweep before preparation, restart and unlock
+   reachability, actual production artifact/binary invocation, and more than five Move-preparation
+   failures without durable discard.
+
+Generated Kotlin and Swift request/result shapes may travel with B and C, but native production
+capability-registry adapters remain owned by their later host slices. Deliberately left open after A1
+through D: the final Web cutover and transitional-writer reachability audit, removal of
+`idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
+claimed.
