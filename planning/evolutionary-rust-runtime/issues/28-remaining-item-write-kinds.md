@@ -1264,3 +1264,24 @@ Runtime service and authenticated C4b2b browser acceptance, final Web mutation/l
 `idempotency_record` removal, native host Share creation, and Ticket 30's held-SSE loop. Ticket 48 now
 records the maintainer's teardown contract and remains an implementation dependency before Ticket 28
 can resolve.
+
+### 2026-08-28 — cross-kind Operation dispatch proof delivered
+
+Commit `9271963e` adds the missing executable dispatch fixture and behavioral coverage for the six
+ordinary mutation kinds. The exact RED was six panics on unsupported fake-Server routes, proving
+that every kind already reached the shared kind-agnostic production dispatcher; this was missing
+fixture and coverage, not a production defect. Only `dispatch_tests.rs` and the test-only
+`operation_fixtures.rs` changed. The deliberately transient-only fixture cannot reconcile an
+Operation or manufacture a semantic outcome.
+
+The tests prove each immutable request's exact method, URL, body, and headers, with only the
+Runtime-added idempotency, client-identification (`Bittery-Client-Id`, `Bittery-Client-Platform`, and
+`Bittery-Client-Version`), and authorization headers; seven transient attempts with durable backoff
+delays of 1, 2, 4, 8, 16, 32, and 64 seconds; restart from the persisted remaining deadline; and
+forced exact duplicate transport sends while the Operation remains accepted. Fresh
+independent review mutation-tested these guarantees and approved the slice. The orchestrator's
+focused test, Clippy, formatting, and diff gates pass.
+
+Deliberately left open: outcome and reconciliation widening, the dedicated Attachment Runtime
+service and C4b2b authenticated browser acceptance, final Web cutover, `idempotency_record` removal,
+native host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains claimed.
