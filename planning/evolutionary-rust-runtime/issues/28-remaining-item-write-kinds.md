@@ -1419,3 +1419,25 @@ capability-registry adapters remain owned by their later host slices. Deliberate
 through D: the final Web cutover and transitional-writer reachability audit, removal of
 `idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
 claimed.
+
+### 2026-08-28 — Attachment Rename preserves the key-envelope version
+
+A1 inspection found that the existing Rename handler increments `envelope_version` even though its
+PATCH body carries no replacement `encrypted_attachment_key`. That creates unreadable authoritative
+state: Runtime opens the retained encrypted Attachment key with `envelope_version` in its AAD, so an
+increment without a matching rewrap makes the unchanged key envelope fail authentication. Keeping
+the prior version only in the Replica would instead violate A1's authoritative-fetch and guarded-
+commit contract.
+
+The maintainer therefore confirmed that Rename keeps `envelope_version` unchanged. The existing
+PATCH body remains exactly `encryptedName`, `encryptionIv`, and `encryptionAlgorithm`, and the Server
+modifies only those three fields. `envelope_version` advances only in an authoritative transition
+that also rewraps `encrypted_attachment_key` for the new version; Rename adds neither a fallback AAD
+read nor a second request shape.
+
+A1 acceptance is amended accordingly. A Server regression performs repeated Rename requests and
+proves that the renamed ciphertext fields change while `envelope_version` and the Attachment key
+envelope remain unchanged. The Runtime Rename proof then fetches that authoritative Attachment and
+Item state, commits it through the existing guard, and proves the Attachment remains readable in the
+unlocked projection after repeated Rename. All other A1 boundaries and later Attachment slices stay
+unchanged.
