@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::{
-    auth_http::{AttachmentRenameAnswer, AuthenticatedOutcome},
+    auth_http::{AttachmentDeleteAnswer, AttachmentRenameAnswer, AuthenticatedOutcome},
     platform_storage::CurrentSessionDocument,
     replica::{
         AuthorityAttachmentRecord, AuthorityItemRecord, AuthorityVaultRole,
@@ -20,6 +20,200 @@ use bittery_crypto_core::{
 };
 
 impl Runtime {
+    pub(super) async fn delete_attachment(
+        &self,
+        account_id: AccountId,
+        attachment_id: String,
+        cancellation: RequestCancellation,
+        teardown_admission: tokio::sync::RwLockReadGuard<'_, ()>,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let initial = self.require_snapshot(&account_id)?;
+        if initial.failure.is_some() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountFailed,
+                "the selected Account module has failed",
+            ));
+        }
+        let (item_id, vault_id) = find_attachment_address(&initial, &attachment_id)?;
+        let item_lock = self.item_mutation_lock(&account_id, &item_id);
+        let item_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(cancelled()),
+            guard = item_lock.lock() => guard,
+        };
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let execution_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(cancelled()),
+            guard = execution_lock.lock() => guard,
+        };
+        self.ensure_attachment_admission(&account_id, &cancellation)?;
+        let snapshot = self.require_snapshot(&account_id)?;
+        let (current_item_id, current_vault_id) =
+            find_attachment_address(&snapshot, &attachment_id)?;
+        if current_item_id != item_id || current_vault_id != vault_id {
+            return Err(retryable("Attachment authority changed before Delete"));
+        }
+        if item_has_optimistic_owner(&snapshot, &item_id) {
+            return Err(retryable(
+                "an optimistic Item owner must reconcile before Attachment Delete",
+            ));
+        }
+        let (_, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+        if vault.role == AuthorityVaultRole::ReadOnly {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ReadOnly,
+                "the Attachment belongs to a read-only Vault",
+            ));
+        }
+        let foreground_guard = self.foreground_attachments.register(
+            &account_id,
+            &snapshot.incarnation,
+            cancellation.clone(),
+        )?;
+        let auth_config = self.auth_client_config.clone().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::AuthenticationUnavailable,
+                "authentication is not configured for this Runtime",
+            )
+        })?;
+        drop(execution_guard);
+
+        let metadata = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(cancelled()),
+            result = self.platform_storage.load_account_metadata(&account_id, &snapshot.incarnation) => {
+                result.map_err(|_| retryable("Account metadata could not be loaded"))?
+                    .ok_or_else(authentication_required)?
+            }
+        };
+        let mut session = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(cancelled()),
+            result = self.platform_storage.load_current_session(&account_id, &snapshot.incarnation) => {
+                result.map_err(|_| retryable("Session could not be loaded"))?
+                    .ok_or_else(authentication_required)?
+            }
+        };
+        let http = AuthHttpClient::new(
+            &self.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        )?;
+        let mut renewed = false;
+        let mut deletion = http
+            .delete_attachment(session.token.as_ref(), &attachment_id, cancellation.clone())
+            .await?;
+        if matches!(deletion, AuthenticatedOutcome::ReauthenticationRequired) {
+            renew_once(
+                self,
+                &account_id,
+                &http,
+                &mut session,
+                &mut renewed,
+                cancellation.clone(),
+            )
+            .await?;
+            deletion = http
+                .delete_attachment(session.token.as_ref(), &attachment_id, cancellation.clone())
+                .await?;
+        }
+        match deletion {
+            AuthenticatedOutcome::Ok(
+                AttachmentDeleteAnswer::Deleted
+                | AttachmentDeleteAnswer::Ambiguous
+                | AttachmentDeleteAnswer::Missing,
+            )
+            | AuthenticatedOutcome::Transient => {}
+            AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::AccessDenied) => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccessDenied,
+                    "Attachment Delete was denied",
+                ));
+            }
+            AuthenticatedOutcome::ReauthenticationRequired => {
+                self.mark_reauthentication_required(&account_id);
+                return Err(authentication_required());
+            }
+        }
+
+        let item = fetch_item_authority(
+            self,
+            &http,
+            AttachmentAuthority {
+                account_id: &account_id,
+                item_id: &item_id,
+                attachment_id: &attachment_id,
+                expectation: AttachmentAuthorityExpectation::Deleted {
+                    vault_id: &vault_id,
+                },
+                cancellation: cancellation.clone(),
+            },
+            &mut session,
+            &mut renewed,
+        )
+        .await?;
+        if cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+
+        let execution_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(cancelled()),
+            guard = execution_lock.lock() => guard,
+        };
+        self.ensure_attachment_admission(&account_id, &cancellation)?;
+        let current = self.require_snapshot(&account_id)?;
+        if current.incarnation != snapshot.incarnation {
+            return Err(retryable(
+                "Account incarnation changed before Attachment Delete publication",
+            ));
+        }
+        let result = self
+            .replica
+            .execute_foreground_attachment_exact(ForegroundAttachmentCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation.clone(),
+                snapshot.revision,
+                snapshot.lock_epoch,
+                attachment_id.clone(),
+                false,
+                item,
+            ))
+            .await?;
+        match result {
+            ForegroundAttachmentCommitResult::Applied { .. } => {}
+            ForegroundAttachmentCommitResult::StaleReplica { .. }
+            | ForegroundAttachmentCommitResult::StaleAuthority { .. } => {
+                return Err(retryable(
+                    "Replica authority changed before Attachment Delete publication",
+                ));
+            }
+            ForegroundAttachmentCommitResult::Missing => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "Account disappeared before Attachment Delete publication",
+                ));
+            }
+        };
+        let publication = self.foreground_attachments.publication(&foreground_guard);
+        let prepared_publications =
+            self.decrypt_visible_items_for_foreground_attachment(&account_id)?;
+        let response = RuntimeResponse::AttachmentDeleted {
+            account_id,
+            attachment_id,
+        };
+        drop(execution_guard);
+        drop(foreground_guard);
+        drop(item_guard);
+        drop(teardown_admission);
+        if let Some(prepared_publications) = prepared_publications {
+            prepared_publications.publish(publication);
+        }
+        Ok(response)
+    }
+
     pub(super) async fn rename_attachment(
         &self,
         account_id: AccountId,
@@ -156,12 +350,14 @@ impl Runtime {
         let item = fetch_item_authority(
             self,
             &http,
-            RenameAuthority {
+            AttachmentAuthority {
                 account_id: &account_id,
                 item_id: &item_id,
                 attachment_id: &attachment_id,
-                body: &body,
-                source_attachment: &source_attachment,
+                expectation: AttachmentAuthorityExpectation::Renamed {
+                    body: &body,
+                    source_attachment: &source_attachment,
+                },
                 cancellation: cancellation.clone(),
             },
             &mut session,
@@ -197,6 +393,7 @@ impl Runtime {
                 snapshot.revision,
                 snapshot.lock_epoch,
                 attachment_id.clone(),
+                true,
                 item,
             ))
             .await?;
@@ -250,7 +447,7 @@ impl Runtime {
         {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::AuthenticationRequired,
-                "Attachment Rename requires an unlocked Account",
+                "foreground Attachment mutation requires an unlocked Account",
             ));
         }
         Ok(())
@@ -272,28 +469,36 @@ fn item_has_optimistic_owner(snapshot: &crate::replica::ReplicaSnapshot, item_id
             .any(|overlay| overlay.item_id == item_id)
 }
 
-struct RenameAuthority<'a> {
+struct AttachmentAuthority<'a> {
     account_id: &'a AccountId,
     item_id: &'a str,
     attachment_id: &'a str,
-    body: &'a UpdateAttachmentBody,
-    source_attachment: &'a AuthorityAttachmentRecord,
+    expectation: AttachmentAuthorityExpectation<'a>,
     cancellation: RequestCancellation,
+}
+
+enum AttachmentAuthorityExpectation<'a> {
+    Renamed {
+        body: &'a UpdateAttachmentBody,
+        source_attachment: &'a AuthorityAttachmentRecord,
+    },
+    Deleted {
+        vault_id: &'a str,
+    },
 }
 
 async fn fetch_item_authority(
     runtime: &Runtime,
     http: &AuthHttpClient<'_>,
-    authority: RenameAuthority<'_>,
+    authority: AttachmentAuthority<'_>,
     session: &mut CurrentSessionDocument,
     renewed: &mut bool,
 ) -> Result<AuthorityItemRecord, RuntimeError> {
-    let RenameAuthority {
+    let AttachmentAuthority {
         account_id,
         item_id,
         attachment_id,
-        body,
-        source_attachment,
+        expectation,
         cancellation,
     } = authority;
     let mut item = http
@@ -331,6 +536,7 @@ async fn fetch_item_authority(
             "Item authority returned a foreign identity",
         ));
     }
+    let item_vault_id = item.vault_id.clone();
 
     let mut attachments = http
         .fetch_attachment_authority(session.token.as_ref(), item_id, cancellation.clone())
@@ -369,7 +575,7 @@ async fn fetch_item_authority(
         })
     {
         return Err(retryable(
-            "Attachment address authority changed during Rename",
+            "Attachment address authority changed during probe",
         ));
     }
     let mut authority = super::bootstrap::authority_item_from_dto(item)?;
@@ -377,20 +583,43 @@ async fn fetch_item_authority(
         .into_iter()
         .map(authority_attachment_from_dto)
         .collect();
-    if !attachment_matches_rename(&authority, attachment_id, body) {
-        return Err(retryable(
-            "authoritative state did not retain the requested Attachment Rename",
-        ));
-    }
-    let fetched_attachment = authority
-        .attachments
-        .iter()
-        .find(|attachment| attachment.id == attachment_id)
-        .expect("the requested Attachment was matched above");
-    if !attachment_key_authority_is_unchanged(source_attachment, fetched_attachment) {
-        return Err(retryable(
-            "Attachment key-envelope authority changed during Rename",
-        ));
+    match expectation {
+        AttachmentAuthorityExpectation::Renamed {
+            body,
+            source_attachment,
+        } => {
+            if !attachment_matches_rename(&authority, attachment_id, body) {
+                return Err(retryable(
+                    "authoritative state did not retain the requested Attachment Rename",
+                ));
+            }
+            let fetched_attachment = authority
+                .attachments
+                .iter()
+                .find(|attachment| attachment.id == attachment_id)
+                .expect("the requested Attachment was matched above");
+            if !attachment_key_authority_is_unchanged(source_attachment, fetched_attachment) {
+                return Err(retryable(
+                    "Attachment key-envelope authority changed during Rename",
+                ));
+            }
+        }
+        AttachmentAuthorityExpectation::Deleted { vault_id } => {
+            if item_vault_id != vault_id {
+                return Err(retryable(
+                    "owning Item authority changed during Attachment Delete",
+                ));
+            }
+            if authority
+                .attachments
+                .iter()
+                .any(|attachment| attachment.id == attachment_id)
+            {
+                return Err(retryable(
+                    "authoritative state did not prove the Attachment Delete",
+                ));
+            }
+        }
     }
     Ok(authority)
 }

@@ -136,6 +136,13 @@ pub(crate) enum AttachmentRenameAnswer {
     AccessDenied,
 }
 
+pub(crate) enum AttachmentDeleteAnswer {
+    Deleted,
+    Ambiguous,
+    Missing,
+    AccessDenied,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentAuthorityPage {
@@ -870,6 +877,61 @@ impl<'transport> AuthHttpClient<'transport> {
             }
             HttpResponse::Completed { .. } => {
                 return Err(invariant("Attachment Rename returned an unexpected status"));
+            }
+        })
+    }
+
+    pub(crate) async fn delete_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentDeleteAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Delete,
+                    self.endpoint(&["api", "v1", "attachments", attachment_id])?
+                        .into(),
+                    self.headers(Some(token))?,
+                    Vec::new(),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status: 200, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Deleted)
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Delete was cancelled",
+                ));
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant("Attachment Delete returned an unexpected status"));
             }
         })
     }

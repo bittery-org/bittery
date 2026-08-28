@@ -1245,6 +1245,25 @@ impl Runtime {
                 )
                 .await;
         }
+        if let RuntimeRequest::DeleteAttachment {
+            account_id,
+            attachment_id,
+        } = &request
+        {
+            let teardown_admission = self.teardown_admission.read().await;
+            self.reject_request_during_pending_teardown(&RuntimeRequest::DeleteAttachment {
+                account_id: account_id.clone(),
+                attachment_id: attachment_id.clone(),
+            })?;
+            return self
+                .delete_attachment(
+                    account_id.clone(),
+                    attachment_id.clone(),
+                    cancellation,
+                    teardown_admission,
+                )
+                .await;
+        }
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
         match request {
@@ -1568,6 +1587,9 @@ impl Runtime {
             }
             RuntimeRequest::RenameAttachment { .. } => unreachable!(
                 "Rename is handled before ordinary admission so callback delivery can release it"
+            ),
+            RuntimeRequest::DeleteAttachment { .. } => unreachable!(
+                "Delete is handled before ordinary admission so callback delivery can release it"
             ),
             // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
             // so this reports an error rather than panicking on the request path.

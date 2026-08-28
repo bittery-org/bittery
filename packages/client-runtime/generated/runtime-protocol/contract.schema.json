@@ -1015,6 +1015,27 @@
             "attachmentId",
             "name"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
         }
       ]
     },
@@ -1148,6 +1169,27 @@
             "type": {
               "type": "string",
               "const": "attachmentRenamed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentDeleted"
             }
           },
           "additionalProperties": false,

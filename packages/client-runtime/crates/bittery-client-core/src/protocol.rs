@@ -195,6 +195,14 @@ pub enum RuntimeRequest {
         attachment_id: String,
         name: String,
     },
+    DeleteAttachment {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -318,6 +326,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("attachment_id", attachment_id)
                 .field("plaintext", &"[redacted]")
                 .finish(),
+            Self::DeleteAttachment {
+                account_id,
+                attachment_id,
+            } => formatter
+                .debug_struct("DeleteAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .finish(),
         }
     }
 }
@@ -340,7 +356,8 @@ impl RuntimeRequest {
             | Self::PermanentlyDeleteItem { account_id, .. }
             | Self::CreateShare { account_id, .. }
             | Self::AcknowledgeShareResult { account_id, .. }
-            | Self::RenameAttachment { account_id, .. } => Some(account_id),
+            | Self::RenameAttachment { account_id, .. }
+            | Self::DeleteAttachment { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -521,6 +538,14 @@ pub enum RuntimeResponse {
         operation_id: String,
     },
     AttachmentRenamed {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
+    },
+    AttachmentDeleted {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
             schemars(with = "String")

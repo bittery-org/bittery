@@ -328,6 +328,10 @@ pub enum RuntimeRequest {
         attachment_id: String,
         name: Arc<AttachmentName>,
     },
+    DeleteAttachment {
+        account_id: String,
+        attachment_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -451,6 +455,14 @@ impl fmt::Debug for RuntimeRequest {
                 .field("attachment_id", attachment_id)
                 .field("plaintext", &"[redacted]")
                 .finish(),
+            Self::DeleteAttachment {
+                account_id,
+                attachment_id,
+            } => formatter
+                .debug_struct("DeleteAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .finish(),
         }
     }
 }
@@ -480,6 +492,10 @@ pub enum RuntimeResponse {
         operation_id: String,
     },
     AttachmentRenamed {
+        account_id: String,
+        attachment_id: String,
+    },
+    AttachmentDeleted {
         account_id: String,
         attachment_id: String,
     },
@@ -1112,6 +1128,13 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 attachment_id,
                 name: name.value.clone(),
             },
+            RuntimeRequest::DeleteAttachment {
+                account_id,
+                attachment_id,
+            } => Self::DeleteAttachment {
+                account_id: account_id.into(),
+                attachment_id,
+            },
         }
     }
 }
@@ -1207,6 +1230,13 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 account_id,
                 attachment_id,
             } => Self::AttachmentRenamed {
+                account_id: account_id.into(),
+                attachment_id,
+            },
+            core::RuntimeResponse::AttachmentDeleted {
+                account_id,
+                attachment_id,
+            } => Self::AttachmentDeleted {
                 account_id: account_id.into(),
                 attachment_id,
             },
@@ -1633,6 +1663,37 @@ pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_attachment_delete_keeps_the_closed_minimal_shape() {
+        let core_request: core::RuntimeRequest = RuntimeRequest::DeleteAttachment {
+            account_id: "account-1".into(),
+            attachment_id: "attachment-1".into(),
+        }
+        .into();
+        assert!(matches!(
+            core_request,
+            core::RuntimeRequest::DeleteAttachment {
+                account_id,
+                attachment_id,
+            } if account_id.as_str() == "account-1" && attachment_id == "attachment-1"
+        ));
+
+        let response = RuntimeResponse::from(core::RuntimeResponse::AttachmentDeleted {
+            account_id: core::AccountId::from("account-1"),
+            attachment_id: "attachment-1".into(),
+        });
+        assert!(matches!(
+            &response,
+            RuntimeResponse::AttachmentDeleted {
+                account_id,
+                attachment_id,
+            } if account_id == "account-1" && attachment_id == "attachment-1"
+        ));
+        let debug = format!("{response:?}");
+        assert!(!debug.contains("storage"));
+        assert!(!debug.contains("plaintext"));
+    }
 
     #[test]
     fn native_account_email_helper_delegates_to_the_validated_core_contract() {

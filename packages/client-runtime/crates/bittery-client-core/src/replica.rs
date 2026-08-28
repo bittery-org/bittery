@@ -1639,6 +1639,7 @@ impl Replica {
         let guarded = GuardedCommitPlan {
             mutations: vec![PlanMutation::CommitAttachmentAuthority {
                 attachment_id: plan.attachment_id,
+                attachment_present: plan.attachment_present,
                 item: Box::new(plan.item),
             }],
             ..plan.guard

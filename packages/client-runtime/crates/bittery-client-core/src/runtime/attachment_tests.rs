@@ -125,6 +125,35 @@ fn rename_attachment_request_carries_only_account_attachment_and_name() {
     );
 }
 
+#[test]
+fn delete_attachment_request_carries_only_account_and_attachment() {
+    let request = RuntimeRequest::DeleteAttachment {
+        account_id: AccountId::from("account-1"),
+        attachment_id: "attachment-1".into(),
+    };
+
+    assert_eq!(
+        serde_json::to_value(request).expect("Delete request should serialize"),
+        serde_json::json!({
+            "type": "deleteAttachment",
+            "accountId": "account-1",
+            "attachmentId": "attachment-1",
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(RuntimeResponse::AttachmentDeleted {
+            account_id: AccountId::from("account-1"),
+            attachment_id: "attachment-1".into(),
+        })
+        .expect("Delete result should serialize"),
+        serde_json::json!({
+            "type": "attachmentDeleted",
+            "accountId": "account-1",
+            "attachmentId": "attachment-1",
+        })
+    );
+}
+
 const ATTACHMENT_ID: &str = "attachment-1";
 const ITEM_ID: &str = "item-existing";
 
@@ -132,17 +161,28 @@ struct AttachmentServer {
     requests: Mutex<Vec<RecordedRequest>>,
     item: StoredItem,
     attachment: Mutex<VaultAttachmentResponse>,
+    additional_owning_attachments: Mutex<Vec<VaultAttachmentResponse>>,
+    attachment_deleted: AtomicBool,
+    delete_not_found: AtomicBool,
+    lose_next_delete_response: AtomicBool,
+    discard_next_delete: AtomicBool,
     lose_next_patch_response: AtomicBool,
     discard_next_patch: AtomicBool,
     unauthorized_patches: AtomicUsize,
     patch_calls: AtomicUsize,
+    delete_calls: AtomicUsize,
+    unauthorized_deletes: AtomicUsize,
+    denied_deletes: AtomicUsize,
     refresh_calls: AtomicUsize,
     refresh_mode: AtomicUsize,
     refresh_release: Semaphore,
     hold_patch: AtomicBool,
     patch_release: Semaphore,
+    hold_delete: AtomicBool,
+    delete_release: Semaphore,
     hold_attachment_get: AtomicBool,
     attachment_get_calls: AtomicUsize,
+    item_get_calls: AtomicUsize,
     attachment_get_release: Semaphore,
     item_get_failure: AtomicUsize,
     attachment_get_failure: AtomicUsize,
@@ -159,6 +199,16 @@ impl AttachmentServer {
             .unwrap()
             .iter()
             .filter(|request| request.method == "PATCH")
+            .cloned()
+            .collect()
+    }
+
+    fn deletes(&self) -> Vec<RecordedRequest> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.method == "DELETE")
             .cloned()
             .collect()
     }
@@ -208,6 +258,40 @@ impl SerializedHttpExecutor for AttachmentServer {
                     }))
                     .unwrap(),
                 ),
+            }
+        } else if request.method == "DELETE" {
+            self.delete_calls.fetch_add(1, Ordering::SeqCst);
+            if self
+                .unauthorized_deletes
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Ok(completed(401, b"{}".to_vec()).to_string());
+            }
+            if self
+                .denied_deletes
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Ok(completed(403, b"{}".to_vec()).to_string());
+            }
+            if self.hold_delete.load(Ordering::SeqCst) {
+                self.delete_release.acquire().await.unwrap().forget();
+            }
+            if self.delete_not_found.load(Ordering::SeqCst) {
+                return Ok(completed(404, b"{}".to_vec()).to_string());
+            }
+            if !self.discard_next_delete.swap(false, Ordering::SeqCst) {
+                self.attachment_deleted.store(true, Ordering::SeqCst);
+            }
+            if self.lose_next_delete_response.swap(false, Ordering::SeqCst) {
+                json!({ "type": "networkFailure" })
+            } else {
+                completed(200, br#"{"success":true}"#.to_vec())
             }
         } else if request.method == "PATCH" {
             self.patch_calls.fetch_add(1, Ordering::SeqCst);
@@ -299,6 +383,7 @@ impl SerializedHttpExecutor for AttachmentServer {
         } else if request.method == "GET"
             && request.url.ends_with(&format!("/api/v1/items/{ITEM_ID}"))
         {
+            self.item_get_calls.fetch_add(1, Ordering::SeqCst);
             match self.item_get_failure.swap(0, Ordering::SeqCst) {
                 1 => return Ok(json!({ "type": "networkFailure" }).to_string()),
                 2 => return Ok(json!({ "type": "responseTooLarge" }).to_string()),
@@ -308,6 +393,7 @@ impl SerializedHttpExecutor for AttachmentServer {
                     foreign.id = "foreign-item".into();
                     return Ok(completed(200, item_body(&foreign)).to_string());
                 }
+                5 => return Ok(completed(404, b"{}".to_vec()).to_string()),
                 _ => {}
             }
             completed(200, item_body(&self.item))
@@ -333,6 +419,10 @@ struct AttachmentHarness {
 }
 
 async fn seeded_attachment() -> AttachmentHarness {
+    seeded_attachment_with_role(AuthorityVaultRole::Owner).await
+}
+
+async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarness {
     let account_id = AccountId::from(ACCOUNT);
     let state = InMemoryReplica::default();
     state
@@ -355,13 +445,12 @@ async fn seeded_attachment() -> AttachmentHarness {
     )
     .unwrap();
     let attachment = attachment_authority();
+    let mut source_vault = personal_vault(TEST_VAULT_ID, USER);
+    source_vault.role = role;
     state
         .seed_ready_authority(
             &account_id,
-            vec![
-                personal_vault(TEST_VAULT_ID, USER),
-                personal_vault("vault-2", USER),
-            ],
+            vec![source_vault, personal_vault("vault-2", USER)],
             vec![AuthorityItemRecord {
                 id: ITEM_ID.into(),
                 vault_id: TEST_VAULT_ID.into(),
@@ -394,17 +483,28 @@ async fn seeded_attachment() -> AttachmentHarness {
             deleted_at: None,
         },
         attachment: Mutex::new(attachment_dto(attachment)),
+        additional_owning_attachments: Mutex::new(Vec::new()),
+        attachment_deleted: AtomicBool::new(false),
+        delete_not_found: AtomicBool::new(false),
+        lose_next_delete_response: AtomicBool::new(false),
+        discard_next_delete: AtomicBool::new(false),
         lose_next_patch_response: AtomicBool::new(false),
         discard_next_patch: AtomicBool::new(false),
         unauthorized_patches: AtomicUsize::new(0),
         patch_calls: AtomicUsize::new(0),
+        delete_calls: AtomicUsize::new(0),
+        unauthorized_deletes: AtomicUsize::new(0),
+        denied_deletes: AtomicUsize::new(0),
         refresh_calls: AtomicUsize::new(0),
         refresh_mode: AtomicUsize::new(0),
         refresh_release: Semaphore::new(0),
         hold_patch: AtomicBool::new(false),
         patch_release: Semaphore::new(0),
+        hold_delete: AtomicBool::new(false),
+        delete_release: Semaphore::new(0),
         hold_attachment_get: AtomicBool::new(false),
         attachment_get_calls: AtomicUsize::new(0),
+        item_get_calls: AtomicUsize::new(0),
         attachment_get_release: Semaphore::new(0),
         item_get_failure: AtomicUsize::new(0),
         attachment_get_failure: AtomicUsize::new(0),
@@ -433,6 +533,1117 @@ async fn seeded_attachment() -> AttachmentHarness {
         server,
         replica,
     }
+}
+
+async fn seeded_attachment_with_unrelated_authority() -> AttachmentHarness {
+    let harness = seeded_attachment().await;
+    let observed = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let mut owning_item = observed.bootstrap.snapshot().visible_items[0].clone();
+    let owning_attachment = attachment_authority_for(
+        "attachment-sibling",
+        ITEM_ID,
+        "sibling.txt",
+        "attachments/item-existing/sibling.enc",
+    );
+    owning_item.attachments.push(owning_attachment.clone());
+
+    let other_item_id = "item-unrelated";
+    let other_item_ciphertext = encrypt_with_aad(
+        &serde_json::to_string(&draft()).unwrap(),
+        &TEST_VAULT_KEY,
+        &AadContext {
+            vault_id: TEST_VAULT_ID.into(),
+            entity_id: other_item_id.into(),
+            entity_type: "item".into(),
+            version: 1,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    let other_attachment = attachment_authority_for(
+        "attachment-unrelated",
+        other_item_id,
+        "unrelated.txt",
+        "attachments/item-unrelated/unrelated.enc",
+    );
+    let other_item = AuthorityItemRecord {
+        id: other_item_id.into(),
+        vault_id: TEST_VAULT_ID.into(),
+        category: AuthorityItemCategory::Login,
+        favorite: false,
+        encrypted_data: other_item_ciphertext.ciphertext,
+        encryption_iv: other_item_ciphertext.iv,
+        encryption_algorithm: other_item_ciphertext.algorithm,
+        version: 1,
+        encryption_version: 1,
+        encrypted_by_user_id: USER.into(),
+        last_modified_by: USER.into(),
+        created_at: "2026-08-23T00:00:00Z".into(),
+        updated_at: "2026-08-23T00:00:00Z".into(),
+        deleted_at: None,
+        attachments: vec![other_attachment.clone()],
+    };
+    assert!(matches!(
+        harness
+            .runtime
+            .execute_plan(GuardedCommitPlan::new(
+                harness.account_id.clone(),
+                observed.incarnation,
+                observed.revision,
+                observed.lock_epoch,
+                vec![
+                    PlanMutation::CommitAttachmentAuthority {
+                        attachment_id: owning_attachment.id.clone(),
+                        attachment_present: true,
+                        item: Box::new(owning_item),
+                    },
+                    PlanMutation::CommitAttachmentAuthority {
+                        attachment_id: other_attachment.id.clone(),
+                        attachment_present: true,
+                        item: Box::new(other_item),
+                    },
+                ],
+            ))
+            .await
+            .unwrap(),
+        PlanResult::Applied { .. }
+    ));
+    harness
+        .server
+        .additional_owning_attachments
+        .lock()
+        .unwrap()
+        .push(attachment_dto(owning_attachment));
+    harness
+        .runtime
+        .decrypt_visible_items(&harness.account_id)
+        .unwrap();
+    harness
+}
+
+#[tokio::test]
+async fn successful_delete_uses_exact_bodyless_route_and_publishes_authoritative_absence() {
+    let harness = seeded_attachment().await;
+
+    let response = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response,
+        RuntimeResponse::AttachmentDeleted {
+            account_id: harness.account_id.clone(),
+            attachment_id: ATTACHMENT_ID.into(),
+        }
+    );
+    let deletes = harness.server.deletes();
+    assert_eq!(deletes.len(), 1);
+    assert_eq!(
+        deletes[0].url,
+        format!("{SERVER_URL}/api/v1/attachments/{ATTACHMENT_ID}")
+    );
+    assert_eq!(
+        deletes[0].header("authorization"),
+        Some("Bearer session-token-1")
+    );
+    assert_eq!(deletes[0].header("content-type"), None);
+    assert!(deletes[0].body.is_empty());
+    assert!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn lost_delete_response_converges_only_after_authoritative_absence_without_resend() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .lose_next_delete_response
+        .store(true, Ordering::SeqCst);
+
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn delete_transport_success_with_authority_still_present_is_retryable_without_resend() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .discard_next_delete
+        .store(true, Ordering::SeqCst);
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn delete_not_found_with_target_still_present_is_retryable_without_replica_publication() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .delete_not_found
+        .store(true, Ordering::SeqCst);
+    let sink = Arc::new(AttachmentSink::default());
+    let _observation = harness
+        .runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: harness.account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let publications_before = sink.0.lock().unwrap().len();
+    let revision_before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .revision;
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(harness.server.item_get_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.server.attachment_get_calls.load(Ordering::SeqCst),
+        1
+    );
+    let deletes = harness.server.deletes();
+    assert_eq!(deletes.len(), 1);
+    assert_eq!(
+        deletes[0].url,
+        format!("{SERVER_URL}/api/v1/attachments/{ATTACHMENT_ID}")
+    );
+    assert!(deletes[0].body.is_empty());
+    assert_eq!(deletes[0].header("content-type"), None);
+    assert_eq!(
+        harness
+            .runtime
+            .replica()
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .revision,
+        revision_before
+    );
+    assert_eq!(sink.0.lock().unwrap().len(), publications_before);
+}
+
+#[tokio::test]
+async fn delete_not_found_succeeds_only_after_item_and_attachment_authority_prove_absence() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .delete_not_found
+        .store(true, Ordering::SeqCst);
+    harness
+        .server
+        .attachment_deleted
+        .store(true, Ordering::SeqCst);
+    harness
+        .server
+        .hold_attachment_get
+        .store(true, Ordering::SeqCst);
+    let revision_before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .revision;
+    let deletion = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DeleteAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("404 Delete reaches its Attachment authority probe", || {
+        harness.server.attachment_get_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    assert_eq!(harness.server.item_get_calls.load(Ordering::SeqCst), 1);
+    assert!(!deletion.is_finished());
+    assert_eq!(
+        harness
+            .runtime
+            .replica()
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .revision,
+        revision_before
+    );
+    harness
+        .server
+        .hold_attachment_get
+        .store(false, Ordering::SeqCst);
+    harness.server.attachment_get_release.add_permits(1);
+
+    assert!(matches!(
+        deletion.await.unwrap().unwrap(),
+        RuntimeResponse::AttachmentDeleted { .. }
+    ));
+    assert_eq!(harness.server.deletes().len(), 1);
+    assert_eq!(
+        harness.server.attachment_get_calls.load(Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        harness
+            .runtime
+            .replica()
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .revision,
+        revision_before + 1
+    );
+}
+
+#[tokio::test]
+async fn missing_owning_item_after_delete_is_authority_missing_without_replica_publication() {
+    let harness = seeded_attachment().await;
+    harness.server.item_get_failure.store(5, Ordering::SeqCst);
+    let sink = Arc::new(AttachmentSink::default());
+    let _observation = harness
+        .runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: harness.account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let publications_before = sink.0.lock().unwrap().len();
+    let before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::AuthorityMissing);
+    assert_eq!(harness.server.deletes().len(), 1);
+    assert_eq!(harness.server.item_get_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.server.attachment_get_calls.load(Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        harness.runtime.replica().snapshot(&harness.account_id),
+        Some(before)
+    );
+    assert_eq!(sink.0.lock().unwrap().len(), publications_before);
+}
+
+#[tokio::test]
+async fn finite_multipage_absence_removes_only_the_target_and_publishes_once() {
+    let harness = seeded_attachment_with_unrelated_authority().await;
+    harness
+        .server
+        .attachment_page_mode
+        .store(3, Ordering::SeqCst);
+    let sink = Arc::new(AttachmentSink::default());
+    let _observation = harness
+        .runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: harness.account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let publications_before = sink.0.lock().unwrap().len();
+    let revision_before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .revision;
+
+    assert!(matches!(
+        harness
+            .runtime
+            .request(
+                RuntimeRequest::DeleteAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AttachmentDeleted { .. }
+    ));
+
+    assert_eq!(harness.server.deletes().len(), 1);
+    assert_eq!(harness.server.item_get_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.server.attachment_get_calls.load(Ordering::SeqCst),
+        3
+    );
+    let attachment_gets = harness
+        .server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| {
+            request.method == "GET" && request.url.contains(&format!("/{ITEM_ID}/attachments"))
+        })
+        .map(|request| request.url.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(attachment_gets.len(), 3);
+    assert!(!attachment_gets[0].contains("cursor="));
+    assert!(attachment_gets[1].contains("cursor=authority-1"));
+    assert!(attachment_gets[2].contains("cursor=authority-2"));
+    assert_eq!(
+        harness
+            .runtime
+            .replica()
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .revision,
+        revision_before + 1
+    );
+    let publications = sink.0.lock().unwrap();
+    assert_eq!(publications.len(), publications_before + 1);
+    let RuntimeProjection::Items(items) = publications.last().unwrap() else {
+        panic!("Attachment Delete observation published another projection kind");
+    };
+    let owning = items
+        .items
+        .iter()
+        .find(|item| item.item_id == ITEM_ID)
+        .unwrap();
+    assert!(!owning
+        .attachments
+        .iter()
+        .any(|attachment| attachment.attachment_id == ATTACHMENT_ID));
+    assert!(owning
+        .attachments
+        .iter()
+        .any(|attachment| attachment.attachment_id == "attachment-sibling"));
+    let unrelated = items
+        .items
+        .iter()
+        .find(|item| item.item_id == "item-unrelated")
+        .unwrap();
+    assert_eq!(
+        unrelated.attachments[0].attachment_id,
+        "attachment-unrelated"
+    );
+}
+
+#[tokio::test]
+async fn delete_renews_once_then_replays_the_exact_bodyless_request() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .unauthorized_deletes
+        .store(1, Ordering::SeqCst);
+
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    let deletes = harness.server.deletes();
+    assert_eq!(deletes.len(), 2);
+    assert_eq!(deletes[0].url, deletes[1].url);
+    assert!(deletes.iter().all(|delete| delete.body.is_empty()));
+    assert_eq!(
+        deletes[0].header("authorization"),
+        Some("Bearer session-token-1")
+    );
+    assert_eq!(
+        deletes[1].header("authorization"),
+        Some("Bearer session-token-2")
+    );
+}
+
+#[tokio::test]
+async fn malformed_foreign_and_transient_delete_authority_never_manufactures_success() {
+    for (stage, fault, expected) in [
+        ("item-network", 1usize, RuntimeErrorCode::RetryableTransport),
+        ("item-malformed", 3, RuntimeErrorCode::InvariantViolation),
+        ("item-foreign", 4, RuntimeErrorCode::InvariantViolation),
+        (
+            "attachment-network",
+            1,
+            RuntimeErrorCode::RetryableTransport,
+        ),
+        (
+            "attachment-malformed",
+            3,
+            RuntimeErrorCode::InvariantViolation,
+        ),
+        (
+            "attachment-foreign-item",
+            4,
+            RuntimeErrorCode::InvariantViolation,
+        ),
+        (
+            "attachment-foreign-vault",
+            5,
+            RuntimeErrorCode::InvariantViolation,
+        ),
+    ] {
+        let harness = seeded_attachment().await;
+        if stage.starts_with("item-") {
+            harness
+                .server
+                .item_get_failure
+                .store(fault, Ordering::SeqCst);
+        } else {
+            harness
+                .server
+                .attachment_get_failure
+                .store(fault, Ordering::SeqCst);
+        }
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DeleteAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, expected, "{stage}");
+        assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+                .attachments
+                .len(),
+            1,
+            "{stage}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn active_item_operation_refuses_delete_before_transport() {
+    let harness = seeded_attachment().await;
+    assert!(matches!(
+        harness
+            .runtime
+            .request(
+                create_share(&harness.account_id),
+                RequestCancellation::new()
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn active_attachment_move_refuses_delete_before_transport() {
+    let harness = seeded_attachment().await;
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::MoveItem {
+                account_id: harness.account_id.clone(),
+                item_id: ITEM_ID.into(),
+                target_vault_id: "vault-2".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        harness.runtime.replica().snapshot(&harness.account_id),
+        Some(before)
+    );
+}
+
+#[tokio::test]
+async fn delete_and_rename_share_the_same_item_writer() {
+    let harness = seeded_attachment().await;
+    harness.server.hold_delete.store(true, Ordering::SeqCst);
+    let delete = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DeleteAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Delete owns the Item writer", || {
+        harness.server.delete_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let rename = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::RenameAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        name: "must-wait.txt".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    settle().await;
+    assert!(!rename.is_finished());
+    assert_eq!(harness.server.patch_calls.load(Ordering::SeqCst), 0);
+
+    harness.server.hold_delete.store(false, Ordering::SeqCst);
+    harness.server.delete_release.add_permits(1);
+    assert!(matches!(
+        delete.await.unwrap().unwrap(),
+        RuntimeResponse::AttachmentDeleted { .. }
+    ));
+    assert_eq!(
+        rename.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::AuthorityMissing
+    );
+    assert_eq!(harness.server.patch_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn account_lock_cancels_and_drains_a_hung_foreground_delete() {
+    let harness = seeded_attachment().await;
+    harness.server.hold_delete.store(true, Ordering::SeqCst);
+    let delete = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DeleteAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Delete reaches transport", || {
+        harness.server.delete_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let lock = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    until("Lock cancels and drains Delete", || {
+        lock.is_finished() && delete.is_finished()
+    })
+    .await;
+
+    assert_eq!(
+        delete.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    lock.await.unwrap().unwrap();
+    assert_eq!(harness.server.cancel_calls.load(Ordering::SeqCst), 1);
+    assert!(!harness
+        .runtime
+        .unlocked_items
+        .lock()
+        .unwrap()
+        .contains_key(&harness.account_id));
+}
+
+#[tokio::test]
+async fn delete_rejects_missing_denied_and_cancelled_requests_without_false_success() {
+    let harness = seeded_attachment().await;
+    let missing = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: "missing-attachment".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, RuntimeErrorCode::AuthorityMissing);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 0);
+
+    harness.server.denied_deletes.store(1, Ordering::SeqCst);
+    let denied = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code, RuntimeErrorCode::AccessDenied);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .len(),
+        1
+    );
+
+    let cancellation = RequestCancellation::new();
+    cancellation.cancel();
+    let cancelled = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            cancellation,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(cancelled.code, RuntimeErrorCode::Cancelled);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn read_only_attachment_delete_is_rejected_before_transport() {
+    let harness = seeded_attachment_with_role(AuthorityVaultRole::ReadOnly).await;
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::ReadOnly);
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn newer_background_authority_wins_the_guarded_delete_commit() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .hold_attachment_get
+        .store(true, Ordering::SeqCst);
+    let deletion = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DeleteAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Delete pauses at Attachment authority", || {
+        harness.server.attachment_get_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let background = Replica::new(Arc::new(SerializedReplicaPersistence::new(
+        harness.replica.clone(),
+    )));
+    let observed = background.load(&harness.account_id).await.unwrap().unwrap();
+    let mut item = observed.bootstrap.snapshot().visible_items[0].clone();
+    item.version = 2;
+    item.updated_at = "2026-08-28T14:00:00Z".into();
+    assert!(matches!(
+        background
+            .execute(GuardedCommitPlan::new(
+                harness.account_id.clone(),
+                observed.incarnation,
+                observed.revision,
+                observed.lock_epoch,
+                vec![PlanMutation::CommitAttachmentAuthority {
+                    attachment_id: ATTACHMENT_ID.into(),
+                    attachment_present: true,
+                    item: Box::new(item),
+                }],
+            ))
+            .await
+            .unwrap(),
+        PlanResult::Applied { .. }
+    ));
+
+    harness
+        .server
+        .hold_attachment_get
+        .store(false, Ordering::SeqCst);
+    harness.server.attachment_get_release.add_permits(1);
+    let error = deletion.await.unwrap().unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    harness
+        .runtime
+        .decrypt_visible_items(&harness.account_id)
+        .unwrap();
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn stale_fetched_item_cannot_turn_delete_into_revision_only_success() {
+    let harness = seeded_attachment().await;
+    let observed = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let mut newer = observed.bootstrap.snapshot().visible_items[0].clone();
+    newer.version = 2;
+    newer.updated_at = "2026-08-28T15:00:00Z".into();
+    assert!(matches!(
+        harness
+            .runtime
+            .execute_plan(GuardedCommitPlan::new(
+                harness.account_id.clone(),
+                observed.incarnation,
+                observed.revision,
+                observed.lock_epoch,
+                vec![PlanMutation::CommitAttachmentAuthority {
+                    attachment_id: ATTACHMENT_ID.into(),
+                    attachment_present: true,
+                    item: Box::new(newer),
+                }],
+            ))
+            .await
+            .unwrap(),
+        PlanResult::Applied { .. }
+    ));
+    let before_delete = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(
+        harness.runtime.replica().snapshot(&harness.account_id),
+        Some(before_delete)
+    );
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn runtime_close_cancels_and_drains_a_hung_delete_probe() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .hold_attachment_get
+        .store(true, Ordering::SeqCst);
+    let deletion = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DeleteAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Delete reaches its Attachment authority probe", || {
+        harness.server.attachment_get_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let close = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        async move { runtime.close().await }
+    });
+    until("close cancels and drains Delete", || {
+        close.is_finished() && deletion.is_finished()
+    })
+    .await;
+
+    assert_eq!(
+        deletion.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    close.await.unwrap();
+    assert_eq!(harness.server.delete_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.server.cancel_calls.load(Ordering::SeqCst), 1);
+    assert!(harness.runtime.is_closed());
+}
+
+#[tokio::test]
+async fn delete_commit_failure_preserves_replica_and_never_publishes_success() {
+    let harness = seeded_attachment().await;
+    let before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    harness.replica.fail_next_commits(1);
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(
+        harness.runtime.replica().snapshot(&harness.account_id),
+        Some(before)
+    );
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0]
+            .attachments
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn delete_releases_all_guards_before_a_synchronous_reentrant_callback() {
+    let harness = seeded_attachment().await;
+    let sink = Arc::new(ReentrantAttachmentSink {
+        publications: Mutex::new(Vec::new()),
+        callback: Mutex::new(None),
+    });
+    let _observation = harness
+        .runtime
+        .observe(
+            ObservationRequest::Items {
+                account_id: harness.account_id.clone(),
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    let callback_completed = Arc::new(AtomicBool::new(false));
+    *sink.callback.lock().unwrap() = Some(Box::new({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        let callback_completed = Arc::clone(&callback_completed);
+        move || {
+            let (finished_tx, finished_rx) = std::sync::mpsc::sync_channel(1);
+            let lifecycle = std::thread::spawn(move || {
+                let runtime_thread = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap();
+                let completed = runtime_thread.block_on(async {
+                    runtime
+                        .request(
+                            RuntimeRequest::Lock { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .is_ok()
+                });
+                finished_tx.send(completed).unwrap();
+            });
+            assert!(finished_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("Lock deadlocked on the begun Delete callback"));
+            lifecycle.join().unwrap();
+            callback_completed.store(true, Ordering::SeqCst);
+        }
+    }));
+
+    let response = harness
+        .runtime
+        .request(
+            RuntimeRequest::DeleteAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        response,
+        RuntimeResponse::AttachmentDeleted { .. }
+    ));
+    assert!(callback_completed.load(Ordering::SeqCst));
+    assert!(!harness
+        .runtime
+        .unlocked_items
+        .lock()
+        .unwrap()
+        .contains_key(&harness.account_id));
 }
 
 #[tokio::test]
@@ -2090,6 +3301,7 @@ async fn newer_background_authority_wins_the_guarded_rename_commit() {
                 observed.lock_epoch,
                 vec![PlanMutation::CommitAttachmentAuthority {
                     attachment_id: ATTACHMENT_ID.into(),
+                    attachment_present: true,
                     item: Box::new(item),
                 }],
             ))
@@ -2135,6 +3347,7 @@ async fn older_fetched_item_authority_is_retryable_without_commit_or_publication
             current.lock_epoch,
             vec![PlanMutation::CommitAttachmentAuthority {
                 attachment_id: ATTACHMENT_ID.into(),
+                attachment_present: true,
                 item: Box::new(newer),
             }],
         ))
@@ -2243,10 +3456,24 @@ async fn rename_rejects_foreign_missing_invalid_and_cancelled_requests_before_tr
 }
 
 fn attachment_authority() -> AuthorityAttachmentRecord {
+    attachment_authority_for(
+        ATTACHMENT_ID,
+        ITEM_ID,
+        "original.txt",
+        "attachments/item-existing/file.enc",
+    )
+}
+
+fn attachment_authority_for(
+    attachment_id: &str,
+    item_id: &str,
+    name: &str,
+    storage_key: &str,
+) -> AuthorityAttachmentRecord {
     let attachment_key = [13u8; 32];
     let context = |entity_type: &str| AadContext {
         vault_id: TEST_VAULT_ID.into(),
-        entity_id: ATTACHMENT_ID.into(),
+        entity_id: attachment_id.into(),
         entity_type: entity_type.into(),
         version: 1,
         user_id: USER.into(),
@@ -2258,7 +3485,7 @@ fn attachment_authority() -> AuthorityAttachmentRecord {
     )
     .unwrap();
     let encrypted_name =
-        encrypt_with_aad("original.txt", &attachment_key, &context("attachment_name")).unwrap();
+        encrypt_with_aad(name, &attachment_key, &context("attachment_name")).unwrap();
     let encrypted_content_type = encrypt_with_aad(
         "text/plain",
         &attachment_key,
@@ -2266,10 +3493,10 @@ fn attachment_authority() -> AuthorityAttachmentRecord {
     )
     .unwrap();
     AuthorityAttachmentRecord {
-        id: ATTACHMENT_ID.into(),
-        item_id: ITEM_ID.into(),
+        id: attachment_id.into(),
+        item_id: item_id.into(),
         vault_id: TEST_VAULT_ID.into(),
-        storage_key: "attachments/item-existing/file.enc".into(),
+        storage_key: storage_key.into(),
         encrypted_name: encrypted_name.ciphertext,
         encryption_iv: encrypted_name.iv,
         encryption_algorithm: encrypted_name.algorithm,
@@ -2309,10 +3536,24 @@ fn attachment_dto(attachment: AuthorityAttachmentRecord) -> VaultAttachmentRespo
 fn attachment_page_response(server: &AttachmentServer, url: &str) -> Value {
     let mode = server.attachment_page_mode.load(Ordering::SeqCst);
     if mode == 0 {
+        let mut items = server
+            .additional_owning_attachments
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|attachment| serde_json::to_value(attachment).unwrap())
+            .collect::<Vec<_>>();
+        if !server.attachment_deleted.load(Ordering::SeqCst) {
+            items.insert(
+                0,
+                serde_json::to_value(server.attachment.lock().unwrap().clone()).unwrap(),
+            );
+        }
         return completed(
             200,
             serde_json::to_vec(&json!({
-                "items": [serde_json::to_value(server.attachment.lock().unwrap().clone()).unwrap()],
+                "items": items,
                 "hasMore": false,
                 "nextCursor": null,
             }))
@@ -2326,18 +3567,32 @@ fn attachment_page_response(server: &AttachmentServer, url: &str) -> Value {
         .and_then(|value| value.split('&').next())
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let (count, has_more) = if mode == 1 {
-        (1usize, true)
-    } else {
-        (1, page < 8)
+    let (count, has_more) = match mode {
+        1 => (1usize, true),
+        3 => (1, page < 2),
+        _ => (1, page < 8),
     };
     let template = server.attachment.lock().unwrap().clone();
     let items: Vec<_> = (0..count)
         .map(|offset| {
+            if mode == 3 {
+                return attachment_dto(attachment_authority_for(
+                    &format!("decoy-{page}-{offset}"),
+                    ITEM_ID,
+                    &format!("decoy-{page}-{offset}.txt"),
+                    &format!("attachments/{ITEM_ID}/decoy-{page}-{offset}.enc"),
+                ));
+            }
             let mut attachment = template.clone();
             attachment.id = format!("decoy-{mode}-{page}-{offset}");
             attachment
         })
+        .chain(
+            (mode == 3 && page == 1)
+                .then(|| server.additional_owning_attachments.lock().unwrap().clone())
+                .into_iter()
+                .flatten(),
+        )
         .collect();
     let mut body = serde_json::to_vec(&json!({
         "items": items,

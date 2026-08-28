@@ -41,6 +41,7 @@ impl GuardedCommitPlan {
 pub(crate) struct ForegroundAttachmentCommitPlan {
     pub(crate) guard: GuardedCommitPlan,
     pub(crate) attachment_id: String,
+    pub(crate) attachment_present: bool,
     pub(crate) item: AuthorityItemRecord,
 }
 
@@ -51,6 +52,7 @@ impl ForegroundAttachmentCommitPlan {
         expected_replica_revision: u64,
         expected_lock_epoch: u64,
         attachment_id: String,
+        attachment_present: bool,
         item: AuthorityItemRecord,
     ) -> Self {
         Self {
@@ -62,6 +64,7 @@ impl ForegroundAttachmentCommitPlan {
                 Vec::new(),
             ),
             attachment_id,
+            attachment_present,
             item,
         }
     }
@@ -137,6 +140,7 @@ pub(crate) enum PlanMutation {
     /// Publishes a foreground Attachment mutation only with the freshly fetched owning Item.
     CommitAttachmentAuthority {
         attachment_id: String,
+        attachment_present: bool,
         item: Box<AuthorityItemRecord>,
     },
     /// Retains one terminal rejection: retry stops, the receipt says why, the ciphertext stays.
@@ -1955,13 +1959,15 @@ impl AccountReplica {
             }
             PlanMutation::CommitAttachmentAuthority {
                 attachment_id,
+                attachment_present,
                 item,
             } => {
-                if !item.attachments.iter().any(|attachment| {
+                let present = item.attachments.iter().any(|attachment| {
                     attachment.id == attachment_id && attachment.item_id == item.id
-                }) {
+                });
+                if present != attachment_present {
                     return Err(replica_invariant(
-                        "the authoritative Item does not contain the named Attachment",
+                        "the authoritative Item does not prove the required Attachment presence",
                     ));
                 }
                 self.write_authoritative_item(*item)?;

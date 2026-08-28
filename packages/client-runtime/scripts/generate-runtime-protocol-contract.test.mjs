@@ -56,6 +56,42 @@ test("generated validators keep the Runtime request surface closed", () => {
 	assert.equal(validateObservationRequest({ type: "items" }), false);
 });
 
+test("generated Web Attachment Delete shapes are minimal and closed", () => {
+	const request = {
+		type: "deleteAttachment",
+		accountId: "account-1",
+		attachmentId: "attachment-1",
+	};
+	assert.equal(validateRuntimeRequest(request), true);
+	assert.equal(
+		validateRuntimeRequest({ ...request, storageKey: "private/storage-key" }),
+		false,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "attachmentDeleted",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			},
+		}),
+		true,
+	);
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "attachmentDeleted",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+				name: "secret.txt",
+			},
+		}),
+		false,
+	);
+});
+
 test("the outcome envelope is declared rather than implied by Serde", () => {
 	assert.equal(
 		validateRuntimeOutcome({
