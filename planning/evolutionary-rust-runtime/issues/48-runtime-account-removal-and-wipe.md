@@ -66,6 +66,74 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-28 — Authenticated deletion delivered; 4d audit remains open
+
+Commit `48251b3d` completes the remaining vertical slice. The existing authenticated Server route
+now retains each exact closed 200/400/409 Account-deletion outcome in the same transaction as its
+decision and, for success, the audit event and User cascade. An exact request can therefore replay
+after the Session and User have disappeared without making a bearer token, email, User id, or
+mutable claim durable. The Server re-reads under the request-id advisory lock, binds replay to the
+original credential proof and request fingerprint, and retains refusals as well as success.
+Independent review found that the first implementation did not serialize Team authority changes
+with deletion and did not supply the promised growth/abuse observability; the corrected version
+shares the Team authority lock with the concrete invited-signup, invitation-acceptance,
+Team-deletion, shared-Vault create/convert/delete, and member-departure transactions and emits
+request-scoped insert, replay, outcome, row-growth, rate-limit, request-id-reuse, and
+uniqueness-failure signals. Adversarial Server tests cover exact replay, foreign or changed proof,
+rollback, concurrent requests, retained Team/email decisions, and the authority-lock races.
+
+The shared Rust email normalizer is now exported through the native and Web bindings, and the typed
+`DeleteServerAccount` Runtime command owns explicit Account scope, current-Session transport, one
+bounded refresh after an authoritative first 401, identical retry bytes, response-id validation,
+cancellation classification, and teardown/close fencing. Web owns only the server-first product
+workflow. Its versioned durable marker records `prepared`, `dispatchedUnknown`, or `serverDeleted`;
+start-up recovery runs before authentication can rotate retry authority, destructive Sign-out and
+RemoveAccount entry points gate an unknown dispatch, and local teardown cannot begin until deletion
+is authoritative. Focused cloud Playwright paths prove first-attempt success, lost-response reload
+convergence, retained wrong-email refusal followed by a corrected gesture, forced reload during the
+local tail, and the marker's Sidebar RemoveAccount and locked-screen SignOut gates. The latter is
+the "Use a different account" Session-retirement path, not the Sidebar's destructive Log-out
+gesture. The earlier browser-only escape and abandoned-removal seeding rules remain intact.
+
+`48251b3d` builds on `30c37349`, `5abd6457`, `eec2f105`, `f9bcee74`, `d45fc654`, `41755f7d`,
+`0366decf`, `96ade6a5`, `dd1eaa3`, `78eed595`, and `7b6059a4`. From the clean committed
+implementation tree, the orchestrator's full `pnpm check:ci` and `pnpm check:ci:rust` runs both
+exited successfully. This proves the delivered Server, Runtime, Web orchestration, start-up, focused
+cloud deletion, generated-contract, and phase-gate work; it does not close the remaining 4d audit.
+
+4d still owes exactly three evidence groups:
+
+1. **Web lifecycle reachability.** The whole-entry graph still reaches five transitional lifecycle
+   symbols: `lockInvalidSession` from `apps/web/src/lib/storage.ts`, `NO_CREDENTIAL_MIRROR` from
+   `apps/web/src/lib/lifecycle.ts`, `requireCompleteLifecycleOutcome` from `apps/web/src/router.tsx`,
+   and `signOutAccount` plus `removeAccount` from `apps/web/src/lib/storage.ts`. The retired core
+   `deleteAccountEverywhere` aggregate is unreachable, but the ticket's literal no-reachability
+   acceptance is not. These five edges must either be removed or the maintainer must explicitly
+   supersede that acceptance; this comment makes no such decision.
+2. **Real browser wiring proof.** Source tripwires and pure unit tests cover parts of the intended
+   behavior but are insufficient to prove the rendered wiring. Playwright/browser acceptance still
+   owes the Sidebar Log-out menu destroying nothing until confirmation; cancel and incomplete
+   states; successful Log-out clearing the query cache and navigating to `/login`; and incomplete
+   Log-out staying open without navigation. Throws from `manager.refresh()` or `localStorage` must
+   visibly re-enable the controls instead of leaving a dialog on "Removing…". The three escapes—
+   Sidebar Log-out's browser-data clear, locked-screen Use-different-account's Session retirement,
+   and Danger Zone Delete's browser-data clear—each need a real second-failure appearance proof,
+   preservation of `bittery_runtime_account_id`, their own terminal status (`browserDataCleared`
+   for the two clear actions and `browserSessionForgotten` for retirement), no retry control, and
+   no navigation. The retirement escape must visibly re-enable the email field. The transitional
+   signed-in Account must resolve the login id rather than the synthetic seed, resolving the current
+   fixture contradiction. Finally, a Sidebar Log-out after a truly abandoned, pre-transport
+   `prepared` deletion must clear its marker. The focused deletion flows and the already-proven
+   Sidebar RemoveAccount/locked-screen SignOut marker gates do not close these distinct omissions.
+3. **Chromium gate placement.** The repository still has three actual-Chromium suites under
+   `packages/client-runtime/tests`: binary transfer, Account lease, and OPFS upload spool. They are
+   not all invoked by a repository gate, and only the binary-transfer suite has a package script.
+   4d must either wire all three into the chosen gate or record the maintainer-approved rationale
+   for keeping each on demand, together with explicit successful invocations. Earlier OPFS evidence
+   alone does not decide placement or prove all three current suites.
+
+`Status:` therefore remains `ready-for-agent`.
+
 ### 2026-08-28 — Runtime-owned authenticated Server deletion and retained exact retry
 
 The maintainer decided the authenticated Server-delete frontier. Add one narrow Runtime command:
