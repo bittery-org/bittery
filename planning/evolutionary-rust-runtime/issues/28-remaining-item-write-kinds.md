@@ -1441,3 +1441,44 @@ envelope remain unchanged. The Runtime Rename proof then fetches that authoritat
 Item state, commits it through the existing guard, and proves the Attachment remains readable in the
 unlocked projection after repeated Rename. All other A1 boundaries and later Attachment slices stay
 unchanged.
+
+### 2026-08-28 — A1 foreground Attachment Rename delivered
+
+Commit `f4095156` delivers the first dedicated Attachment Runtime vertical. The public closed request
+carries only Account ID, Attachment ID, and the bounded new name; results and errors use the recorded
+closed vocabulary. Rust derives Item, Vault, uploader, envelope-version, and storage authority,
+encrypts the name, sends the exact existing PATCH body, renews the Session at most once, and never
+blindly resends an ambiguous mutation. Instead it probes authoritative Item and Attachment pages
+within fixed cursor and aggregate bounds. Success requires the requested ciphertext plus the complete
+original key and address authority; foreign, missing, malformed, drifted, or unproved authority fails
+closed or returns the retryable result without publishing the requested effect.
+
+The Server PATCH now preserves both `envelope_version` and the encrypted Attachment key, with a
+repeated-Rename database regression for that invariant. Runtime publishes success only through one
+foreground-specific, exact guarded Replica commit. Newer background authority wins that race, and
+stale fetched or Replica authority cannot overwrite it. The unlocked Item projection retains the
+decrypted Attachment name and content type while public `storageKey` is removed from Rust, generated
+Runtime, Kotlin, Swift, and Web binding shapes. Native bindings keep the Rename plaintext behind an
+opaque redacted input object, and neither the closed result nor error echoes it.
+
+Rename uses the shared per-Item writer already used by existing Item Operations, including
+`CreateShare`, and therefore serializes with those Item mutations. A2 Attachment Delete and C
+foreground Upload are specified to reuse that writer; they are not implemented by A1. Existing
+Runtime admission and teardown remain the authority owner, while
+Account/incarnation-scoped tracking cancels and drains work for Lock, Sign-out, Remove, Wipe, and
+Runtime close. The guarded Replica commit remains under teardown admission. Callback begin is
+separately linearized against lifecycle retirement: lifecycle may win after the commit and suppress
+an unbegun callback, while a begun callback owns its copied payload and does not block teardown.
+Multiple fresh non-writer review and correction rounds exercised these races and the transport,
+authority, writer, lifecycle, projection, and binding boundaries; the final review reported
+**APPROVED**.
+
+The orchestrator's Server database regression passes 1/1, `pnpm check:server` passes, and the full
+`@bittery/client-runtime` check passes 426 Core tests, 43 binding tests, and 25 generator tests,
+including contract, native, and Web drift checks; the WebAssembly run passes 7 tests with 1 skipped.
+The dependent Turbo type checks and `git diff --check` also pass.
+
+Deliberately left open: A2 Attachment Delete, B atomic download, C foreground upload, D authenticated
+C4b2b browser acceptance, the final Web cutover and transitional-writer reachability audit, removal
+of `idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
+claimed.
