@@ -356,6 +356,20 @@ impl FakeServer {
             .collect()
     }
 
+    pub(super) fn existing_item_mutation_requests(&self) -> Vec<RecordedRequest> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| {
+                request.url.contains("/api/v1/items/item-existing")
+                    && request.method != "GET"
+                    && !request.url.ends_with("/share-links")
+            })
+            .cloned()
+            .collect()
+    }
+
     pub(super) fn created_items(&self) -> Vec<String> {
         self.created_items
             .lock()
@@ -529,6 +543,20 @@ impl FakeServer {
             return json!({ "type": "networkFailure" });
         }
         completed(200, outcome_body(operation_id, &result))
+    }
+
+    /// Dispatch-only behavior for the six ordinary Item mutations. Their semantic outcome
+    /// lifecycle is deliberately outside this fixture slice; every unscripted answer remains
+    /// transient so a test cannot accidentally claim reconciliation coverage.
+    pub(super) fn handle_existing_item_mutation(&self, request: &RecordedRequest) -> Value {
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        match self.faults.lock().unwrap().pop_front() {
+            Some(Fault::NetworkFailure) => json!({ "type": "networkFailure" }),
+            Some(Fault::Status(status)) => completed(status, b"{}".to_vec()),
+            None => completed(503, b"{}".to_vec()),
+        }
     }
 
     /// `GET /api/v1/operations/{operationId}`: the retained outcome, after a lost response.
@@ -733,6 +761,8 @@ impl crate::http_transport::SerializedHttpExecutor for FakeServer {
             self.handle_create(&request)
         } else if request.method == "POST" && request.url.ends_with("/share-links") {
             self.handle_share(&request)
+        } else if request.method != "GET" && request.url.contains("/api/v1/items/item-existing") {
+            self.handle_existing_item_mutation(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/sync/changes") {
             self.handle_sync_changes(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/sync/events") {
@@ -773,14 +803,40 @@ pub(super) fn auth_config() -> AuthClientConfig {
 }
 
 pub(super) async fn seeded(hold_time: bool) -> Harness {
-    seeded_inner(hold_time, false).await
+    seeded_inner(hold_time, SeedAuthority::Empty).await
 }
 
 pub(super) async fn seeded_with_share_item(hold_time: bool) -> Harness {
-    seeded_inner(hold_time, true).await
+    seeded_inner(
+        hold_time,
+        SeedAuthority::ExistingItem {
+            deleted: false,
+            include_target_vault: false,
+        },
+    )
+    .await
 }
 
-async fn seeded_inner(hold_time: bool, with_share_item: bool) -> Harness {
+pub(super) async fn seeded_with_existing_item(hold_time: bool, deleted: bool) -> Harness {
+    seeded_inner(
+        hold_time,
+        SeedAuthority::ExistingItem {
+            deleted,
+            include_target_vault: true,
+        },
+    )
+    .await
+}
+
+enum SeedAuthority {
+    Empty,
+    ExistingItem {
+        deleted: bool,
+        include_target_vault: bool,
+    },
+}
+
+async fn seeded_inner(hold_time: bool, authority: SeedAuthority) -> Harness {
     let state = InMemoryReplica::default();
     let account_id = AccountId::from(ACCOUNT);
     state
@@ -790,44 +846,52 @@ async fn seeded_inner(hold_time: bool, with_share_item: bool) -> Harness {
             Incarnation::from(INCARNATION),
         )
         .unwrap();
-    if with_share_item {
-        let sealed = encrypt_with_aad(
-            &serde_json::to_string(&draft()).unwrap(),
-            &TEST_VAULT_KEY,
-            &AadContext {
-                vault_id: TEST_VAULT_ID.into(),
-                entity_id: "item-existing".into(),
-                entity_type: "item".into(),
-                version: 1,
-                user_id: USER.into(),
-            },
-        )
-        .unwrap();
-        state
-            .seed_ready_authority(
-                &account_id,
-                vec![personal_vault(TEST_VAULT_ID, USER)],
-                vec![AuthorityItemRecord {
-                    id: "item-existing".into(),
+    match authority {
+        SeedAuthority::Empty => seed_ready_personal_vault(&state, &account_id).unwrap(),
+        SeedAuthority::ExistingItem {
+            deleted,
+            include_target_vault,
+        } => {
+            let sealed = encrypt_with_aad(
+                &serde_json::to_string(&draft()).unwrap(),
+                &TEST_VAULT_KEY,
+                &AadContext {
                     vault_id: TEST_VAULT_ID.into(),
-                    category: AuthorityItemCategory::Login,
-                    favorite: false,
-                    encrypted_data: sealed.ciphertext,
-                    encryption_iv: sealed.iv,
-                    encryption_algorithm: sealed.algorithm,
+                    entity_id: "item-existing".into(),
+                    entity_type: "item".into(),
                     version: 1,
-                    encryption_version: 1,
-                    encrypted_by_user_id: USER.into(),
-                    last_modified_by: USER.into(),
-                    created_at: "2026-08-23T00:00:00Z".into(),
-                    updated_at: "2026-08-23T00:00:00Z".into(),
-                    deleted_at: None,
-                    attachments: Vec::new(),
-                }],
+                    user_id: USER.into(),
+                },
             )
             .unwrap();
-    } else {
-        seed_ready_personal_vault(&state, &account_id).unwrap();
+            let mut vaults = vec![personal_vault(TEST_VAULT_ID, USER)];
+            if include_target_vault {
+                vaults.push(personal_vault("vault-2", USER));
+            }
+            state
+                .seed_ready_authority(
+                    &account_id,
+                    vaults,
+                    vec![AuthorityItemRecord {
+                        id: "item-existing".into(),
+                        vault_id: TEST_VAULT_ID.into(),
+                        category: AuthorityItemCategory::Login,
+                        favorite: false,
+                        encrypted_data: sealed.ciphertext,
+                        encryption_iv: sealed.iv,
+                        encryption_algorithm: sealed.algorithm,
+                        version: 1,
+                        encryption_version: 1,
+                        encrypted_by_user_id: USER.into(),
+                        last_modified_by: USER.into(),
+                        created_at: "2026-08-23T00:00:00Z".into(),
+                        updated_at: "2026-08-23T00:00:00Z".into(),
+                        deleted_at: deleted.then(|| "2026-08-24T00:00:00Z".into()),
+                        attachments: Vec::new(),
+                    }],
+                )
+                .unwrap();
+        }
     }
     let replica = PlainReplica::new(state);
     let platform = MemoryPlatform::new();
@@ -930,6 +994,22 @@ impl Harness {
                 },
                 RequestCancellation::new(),
             )
+            .await
+            .unwrap()
+        {
+            RuntimeResponse::Accepted {
+                operation_id,
+                item_id,
+                ..
+            } => (operation_id, item_id),
+            other => panic!("expected Accepted, got {other:?}"),
+        }
+    }
+
+    pub(super) async fn accept_existing(&self, request: RuntimeRequest) -> (String, String) {
+        match self
+            .runtime
+            .request(request, RequestCancellation::new())
             .await
             .unwrap()
         {

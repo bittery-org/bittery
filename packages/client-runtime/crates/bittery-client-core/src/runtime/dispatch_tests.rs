@@ -6,10 +6,318 @@
 use super::operation_fixtures::*;
 use super::*;
 use crate::{
+    auth_http::AuthenticatedOutcome,
     http_transport::{HttpHeader, HttpMethod},
     replica::{GuardedCommitPlan, PlanMutation},
     test_fixtures::TEST_VAULT_ID,
 };
+
+#[derive(Clone, Copy)]
+enum ExistingDispatchCase {
+    Update,
+    Favorite,
+    Trash,
+    Restore,
+    Move,
+    PermanentlyDelete,
+}
+
+impl ExistingDispatchCase {
+    fn all() -> [Self; 6] {
+        [
+            Self::Update,
+            Self::Favorite,
+            Self::Trash,
+            Self::Restore,
+            Self::Move,
+            Self::PermanentlyDelete,
+        ]
+    }
+
+    fn needs_deleted_authority(self) -> bool {
+        matches!(self, Self::Restore | Self::PermanentlyDelete)
+    }
+
+    fn request(self, account_id: AccountId) -> RuntimeRequest {
+        match self {
+            Self::Update => RuntimeRequest::UpdateLoginItem {
+                account_id,
+                item_id: "item-existing".into(),
+                draft: draft(),
+            },
+            Self::Favorite => RuntimeRequest::SetItemFavorite {
+                account_id,
+                item_id: "item-existing".into(),
+                favorite: true,
+            },
+            Self::Trash => RuntimeRequest::TrashItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+            Self::Restore => RuntimeRequest::RestoreItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+            Self::Move => RuntimeRequest::MoveItem {
+                account_id,
+                item_id: "item-existing".into(),
+                target_vault_id: "vault-2".into(),
+            },
+            Self::PermanentlyDelete => RuntimeRequest::PermanentlyDeleteItem {
+                account_id,
+                item_id: "item-existing".into(),
+            },
+        }
+    }
+
+    fn method(self) -> &'static str {
+        match self {
+            Self::Update | Self::Favorite => "PATCH",
+            Self::Trash | Self::PermanentlyDelete => "DELETE",
+            Self::Restore | Self::Move => "POST",
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::Update | Self::Trash => "/api/v1/items/item-existing",
+            Self::Favorite => "/api/v1/items/item-existing/favorite",
+            Self::Restore => "/api/v1/items/item-existing/restore",
+            Self::Move => "/api/v1/items/item-existing/moves",
+            Self::PermanentlyDelete => "/api/v1/items/item-existing/permanent",
+        }
+    }
+}
+
+async fn existing_item_kind_reaches_the_shared_dispatcher(case: ExistingDispatchCase) {
+    let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+    harness.server.script([Fault::Status(503)]);
+    let (operation_id, _) = harness
+        .accept_existing(case.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    assert_eq!(harness.operation().unwrap().scheduling.attempt_count, 1);
+}
+
+macro_rules! existing_dispatch_case {
+    ($name:ident, $case:expr) => {
+        #[tokio::test]
+        async fn $name() {
+            existing_item_kind_reaches_the_shared_dispatcher($case).await;
+        }
+    };
+}
+
+existing_dispatch_case!(
+    update_item_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::Update
+);
+existing_dispatch_case!(
+    favorite_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::Favorite
+);
+existing_dispatch_case!(
+    trash_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::Trash
+);
+existing_dispatch_case!(
+    restore_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::Restore
+);
+existing_dispatch_case!(
+    move_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::Move
+);
+existing_dispatch_case!(
+    permanent_delete_reaches_the_shared_dispatcher,
+    ExistingDispatchCase::PermanentlyDelete
+);
+
+#[tokio::test]
+async fn every_existing_item_kind_retries_immutable_requests_without_an_attempt_limit() {
+    let faults = [
+        Fault::NetworkFailure,
+        Fault::Status(500),
+        Fault::Status(502),
+        Fault::NetworkFailure,
+        Fault::Status(503),
+        Fault::Status(429),
+        Fault::Status(408),
+    ];
+    for case in ExistingDispatchCase::all() {
+        let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+        harness.server.script(faults);
+        let (operation_id, _) = harness
+            .accept_existing(case.request(harness.account_id.clone()))
+            .await;
+        let accepted = harness.operation().unwrap();
+        let mut delays = Vec::new();
+
+        for expected_attempt_count in 1..=7 {
+            harness
+                .runtime
+                .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+                .await;
+            let retriable = harness
+                .operation()
+                .expect("a transient answer stays accepted");
+            assert_eq!(retriable.scheduling.attempt_count, expected_attempt_count);
+            let delay = retriable
+                .scheduling
+                .not_before_ms
+                .saturating_sub(harness.clock.now());
+            delays.push(delay);
+            harness.clock.advance(delay);
+        }
+
+        assert_eq!(
+            delays,
+            vec![1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000]
+        );
+        let after_retries = harness.operation().unwrap();
+        assert_eq!(after_retries.request, accepted.request);
+        assert_eq!(
+            after_retries.request_fingerprint,
+            accepted.request_fingerprint
+        );
+        let requests = harness.server.existing_item_mutation_requests();
+        assert_eq!(requests.len(), 7);
+        let mut expected_headers: Vec<(String, String)> = accepted
+            .request
+            .headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect();
+        expected_headers.extend([
+            ("Idempotency-Key".into(), operation_id.clone()),
+            ("Bittery-Client-Id".into(), "client-1".into()),
+            ("Bittery-Client-Platform".into(), "web".into()),
+            ("Bittery-Client-Version".into(), "1.0.0".into()),
+            ("Authorization".into(), format!("Bearer {FIRST_TOKEN}")),
+        ]);
+        for request in requests {
+            assert_eq!(request.method, case.method());
+            assert_eq!(request.url, format!("{SERVER_URL}{}", case.path()));
+            assert_eq!(request.body, accepted.request.body);
+            assert_eq!(request.headers, expected_headers);
+        }
+    }
+}
+
+#[tokio::test]
+async fn every_existing_item_kind_honors_durable_backoff_after_restart() {
+    for case in ExistingDispatchCase::all() {
+        let harness = seeded_with_existing_item(true, case.needs_deleted_authority()).await;
+        harness.server.script([Fault::NetworkFailure]);
+        let (operation_id, _) = harness
+            .accept_existing(case.request(harness.account_id.clone()))
+            .await;
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        assert_eq!(
+            harness.operation().unwrap().scheduling.not_before_ms,
+            START_MS + 1_000
+        );
+        harness.runtime.close().await;
+
+        harness.clock.advance(400);
+        let restarted = Runtime::with_test_dispatch_environment(
+            harness.replica.clone(),
+            harness.platform.clone(),
+            harness.server.clone(),
+            auth_config(),
+            harness.clock.clone(),
+            harness.timer.clone(),
+        );
+        restarted
+            .replica()
+            .load(&harness.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        match restarted.dispatch_eligible_operations().await {
+            dispatch::DispatchPass::WaitFor { milliseconds } => assert_eq!(milliseconds, 600),
+            _ => panic!("the restarted Runtime must honor the durable deadline"),
+        }
+        assert_eq!(harness.server.existing_item_mutation_requests().len(), 1);
+
+        harness.clock.advance(600);
+        harness.server.script([Fault::Status(503)]);
+        assert!(matches!(
+            restarted.dispatch_eligible_operations().await,
+            dispatch::DispatchPass::Progressed
+        ));
+        assert_eq!(harness.server.existing_item_mutation_requests().len(), 2);
+        assert_eq!(
+            restarted
+                .replica()
+                .snapshot(&harness.account_id)
+                .unwrap()
+                .operations[0]
+                .scheduling
+                .attempt_count,
+            2
+        );
+        restarted.close().await;
+    }
+}
+
+#[tokio::test]
+async fn forced_duplicate_dispatch_replays_each_existing_item_request_exactly() {
+    for case in ExistingDispatchCase::all() {
+        let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+        harness
+            .server
+            .script([Fault::NetworkFailure, Fault::Status(503)]);
+        let (operation_id, _) = harness
+            .accept_existing(case.request(harness.account_id.clone()))
+            .await;
+        let accepted = harness.operation().unwrap();
+        let http = AuthHttpClient::new(
+            &harness.runtime.http_transport,
+            SERVER_URL,
+            false,
+            auth_config(),
+        )
+        .unwrap();
+
+        let first = http
+            .dispatch_operation(
+                FIRST_TOKEN,
+                &operation_id,
+                &accepted.request,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let duplicate = http
+            .dispatch_operation(
+                FIRST_TOKEN,
+                &operation_id,
+                &accepted.request,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(first, AuthenticatedOutcome::Transient));
+        assert!(matches!(duplicate, AuthenticatedOutcome::Transient));
+
+        let requests = harness.server.existing_item_mutation_requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].method, requests[1].method);
+        assert_eq!(requests[0].url, requests[1].url);
+        assert_eq!(requests[0].headers, requests[1].headers);
+        assert_eq!(requests[0].body, requests[1].body);
+        assert!(harness.operation().is_some());
+    }
+}
 
 // ---------------------------------------------------------------- the required behavior
 
