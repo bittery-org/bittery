@@ -1285,3 +1285,54 @@ focused test, Clippy, formatting, and diff gates pass.
 Deliberately left open: outcome and reconciliation widening, the dedicated Attachment Runtime
 service and C4b2b authenticated browser acceptance, final Web cutover, `idempotency_record` removal,
 native host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains claimed.
+
+### 2026-08-28 — remaining Item Operation reconciliation delivered
+
+Commit `e0eb2323` widens the Runtime's semantic-outcome and reconciliation path to `update_item`,
+`set_item_favorite`, `trash_item`, `restore_item`, `move_item`, and `permanently_delete_item`. The
+initial RED classified all six correctly tagged ordinary outcomes as cross-kind identity reuse. The
+closed decoder now validates the exact accepted kind, Operation and Item identities, positive
+validator, and per-kind rejection set before an answer can affect durable state. An unrecognised
+outcome remains retryable; a parsable wrong kind or invalid same-kind answer fails closed. Because
+lookup carries no request fingerprint, a same-kind lookup answer remains only a hint until replay of
+the exact immutable mutation through the shared dispatch path proves its identity.
+
+One generic `ReconcileItemMutation` plan now owns every ordinary Item terminal result. Applied
+non-permanent mutations require the authoritative Item to be present with the accepted Item, Vault,
+and retained version; an applied permanent deletion requires authoritative absence. Rejections fetch
+the current authority and either replace the local record or remove stale local authority when the
+Server proves absence. In the same guarded transaction the plan retains the compact receipt, removes
+the accepted Operation and its optimistic overlay, and applies the authoritative presence or absence.
+Fetch or commit failure preserves the Operation, overlay, prior authority, and retry obligation.
+
+Dropped responses recover through lookup plus exact replay for all six kinds. Forced duplicate sends
+converge on one semantic effect and one receipt, while foreign Operation IDs, unknown outcomes,
+transport failures, invalid authority presence, and rejected or stale commits cannot manufacture
+completion. The Rust logical history for ordinary reconciliation is generated into the shared
+Replica corpus, so SQLite and IndexedDB execute the same atomic mutation and final snapshot rather
+than relying on parallel adapter-specific expectations.
+
+Sync page ownership is now explicit. Operation reconciliation is cursorless: Bootstrap processes the
+whole multi-event page under the Account execution fence, and exact replay uses the same Session
+renewal, send classification, and persisted backoff helper as background dispatch. Only after every
+event succeeds does a separate guarded `AdvanceSyncPageCursor` commit the page's terminal Cursor.
+That plan refuses to pass any page-named active Operation or Attachment Move preparation. It handles
+a background dispatcher winning before the event, foreign Operations, repeated pages, and multiple
+pages idempotently; a terminal Cursor commit failure retries without moving either the watermark or
+accepted work.
+
+Independent correction and review rounds closed real gaps in cursor preservation and page-watermark
+ownership, removed a duplicated Sync send/backoff owner, repaired an invalid Move fixture, and covered
+the background-wins race plus active-preparation and stale-guard fencing. They also corrected the
+mixed- and two-page fixtures and moved the stale conformance expectation back to the Rust-owned shared
+history. The resulting tests prove that no earlier event can advance a page past later undecided,
+transport-failed, authority-fetch-failed, or reconciliation-commit-failed work.
+
+The orchestrator's full `@bittery/client-runtime` check passes 394 Core tests, 43 binding tests, and
+25 generator tests, including native and Web generated-binding drift. The focused IndexedDB shared
+conformance run passes 1 test with 1,084 assertions, the failure-injection run passes 3 tests with 74
+assertions, and `git diff --check` passes.
+
+Deliberately left open: the dedicated Attachment Runtime service and C4b2b authenticated browser
+acceptance, final Web cutover, `idempotency_record` removal, native host Share creation, and Ticket
+30's held-SSE work. Ticket 28 remains claimed.
