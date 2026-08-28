@@ -1482,3 +1482,34 @@ Deliberately left open: A2 Attachment Delete, B atomic download, C foreground up
 C4b2b browser acceptance, the final Web cutover and transitional-writer reachability audit, removal
 of `idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
 claimed.
+
+### 2026-08-28 — A2 foreground Attachment Delete delivered
+
+Commit `7b81a736` adds the non-durable foreground Delete request with only Account ID and Attachment
+ID and a closed result. Rust sends the exact existing bodyless `DELETE /api/v1/attachments/{id}`
+request. Only a 401 may renew the Session once and replay that exact request; a 200, 404, lost
+response, or other ambiguous response never causes a blind mutation replay and never proves success
+by itself.
+
+Every such response requires a valid authoritative owning Item and a fully bounded, cursor-paginated
+proof that the target Attachment is absent. Present or otherwise unproved Attachment authority is
+retryable, while a missing owning Item is `AuthorityMissing`; in particular, DELETE 404 alone does
+not establish success. The exact foreground guarded absence commit removes only the target
+Attachment and preserves sibling and unrelated authority. Stale fetched or Replica authority cannot
+manufacture a revision-only success, and newer background authority wins the guarded race.
+
+Delete reuses A1's shared per-Item writer, optimistic-overlay exclusion, teardown admission,
+Account/incarnation lifecycle cancellation and draining, and callback-begin fencing. Generated
+native and Web request/result shapes remain closed and minimal, and diagnostic shapes preserve the
+module's redaction boundary. The slice changes no Server route, Server schema, or generated Server
+contract. Fresh non-writer review found corrections, then fresh re-review approved the corrected
+slice.
+
+The orchestrator's full `@bittery/client-runtime` check passes 447 Core tests, 44 binding tests, and
+26 generator tests, including generated native and Web drift checks; the WebAssembly run passes 7
+tests with 1 skipped. `pnpm check:server`, 14 dependent type checks, and `git diff --check` also pass.
+
+Deliberately left open: B atomic download, C foreground upload, D authenticated C4b2b browser
+acceptance, the final Web cutover and transitional-writer reachability audit, removal of
+`idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
+claimed.
