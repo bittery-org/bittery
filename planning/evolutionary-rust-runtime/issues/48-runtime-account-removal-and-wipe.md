@@ -66,6 +66,22 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-28 — All actual-Chromium Runtime suites join `check:ci`
+
+The maintainer chose to run all three actual-Chromium client-runtime suites in every repository
+`check:ci`: Web Account lease, Web binary transfer under MV3, and the MV3 OPFS upload spool including
+teardown. One named client-runtime script must run them serially with the virtual X server required
+by the headed extension contexts, and the root gate must invoke that script. The gate must also fail
+portably and explicitly when its required Xvfb support is unavailable, as appropriate for the
+supported environment, and tests must pin that the root gate can still reach the named script.
+
+Today's direct evidence makes the always-on cost acceptable: the lease suite passed once in about
+2.3 seconds in ordinary headless Chromium; binary transfer was correctly RED without an X server
+and then passed once in about 2.2 seconds under `xvfb-run -a`; and the spool passed twice, including
+teardown, in about 2.7 seconds under `xvfb-run -a`. The serial total is approximately 7–8 seconds.
+The script, root `check:ci` wiring, environment failure behavior, and reachability tests remain to be
+implemented. `Status:` remains `ready-for-agent`.
+
 ### 2026-08-28 — Authenticated deletion delivered; 4d audit remains open
 
 Commit `48251b3d` completes the remaining vertical slice. The existing authenticated Server route
