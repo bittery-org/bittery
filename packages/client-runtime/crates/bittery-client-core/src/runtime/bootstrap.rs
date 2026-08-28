@@ -379,6 +379,16 @@ impl Runtime {
             if changes.events.is_empty() {
                 return Ok(session);
             }
+            let terminal_cursor = changes
+                .cursor
+                .as_ref()
+                .map(captured_watermark_from_response);
+            let page_operation_ids: Vec<_> = changes
+                .events
+                .iter()
+                .filter(|event| event.entity_type == SyncEntityType::Operation)
+                .map(|event| event.entity_id.clone())
+                .collect();
             for event in &changes.events {
                 // An Operation event names work this Device may still own. Reconciling it here
                 // keeps one Sync feed and one Cursor rather than a second parallel path.
@@ -389,10 +399,6 @@ impl Runtime {
                             &event.entity_id,
                             http,
                             &mut session,
-                            changes
-                                .cursor
-                                .as_ref()
-                                .map(captured_watermark_from_response),
                         )
                         .await
                     {
@@ -434,17 +440,12 @@ impl Runtime {
                 };
                 let snapshot = self.require_snapshot(account_id)?;
                 let expected = snapshot.bootstrap.active_cursor.clone();
-                let next_cursor = changes
-                    .cursor
-                    .as_ref()
-                    .map(captured_watermark_from_response)
-                    .unwrap_or(expected.clone());
                 match self
                     .replica
                     .apply_authoritative_item(
                         account_id,
+                        expected.clone(),
                         expected,
-                        next_cursor,
                         authority_item_from_dto(item)?,
                     )
                     .await
@@ -457,6 +458,19 @@ impl Runtime {
                             "account is not installed",
                         ));
                     }
+                }
+            }
+            match self
+                .advance_sync_page_cursor_fenced(account_id, page_operation_ids, terminal_cursor)
+                .await
+            {
+                CompletionResult::Completed => {}
+                CompletionResult::Retry | CompletionResult::Failed => return Ok(session),
+                CompletionResult::Reauthenticate => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "Session is missing or expired",
+                    ));
                 }
             }
             if !changes.has_more {

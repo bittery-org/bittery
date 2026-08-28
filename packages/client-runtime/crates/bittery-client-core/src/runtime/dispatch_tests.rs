@@ -657,7 +657,7 @@ async fn an_unrenewable_session_parks_the_operation_and_resumes_when_a_session_a
 }
 
 // What an HTTP success alone is worth now lives in `outcome_tests`: a `200` the Runtime cannot
-// reconcile leaves the Operation, its overlay, and the Cursor exactly where they were.
+// reconcile leaves the Operation and overlay unchanged; Bootstrap alone owns page progress.
 
 #[tokio::test]
 async fn dispatch_attaches_only_what_the_durable_bytes_deliberately_omit() {

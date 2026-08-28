@@ -243,7 +243,8 @@ describe("IndexedDB Replica transaction failure injection", () => {
 		);
 		const reconciliationIndex = operationHistory.steps.findIndex(
 			(step) =>
-				step.label === "reconcile applied outcome receipt authority and Cursor",
+				step.label ===
+				"reconcile applied outcome receipt and authority without page progress",
 		);
 		if (reconciliationIndex < 0) throw new Error("missing reconciliation step");
 		const reconciliation = operationHistory.steps[reconciliationIndex]?.request;

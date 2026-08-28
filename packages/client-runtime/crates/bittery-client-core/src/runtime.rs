@@ -1,5 +1,7 @@
 mod attachment_move_lifecycle;
 #[cfg(test)]
+pub(crate) use attachment_move_lifecycle::live_artifact_owners;
+#[cfg(test)]
 mod attachment_move_lifecycle_tests;
 #[allow(
     dead_code,

@@ -22,7 +22,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use bittery_crypto_core::{encrypt_with_aad, AadContext};
-use create::{create_item_fingerprint, share_operation_fingerprint};
+use create::{create_item_fingerprint, item_operation_fingerprint, share_operation_fingerprint};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -249,6 +249,15 @@ pub(super) enum StoredResult {
     ItemRejected {
         code: &'static str,
     },
+    ExistingItemApplied {
+        kind: &'static str,
+        item_id: String,
+        version: i32,
+    },
+    ExistingItemRejected {
+        kind: &'static str,
+        code: &'static str,
+    },
     ShareRejected {
         code: &'static str,
     },
@@ -263,6 +272,8 @@ pub(super) struct StoredItem {
     pub(super) encryption_iv: String,
     pub(super) encryption_algorithm: String,
     pub(super) version: i32,
+    pub(super) favorite: bool,
+    pub(super) deleted_at: Option<String>,
 }
 
 pub(super) struct FakeServer {
@@ -276,6 +287,8 @@ pub(super) struct FakeServer {
     pub(super) item_faults: Mutex<VecDeque<Fault>>,
     /// Faults for the outcome lookup.
     pub(super) outcome_faults: Mutex<VecDeque<Fault>>,
+    pub(super) mutation_response_overrides: Mutex<VecDeque<Vec<u8>>>,
+    pub(super) lookup_response_overrides: Mutex<VecDeque<Vec<u8>>>,
     /// Rejection codes the Server answers instead of applying, one per create.
     pub(super) rejections: Mutex<VecDeque<&'static str>>,
     /// Drops the create response *after* the Server committed, which is response loss.
@@ -291,6 +304,8 @@ pub(super) struct FakeServer {
     /// What `GET /sync/changes` answers: events plus the exact Cursor they end at.
     pub(super) sync_events: Mutex<Vec<Value>>,
     pub(super) sync_cursor: Mutex<Option<String>>,
+    /// Explicit consecutive pages, for exercising the real `hasMore` continuation contract.
+    pub(super) sync_pages: Mutex<VecDeque<Value>>,
 }
 
 impl FakeServer {
@@ -302,6 +317,8 @@ impl FakeServer {
             faults: Mutex::new(VecDeque::new()),
             item_faults: Mutex::new(VecDeque::new()),
             outcome_faults: Mutex::new(VecDeque::new()),
+            mutation_response_overrides: Mutex::new(VecDeque::new()),
+            lookup_response_overrides: Mutex::new(VecDeque::new()),
             rejections: Mutex::new(VecDeque::new()),
             lose_responses: AtomicUsize::new(0),
             accepted_tokens: Mutex::new(vec![FIRST_TOKEN.to_owned()]),
@@ -314,6 +331,7 @@ impl FakeServer {
             outcome_calls: AtomicUsize::new(0),
             sync_events: Mutex::new(Vec::new()),
             sync_cursor: Mutex::new(None),
+            sync_pages: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -327,6 +345,20 @@ impl FakeServer {
 
     pub(super) fn reject_next(&self, code: &'static str) {
         self.rejections.lock().unwrap().push_back(code);
+    }
+
+    pub(super) fn answer_next_mutation_with(&self, body: Vec<u8>) {
+        self.mutation_response_overrides
+            .lock()
+            .unwrap()
+            .push_back(body);
+    }
+
+    pub(super) fn answer_next_lookup_with(&self, body: Vec<u8>) {
+        self.lookup_response_overrides
+            .lock()
+            .unwrap()
+            .push_back(body);
     }
 
     /// The Server commits, and the client never sees the answer.
@@ -439,6 +471,8 @@ impl FakeServer {
                     encryption_iv: body["encryptionIv"].as_str().unwrap().to_owned(),
                     encryption_algorithm: body["encryptionAlgorithm"].as_str().unwrap().to_owned(),
                     version: 1,
+                    favorite: false,
+                    deleted_at: None,
                 });
                 StoredResult::Applied {
                     item_id: item_id.to_owned(),
@@ -545,18 +579,149 @@ impl FakeServer {
         completed(200, outcome_body(operation_id, &result))
     }
 
-    /// Dispatch-only behavior for the six ordinary Item mutations. Their semantic outcome
-    /// lifecycle is deliberately outside this fixture slice; every unscripted answer remains
-    /// transient so a test cannot accidentally claim reconciliation coverage.
     pub(super) fn handle_existing_item_mutation(&self, request: &RecordedRequest) -> Value {
         if !self.authorized(request) {
             return completed(401, b"{}".to_vec());
         }
-        match self.faults.lock().unwrap().pop_front() {
-            Some(Fault::NetworkFailure) => json!({ "type": "networkFailure" }),
-            Some(Fault::Status(status)) => completed(status, b"{}".to_vec()),
-            None => completed(503, b"{}".to_vec()),
+        if let Some(fault) = self.faults.lock().unwrap().pop_front() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
         }
+        if let Some(body) = self.mutation_response_overrides.lock().unwrap().pop_front() {
+            return completed(200, body);
+        }
+        let Some(operation_id) = request.header("idempotency-key") else {
+            return completed(400, b"{}".to_vec());
+        };
+        let Some(expected_version) = request
+            .header("if-match")
+            .and_then(|value| value.trim_matches('"').parse::<i32>().ok())
+        else {
+            return completed(428, b"{}".to_vec());
+        };
+        let path = request.url.trim_start_matches(SERVER_URL);
+        let (kind, operation_kind, route) = match (request.method.as_str(), path) {
+            ("PATCH", "/api/v1/items/item-existing") => (
+                "update_item",
+                crate::replica::OperationKind::UpdateItem,
+                "PATCH /api/v1/items/{itemId}",
+            ),
+            ("PATCH", "/api/v1/items/item-existing/favorite") => (
+                "set_item_favorite",
+                crate::replica::OperationKind::SetItemFavorite,
+                "PATCH /api/v1/items/{itemId}/favorite",
+            ),
+            ("DELETE", "/api/v1/items/item-existing") => (
+                "trash_item",
+                crate::replica::OperationKind::TrashItem,
+                "DELETE /api/v1/items/{itemId}",
+            ),
+            ("POST", "/api/v1/items/item-existing/restore") => (
+                "restore_item",
+                crate::replica::OperationKind::RestoreItem,
+                "POST /api/v1/items/{itemId}/restore",
+            ),
+            ("POST", "/api/v1/items/item-existing/moves") => (
+                "move_item",
+                crate::replica::OperationKind::MoveItem,
+                "POST /api/v1/items/{itemId}/moves",
+            ),
+            ("DELETE", "/api/v1/items/item-existing/permanent") => (
+                "permanently_delete_item",
+                crate::replica::OperationKind::PermanentlyDeleteItem,
+                "DELETE /api/v1/items/{itemId}/permanent",
+            ),
+            _ => return completed(404, b"{}".to_vec()),
+        };
+        let fingerprint = item_operation_fingerprint(
+            operation_kind,
+            route,
+            "item-existing",
+            &request.body,
+            expected_version,
+        )
+        .0;
+        let mut outcomes = self.outcomes.lock().unwrap();
+        if let Some(stored) = outcomes.get(operation_id) {
+            if stored.fingerprint != fingerprint {
+                return completed(
+                    422,
+                    serde_json::to_vec(&json!({
+                        "type": "about:blank",
+                        "title": "Unprocessable Entity",
+                        "status": 422,
+                        "code": "OPERATION_ID_REUSED",
+                    }))
+                    .unwrap(),
+                );
+            }
+            return completed(200, outcome_body(operation_id, &stored.result));
+        }
+        let result = if let Some(code) = self.rejections.lock().unwrap().pop_front() {
+            StoredResult::ExistingItemRejected { kind, code }
+        } else {
+            let mut items = self.created_items.lock().unwrap();
+            let position = items.iter().position(|item| item.id == "item-existing");
+            let Some(position) = position else {
+                return completed(500, b"{}".to_vec());
+            };
+            let next_version = expected_version + 1;
+            if operation_kind == crate::replica::OperationKind::PermanentlyDeleteItem {
+                items.remove(position);
+            } else {
+                let item = &mut items[position];
+                let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+                match operation_kind {
+                    crate::replica::OperationKind::UpdateItem => {
+                        item.encrypted_data = body["encryptedData"].as_str().unwrap().to_owned();
+                        item.encryption_iv = body["encryptionIv"].as_str().unwrap().to_owned();
+                        item.encryption_algorithm =
+                            body["encryptionAlgorithm"].as_str().unwrap().to_owned();
+                    }
+                    crate::replica::OperationKind::SetItemFavorite => {
+                        item.favorite = body["favorite"].as_bool().unwrap();
+                    }
+                    crate::replica::OperationKind::TrashItem => {
+                        item.deleted_at = Some("2026-08-28T00:00:00Z".into());
+                    }
+                    crate::replica::OperationKind::RestoreItem => item.deleted_at = None,
+                    crate::replica::OperationKind::MoveItem => {
+                        item.vault_id = body["targetVaultId"].as_str().unwrap().to_owned();
+                        item.encrypted_data = body["encryptedData"].as_str().unwrap().to_owned();
+                        item.encryption_iv = body["encryptionIv"].as_str().unwrap().to_owned();
+                        item.encryption_algorithm =
+                            body["encryptionAlgorithm"].as_str().unwrap().to_owned();
+                    }
+                    _ => {}
+                }
+                item.version = next_version;
+            }
+            StoredResult::ExistingItemApplied {
+                kind,
+                item_id: "item-existing".into(),
+                version: next_version,
+            }
+        };
+        outcomes.insert(
+            operation_id.to_owned(),
+            StoredOutcome {
+                fingerprint,
+                result: result.clone(),
+            },
+        );
+        drop(outcomes);
+        if self
+            .lose_responses
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                pending.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return json!({ "type": "networkFailure" });
+        }
+        completed(200, outcome_body(operation_id, &result))
     }
 
     /// `GET /api/v1/operations/{operationId}`: the retained outcome, after a lost response.
@@ -570,6 +735,9 @@ impl FakeServer {
                 Fault::NetworkFailure => json!({ "type": "networkFailure" }),
                 Fault::Status(status) => completed(status, b"{}".to_vec()),
             };
+        }
+        if let Some(body) = self.lookup_response_overrides.lock().unwrap().pop_front() {
+            return completed(200, body);
         }
         let operation_id = request.url.rsplit('/').next().unwrap();
         match self.outcomes.lock().unwrap().get(operation_id) {
@@ -621,9 +789,21 @@ impl FakeServer {
         *self.sync_cursor.lock().unwrap() = Some(cursor.to_owned());
     }
 
+    pub(super) fn script_sync_page(&self, events: Vec<Value>, cursor: &str, has_more: bool) {
+        self.sync_pages.lock().unwrap().push_back(json!({
+            "events": events,
+            "cursor": { "id": cursor },
+            "hasMore": has_more,
+            "requiresFullRefresh": false,
+        }));
+    }
+
     pub(super) fn handle_sync_changes(&self, request: &RecordedRequest) -> Value {
         if !self.authorized(request) {
             return completed(401, b"{}".to_vec());
+        }
+        if let Some(page) = self.sync_pages.lock().unwrap().pop_front() {
+            return completed(200, serde_json::to_vec(&page).unwrap());
         }
         let events = self.sync_events.lock().unwrap().clone();
         let cursor = self
@@ -696,6 +876,17 @@ pub(super) fn outcome_body(operation_id: &str, result: &StoredResult) -> Vec<u8>
         StoredResult::ItemRejected { code } => {
             ("create_item", json!({ "status": "rejected", "code": code }))
         }
+        StoredResult::ExistingItemApplied {
+            kind,
+            item_id,
+            version,
+        } => (
+            *kind,
+            json!({ "status": "applied", "itemId": item_id, "version": version }),
+        ),
+        StoredResult::ExistingItemRejected { kind, code } => {
+            (*kind, json!({ "status": "rejected", "code": code }))
+        }
         StoredResult::ShareRejected { code } => (
             "create_share",
             json!({ "status": "rejected", "code": code }),
@@ -714,7 +905,7 @@ pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
         "id": item.id,
         "vaultId": item.vault_id,
         "category": "login",
-        "favorite": false,
+        "favorite": item.favorite,
         "encryptedData": item.encrypted_data,
         "encryptionIv": item.encryption_iv,
         "encryptionAlgorithm": item.encryption_algorithm,
@@ -724,7 +915,7 @@ pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
         "lastModifiedBy": USER,
         "createdAt": "2026-08-24T00:00:00Z",
         "updatedAt": "2026-08-24T00:00:00Z",
-        "deletedAt": null,
+        "deletedAt": item.deleted_at,
     }))
     .unwrap()
 }
@@ -893,9 +1084,28 @@ async fn seeded_inner(hold_time: bool, authority: SeedAuthority) -> Harness {
                 .unwrap();
         }
     }
+    let seeded_server_items = state
+        .snapshot(&account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot()
+        .visible_items
+        .into_iter()
+        .map(|item| StoredItem {
+            id: item.id,
+            vault_id: item.vault_id,
+            encrypted_data: item.encrypted_data,
+            encryption_iv: item.encryption_iv,
+            encryption_algorithm: item.encryption_algorithm,
+            version: item.version,
+            favorite: item.favorite,
+            deleted_at: item.deleted_at,
+        })
+        .collect();
     let replica = PlainReplica::new(state);
     let platform = MemoryPlatform::new();
     let server = FakeServer::new();
+    *server.created_items.lock().unwrap() = seeded_server_items;
     let clock = TestClock::new();
     let timer = if hold_time {
         TestTimer::holding(clock.clone())

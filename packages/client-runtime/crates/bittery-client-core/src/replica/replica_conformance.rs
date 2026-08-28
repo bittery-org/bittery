@@ -903,7 +903,7 @@ fn operation_history() -> Result<History, RuntimeError> {
         },
     )?;
     history.commit_plan(
-        "reconcile applied outcome receipt authority and Cursor",
+        "reconcile applied outcome receipt and authority without page progress",
         GuardedCommitPlan::new(
             AccountId::from("account-operations"),
             incarnation("account-operations", "first"),
@@ -919,14 +919,7 @@ fn operation_history() -> Result<History, RuntimeError> {
                     },
                 },
                 item: Box::new(authority_item("account-operations", "item-applied", 1)),
-                cursor: Some(CursorAdvance {
-                    expected: SyncCursor::CapturedValue {
-                        id: "cursor-captured".to_owned(),
-                    },
-                    next: SyncCursor::CapturedValue {
-                        id: "cursor-after-applied".to_owned(),
-                    },
-                }),
+                cursor: None,
             }],
         ),
     )?;
@@ -1139,6 +1132,129 @@ fn operation_history() -> Result<History, RuntimeError> {
     Ok(history.finish())
 }
 
+fn ordinary_item_reconciliation_history() -> Result<History, RuntimeError> {
+    let mut history = HistoryBuilder::new(
+        "ordinary-item-authoritative-reconciliation",
+        &[
+            "applied existing-Item authority, receipt, Operation, and overlay atomicity",
+            "rejected missing-Item authority and receipt atomicity",
+            "receipt-proved terminal Sync page Cursor advance without active work",
+        ],
+        &["account-operations"],
+    );
+    ready_operation_history(&mut history)?;
+
+    let mut applied = operation("operation-update", "item-existing");
+    applied.kind = OperationKind::UpdateItem;
+    applied.request.method = HttpMethod::Patch;
+    applied.request.path = "/api/v1/items/item-existing".to_owned();
+    history.commit_plan(
+        "accept ordinary Item update and encrypted overlay",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            2,
+            0,
+            vec![
+                PlanMutation::AcceptOperation(applied.clone()),
+                PlanMutation::PutOptimisticItem(overlay(
+                    "account-operations",
+                    "operation-update",
+                    "item-existing",
+                )),
+            ],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically reconcile ordinary Item authority and retained validator",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            3,
+            0,
+            vec![PlanMutation::ReconcileItemMutation {
+                outcome: ObservedOutcome {
+                    operation_id: applied.operation_id,
+                    request_fingerprint: applied.request_fingerprint,
+                    result: OperationOutcomeResult::Applied {
+                        entity_id: applied.item_id,
+                        version: 2,
+                    },
+                },
+                item: Some(Box::new(authority_item(
+                    "account-operations",
+                    "item-existing",
+                    2,
+                ))),
+                cursor: None,
+            }],
+        ),
+    )?;
+
+    let mut rejected = operation("operation-missing", "item-existing");
+    rejected.kind = OperationKind::TrashItem;
+    rejected.request.method = HttpMethod::Delete;
+    rejected.request.path = "/api/v1/items/item-existing".to_owned();
+    history.commit_plan(
+        "accept ordinary Item mutation against stale local authority",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            4,
+            0,
+            vec![
+                PlanMutation::AcceptOperation(rejected.clone()),
+                PlanMutation::PutOptimisticItem(overlay(
+                    "account-operations",
+                    "operation-missing",
+                    "item-existing",
+                )),
+            ],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically retain missing-Item rejection and remove stale authority",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            5,
+            0,
+            vec![PlanMutation::ReconcileItemMutation {
+                outcome: ObservedOutcome {
+                    operation_id: rejected.operation_id,
+                    request_fingerprint: rejected.request_fingerprint,
+                    result: OperationOutcomeResult::Rejected {
+                        code: OperationRejectionCode::ItemNotFound,
+                    },
+                },
+                item: None,
+                cursor: None,
+            }],
+        ),
+    )?;
+    history.commit_plan(
+        "advance a terminal Sync page after background completion retained its receipt",
+        GuardedCommitPlan::new(
+            AccountId::from("account-operations"),
+            incarnation("account-operations", "first"),
+            6,
+            0,
+            vec![PlanMutation::AdvanceSyncPageCursor {
+                operation_ids: vec!["operation-update".into()],
+                cursor: CursorAdvance {
+                    expected: SyncCursor::CapturedValue {
+                        id: "cursor-captured".to_owned(),
+                    },
+                    next: SyncCursor::CapturedValue {
+                        id: "cursor-after-background-page".to_owned(),
+                    },
+                },
+            }],
+        ),
+    )?;
+    Ok(history.finish())
+}
+
 fn build_corpus() -> Result<Corpus, RuntimeError> {
     Ok(Corpus {
         format_version: FORMAT_VERSION,
@@ -1150,6 +1266,7 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
             deletion_history()?,
             bootstrap_history()?,
             operation_history()?,
+            ordinary_item_reconciliation_history()?,
         ],
     })
 }

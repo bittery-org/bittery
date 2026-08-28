@@ -500,6 +500,41 @@ impl<'transport> AuthHttpClient<'transport> {
             .map(|page| page.value))
     }
 
+    /// Reads current Item authority for semantic reconciliation, where `404` is authoritative
+    /// absence rather than a transport failure.
+    pub(crate) async fn fetch_item_or_absent(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let item = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Sync Server returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(Some(item)))
+            }
+            404 => Ok(AuthenticatedOutcome::Ok(None)),
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
     pub(crate) async fn sse_wakeup(
         &self,
         token: &str,

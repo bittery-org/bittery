@@ -101,7 +101,132 @@ enum AttemptOutcome {
     Parked,
 }
 
+/// The fence-safe authenticated send shared by Sync catch-up and the background dispatcher.
+/// Semantic completion belongs to the caller; Bootstrap owns terminal Sync page progress.
+enum ExactSendOutcome {
+    Outcome(crate::replica::ObservedOutcome),
+    IdentityReused,
+    Deferred,
+    RetryScheduled,
+    Reauthenticate,
+}
+
 impl Runtime {
+    /// Proves a lookup hint by replaying the exact accepted request while Sync owns the Account
+    /// fence. This completes semantics without page progress; Bootstrap advances the terminal
+    /// page Cursor only after every event succeeds.
+    pub(super) async fn replay_lookup_hint_for_sync_fenced(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+    ) -> CompletionResult {
+        match self
+            .send_exact_operation_fenced(snapshot, operation, http, session)
+            .await
+        {
+            ExactSendOutcome::Outcome(outcome) => {
+                self.complete_operation_fenced(
+                    &snapshot.account_id,
+                    operation,
+                    outcome,
+                    http,
+                    session,
+                    None,
+                )
+                .await
+            }
+            ExactSendOutcome::IdentityReused => {
+                self.fail_account_module_fenced(&snapshot.account_id).await
+            }
+            ExactSendOutcome::Deferred | ExactSendOutcome::RetryScheduled => {
+                CompletionResult::Retry
+            }
+            ExactSendOutcome::Reauthenticate => CompletionResult::Reauthenticate,
+        }
+    }
+
+    /// Sends the immutable accepted request under a caller-held Account execution fence.
+    ///
+    /// This is the sole exact-send Session-renewal and transport-classification policy. Failures
+    /// move the durable Operation schedule here, before either caller decides how to continue.
+    async fn send_exact_operation_fenced(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+    ) -> ExactSendOutcome {
+        let Ok(now_ms) = self.clock.now_ms() else {
+            return ExactSendOutcome::Deferred;
+        };
+        if operation.scheduling.not_before_ms > now_ms {
+            return ExactSendOutcome::Deferred;
+        }
+
+        let account_id = &snapshot.account_id;
+        let cancellation = RequestCancellation::new();
+        let mut answer = http
+            .dispatch_operation(
+                session.token.as_ref(),
+                &operation.operation_id,
+                &operation.request,
+                cancellation.clone(),
+            )
+            .await;
+
+        if matches!(answer, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
+            match self
+                .renew_session(account_id, session, http, cancellation.clone())
+                .await
+            {
+                Ok(renewed) => {
+                    *session = renewed;
+                    answer = http
+                        .dispatch_operation(
+                            session.token.as_ref(),
+                            &operation.operation_id,
+                            &operation.request,
+                            cancellation,
+                        )
+                        .await;
+                }
+                Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
+                    self.persist_backoff(snapshot, operation).await;
+                    self.mark_reauthentication_required(account_id);
+                    return ExactSendOutcome::Reauthenticate;
+                }
+                Err(_) => {
+                    self.persist_backoff(snapshot, operation).await;
+                    return ExactSendOutcome::RetryScheduled;
+                }
+            }
+        }
+
+        match answer {
+            Ok(AuthenticatedOutcome::Ok(response)) => {
+                match self.read_dispatch_answer(operation, response.status, &response.body) {
+                    SemanticAnswer::Outcome(outcome) => ExactSendOutcome::Outcome(outcome),
+                    SemanticAnswer::IdentityReused => ExactSendOutcome::IdentityReused,
+                    SemanticAnswer::Undecided | SemanticAnswer::Transient => {
+                        self.persist_backoff(snapshot, operation).await;
+                        ExactSendOutcome::RetryScheduled
+                    }
+                }
+            }
+            Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
+                self.persist_backoff(snapshot, operation).await;
+                self.mark_reauthentication_required(account_id);
+                ExactSendOutcome::Reauthenticate
+            }
+            Ok(AuthenticatedOutcome::Transient) | Err(_) => {
+                self.persist_backoff(snapshot, operation).await;
+                ExactSendOutcome::RetryScheduled
+            }
+        }
+    }
+
     /// The Runtime's only background loop: it owns every accepted Operation until an authoritative
     /// semantic outcome ends it.
     ///
@@ -321,16 +446,16 @@ impl Runtime {
                 .await
             {
                 SemanticAnswer::Outcome(outcome) => {
-                    if operation.kind != OperationKind::CreateShare {
+                    if operation.kind == OperationKind::CreateItem {
                         return self
                             .finish_operation(snapshot, operation, outcome, http, &mut session)
                             .await;
                     }
-                    // Share lookup has no request fingerprint and its payload has no Item/token
-                    // correlation. It is only evidence that some same-kind decision exists under
-                    // this ID. Replaying the exact immutable POST is what proves identity: a
-                    // matching fingerprint replays the outcome, while reuse answers 422.
-                    let _share_outcome_hint = outcome;
+                    // Lookup has no request fingerprint. For Share and existing-Item work it is
+                    // only evidence that a same-kind decision exists under this ID. Replaying the
+                    // exact immutable request proves identity: a matching fingerprint replays the
+                    // outcome, while reuse answers 422 without another semantic effect.
+                    let _outcome_hint = outcome;
                 }
                 SemanticAnswer::IdentityReused => {
                     self.fail_account_module_fenced(account_id).await;
@@ -345,84 +470,30 @@ impl Runtime {
             }
         }
 
-        let cancellation = RequestCancellation::new();
-        let mut answer = http
-            .dispatch_operation(
-                session.token.as_ref(),
-                &operation.operation_id,
-                &operation.request,
-                cancellation.clone(),
-            )
-            .await;
-
-        // One `401` is the renewable Session answer, and it is renewed exactly the way Bootstrap
-        // renews it. A second `401` after a fresh Session is the reauthentication boundary.
-        if matches!(answer, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
-            match self
-                .renew_session(account_id, &session, http, cancellation.clone())
-                .await
-            {
-                Ok(renewed) => {
-                    // Everything after this point uses the Session that is current now, so one
-                    // renewal serves the send and the reconciliation that may follow it.
-                    session = renewed;
-                    answer = http
-                        .dispatch_operation(
-                            session.token.as_ref(),
-                            &operation.operation_id,
-                            &operation.request,
-                            cancellation,
-                        )
-                        .await;
-                }
-                Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
-                    self.persist_backoff(snapshot, operation).await;
-                    self.mark_reauthentication_required(account_id);
-                    return AttemptOutcome::Parked;
-                }
-                Err(_) => {
-                    self.persist_backoff(snapshot, operation).await;
-                    return AttemptOutcome::Progressed;
-                }
+        match self
+            .send_exact_operation_fenced(snapshot, operation, http, &mut session)
+            .await
+        {
+            ExactSendOutcome::Outcome(outcome) => {
+                self.finish_operation(snapshot, operation, outcome, http, &mut session)
+                    .await
             }
-        }
-
-        match answer {
-            // The Server answered these exact bytes. What it answered is a semantic question,
-            // and local completion only happens once a reconciliation plan commits.
-            Ok(AuthenticatedOutcome::Ok(response)) => {
-                match self.read_dispatch_answer(operation, response.status, &response.body) {
-                    SemanticAnswer::Outcome(outcome) => {
-                        self.finish_operation(snapshot, operation, outcome, http, &mut session)
-                            .await
-                    }
-                    SemanticAnswer::IdentityReused => {
-                        self.fail_account_module_fenced(account_id).await;
-                        AttemptOutcome::Parked
-                    }
-                    SemanticAnswer::Undecided | SemanticAnswer::Transient => {
-                        self.persist_backoff(snapshot, operation).await;
-                        AttemptOutcome::Progressed
-                    }
-                }
-            }
-            Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
-                self.persist_backoff(snapshot, operation).await;
-                self.mark_reauthentication_required(account_id);
+            ExactSendOutcome::IdentityReused => {
+                self.fail_account_module_fenced(account_id).await;
                 AttemptOutcome::Parked
             }
-            Ok(AuthenticatedOutcome::Transient) | Err(_) => {
-                self.persist_backoff(snapshot, operation).await;
+            ExactSendOutcome::Deferred | ExactSendOutcome::RetryScheduled => {
                 AttemptOutcome::Progressed
             }
+            ExactSendOutcome::Reauthenticate => AttemptOutcome::Parked,
         }
     }
 
     /// Completes one Operation on an authoritative outcome, or schedules another try.
     ///
     /// A reconciliation that cannot commit is exactly as durable as a failed send: the Operation,
-    /// its bytes, its overlay, and the Cursor are all still there, and backoff decides when this
-    /// Device looks again.
+    /// its immutable request, any overlay, and prior authority remain unchanged, with no receipt
+    /// retained. Durable scheduling or reauthentication decides when this Device looks again.
     async fn finish_operation(
         &self,
         snapshot: &ReplicaSnapshot,

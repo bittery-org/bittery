@@ -1,6 +1,8 @@
 use crate::protocol::Incarnation;
 use crate::{AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -1790,6 +1792,8 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
 #[derive(Default)]
 pub(crate) struct InMemoryReplica {
     state: Mutex<InMemoryReplicaState>,
+    #[cfg(test)]
+    pending_commit_failures: AtomicUsize,
 }
 
 #[derive(Default)]
@@ -1798,6 +1802,12 @@ struct InMemoryReplicaState {
 }
 
 impl InMemoryReplica {
+    #[cfg(test)]
+    pub(crate) fn fail_next_commits(&self, count: usize) {
+        self.pending_commit_failures
+            .fetch_add(count, Ordering::SeqCst);
+    }
+
     #[cfg(test)]
     pub(crate) fn install(
         &self,
@@ -1834,6 +1844,18 @@ impl InMemoryReplica {
 
     #[cfg(test)]
     pub(crate) fn execute(&self, plan: GuardedCommitPlan) -> Result<PlanResult, RuntimeError> {
+        if self
+            .pending_commit_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                pending.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "injected commit failure",
+            ));
+        }
         let mut state = self.state.lock().expect("replica lock poisoned");
         let Some(current) = state.accounts.get(&plan.account_id) else {
             return Ok(PlanResult::Missing);
@@ -2821,6 +2843,67 @@ mod persistence_contract_tests {
         };
         assert_eq!(snapshot.lock_epoch, 1);
         assert!(snapshot.operations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stale_sync_page_cursor_recomputation_refuses_work_that_became_active() {
+        let account_id = AccountId::from("account-1");
+        let incarnation = Incarnation::from("incarnation-1");
+        let state = Arc::new(InMemoryReplica::default());
+        state
+            .install(account_id.clone(), "user-1".into(), incarnation.clone())
+            .unwrap();
+        crate::test_fixtures::seed_ready_personal_vault(&state, &account_id).unwrap();
+        let before_race = state.snapshot(&account_id).unwrap();
+        let cursor_plan = || {
+            GuardedCommitPlan::new(
+                account_id.clone(),
+                incarnation.clone(),
+                before_race.revision,
+                before_race.lock_epoch,
+                vec![PlanMutation::AdvanceSyncPageCursor {
+                    operation_ids: vec!["operation-race".into()],
+                    cursor: CursorAdvance {
+                        expected: before_race.bootstrap.active_cursor.clone(),
+                        next: SyncCursor::CapturedValue {
+                            id: "must-not-pass-raced-work".into(),
+                        },
+                    },
+                }],
+            )
+        };
+
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                incarnation.clone(),
+                before_race.revision,
+                before_race.lock_epoch,
+                vec![
+                    PlanMutation::AcceptOperation(operation("operation-race", "item-race")),
+                    PlanMutation::PutOptimisticItem(item(
+                        "account-1",
+                        "item-race",
+                        "operation-race",
+                    )),
+                ],
+            ))
+            .unwrap();
+        let active = state.snapshot(&account_id).unwrap();
+        assert_eq!(active.revision, before_race.revision + 1);
+        let replica = Replica::new(state.clone());
+
+        let Err(error) = replica.execute_recomputing(cursor_plan()).await else {
+            panic!("stale Sync page cursor recomputation must reject newly active work");
+        };
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(state.snapshot(&account_id).unwrap(), active);
+
+        let Err(retry_error) = replica.execute_recomputing(cursor_plan()).await else {
+            panic!("Sync page cursor retry must still reject active work");
+        };
+        assert_eq!(retry_error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(state.snapshot(&account_id).unwrap(), active);
     }
 
     async fn assert_replica_conformance(replica: &Replica) {

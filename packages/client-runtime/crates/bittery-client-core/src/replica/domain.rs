@@ -82,13 +82,23 @@ pub(crate) enum PlanMutation {
     },
     /// Completes one applied create in the single transaction the outcome slice owes.
     ///
-    /// Authority, receipt, Operation removal, overlay removal, and a matching exact Cursor
-    /// advance are one mutation because they are one fact: the Server decided, and this Device
-    /// now agrees. There is deliberately no partial form of that.
+    /// Authority, receipt, Operation removal, and overlay removal are one mutation because they
+    /// are one fact: the Server decided, and this Device now agrees. The optional Cursor remains
+    /// for compatible stored plans; Bootstrap page progress uses `AdvanceSyncPageCursor`.
     ReconcileAppliedCreate {
         outcome: ObservedOutcome,
         /// Boxed only because an authoritative Item dwarfs every other mutation's payload.
         item: Box<AuthorityItemRecord>,
+        cursor: Option<CursorAdvance>,
+    },
+    /// Reconciles an existing-Item mutation against the authority fetched after its outcome.
+    ///
+    /// `None` is authoritative absence (including an applied permanent deletion). The receipt,
+    /// authority replacement/removal, Operation removal, and overlay removal are one fact and
+    /// therefore one mutation. Bootstrap page progress is a separate guarded mutation.
+    ReconcileItemMutation {
+        outcome: ObservedOutcome,
+        item: Option<Box<AuthorityItemRecord>>,
         cursor: Option<CursorAdvance>,
     },
     /// Retains one terminal rejection: retry stops, the receipt says why, the ciphertext stays.
@@ -102,6 +112,14 @@ pub(crate) enum PlanMutation {
         outcome: ObservedOutcome,
         cursor: Option<CursorAdvance>,
     },
+    /// Advances one complete Sync page after all of its event effects succeeded locally.
+    ///
+    /// Operation identities are retained so a stale recomputation cannot move the page watermark
+    /// past accepted work that appeared after event processing but before this commit.
+    AdvanceSyncPageCursor {
+        operation_ids: Vec<String>,
+        cursor: CursorAdvance,
+    },
     AcknowledgeShareResult {
         operation_id: String,
     },
@@ -114,10 +132,11 @@ pub(crate) enum PlanMutation {
     },
 }
 
-/// One Cursor step a reconciliation may take, and the exact Cursor it must start from.
+/// One exact guarded Sync page Cursor step and the Cursor it must start from.
 ///
-/// A Sync event supplies both. When the Replica has moved on, the step is simply not taken: a
-/// Cursor that no longer matches exactly is never advanced past unread work.
+/// Bootstrap owns one terminal step after every event in the page succeeds. When the Replica has
+/// moved on, the step is simply not taken: a Cursor that no longer matches exactly is never
+/// advanced past unread work.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CursorAdvance {
@@ -1840,6 +1859,54 @@ impl AccountReplica {
                     .retain(|_, overlay| overlay.operation_id != operation.operation_id);
                 self.advance_matching_cursor(cursor)?;
             }
+            PlanMutation::ReconcileItemMutation {
+                outcome,
+                item,
+                cursor,
+            } => {
+                let operation = self.operation_for(&outcome)?;
+                if !matches!(
+                    operation.kind,
+                    OperationKind::UpdateItem
+                        | OperationKind::SetItemFavorite
+                        | OperationKind::TrashItem
+                        | OperationKind::RestoreItem
+                        | OperationKind::MoveItem
+                        | OperationKind::PermanentlyDeleteItem
+                ) {
+                    return Err(replica_invariant(
+                        "an existing-Item reconciliation needs an ordinary Item Operation",
+                    ));
+                }
+                match (&outcome.result, item.as_deref()) {
+                    (OperationOutcomeResult::Applied { entity_id, version }, Some(authority))
+                        if operation.kind != OperationKind::PermanentlyDeleteItem
+                            && entity_id == &operation.item_id
+                            && authority.id == operation.item_id
+                            && authority.vault_id == operation.vault_id
+                            && authority.version == *version => {}
+                    (OperationOutcomeResult::Applied { entity_id, .. }, None)
+                        if operation.kind == OperationKind::PermanentlyDeleteItem
+                            && entity_id == &operation.item_id => {}
+                    (OperationOutcomeResult::Rejected { .. }, Some(authority))
+                        if authority.id == operation.item_id => {}
+                    (OperationOutcomeResult::Rejected { .. }, None) => {}
+                    _ => {
+                        return Err(replica_invariant(
+                            "the authoritative Item does not match the mutation outcome",
+                        ))
+                    }
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                match item {
+                    Some(item) => self.write_authoritative_item(*item)?,
+                    None => self.remove_authoritative_item(&operation.item_id)?,
+                }
+                self.operations.remove(&operation.operation_id);
+                self.items
+                    .retain(|_, overlay| overlay.operation_id != operation.operation_id);
+                self.advance_matching_cursor(cursor)?;
+            }
             PlanMutation::RetainRejection { outcome, cursor } => {
                 let operation = self.operation_for(&outcome)?;
                 if !matches!(outcome.result, OperationOutcomeResult::Rejected { .. }) {
@@ -1909,6 +1976,26 @@ impl AccountReplica {
                     (None, _) => {}
                 }
                 self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::AdvanceSyncPageCursor {
+                operation_ids,
+                cursor,
+            } => {
+                for operation_id in &operation_ids {
+                    validate_identifier(operation_id, "Sync page Operation event")?;
+                    if self.operations.contains_key(operation_id)
+                        || self.attachment_move_preparations.contains_key(operation_id)
+                    {
+                        return Err(replica_invariant(
+                            "Sync page Cursor cannot pass active accepted work",
+                        ));
+                    }
+                }
+                if self.bootstrap.active_cursor != cursor.expected || cursor.next == cursor.expected
+                {
+                    return Err(replica_invariant("Sync page Cursor advance is not exact"));
+                }
+                self.advance_matching_cursor(Some(cursor))?;
             }
             PlanMutation::AcknowledgeShareResult { operation_id } => {
                 let capability = self
@@ -2141,7 +2228,23 @@ impl AccountReplica {
         self.bootstrap.validate()
     }
 
-    /// Takes the Cursor step a Sync event supplied, and only from the exact Cursor it names.
+    fn remove_authoritative_item(&mut self, item_id: &str) -> Result<(), RuntimeError> {
+        if self.bootstrap.state != ReplicaState::Ready {
+            return Err(replica_invariant(
+                "authority can only be removed from a ready Replica",
+            ));
+        }
+        let generation =
+            self.bootstrap.active_generation.clone().ok_or_else(|| {
+                replica_invariant("ready Replica has no active Bootstrap generation")
+            })?;
+        self.bootstrap
+            .items
+            .remove(&(generation, item_id.to_owned()));
+        self.bootstrap.validate()
+    }
+
+    /// Applies optional guarded Sync page progress only from its exact expected Cursor.
     fn advance_matching_cursor(
         &mut self,
         cursor: Option<CursorAdvance>,
@@ -3052,5 +3155,320 @@ mod share_capability_invariant_tests {
                 .validate_durable_work()
                 .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod sync_page_cursor_tests {
+    use super::*;
+    use crate::{
+        replica::InMemoryReplica,
+        test_fixtures::{seed_ready_personal_vault, test_operation, test_overlay},
+    };
+
+    #[test]
+    fn sync_page_cursor_plan_refuses_matching_active_work() {
+        let account_id = AccountId::from("account-1");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        seed_ready_personal_vault(&state, &account_id).unwrap();
+        let before_accept = state.snapshot(&account_id).unwrap();
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                before_accept.incarnation,
+                before_accept.revision,
+                before_accept.lock_epoch,
+                vec![
+                    PlanMutation::AcceptOperation(test_operation("operation-1", "item-1")),
+                    PlanMutation::PutOptimisticItem(test_overlay(
+                        account_id.clone(),
+                        "item-1",
+                        "operation-1",
+                    )),
+                ],
+            ))
+            .unwrap();
+        let active = state.snapshot(&account_id).unwrap();
+
+        let result = state.execute(GuardedCommitPlan::new(
+            account_id.clone(),
+            active.incarnation.clone(),
+            active.revision,
+            active.lock_epoch,
+            vec![PlanMutation::AdvanceSyncPageCursor {
+                operation_ids: vec!["operation-1".into()],
+                cursor: CursorAdvance {
+                    expected: active.bootstrap.active_cursor.clone(),
+                    next: SyncCursor::CapturedValue {
+                        id: "must-not-pass-active-work".into(),
+                    },
+                },
+            }],
+        ));
+
+        assert!(result.is_err());
+        assert_eq!(state.snapshot(&account_id).unwrap(), active);
+    }
+}
+
+#[cfg(test)]
+mod attachment_move_reconciliation_tests {
+    use super::*;
+    use crate::{
+        replica::InMemoryReplica,
+        runtime::live_artifact_owners,
+        test_fixtures::{personal_vault, test_overlay},
+    };
+
+    fn source_attachment() -> AuthorityAttachmentRecord {
+        AuthorityAttachmentRecord {
+            id: "attachment-1".into(),
+            item_id: "item-1".into(),
+            vault_id: "source-vault".into(),
+            storage_key: "source-object".into(),
+            encrypted_name: "source-name".into(),
+            encryption_iv: "source-name-iv".into(),
+            encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            encrypted_attachment_key: "source-key".into(),
+            attachment_key_iv: "source-key-iv".into(),
+            attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+            encrypted_content_type: "source-type".into(),
+            encrypted_content_type_iv: "source-type-iv".into(),
+            envelope_version: 1,
+            file_size: 8,
+            uploaded_by: "user-1".into(),
+            created_at: "2026-08-28T00:00:00Z".into(),
+        }
+    }
+
+    fn prepared_move(account_id: &AccountId) -> AttachmentMovePreparationRecord {
+        let artifact = attachment_move_artifact_ref(
+            account_id,
+            "move-operation",
+            "attachment-1",
+            &"ab".repeat(32),
+            8,
+        )
+        .unwrap();
+        let mut preparation = AttachmentMovePreparationRecord {
+            account_id: account_id.clone(),
+            operation_id: "move-operation".into(),
+            item_id: "item-1".into(),
+            source_vault_id: "source-vault".into(),
+            target_vault_id: "vault-1".into(),
+            expected_item_version: 1,
+            target_encrypted_data: "sealed-target".into(),
+            target_encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            target_encryption_iv: "target-iv".into(),
+            source_attachments: vec![source_attachment()],
+            progress: vec![AttachmentMoveProgress::Encrypted {
+                attachment_id: "attachment-1".into(),
+                expected_envelope_version: 1,
+                artifact,
+                payload: Box::new(PreparedMoveAttachment {
+                    encrypted_name: "sealed-name".into(),
+                    encryption_iv: "name-iv".into(),
+                    encryption_algorithm: "AES-GCM-AAD-V1".into(),
+                    encrypted_attachment_key: "sealed-key".into(),
+                    attachment_key_iv: "key-iv".into(),
+                    attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+                    encrypted_content_type: "sealed-type".into(),
+                    encrypted_content_type_iv: "type-iv".into(),
+                }),
+                upload: AttachmentMoveUploadState::Uploaded,
+            }],
+            intent_fingerprint: Sha256Fingerprint([0; 32]),
+            scheduling: OperationSchedulingState::default(),
+        };
+        preparation.intent_fingerprint = attachment_move_intent_fingerprint(&preparation).unwrap();
+        preparation
+    }
+
+    fn authority_item(version: i32) -> AuthorityItemRecord {
+        AuthorityItemRecord {
+            id: "item-1".into(),
+            vault_id: "vault-1".into(),
+            category: AuthorityItemCategory::Login,
+            favorite: false,
+            encrypted_data: "authoritative-sealed".into(),
+            encryption_iv: "authority-iv".into(),
+            encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            version,
+            encryption_version: version,
+            encrypted_by_user_id: "user-1".into(),
+            last_modified_by: "user-1".into(),
+            created_at: "2026-08-28T00:00:00Z".into(),
+            updated_at: "2026-08-28T00:01:00Z".into(),
+            deleted_at: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    fn active_preparation() -> (InMemoryReplica, AccountId, AttachmentMovePreparationRecord) {
+        let account_id = AccountId::from("account-1");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-1".into(),
+                Incarnation::from("incarnation-1"),
+            )
+            .unwrap();
+        state
+            .seed_ready_authority(
+                &account_id,
+                vec![
+                    personal_vault("source-vault", "user-1"),
+                    personal_vault("vault-1", "user-1"),
+                ],
+                vec![AuthorityItemRecord {
+                    id: "item-1".into(),
+                    vault_id: "source-vault".into(),
+                    attachments: vec![source_attachment()],
+                    ..authority_item(1)
+                }],
+            )
+            .unwrap();
+        let preparation = prepared_move(&account_id);
+        let accepted = state.snapshot(&account_id).unwrap();
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                accepted.incarnation,
+                accepted.revision,
+                accepted.lock_epoch,
+                vec![
+                    PlanMutation::AcceptAttachmentMovePreparation(preparation.clone()),
+                    PlanMutation::PutOptimisticItem(test_overlay(
+                        account_id.clone(),
+                        "item-1",
+                        "move-operation",
+                    )),
+                ],
+            ))
+            .unwrap();
+        AccountReplica::from_snapshot(state.snapshot(&account_id).unwrap())
+            .validate_durable_work()
+            .unwrap();
+        (state, account_id, preparation)
+    }
+
+    #[test]
+    fn sync_page_cursor_cannot_pass_a_real_active_attachment_move_preparation() {
+        let (state, account_id, preparation) = active_preparation();
+        let active = state.snapshot(&account_id).unwrap();
+        let result = state.execute(GuardedCommitPlan::new(
+            account_id.clone(),
+            active.incarnation.clone(),
+            active.revision,
+            active.lock_epoch,
+            vec![PlanMutation::AdvanceSyncPageCursor {
+                operation_ids: vec![preparation.operation_id],
+                cursor: CursorAdvance {
+                    expected: active.bootstrap.active_cursor.clone(),
+                    next: SyncCursor::CapturedValue {
+                        id: "must-not-pass-preparation".into(),
+                    },
+                },
+            }],
+        ));
+
+        assert!(result.is_err());
+        assert_eq!(state.snapshot(&account_id).unwrap(), active);
+    }
+
+    #[test]
+    fn promoted_move_artifact_becomes_orphanable_only_with_atomic_receipt() {
+        let (state, account_id, preparation) = active_preparation();
+        let staged = state.snapshot(&account_id).unwrap();
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                staged.incarnation,
+                staged.revision,
+                staged.lock_epoch,
+                vec![PlanMutation::PromoteAttachmentMovePreparation {
+                    operation_id: "move-operation".into(),
+                    expected_intent_fingerprint: preparation.intent_fingerprint,
+                }],
+            ))
+            .unwrap();
+        let current = state.snapshot(&account_id).unwrap();
+        AccountReplica::from_snapshot(current.clone())
+            .validate_durable_work()
+            .unwrap();
+        let operation = current.operations[0].clone();
+        assert_eq!(operation.kind, OperationKind::MoveItem);
+        assert!(matches!(
+            operation.attachment_move_recovery,
+            Some(AttachmentMoveRecovery::Prepared { .. })
+        ));
+        assert_eq!(live_artifact_owners(&current).unwrap().len(), 1);
+
+        let outcome = ObservedOutcome {
+            operation_id: operation.operation_id.clone(),
+            request_fingerprint: operation.request_fingerprint,
+            result: OperationOutcomeResult::Applied {
+                entity_id: operation.item_id.clone(),
+                version: 2,
+            },
+        };
+        let mismatched = state.execute(GuardedCommitPlan::new(
+            account_id.clone(),
+            current.incarnation.clone(),
+            current.revision,
+            current.lock_epoch,
+            vec![PlanMutation::ReconcileItemMutation {
+                outcome: outcome.clone(),
+                item: Some(Box::new(authority_item(3))),
+                cursor: None,
+            }],
+        ));
+        assert!(mismatched.is_err());
+        assert_eq!(state.snapshot(&account_id).unwrap(), current);
+
+        state.fail_next_commits(1);
+        let failed_commit = state.execute(GuardedCommitPlan::new(
+            account_id.clone(),
+            current.incarnation.clone(),
+            current.revision,
+            current.lock_epoch,
+            vec![PlanMutation::ReconcileItemMutation {
+                outcome: outcome.clone(),
+                item: Some(Box::new(authority_item(2))),
+                cursor: None,
+            }],
+        ));
+        assert!(failed_commit.is_err());
+        let retained = state.snapshot(&account_id).unwrap();
+        assert_eq!(retained, current);
+        assert_eq!(live_artifact_owners(&retained).unwrap().len(), 1);
+        assert!(retained.receipts.is_empty());
+
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                current.incarnation.clone(),
+                current.revision,
+                current.lock_epoch,
+                vec![PlanMutation::ReconcileItemMutation {
+                    outcome,
+                    item: Some(Box::new(authority_item(2))),
+                    cursor: None,
+                }],
+            ))
+            .unwrap();
+        let completed = state.snapshot(&account_id).unwrap();
+        assert!(completed.operations.is_empty());
+        assert!(completed.items.is_empty());
+        assert_eq!(completed.receipts.len(), 1);
+        assert!(live_artifact_owners(&completed).unwrap().is_empty());
     }
 }

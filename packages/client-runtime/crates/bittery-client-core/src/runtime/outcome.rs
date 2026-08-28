@@ -230,9 +230,9 @@ impl Runtime {
     /// Completes one Operation against its authoritative outcome.
     ///
     /// For an applied create the authoritative Item is fetched first, outside any transaction,
-    /// and only then does one plan write authority, remove the Operation and its overlay, insert
-    /// the compact receipt, and advance a matching exact Cursor. A fetch or commit failure leaves
-    /// every one of those unchanged.
+    /// and only then does one plan write authority, remove the Operation and its overlay, and
+    /// insert the compact receipt. Bootstrap advances terminal page progress separately after
+    /// every event succeeds. A fetch or commit failure leaves every semantic fact unchanged.
     #[allow(
         dead_code,
         reason = "non-Bootstrap Sync callers retain the lock-acquiring reconciliation seam"
@@ -285,30 +285,61 @@ impl Runtime {
         let observed = outcome.clone();
         let mutation = match &outcome.result {
             OperationOutcomeResult::Applied { entity_id, version } => {
-                let item = match self
-                    .fetch_authoritative_item(account_id, entity_id, http, session)
-                    .await
-                {
-                    Ok(Some(item)) => item,
-                    Ok(None) => return CompletionResult::Retry,
-                    Err(result) => return result,
-                };
-                if item.id != operation.item_id
-                    || item.vault_id != operation.vault_id
-                    || item.version != *version
-                {
-                    // The Server's own outcome and its own Item disagree. Reading further would
-                    // be guessing, and this Runtime does not guess about authority.
-                    return if fence_already_held {
-                        self.fail_account_module_fenced(account_id).await
-                    } else {
-                        self.fail_account_module(account_id).await
+                if operation.kind != OperationKind::CreateItem {
+                    let item = match self
+                        .fetch_authoritative_item(account_id, entity_id, http, session)
+                        .await
+                    {
+                        Ok(item) => item,
+                        Err(result) => return result,
                     };
-                }
-                PlanMutation::ReconcileAppliedCreate {
-                    outcome,
-                    item: Box::new(item),
-                    cursor,
+                    let valid = match (&item, operation.kind) {
+                        (None, OperationKind::PermanentlyDeleteItem) => true,
+                        (Some(item), kind) if kind != OperationKind::PermanentlyDeleteItem => {
+                            item.id == operation.item_id
+                                && item.vault_id == operation.vault_id
+                                && item.version == *version
+                        }
+                        _ => false,
+                    };
+                    if !valid {
+                        return if fence_already_held {
+                            self.fail_account_module_fenced(account_id).await
+                        } else {
+                            self.fail_account_module(account_id).await
+                        };
+                    }
+                    PlanMutation::ReconcileItemMutation {
+                        outcome,
+                        item: item.map(Box::new),
+                        cursor,
+                    }
+                } else {
+                    let item = match self
+                        .fetch_authoritative_item(account_id, entity_id, http, session)
+                        .await
+                    {
+                        Ok(Some(item)) => item,
+                        Ok(None) => return CompletionResult::Retry,
+                        Err(result) => return result,
+                    };
+                    if item.id != operation.item_id
+                        || item.vault_id != operation.vault_id
+                        || item.version != *version
+                    {
+                        // The Server's own outcome and its own Item disagree. Reading further would
+                        // be guessing, and this Runtime does not guess about authority.
+                        return if fence_already_held {
+                            self.fail_account_module_fenced(account_id).await
+                        } else {
+                            self.fail_account_module(account_id).await
+                        };
+                    }
+                    PlanMutation::ReconcileAppliedCreate {
+                        outcome,
+                        item: Box::new(item),
+                        cursor,
+                    }
                 }
             }
             OperationOutcomeResult::ShareApplied { .. } => {
@@ -317,6 +348,19 @@ impl Runtime {
             OperationOutcomeResult::Rejected { .. } => {
                 if operation.kind == OperationKind::CreateShare {
                     PlanMutation::ReconcileShareOutcome { outcome, cursor }
+                } else if operation.kind != OperationKind::CreateItem {
+                    let item = match self
+                        .fetch_authoritative_item(account_id, &operation.item_id, http, session)
+                        .await
+                    {
+                        Ok(item) => item,
+                        Err(result) => return result,
+                    };
+                    PlanMutation::ReconcileItemMutation {
+                        outcome,
+                        item: item.map(Box::new),
+                        cursor,
+                    }
                 } else {
                     PlanMutation::RetainRejection { outcome, cursor }
                 }
@@ -341,7 +385,7 @@ impl Runtime {
     ) -> Result<Option<AuthorityItemRecord>, CompletionResult> {
         let cancellation = RequestCancellation::new();
         let mut fetched = http
-            .fetch_item(session.token.as_ref(), item_id, cancellation.clone())
+            .fetch_item_or_absent(session.token.as_ref(), item_id, cancellation.clone())
             .await;
         if matches!(fetched, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
             match self
@@ -351,7 +395,7 @@ impl Runtime {
                 Ok(renewed) => {
                     *session = renewed;
                     fetched = http
-                        .fetch_item(session.token.as_ref(), item_id, cancellation)
+                        .fetch_item_or_absent(session.token.as_ref(), item_id, cancellation)
                         .await;
                 }
                 Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
@@ -362,15 +406,15 @@ impl Runtime {
             }
         }
         match fetched {
-            Ok(AuthenticatedOutcome::Ok(item)) => match authority_item_from_dto(item) {
-                Ok(item) => Ok(Some(item)),
-                Err(_) => Ok(None),
-            },
+            Ok(AuthenticatedOutcome::Ok(Some(item))) => authority_item_from_dto(item)
+                .map(Some)
+                .map_err(|_| CompletionResult::Retry),
+            Ok(AuthenticatedOutcome::Ok(None)) => Ok(None),
             Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
                 self.mark_reauthentication_required(account_id);
                 Err(CompletionResult::Reauthenticate)
             }
-            Ok(AuthenticatedOutcome::Transient) | Err(_) => Ok(None),
+            Ok(AuthenticatedOutcome::Transient) | Err(_) => Err(CompletionResult::Retry),
         }
     }
 
@@ -516,8 +560,7 @@ impl Runtime {
     /// Completes one Operation because the Sync feed says the Server resolved it.
     ///
     /// The feed carries identity, never the decision, so the outcome is still read from the
-    /// Server. The event's Cursor rides along in the same reconciliation plan: the Operation and
-    /// the Cursor step past it become durable together, or neither does.
+    /// Server. Page progress remains owned by Bootstrap after every event has reconciled.
     #[allow(
         dead_code,
         reason = "non-Bootstrap Sync callers retain the lock-acquiring reconciliation seam"
@@ -528,7 +571,6 @@ impl Runtime {
         operation_id: &str,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
-        next_cursor: Option<SyncCursor>,
     ) -> CompletionResult {
         let Ok(execution_lock) = self.account_execution_lock(account_id) else {
             return CompletionResult::Retry;
@@ -537,14 +579,8 @@ impl Runtime {
         if self.is_closed() {
             return CompletionResult::Retry;
         }
-        self.reconcile_resolved_operation_fenced(
-            account_id,
-            operation_id,
-            http,
-            session,
-            next_cursor,
-        )
-        .await
+        self.reconcile_resolved_operation_fenced(account_id, operation_id, http, session)
+            .await
     }
 
     /// Bootstrap already owns the Account execution fence across Sync reconciliation.
@@ -554,7 +590,6 @@ impl Runtime {
         operation_id: &str,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
-        next_cursor: Option<SyncCursor>,
     ) -> CompletionResult {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Retry;
@@ -565,33 +600,82 @@ impl Runtime {
             .find(|operation| operation.operation_id == operation_id)
             .cloned()
         else {
-            // Another Device's Operation, or one this Device already completed.
+            // Another Device's Operation, or one this Device already completed. Bootstrap owns
+            // the page watermark and advances it only after every event has been processed.
             return CompletionResult::Completed;
         };
-        let cursor = Self::cursor_advance(&snapshot, next_cursor);
         match self
             .lookup_operation_outcome(account_id, &operation, http, session)
             .await
         {
             SemanticAnswer::Outcome(outcome) => {
                 if operation.kind == OperationKind::CreateShare {
-                    // A Share lookup is only a hint because it carries no request fingerprint.
-                    // The production dispatcher replays the exact immutable POST to prove
-                    // identity; this Sync hint remains uncommitted until that proof completes.
                     self.wake_dispatch();
                     return CompletionResult::Retry;
                 }
-                self.complete_operation_fenced(
-                    account_id, &operation, outcome, http, session, cursor,
-                )
-                .await
+                if operation.kind != OperationKind::CreateItem {
+                    // Lookup is only a hint because it carries no request fingerprint. Replay the
+                    // exact immutable request under this same Sync fence so identity remains
+                    // proven before Bootstrap advances the page watermark.
+                    return self
+                        .replay_lookup_hint_for_sync_fenced(&snapshot, &operation, http, session)
+                        .await;
+                }
+                self.complete_operation_fenced(account_id, &operation, outcome, http, session, None)
+                    .await
             }
             SemanticAnswer::IdentityReused => self.fail_account_module_fenced(account_id).await,
             SemanticAnswer::Undecided | SemanticAnswer::Transient => CompletionResult::Retry,
         }
     }
 
-    /// The Cursor step a Sync event supplies, taken only from the Cursor that event followed.
+    pub(super) async fn advance_sync_page_cursor_fenced(
+        &self,
+        account_id: &AccountId,
+        operation_ids: Vec<String>,
+        next_cursor: Option<SyncCursor>,
+    ) -> CompletionResult {
+        let Some(snapshot) = self.replica.snapshot(account_id) else {
+            return CompletionResult::Retry;
+        };
+        let cursor = Self::cursor_advance(&snapshot, next_cursor);
+        let Some(cursor) = cursor else {
+            return CompletionResult::Completed;
+        };
+        if cursor.expected == cursor.next {
+            return CompletionResult::Completed;
+        }
+        match self
+            .replica
+            .execute_recomputing(GuardedCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation.clone(),
+                snapshot.revision,
+                snapshot.lock_epoch,
+                vec![PlanMutation::AdvanceSyncPageCursor {
+                    operation_ids,
+                    cursor,
+                }],
+            ))
+            .await
+        {
+            Ok(RecomputedPlanResult::Applied { snapshot }) => {
+                let publication = self.publication.lock().expect("publication lock poisoned");
+                self.replica.cache(snapshot);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(publication);
+                self.publish_all_unless_closed();
+                CompletionResult::Completed
+            }
+            Ok(RecomputedPlanResult::Fenced { .. })
+            | Ok(RecomputedPlanResult::Missing)
+            | Err(_) => CompletionResult::Retry,
+        }
+    }
+
+    /// Builds exact guarded progress to one terminal Sync page Cursor.
+    ///
+    /// Bootstrap calls this only after every event in that page has completed locally.
     pub(super) fn cursor_advance(
         snapshot: &ReplicaSnapshot,
         next: Option<SyncCursor>,
@@ -610,6 +694,14 @@ impl Runtime {
 /// Device durably accepted? A `kind` this Runtime does not carry fails to deserialize; a `kind` it
 /// carries but did not ask for is identity reuse. Neither is ever read as this Operation's answer.
 fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) -> SemanticAnswer {
+    macro_rules! ordinary {
+        ($operation_id:expr, $kind:expr, $result:expr) => {
+            match ordinary_item_outcome(operation, $operation_id, $kind, $result) {
+                Some(outcome) => outcome,
+                None => return SemanticAnswer::IdentityReused,
+            }
+        };
+    }
     let (operation_id, expected_kind, result) = match outcome {
         WireOperationOutcome::CreateItem {
             operation_id,
@@ -633,6 +725,30 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             };
             (operation_id, OperationKind::CreateItem, result)
         }
+        WireOperationOutcome::UpdateItem {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::UpdateItem, result),
+        WireOperationOutcome::SetItemFavorite {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::SetItemFavorite, result),
+        WireOperationOutcome::TrashItem {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::TrashItem, result),
+        WireOperationOutcome::RestoreItem {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::RestoreItem, result),
+        WireOperationOutcome::MoveItem {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::MoveItem, result),
+        WireOperationOutcome::PermanentlyDeleteItem {
+            operation_id,
+            result,
+        } => ordinary!(operation_id, OperationKind::PermanentlyDeleteItem, result),
         WireOperationOutcome::CreateShare {
             operation_id,
             result,
@@ -663,10 +779,6 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             };
             (operation_id, OperationKind::CreateShare, result)
         }
-        _ => {
-            // Another kind under this ID answers work this Device never accepted.
-            return SemanticAnswer::IdentityReused;
-        }
     };
     if operation_id != operation.operation_id || operation.kind != expected_kind {
         // The Operation ID is ours; the kind is not. Keeping the fingerprint independent of the
@@ -678,6 +790,90 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
         request_fingerprint: operation.request_fingerprint,
         result,
     })
+}
+
+fn ordinary_item_outcome(
+    operation: &OperationRecord,
+    operation_id: String,
+    kind: OperationKind,
+    result: WireItemOperationResult,
+) -> Option<(String, OperationKind, OperationOutcomeResult)> {
+    let result = match result {
+        WireItemOperationResult::Applied { item_id, version } => {
+            if item_id != operation.item_id || version < 1 {
+                return None;
+            }
+            OperationOutcomeResult::Applied {
+                entity_id: item_id,
+                version,
+            }
+        }
+        WireItemOperationResult::Rejected { code, .. } => {
+            let code = rejection_code(code);
+            if !rejection_allowed(kind, code) {
+                return None;
+            }
+            OperationOutcomeResult::Rejected { code }
+        }
+    };
+    Some((operation_id, kind, result))
+}
+
+fn rejection_allowed(kind: OperationKind, code: OperationRejectionCode) -> bool {
+    use OperationKind::{
+        MoveItem, PermanentlyDeleteItem, RestoreItem, SetItemFavorite, TrashItem, UpdateItem,
+    };
+    use OperationRejectionCode::{
+        AttachmentStateConflict, InvalidCiphertext, ItemNotFound, ItemNotTrashed, ItemTrashed,
+        ItemVersionConflict, SourceVaultMismatch, TargetVaultAccessDenied, TargetVaultReadOnly,
+        VaultAccessDenied, VaultReadOnly,
+    };
+
+    match kind {
+        UpdateItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemVersionConflict
+        ),
+        SetItemFavorite => matches!(
+            code,
+            VaultAccessDenied | VaultReadOnly | ItemNotFound | ItemVersionConflict
+        ),
+        TrashItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemVersionConflict
+        ),
+        RestoreItem | PermanentlyDeleteItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemNotTrashed
+                | ItemVersionConflict
+        ),
+        MoveItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | SourceVaultMismatch
+                | ItemTrashed
+                | TargetVaultAccessDenied
+                | TargetVaultReadOnly
+                | ItemVersionConflict
+                | AttachmentStateConflict
+        ),
+        OperationKind::CreateItem | OperationKind::CreateShare => false,
+    }
 }
 
 fn share_rejection_code(code: WireShareRejectionCode) -> OperationRejectionCode {

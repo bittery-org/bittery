@@ -384,6 +384,7 @@ pub(super) fn prepare_commit(
     for mutation in &plan.mutations {
         // A completion touches several stores at once, so it contributes several writes.
         if let PlanMutation::ReconcileAppliedCreate { outcome, .. }
+        | PlanMutation::ReconcileItemMutation { outcome, .. }
         | PlanMutation::RetainRejection { outcome, .. }
         | PlanMutation::ReconcileShareOutcome { outcome, .. } = mutation
         {
@@ -397,6 +398,10 @@ pub(super) fn prepare_commit(
         }
         if matches!(mutation, PlanMutation::FailAccount { .. }) {
             // The failure lives in the head, and no row moves because of it.
+            continue;
+        }
+        if matches!(mutation, PlanMutation::AdvanceSyncPageCursor { .. }) {
+            // The Cursor lives in Bootstrap metadata, whose exact diff is collected below.
             continue;
         }
         if matches!(mutation, PlanMutation::RemoveAllProtectedShareCapabilities) {
@@ -559,8 +564,10 @@ pub(super) fn prepare_commit(
                 },
             },
             PlanMutation::ReconcileAppliedCreate { .. }
+            | PlanMutation::ReconcileItemMutation { .. }
             | PlanMutation::RetainRejection { .. }
             | PlanMutation::ReconcileShareOutcome { .. }
+            | PlanMutation::AdvanceSyncPageCursor { .. }
             | PlanMutation::FailAccount { .. }
             | PlanMutation::FreezeAttachmentMoveRejection { .. }
             | PlanMutation::PromoteAttachmentMovePreparation { .. }
@@ -569,8 +576,8 @@ pub(super) fn prepare_commit(
             }
         });
     }
-    // Authority and Cursor rows are a diff of what the model decided, so one completion stays
-    // one `Commit` request: nothing about it can be applied by halves.
+    // Authority and Bootstrap rows are a diff of what the model decided, so each guarded mutation
+    // stays one `Commit` request: nothing about that mutation can be applied by halves.
     writes.extend(bootstrap_write_diff(
         &current.account_id,
         &current.bootstrap,
