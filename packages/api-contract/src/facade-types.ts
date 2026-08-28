@@ -101,6 +101,7 @@ export type SignupResponse = Omit<WireSignupResponse, "vaultKeys"> & {
 };
 export type AuthUser = Schema<"MeResponse">;
 export type DeleteAccountInput = Schema<"DeleteAccountRequest">;
+export type DeleteAccountResponse = Schema<"DeleteAccountResponse">;
 export type EmailChangeInput = Schema<"EmailChangeRequest">;
 export type PasswordChangeInput = Schema<"PasswordChangeRequest">;
 export type RecoveryKeyInput = Schema<"RecoveryKeyRequest">;

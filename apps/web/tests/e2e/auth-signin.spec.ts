@@ -71,9 +71,7 @@ async function accountStorageShape(page: Page) {
 			accounts: accountsDocument,
 			webAccountId: localStorage.getItem("bittery_web_account_id"),
 			runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
-			deletedServerAccountId: localStorage.getItem(
-				"bittery_deleted_server_account_id",
-			),
+			accountDeletionMarker: localStorage.getItem("bittery_account_deletion"),
 			secretKeyNames: Object.keys(localStorage)
 				.filter((key) => key.endsWith("_secret_key"))
 				.sort(),
@@ -210,7 +208,7 @@ test("a wrong master password is refused and keeps the user on /login", async ({
 	expect(failedShape.accounts).toBeNull();
 	expect(failedShape.activeAccountId).toBe(failedShape.webAccountId);
 	expect(failedShape.runtimeAccountId).toBeNull();
-	expect(failedShape.deletedServerAccountId).toBeNull();
+	expect(failedShape.accountDeletionMarker).toBeNull();
 });
 
 test("signing out removes the account from the device and forces a full sign-in", async ({
@@ -232,7 +230,7 @@ test("signing out removes the account from the device and forces a full sign-in"
 		signedInShape.activeAccountId,
 	);
 	expect(signedInShape.runtimeAccountId).not.toBe(signedInShape.webAccountId);
-	expect(signedInShape.deletedServerAccountId).toBeNull();
+	expect(signedInShape.accountDeletionMarker).toBeNull();
 	const removedRuntimeAccountId = signedInShape.runtimeAccountId;
 	if (!removedRuntimeAccountId) {
 		throw new Error("Sign-in did not persist the Runtime Account id.");
@@ -254,7 +252,7 @@ test("signing out removes the account from the device and forces a full sign-in"
 		accounts: { version: 2, accounts: [] },
 		webAccountId: null,
 		runtimeAccountId: null,
-		deletedServerAccountId: null,
+		accountDeletionMarker: null,
 		secretKeyNames: [],
 	});
 	expect(

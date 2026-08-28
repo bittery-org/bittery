@@ -4,13 +4,10 @@ import {
 	type RuntimeTeardown,
 } from "@bittery/client-runtime/client";
 import {
-	type AccountDeletionDeps,
 	type AccountDeletionIncomplete,
-	type AccountDeletionResult,
 	type AccountRemovalDeps,
 	type AccountRemovalIncomplete,
 	clearBrowserStoredDataOnly,
-	deleteAccountEverywhereFromDevice,
 	forgetBrowserSessionOnly,
 	removeAccountFromDevice,
 	retireAccountSession,
@@ -37,8 +34,7 @@ interface Recorder extends AccountRemovalDeps {
 	readonly cleared: (string | null)[];
 	readonly forgotten: number[];
 	readonly order: string[];
-	/** Every write to the persisted deleted-Server-Account record. `null` is a clear. */
-	readonly marked: (string | null)[];
+	readonly markerClears: number[];
 }
 
 function recorder(overrides: Partial<AccountRemovalDeps> = {}): Recorder {
@@ -47,7 +43,7 @@ function recorder(overrides: Partial<AccountRemovalDeps> = {}): Recorder {
 	const cleared: (string | null)[] = [];
 	const forgotten: number[] = [];
 	const order: string[] = [];
-	const marked: (string | null)[] = [];
+	const markerClears: number[] = [];
 	let tick = 0;
 	const base: AccountRemovalDeps = {
 		resolveRuntimeAccountId() {
@@ -74,9 +70,9 @@ function recorder(overrides: Partial<AccountRemovalDeps> = {}): Recorder {
 			forgotten.push(tick++);
 			order.push("forget");
 		},
-		writeDeletedServerAccountId(accountId) {
-			marked.push(accountId);
-			order.push(`mark:${accountId ?? "cleared"}`);
+		clearAccountDeletionMarker() {
+			markerClears.push(markerClears.length);
+			order.push("clearDeletionMarker");
 		},
 	};
 	return {
@@ -87,7 +83,7 @@ function recorder(overrides: Partial<AccountRemovalDeps> = {}): Recorder {
 		cleared,
 		forgotten,
 		order,
-		marked,
+		markerClears,
 	};
 }
 
@@ -151,12 +147,12 @@ describe("log out destroys the Account through the Runtime", () => {
 			"clear:0",
 			"forget",
 			"selectAccount:2",
-			"mark:cleared",
+			"clearDeletionMarker",
 		]);
 		// An abandoned deletion leaves the record behind, and nothing else drops it. A log
 		// out destroys everything this browser knows about the Account, so it takes that
 		// record with it and leaves no stray `bittery_*` key.
-		expect(deps.marked).toEqual([null]);
+		expect(deps.markerClears).toHaveLength(1);
 	});
 
 	test("an incomplete teardown keeps every pointer and names the failed phases", async () => {
@@ -932,371 +928,40 @@ describe("a retry that cannot finish is never offered as one", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// The Danger Zone deletion — the Server first, then the Runtime
-// ---------------------------------------------------------------------------
-
-interface DeletionRecorder extends Recorder, AccountDeletionDeps {
-	readonly serverCalls: number[];
-}
-
-function deletionRecorder(
-	options: {
-		server?: () => Promise<void>;
-		removal?: Partial<AccountRemovalDeps>;
-	} = {},
-): DeletionRecorder {
-	const base = recorder(options.removal);
-	const serverCalls: number[] = [];
-	// Stands in for `localStorage`: it outlives a page load, unlike anything React holds.
-	let deletedServerAccountId: string | null = null;
-	return {
-		...base,
-		serverCalls,
-		async deleteServerAccount() {
-			serverCalls.push(serverCalls.length);
-			base.order.push("deleteServerAccount");
-			await options.server?.();
+describe("the Danger Zone browser escape trusts only an authoritative Server outcome", () => {
+	const deletionReport = (
+		serverAccountDeleted: boolean,
+	): AccountDeletionIncomplete => ({
+		status: "incomplete",
+		target: {
+			runtimeAccountId: "account-1",
+			transitionalAccountId: "web-account-1",
 		},
-		readDeletedServerAccountId() {
-			return deletedServerAccountId;
-		},
-		writeDeletedServerAccountId(accountId) {
-			base.marked.push(accountId);
-			base.order.push(`mark:${accountId ?? "cleared"}`);
-			deletedServerAccountId = accountId;
-		},
-	};
-}
-
-function deletionReport(
-	result: AccountDeletionResult,
-): AccountDeletionIncomplete {
-	if (result.status !== "incomplete") {
-		throw new Error(`expected an incomplete deletion, got ${result.status}`);
-	}
-	return result;
-}
-
-describe("deleting the Account deletes it on the Server first", () => {
-	test("the Server answers before anything local is destroyed", async () => {
-		const deps = deletionRecorder();
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result).toEqual({ status: "deleted" });
-		// The record is written between the two, before anything local can fail and
-		// before the 401 the deleted Account now answers with can replace the document.
-		expect(deps.order.slice(0, 3)).toEqual([
-			"deleteServerAccount",
-			"mark:web-account-1",
-			"removeAccount",
-		]);
-		// And cleared once the deletion has nothing left to guard.
-		expect(deps.marked).toEqual(["web-account-1", null]);
+		attempts: 2,
+		areas: [serverAccountDeleted ? "replica" : "serverAccount"],
+		code: null,
+		serverAccountDeleted,
+		canClearBrowserDataOnly: serverAccountDeleted,
 	});
 
-	test("a failed Server delete destroys nothing on this Device", async () => {
-		const deps = deletionRecorder({
-			server: async () => {
-				throw new Error("500");
-			},
-		});
+	test("a non-authoritative Server outcome cannot clear local data", async () => {
+		const deps = recorder();
+		const previous = deletionReport(false);
 
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result.status).toBe("incomplete");
-		expect(deletionReport(result).serverAccountDeleted).toBe(false);
-		expect(deletionReport(result).areas).toEqual(["serverAccount"]);
-		// Destroying local data for an Account the Server still holds is worse than
-		// doing nothing.
-		expect(deps.removed).toEqual([]);
+		expect(await clearBrowserStoredDataOnly(previous, deps)).toBe(previous);
 		expect(deps.cleared).toEqual([]);
-		expect(deps.selected).toEqual([]);
-	});
-
-	test("the Runtime destroys the Account, so no unlock key outlives the deletion", async () => {
-		const deps = deletionRecorder();
-
-		await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(deps.removed).toEqual(["account-1"]);
-	});
-
-	test("a Runtime teardown that did not finish is never reported as deleted", async () => {
-		const deps = deletionRecorder({
-			removal: {
-				async removeAccount(accountId) {
-					return teardown(accountId, ["replica", "platformStorage"]);
-				},
-			},
-		});
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result.status).toBe("incomplete");
-		expect(deletionReport(result).areas).toEqual([
-			"replica",
-			"platformStorage",
-		]);
-		// The Server let go, so a retry must not ask it again.
-		expect(deletionReport(result).serverAccountDeleted).toBe(true);
-		expect(deps.cleared).toEqual([]);
-	});
-
-	test("a transitional store that kept data is never reported as deleted", async () => {
-		const deps = deletionRecorder({
-			removal: {
-				async clearTransitionalAccountData() {
-					return { failures: [{ step: "clear_account_data" }] };
-				},
-			},
-		});
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result.status).toBe("incomplete");
-		expect(deletionReport(result).areas).toEqual(["transitionalStore"]);
 		expect(deps.forgotten).toEqual([]);
-		expect(deps.selected).toEqual([]);
 	});
 
-	test("a retry after a deleted Server Account never asks the Server twice", async () => {
-		let failNext = true;
-		const deps = deletionRecorder({
-			removal: {
-				async removeAccount(accountId) {
-					if (failNext) {
-						failNext = false;
-						return teardown(accountId, ["replica"]);
-					}
-					return teardown(accountId);
-				},
-			},
-		});
+	test("serverDeleted permits only the browser-owned local tail", async () => {
+		const deps = recorder();
 
-		const first = deletionReport(
-			await deleteAccountEverywhereFromDevice(null, deps),
-		);
-		const second = await deleteAccountEverywhereFromDevice(first, deps);
-
-		expect(second).toEqual({ status: "deleted" });
-		// A second delete of an Account the Server no longer has would fail forever and
-		// strand the Device's copy behind it.
-		expect(deps.serverCalls).toEqual([0]);
-	});
-
-	// The Server Account is gone, so the next authenticated request answers 401 and
-	// `router.tsx` sends the document to `/login`. Every React ref dies there, the held
-	// report with it, while `secret_key`, `session_data` and `vault_keys` stay in plain
-	// `localStorage`. A second press must not ask the Server for an Account it no longer
-	// has: that answer is an error, and reading it as "the Server still holds it" blocks
-	// local destruction for good.
-	test("a page load between attempts does not ask the Server twice", async () => {
-		let failNext = true;
-		const deps: DeletionRecorder = deletionRecorder({
-			server: async () => {
-				if (deps.serverCalls.length > 1) {
-					throw new Error("404: no such account");
-				}
-			},
-			removal: {
-				async removeAccount(accountId) {
-					deps.removed.push(accountId);
-					if (failNext) {
-						failNext = false;
-						return teardown(accountId, ["replica"]);
-					}
-					return teardown(accountId);
-				},
-			},
-		});
-
-		const first = deletionReport(
-			await deleteAccountEverywhereFromDevice(null, deps),
-		);
-		expect(first.serverAccountDeleted).toBe(true);
-
-		// The reload: no carried report, and the browser stores exactly as they were.
-		const second = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(second).toEqual({ status: "deleted" });
-		expect(deps.serverCalls).toEqual([0]);
-		expect(deps.cleared).toEqual(["web-account-1"]);
-		// Written under the name the Server let go of, and cleared once nothing is left
-		// for it to guard.
-		expect(deps.marked).toEqual(["web-account-1", null]);
-	});
-
-	test("the carried fact names one Account and never speaks for another", async () => {
-		const deps: DeletionRecorder = deletionRecorder({
-			removal: {
-				async resolveTransitionalAccountId() {
-					// The next sign-in mints a new id: `resolveOrCreateAccountId` keys on
-					// (serverUrl, userId), and a re-registered user is a new userId.
-					return deps.serverCalls.length === 0
-						? "web-account-1"
-						: "web-account-2";
-				},
-				async removeAccount(accountId) {
-					deps.removed.push(accountId);
-					return teardown(
-						accountId,
-						deps.removed.length === 1 ? ["replica"] : [],
-					);
-				},
-			},
-		});
-
-		await deleteAccountEverywhereFromDevice(null, deps);
-		const second = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(second).toEqual({ status: "deleted" });
-		// The Server holds the second Account, so it is asked for it.
-		expect(deps.serverCalls).toEqual([0, 1]);
-	});
-
-	// The record is an optimisation over one Server call, never a licence to skip it. A
-	// browser that refuses to read it — private mode, a disabled store, a quota error — must
-	// fall back to asking the Server, because reading "cannot read" as "already deleted"
-	// destroys this Device's copy of an Account the Server still holds. That is the worst
-	// outcome this module has, and it is the one a user cannot undo.
-	test("a record this browser cannot read never stands in for a Server delete", async () => {
-		const deps: DeletionRecorder = {
-			...deletionRecorder(),
-			readDeletedServerAccountId() {
-				throw new Error("localStorage is blocked");
-			},
-		};
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result).toEqual({ status: "deleted" });
-		// Asked, and asked before anything local was destroyed.
-		expect(deps.serverCalls).toEqual([0]);
-		expect(deps.order[0]).toBe("deleteServerAccount");
-	});
-
-	// The mirror of the read. Once the Server has let go, the Account's local copy must be
-	// destroyed; a `localStorage` write the browser refused may not stand in the way of it.
-	// All a refused write costs is the carry across a reload, which is where it started.
-	test("a record this browser cannot write never blocks the local destruction", async () => {
-		const deps: DeletionRecorder = {
-			...deletionRecorder(),
-			writeDeletedServerAccountId() {
-				throw new Error("localStorage is full");
-			},
-		};
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result).toEqual({ status: "deleted" });
-		expect(deps.removed).toEqual(["account-1"]);
-		expect(deps.cleared).toEqual(["web-account-1"]);
-	});
-
-	test("a transitional id that resolves to null stops before the Server is asked", async () => {
-		const deps = deletionRecorder({
-			removal: {
-				async resolveTransitionalAccountId() {
-					return null;
-				},
-			},
-		});
-
-		const result = await deleteAccountEverywhereFromDevice(null, deps);
-
-		expect(result.status).toBe("incomplete");
-		expect(deletionReport(result).areas).toEqual(["transitionalStore"]);
-		expect(deps.serverCalls).toEqual([]);
-	});
-});
-
-describe("a deleted Server Account can still drop this browser's own data", () => {
-	test("a repeated local failure offers the existing browser-only escape", async () => {
-		const deps = deletionRecorder({
-			removal: {
-				async removeAccount(accountId) {
-					deps.removed.push(accountId);
-					throw new RuntimeRequestError("RUNTIME_CLOSED", "open() threw");
-				},
-			},
-		});
-
-		const first = deletionReport(
-			await deleteAccountEverywhereFromDevice(null, deps),
-		);
-		expect(first.canClearBrowserDataOnly).toBe(false);
-		expect(await clearBrowserStoredDataOnly(first, deps)).toBe(first);
-		expect(deps.cleared).toEqual([]);
-		const second = deletionReport(
-			await deleteAccountEverywhereFromDevice(first, deps),
-		);
-		expect(second.canClearBrowserDataOnly).toBe(true);
-
-		const escaped = await clearBrowserStoredDataOnly(second, deps);
-
-		expect(escaped).toEqual({ status: "browserDataCleared" });
-		// The two failed deletion attempts made the one Server call and the only Runtime
-		// calls. The escape itself reaches neither and leaves the Runtime pointer alone.
-		expect(deps.serverCalls).toEqual([0]);
-		expect(deps.removed).toEqual(["account-1", "account-1"]);
+		expect(
+			await clearBrowserStoredDataOnly(deletionReport(true), deps),
+		).toEqual({ status: "browserDataCleared" });
+		expect(deps.removed).toEqual([]);
 		expect(deps.selected).toEqual([]);
 		expect(deps.cleared).toEqual(["web-account-1"]);
 		expect(deps.forgotten).toHaveLength(1);
-	});
-
-	test("a Server refusal cannot be bypassed by the browser-only escape", async () => {
-		const deps = deletionRecorder({
-			server: async () => {
-				throw new Error("500");
-			},
-		});
-
-		const first = deletionReport(
-			await deleteAccountEverywhereFromDevice(null, deps),
-		);
-		const second = deletionReport(
-			await deleteAccountEverywhereFromDevice(first, deps),
-		);
-		expect(second.canClearBrowserDataOnly).toBe(false);
-
-		const refused = await clearBrowserStoredDataOnly(second, deps);
-
-		expect(refused).toBe(second);
-		expect(deps.serverCalls).toEqual([0, 1]);
-		expect(deps.removed).toEqual([]);
-		expect(deps.cleared).toEqual([]);
-		expect(deps.forgotten).toEqual([]);
-	});
-
-	test("an escape with no transitional target stays incomplete and clears nothing", async () => {
-		const deps = deletionRecorder();
-		const unnamed: AccountDeletionIncomplete = {
-			status: "incomplete",
-			target: null,
-			attempts: 2,
-			areas: ["replica"],
-			code: "RUNTIME_CLOSED",
-			serverAccountDeleted: true,
-			// Deliberately stale: even a caller presenting an offer may not turn an
-			// unnamed clear into success.
-			canClearBrowserDataOnly: true,
-		};
-
-		const result = await clearBrowserStoredDataOnly(unnamed, deps);
-
-		expect(result).toMatchObject({
-			status: "incomplete",
-			target: null,
-			attempts: 3,
-			serverAccountDeleted: true,
-			canClearBrowserDataOnly: false,
-		});
-		expect(deps.serverCalls).toEqual([]);
-		expect(deps.removed).toEqual([]);
-		expect(deps.cleared).toEqual([]);
-		expect(deps.forgotten).toEqual([]);
-		expect(deps.selected).toEqual([]);
 	});
 });

@@ -14,7 +14,9 @@ use crate::{
     domains::billing::{entitlements::team_management_enabled, sync_team_seats_best_effort},
     error::AppError,
     integrations::stripe::BillingGateway,
-    shared::transaction::database_error,
+    shared::transaction::{
+        acquire_team_authority_lock, acquire_user_authority_lock, database_error,
+    },
 };
 
 use super::plans::{
@@ -237,6 +239,22 @@ async fn finalize(
     let mut tx = begin_serializable_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Member departure operation failed"))?;
+    let mut authority_user_ids = [actor_id, target_id];
+    authority_user_ids.sort_unstable();
+    for user_id in authority_user_ids {
+        acquire_user_authority_lock(
+            &mut tx,
+            user_id,
+            "Failed to lock Team Member departure User authority",
+        )
+        .await?;
+    }
+    acquire_team_authority_lock(
+        &mut *tx,
+        team_id,
+        "Failed to lock Team Member departure authority",
+    )
+    .await?;
     let member: (
         TeamRole,
         TeamRole,

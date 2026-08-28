@@ -1,12 +1,10 @@
 /**
- * The three Web gestures that take an Account away, and the one set of rules they share.
+ * The two Web gestures that take an Account away, and the rules they share.
  *
  * - `removeAccountFromDevice` is the sidebar's "Log out", which on this platform means
  *   "remove this Account from this Device".
  * - `retireAccountSession` is the sign-in screen's "Use a different account". It retires
  *   the Session and keeps the Account, because that screen cannot prove who is pressing it.
- * - `deleteAccountEverywhereFromDevice` is the Danger Zone. It deletes on the Server first,
- *   then destroys this Device's copy exactly as a log out does.
  *
  * Two independent stores hold Account material in a browser, and they name the Account
  * differently. The Runtime knows it by its `AccountId` and owns the Replica, the platform
@@ -29,10 +27,10 @@
  * report success over surviving `secret_key` material. A transitional id that resolves to
  * `null` is that half-removal, so it is reported as one and never cleared under.
  *
- * A wedged Runtime refuses its side forever, so all three gestures carry a bounded escape,
- * offered only after repeated refusal. Log out and Danger Zone deletion reuse
- * `clearBrowserStoredDataOnly`; deletion adds the stronger condition that the Server Account
- * is already deleted. Retirement uses `forgetBrowserSessionOnly`. Both escape behaviors touch
+ * A wedged Runtime refuses its side forever, so both gestures carry a bounded escape,
+ * offered only after repeated refusal. Log out uses `clearBrowserStoredDataOnly`; the Danger
+ * Zone deletion orchestrator may reuse it only after its versioned marker says the Server
+ * Account is already deleted. Retirement uses `forgetBrowserSessionOnly`. Both escape behaviors touch
  * the transitional store alone, report what the Runtime kept, and never call themselves a
  * removal.
  *
@@ -102,14 +100,8 @@ export interface AccountRemovalDeps extends AccountNameDeps {
 	): Promise<TransitionalClearOutcome>;
 	/** Forgets the synthetic pre-login id. */
 	forgetTransitionalAccountId(): void;
-	/**
-	 * Records the transitional name of an Account whose Server copy is already deleted, or
-	 * clears the record with `null`. See `AccountDeletionIncomplete`.
-	 *
-	 * Every removal needs the clear, not only the deletion that writes it. A deletion the
-	 * user abandoned leaves the record behind, and nothing else on this Device drops it.
-	 */
-	writeDeletedServerAccountId(accountId: string | null): void;
+	/** Clears the versioned deletion marker after this Device has removed the Account. */
+	clearAccountDeletionMarker(): void;
 }
 
 /**
@@ -352,7 +344,12 @@ async function destroyLocalAccount(
 	// Nothing local is left for the record to guard, and it is the last stray `bittery_*`
 	// key a removal could leave behind. It swallows its own failure, so it cannot undo
 	// any of the destruction above it.
-	rememberServerAccountDeleted(null, deps);
+	try {
+		deps.clearAccountDeletionMarker();
+	} catch {
+		// Destruction is already complete. A refused marker clear cannot make the Account
+		// exist again and must not turn that authoritative outcome into a retry.
+	}
 	return null;
 }
 
@@ -655,36 +652,9 @@ export async function forgetBrowserSessionOnly(
 	return { status: "browserSessionForgotten", areas: ["runtimeSession"] };
 }
 
-// ---------------------------------------------------------------------------
-// The Danger Zone deletion: the Server first, then this Device
-// ---------------------------------------------------------------------------
-
-export interface AccountDeletionDeps extends AccountRemovalDeps {
-	/** Deletes the Account on the Server. Throws when the Server still holds it. */
-	deleteServerAccount(): Promise<void>;
-	/**
-	 * The transitional name of an Account whose Server copy is already deleted, or `null`.
-	 *
-	 * Persisted outside this page load, because the page load is what loses it. See
-	 * `AccountDeletionIncomplete`.
-	 */
-	readDeletedServerAccountId(): string | null;
-}
-
 /**
- * A deletion that did not finish, and the one fact a retry cannot re-derive.
- *
- * `serverAccountDeleted` is carried, not re-tested. Asking the Server a second time for an
- * Account it no longer has answers with an error, and reading that error as "the Server
- * still holds it" would block local destruction forever — the exact material this dialog
- * was pressed to destroy.
- *
- * Carrying it in memory is not enough. Once the Server has let go, the next authenticated
- * request answers 401 and `router.tsx` sends the document to `/login`, which takes every
- * React ref with it. So the fact is also written down, under the transitional name of the
- * Account it is about: that name cannot drift onto another Account, because
- * `resolveOrCreateAccountId` keys on (serverUrl, userId) and a re-registered user is a new
- * userId, which mints a new transitional name.
+ * A Danger Zone deletion whose Server step is owned by the versioned marker orchestrator,
+ * but whose local tail still uses the shared removal/escape reporting model.
  */
 export interface AccountDeletionIncomplete extends TeardownIncomplete {
 	readonly serverAccountDeleted: boolean;
@@ -696,101 +666,3 @@ export type AccountDeletionResult =
 	| { readonly status: "deleted" }
 	| BrowserDataCleared
 	| AccountDeletionIncomplete;
-
-/**
- * Delete the Account on the Server, then destroy this Device's copy through the Runtime.
- *
- * The Server goes first and its failure stops everything. That ordering is the one thing
- * the Runtime cannot express: it knows nothing about a Server Account, and destroying the
- * local copy of an Account the Server still holds leaves a user locked out of an Account
- * that still exists. Once the Server has let go the order inverts and the Runtime becomes
- * the authority again, exactly as it is for "Log out".
- *
- * Both names are resolved before the Server is asked. An Account this Device cannot name
- * is one whose local copy nothing could destroy afterwards, so nothing is deleted anywhere.
- */
-export async function deleteAccountEverywhereFromDevice(
-	previous: AccountDeletionIncomplete | null,
-	deps: AccountDeletionDeps,
-): Promise<AccountDeletionResult> {
-	const attempts = (previous?.attempts ?? 0) + 1;
-
-	const resolved = await resolveNamedTarget(previous, deps);
-	if (resolved.named === null) {
-		const serverAccountDeleted = previous?.serverAccountDeleted ?? false;
-		return {
-			...baseReport(resolved.target, attempts, resolved.areas, resolved.code),
-			// Nothing was named, so the written record cannot be matched against
-			// anything. Only the carried report can answer here.
-			serverAccountDeleted,
-			canClearBrowserDataOnly:
-				serverAccountDeleted &&
-				canOfferBrowserEscape(resolved.target, attempts),
-		};
-	}
-	const named = resolved.named;
-	const serverAccountDeleted =
-		previous?.serverAccountDeleted ??
-		wasServerAccountDeleted(named.transitionalAccountId, deps);
-
-	if (!serverAccountDeleted) {
-		try {
-			await deps.deleteServerAccount();
-		} catch {
-			// No `code`: this is the Server refusing, and `RuntimeErrorCode` is the
-			// Runtime's vocabulary. Nothing local has been touched.
-			return {
-				...baseReport(resolved.target, attempts, ["serverAccount"], null),
-				serverAccountDeleted: false,
-				canClearBrowserDataOnly: false,
-			};
-		}
-		// Written before the first local step, and before the 401 that the deleted
-		// Account now answers every request with can replace this document.
-		rememberServerAccountDeleted(named.transitionalAccountId, deps);
-	}
-
-	const failure = await destroyLocalAccount(named, deps);
-	if (failure !== null) {
-		return {
-			...baseReport(resolved.target, attempts, failure.areas, failure.code),
-			serverAccountDeleted: true,
-			canClearBrowserDataOnly: canOfferBrowserEscape(resolved.target, attempts),
-		};
-	}
-	// The record outlived every step it guarded, and `destroyLocalAccount` cleared it in
-	// the tail every removal runs. So a log out sweeps an abandoned deletion's record too.
-	return { status: "deleted" };
-}
-
-/**
- * Whether the Server already let go of the Account this Device knows by that name.
- *
- * A record for another name says nothing about this Account, so it is not read as one.
- */
-function wasServerAccountDeleted(
-	transitionalAccountId: string,
-	deps: AccountDeletionDeps,
-): boolean {
-	try {
-		return deps.readDeletedServerAccountId() === transitionalAccountId;
-	} catch {
-		// A record this browser cannot read is no record. The Server step runs again and
-		// reports its own answer, which is the honest place for that failure to appear.
-		return false;
-	}
-}
-
-function rememberServerAccountDeleted(
-	transitionalAccountId: string | null,
-	deps: AccountRemovalDeps,
-): void {
-	try {
-		deps.writeDeletedServerAccountId(transitionalAccountId);
-	} catch {
-		// Deliberately swallowed, and only here. The Server has already let go, so the
-		// Account's local copy must still be destroyed; a `localStorage` write that was
-		// refused may not stand in the way of that. It costs the carry across a reload,
-		// which is where it started.
-	}
-}

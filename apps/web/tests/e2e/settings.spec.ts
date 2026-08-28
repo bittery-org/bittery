@@ -605,6 +605,254 @@ test("regenerating the Secret Key replaces the one a full sign-in needs", async 
 	}
 });
 
+test("a lost successful deletion response replays the exact marker after reload", async ({
+	page,
+}) => {
+	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
+	const disposable = await signUp(page, generateTestUser());
+	await openSettings(page);
+	await openSettingsTab(page, "general");
+	let lost = false;
+	await page.route("**/api/v1/users/me", async (route) => {
+		if (route.request().method() !== "DELETE" || lost) {
+			await route.continue();
+			return;
+		}
+		await route.fetch();
+		lost = true;
+		await route.abort("connectionreset");
+	});
+
+	await page
+		.getByRole("button", {
+			name: uiText("settings_delete_account_dialog_trigger"),
+		})
+		.click();
+	const dialog = page.getByTestId("delete-account-dialog");
+	await dialog.locator("#confirmEmail").fill(disposable.email);
+	await dialog
+		.locator("#confirmText")
+		.fill(uiText("settings_delete_account_dialog_confirm_phrase"));
+	await dialog.getByTestId("delete-account-confirm").click();
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() =>
+					JSON.parse(localStorage.getItem("bittery_account_deletion") ?? "null")
+						?.phase,
+			),
+		)
+		.toBe("dispatchedUnknown");
+
+	await page.reload();
+	await page.waitForURL("**/login", { timeout: VAULT_READY_TIMEOUT_MS });
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_account_deletion")),
+		)
+		.toBeNull();
+});
+
+test("a retained wrong-email refusal clears its marker and preserves local Account data", async ({
+	page,
+}) => {
+	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
+	const disposable = await signUp(page, generateTestUser());
+	const before = await page.evaluate(() => ({
+		runtime: localStorage.getItem("bittery_runtime_account_id"),
+		transitional: localStorage.getItem("bittery_active_account"),
+	}));
+	const requestIds: string[] = [];
+	let refuse = true;
+	await page.route("**/api/v1/users/me", async (route) => {
+		if (route.request().method() !== "DELETE") {
+			await route.continue();
+			return;
+		}
+		requestIds.push(route.request().headers()["idempotency-key"] ?? "");
+		if (refuse) {
+			refuse = false;
+			await route.continue({
+				postData: JSON.stringify({ confirmEmail: "wrong@example.test" }),
+			});
+			return;
+		}
+		await route.continue();
+	});
+
+	await openSettings(page);
+	await openSettingsTab(page, "general");
+	await page
+		.getByRole("button", {
+			name: uiText("settings_delete_account_dialog_trigger"),
+		})
+		.click();
+	const dialog = page.getByTestId("delete-account-dialog");
+	await dialog.locator("#confirmEmail").fill(disposable.email);
+	await dialog
+		.locator("#confirmText")
+		.fill(uiText("settings_delete_account_dialog_confirm_phrase"));
+	await dialog.getByTestId("delete-account-confirm").click();
+	await expect(errorToast(page)).toBeVisible({
+		timeout: VAULT_READY_TIMEOUT_MS,
+	});
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_account_deletion")),
+		)
+		.toBeNull();
+	expect(
+		await page.evaluate(() => ({
+			runtime: localStorage.getItem("bittery_runtime_account_id"),
+			transitional: localStorage.getItem("bittery_active_account"),
+		})),
+	).toEqual(before);
+
+	await dialog.getByTestId("delete-account-confirm").click();
+	await finishAccountDeletion(page);
+	expect(requestIds).toHaveLength(2);
+	expect(requestIds[0]).not.toBe(requestIds[1]);
+});
+
+test("a reload during the serverDeleted local tail resumes without a second Server delete", async ({
+	page,
+}) => {
+	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
+	const disposable = await signUp(page, generateTestUser());
+	let deletes = 0;
+	await page.route("**/api/v1/users/me", async (route) => {
+		if (route.request().method() === "DELETE") deletes += 1;
+		await route.continue();
+	});
+	await page.evaluate((prefix) => {
+		const original = Storage.prototype.removeItem;
+		let refused = false;
+		Storage.prototype.removeItem = function (key: string) {
+			if (!refused && key.startsWith(prefix)) {
+				refused = true;
+				throw new Error("forced Runtime platform tail failure");
+			}
+			return original.call(this, key);
+		};
+	}, RUNTIME_STORAGE_PREFIX);
+	await openSettings(page);
+	await openSettingsTab(page, "general");
+	await page
+		.getByRole("button", {
+			name: uiText("settings_delete_account_dialog_trigger"),
+		})
+		.click();
+	const dialog = page.getByTestId("delete-account-dialog");
+	await dialog.locator("#confirmEmail").fill(disposable.email);
+	await dialog
+		.locator("#confirmText")
+		.fill(uiText("settings_delete_account_dialog_confirm_phrase"));
+	await dialog.getByTestId("delete-account-confirm").click();
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() =>
+					JSON.parse(localStorage.getItem("bittery_account_deletion") ?? "null")
+						?.phase,
+			),
+		)
+		.toBe("serverDeleted");
+	await page.reload();
+	await page.waitForURL("**/login", { timeout: VAULT_READY_TIMEOUT_MS });
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_account_deletion")),
+		)
+		.toBeNull();
+	expect(deletes).toBe(1);
+});
+
+test("a deletion marker gates RemoveAccount and SignOut by its dispatch phase", async ({
+	page,
+}) => {
+	test.setTimeout(CREDENTIAL_CHANGE_BUDGET_MS);
+	const disposable = await signUp(page, generateTestUser());
+	const names = await page.evaluate(() => ({
+		runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
+		transitionalAccountId: localStorage.getItem("bittery_active_account"),
+	}));
+	if (!names.runtimeAccountId || !names.transitionalAccountId)
+		throw new Error("missing Account names");
+	await page.evaluate(
+		({ runtimeAccountId, transitionalAccountId, email }) => {
+			localStorage.setItem(
+				"bittery_account_deletion",
+				JSON.stringify({
+					version: 1,
+					runtimeAccountId,
+					transitionalAccountId,
+					confirmEmail: email,
+					requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+					phase: "dispatchedUnknown",
+				}),
+			);
+		},
+		{ ...names, email: disposable.email },
+	);
+	await page.getByTestId("user-menu").click();
+	await page.getByTestId("sign-out-button").click();
+	await page.getByTestId("log-out-confirm").click();
+	await expect(page.getByTestId("log-out-dialog")).toBeVisible();
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_runtime_account_id")),
+		)
+		.toBe(names.runtimeAccountId);
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() =>
+					JSON.parse(localStorage.getItem("bittery_account_deletion") ?? "null")
+						?.phase,
+			),
+		)
+		.toBe("dispatchedUnknown");
+
+	// The locked-screen path invokes Runtime SignOut rather than RemoveAccount. The same
+	// post-dispatch marker must preserve the retry Session there as well.
+	await page.goto("/login");
+	await expect(page.getByTestId("use-different-account")).toBeVisible();
+	await page.getByTestId("use-different-account").click();
+	await expect(page.getByTestId("use-different-account")).toBeVisible();
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_runtime_account_id")),
+		)
+		.toBe(names.runtimeAccountId);
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() =>
+					JSON.parse(localStorage.getItem("bittery_account_deletion") ?? "null")
+						?.phase,
+			),
+		)
+		.toBe("dispatchedUnknown");
+
+	// A pre-dispatch marker owns no Server ambiguity. SignOut may cancel it and proceed.
+	await page.evaluate(() => {
+		const marker = JSON.parse(
+			localStorage.getItem("bittery_account_deletion") ?? "null",
+		);
+		localStorage.setItem(
+			"bittery_account_deletion",
+			JSON.stringify({ ...marker, phase: "prepared" }),
+		);
+	});
+	await page.getByTestId("use-different-account").click();
+	await expect(page.getByTestId("signin-form").locator("#email")).toBeEnabled();
+	await expect
+		.poll(() =>
+			page.evaluate(() => localStorage.getItem("bittery_account_deletion")),
+		)
+		.toBeNull();
+});
+
 test("deleting the account destroys it on the server and removes it from the device", async ({
 	page,
 	browser,
@@ -680,9 +928,7 @@ test("deleting the account destroys it on the server and removes it from the dev
 				accounts,
 				webAccountId: localStorage.getItem("bittery_web_account_id"),
 				runtimeAccountId: localStorage.getItem("bittery_runtime_account_id"),
-				deletedServerAccountId: localStorage.getItem(
-					"bittery_deleted_server_account_id",
-				),
+				accountDeletionMarker: localStorage.getItem("bittery_account_deletion"),
 				localAccountKeys: matchingKeys(localStorage, accountPrefix),
 				sessionAccountKeys: matchingKeys(sessionStorage, accountPrefix),
 				localRuntimeAccountKeys: matchingKeys(
@@ -711,7 +957,7 @@ test("deleting the account destroys it on the server and removes it from the dev
 		accounts: { version: 2, accounts: [] },
 		webAccountId: null,
 		runtimeAccountId: null,
-		deletedServerAccountId: null,
+		accountDeletionMarker: null,
 		localAccountKeys: [],
 		sessionAccountKeys: [],
 		localRuntimeAccountKeys: [],

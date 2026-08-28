@@ -50,6 +50,8 @@ export const webWorkerOwner = composition.workerOwner;
 export const crypto = createWasmWorkerCryptoPort(composition.cryptoChannel);
 /** Shared Worker Runtime. Web Items observation consumes `observe(Items)`. */
 export const runtime = composition.runtime;
+/** Rust-owned Account identity normalization used before durable deletion markers. */
+export const normalizeAccountEmail = composition.normalizeAccountEmail;
 /**
  * The typed host binding over that Worker. Built here, above React, because the
  * observation registry inside it owns observation identity and lifetime: a client built

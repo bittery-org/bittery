@@ -3152,6 +3152,8 @@ public enum RuntimeRequest {
     )
     case removeAccount(accountId: String
     )
+    case deleteServerAccount(accountId: String, confirmEmail: String, requestId: String
+    )
     case wipe
     case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
     )
@@ -3207,33 +3209,36 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         case 5: return .removeAccount(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 6: return .wipe
-
-        case 7: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 6: return .deleteServerAccount(accountId: try FfiConverterString.read(from: &buf), confirmEmail: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf)
         )
 
-        case 8: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 7: return .wipe
+
+        case 8: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
-        case 9: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
+        case 9: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
         )
 
-        case 10: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 10: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
         )
 
-        case 11: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 11: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 12: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
+        case 12: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 13: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 13: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
         )
 
-        case 14: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        case 14: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 15: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 15: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        )
+
+        case 16: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3274,65 +3279,72 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
 
 
-        case .wipe:
+        case let .deleteServerAccount(accountId,confirmEmail,requestId):
             writeInt(&buf, Int32(6))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(confirmEmail, into: &buf)
+            FfiConverterString.write(requestId, into: &buf)
+
+
+        case .wipe:
+            writeInt(&buf, Int32(7))
 
 
         case let .createLoginItem(accountId,vaultId,draft):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
 
 
         case let .updateLoginItem(accountId,itemId,draft):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
 
 
         case let .setItemFavorite(accountId,itemId,favorite):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterBool.write(favorite, into: &buf)
 
 
         case let .trashItem(accountId,itemId):
-            writeInt(&buf, Int32(10))
-            FfiConverterString.write(accountId, into: &buf)
-            FfiConverterString.write(itemId, into: &buf)
-
-
-        case let .restoreItem(accountId,itemId):
             writeInt(&buf, Int32(11))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
-        case let .moveItem(accountId,itemId,targetVaultId):
+        case let .restoreItem(accountId,itemId):
             writeInt(&buf, Int32(12))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .moveItem(accountId,itemId,targetVaultId):
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterString.write(targetVaultId, into: &buf)
 
 
         case let .permanentlyDeleteItem(accountId,itemId):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .createShare(accountId,itemId,draft):
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
 
         case let .acknowledgeShareResult(accountId,operationId):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
@@ -3364,6 +3376,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     case signedIn(accountId: String, userId: String
     )
     case accessChanged(accountId: String, access: AccountAccessState
+    )
+    case serverAccountDeletion(accountId: String, requestId: String, outcome: ServerAccountDeletionOutcome
     )
     case accepted(operationId: String, itemId: String, replicaRevision: UInt64
     )
@@ -3398,13 +3412,16 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 2: return .accessChanged(accountId: try FfiConverterString.read(from: &buf), access: try FfiConverterTypeAccountAccessState.read(from: &buf)
         )
 
-        case 3: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 3: return .serverAccountDeletion(accountId: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf), outcome: try FfiConverterTypeServerAccountDeletionOutcome.read(from: &buf)
         )
 
-        case 4: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 4: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 5: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 5: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 6: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3427,21 +3444,28 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterTypeAccountAccessState.write(access, into: &buf)
 
 
-        case let .accepted(operationId,itemId,replicaRevision):
+        case let .serverAccountDeletion(accountId,requestId,outcome):
             writeInt(&buf, Int32(3))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(requestId, into: &buf)
+            FfiConverterTypeServerAccountDeletionOutcome.write(outcome, into: &buf)
+
+
+        case let .accepted(operationId,itemId,replicaRevision):
+            writeInt(&buf, Int32(4))
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
         case let .shareResultAcknowledged(accountId,operationId):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
 
         case let .teardown(scope,status,failures):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(6))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
@@ -3463,6 +3487,80 @@ public func FfiConverterTypeRuntimeResponse_lift(_ buf: RustBuffer) throws -> Ru
 #endif
 public func FfiConverterTypeRuntimeResponse_lower(_ value: RuntimeResponse) -> RustBuffer {
     return FfiConverterTypeRuntimeResponse.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ServerAccountDeletionOutcome: Equatable, Hashable {
+
+    case deleted
+    case confirmationEmailMismatch
+    case blocked
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ServerAccountDeletionOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeServerAccountDeletionOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = ServerAccountDeletionOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ServerAccountDeletionOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .deleted
+
+        case 2: return .confirmationEmailMismatch
+
+        case 3: return .blocked
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ServerAccountDeletionOutcome, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .deleted:
+            writeInt(&buf, Int32(1))
+
+
+        case .confirmationEmailMismatch:
+            writeInt(&buf, Int32(2))
+
+
+        case .blocked:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeServerAccountDeletionOutcome_lift(_ buf: RustBuffer) throws -> ServerAccountDeletionOutcome {
+    return try FfiConverterTypeServerAccountDeletionOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeServerAccountDeletionOutcome_lower(_ value: ServerAccountDeletionOutcome) -> RustBuffer {
+    return FfiConverterTypeServerAccountDeletionOutcome.lower(value)
 }
 
 
@@ -4333,6 +4431,16 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
+/**
+ * Canonicalizes and validates an Account email through the Runtime's shared Rust policy.
+ */
+public func normalizeAccountEmail(input: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeBindingError_lift) {
+    uniffi_bittery_client_bindings_fn_func_normalize_account_email(
+        FfiConverterString.lower(input),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -4348,6 +4456,9 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_bittery_client_bindings_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_func_normalize_account_email() != 25740) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id() != 40485) {
         return InitializationResult.apiChecksumMismatch

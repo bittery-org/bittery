@@ -68,6 +68,14 @@ export type RuntimeAccepted = Omit<
 	Extract<RuntimeResponse, { type: "accepted" }>,
 	"type"
 >;
+export type DeleteServerAccountInput = Omit<
+	Extract<RuntimeRequest, { type: "deleteServerAccount" }>,
+	"type"
+>;
+export type RuntimeServerAccountDeletion = Omit<
+	Extract<RuntimeResponse, { type: "serverAccountDeletion" }>,
+	"type"
+>;
 export type SignInInput = Omit<
 	Extract<RuntimeRequest, { type: "signIn" }>,
 	"type"
@@ -148,6 +156,11 @@ export interface RuntimeClient {
 		accountId: string,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeTeardown>;
+	/** Uses caller-owned durable retry material to delete the authenticated Server Account. */
+	deleteServerAccount(
+		input: DeleteServerAccountInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeServerAccountDeletion>;
 	/** Destroys every Account and all Runtime state on this Device. Irreversible. */
 	wipe(options?: RuntimeCallOptions): Promise<RuntimeTeardown>;
 	createLoginItem(
@@ -277,6 +290,14 @@ export function createRuntimeClient(
 					callOptions,
 				),
 			);
+		},
+		async deleteServerAccount(input, callOptions) {
+			const { accountId, requestId, outcome } = await call(
+				{ type: "deleteServerAccount", ...input },
+				"serverAccountDeletion",
+				callOptions,
+			);
+			return { accountId, requestId, outcome };
 		},
 		async wipe(callOptions) {
 			return teardownOutcome(

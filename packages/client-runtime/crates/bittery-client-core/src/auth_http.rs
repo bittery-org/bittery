@@ -2,9 +2,9 @@ use crate::{
     http_transport::{HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpTransport},
     replica::ImmutableHttpRequest,
     server_contract::{
-        AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, ErrorCode, FinishLoginRequest,
-        FinishLoginResponse, LoginAttemptResponse, ProblemDetails, StartLoginRequest,
-        TravelModeResponse,
+        AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, DeleteAccountRequest,
+        DeleteAccountResponse, ErrorCode, FinishLoginRequest, FinishLoginResponse,
+        LoginAttemptResponse, ProblemDetails, StartLoginRequest, TravelModeResponse,
     },
     RequestCancellation, RuntimeError, RuntimeErrorCode,
 };
@@ -28,6 +28,12 @@ pub(crate) enum AuthenticatedOutcome<T> {
     Ok(T),
     ReauthenticationRequired,
     Transient,
+}
+
+pub(crate) enum ServerAccountDeletionAnswer {
+    Deleted { request_id: String },
+    ConfirmationEmailMismatch { request_id: String },
+    Blocked { request_id: String },
 }
 
 impl<T> AuthenticatedOutcome<T> {
@@ -317,6 +323,111 @@ impl<'transport> AuthHttpClient<'transport> {
             }
             401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
             _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn delete_server_account(
+        &self,
+        token: &str,
+        request_id: &str,
+        confirm_email: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<ServerAccountDeletionAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_deletion_request_id(request_id)?;
+        let body = serde_json::to_vec(&DeleteAccountRequest {
+            confirm_email: confirm_email.to_owned(),
+        })
+        .map_err(|_| invariant("Account deletion request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/json".to_owned(),
+            },
+        );
+        headers.push(HttpHeader {
+            name: "Idempotency-Key".to_owned(),
+            value: request_id.to_owned(),
+        });
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Delete,
+                    self.endpoint(&["api", "v1", "users", "me"])?.into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await
+            .map_err(|_| authentication_failure("Account deletion transport failed"))?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let response: DeleteAccountResponse =
+                    serde_json::from_slice(&body).map_err(|_| {
+                        authentication_failure("Account deletion returned invalid JSON")
+                    })?;
+                if response.outcome != "deleted" {
+                    return Err(authentication_failure(
+                        "Account deletion returned an unknown outcome",
+                    ));
+                }
+                Ok(AuthenticatedOutcome::Ok(
+                    ServerAccountDeletionAnswer::Deleted {
+                        request_id: response.request_id,
+                    },
+                ))
+            }
+            HttpResponse::Completed {
+                status: status @ (400 | 409),
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Account deletion returned invalid Problem Details")
+                })?;
+                let answer = match (status, problem.code) {
+                    (400, ErrorCode::AccountDeletionConfirmationMismatch) => {
+                        ServerAccountDeletionAnswer::ConfirmationEmailMismatch {
+                            request_id: problem.request_id,
+                        }
+                    }
+                    (409, ErrorCode::AccountDeletionBlocked) => {
+                        ServerAccountDeletionAnswer::Blocked {
+                            request_id: problem.request_id,
+                        }
+                    }
+                    _ => {
+                        return Err(authentication_failure(
+                            "Account deletion returned an unexpected closed outcome",
+                        ));
+                    }
+                };
+                Ok(AuthenticatedOutcome::Ok(answer))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge
+            | HttpResponse::Cancelled => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Account deletion returned an unexpected status",
+            )),
         }
     }
 
@@ -1110,6 +1221,23 @@ fn validate_operation_id(value: &str) -> Result<(), RuntimeError> {
         || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
     {
         return Err(invariant("Operation identity is not a usable wire value"));
+    }
+    Ok(())
+}
+
+fn validate_deletion_request_id(value: &str) -> Result<(), RuntimeError> {
+    let bytes = value.as_bytes();
+    let hyphens = [8, 13, 18, 23];
+    if bytes.len() != 36
+        || hyphens.iter().any(|index| bytes[*index] != b'-')
+        || bytes[14] != b'4'
+        || bytes.iter().enumerate().any(|(index, byte)| {
+            !hyphens.contains(&index) && !matches!(byte, b'0'..=b'9' | b'a'..=b'f')
+        })
+    {
+        return Err(invariant(
+            "Account deletion request identity is not a canonical UUID v4",
+        ));
     }
     Ok(())
 }

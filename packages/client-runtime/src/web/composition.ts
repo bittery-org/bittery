@@ -41,6 +41,8 @@ export interface WebClientRuntimeDeps {
 
 export interface WebClientRuntime {
 	runtime: WorkerRuntime;
+	/** Shared Rust identity normalization, executed by the existing Runtime Worker WASM. */
+	normalizeAccountEmail(value: string): Promise<string>;
 	/** The Crypto channel. The host wraps it in a `CryptoPort`; ticket 22 removes it. */
 	cryptoChannel: WorkerRpcChannel;
 	workerOwner: SharedWorkerOwner;
@@ -56,13 +58,15 @@ export function createWebClientRuntime(
 		handleHostRequest:
 			deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage),
 	});
+	const runtime = createWorkerRuntime(
+		workerOwner.channel("runtime"),
+		workerOwner.close,
+	);
 	return {
 		workerOwner,
 		cryptoChannel: workerOwner.channel("crypto"),
-		runtime: createWorkerRuntime(
-			workerOwner.channel("runtime"),
-			workerOwner.close,
-		),
+		runtime,
+		normalizeAccountEmail: runtime.normalizeAccountEmail,
 		close: workerOwner.close,
 	};
 }

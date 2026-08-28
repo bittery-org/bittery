@@ -30,6 +30,7 @@ mod operation_fixtures;
 mod outcome;
 #[cfg(test)]
 mod outcome_tests;
+mod server_account_deletion;
 #[cfg(test)]
 mod share_outcome_tests;
 mod teardown;
@@ -1358,6 +1359,14 @@ impl Runtime {
                 .retire_account_access(&account_id, AccessRetirement::SignOut)
                 .await
                 .map(|access| RuntimeResponse::AccessChanged { account_id, access }),
+            RuntimeRequest::DeleteServerAccount {
+                account_id,
+                confirm_email,
+                request_id,
+            } => {
+                self.delete_server_account(account_id, confirm_email, request_id, cancellation)
+                    .await
+            }
             RuntimeRequest::CreateLoginItem {
                 account_id,
                 vault_id,

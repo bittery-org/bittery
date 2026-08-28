@@ -116,14 +116,12 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 	expect(accountsDocument.accounts.map((account) => account.accountId)).toEqual(
 		[accountId],
 	);
-	// Runtime scope has its own pointer; deletion's persisted Server fact is
-	// absent in an ordinary signed-in snapshot.
+	// Runtime scope has its own pointer; deletion recovery state is absent in an
+	// ordinary signed-in snapshot.
 	expect(runtimeAccountId).not.toBe("");
 	expect(runtimeAccountId).not.toBe(accountId);
 	if (webAccountId !== null) expect(runtimeAccountId).not.toBe(webAccountId);
-	expect(snapshot.local).not.toHaveProperty(
-		"bittery_deleted_server_account_id",
-	);
+	expect(snapshot.local).not.toHaveProperty("bittery_account_deletion");
 
 	const forbiddenCredentialSuffixes = [
 		"jwt_token",

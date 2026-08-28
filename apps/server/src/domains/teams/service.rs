@@ -11,7 +11,9 @@ use crate::{
     db::models::*,
     error::AppError,
     integrations::storage,
-    shared::transaction::database_error,
+    shared::transaction::{
+        acquire_team_authority_lock, acquire_user_authority_lock, database_error,
+    },
 };
 
 use super::shape::{team_details_shape, team_summary_shape};
@@ -386,6 +388,18 @@ pub(crate) async fn delete_team(
         .begin()
         .await
         .map_err(|error| database_error(error, "Failed to start transaction"))?;
+    acquire_user_authority_lock(
+        &mut transaction,
+        user_id,
+        "Failed to lock Team deletion User authority",
+    )
+    .await?;
+    acquire_team_authority_lock(
+        &mut *transaction,
+        &input.team_id,
+        "Failed to lock Team deletion authority",
+    )
+    .await?;
 
     let actor = query_as::<_, DbDeleteTeamActorRow>(
 		"SELECT u.id AS user_id, u.name AS user_name, u.team_id, u.role::text AS role, t.type::text AS team_type FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",

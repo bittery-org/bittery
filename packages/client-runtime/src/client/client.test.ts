@@ -210,6 +210,39 @@ describe("Runtime client requests", () => {
 		});
 	});
 
+	test("deletes the named Server Account with caller-owned exact retry material", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		const deleting = client.deleteServerAccount({
+			accountId: "account-1",
+			confirmEmail: "person@example.test",
+			requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "deleteServerAccount",
+			accountId: "account-1",
+			confirmEmail: "person@example.test",
+			requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+		});
+
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "serverAccountDeletion",
+				accountId: "account-1",
+				requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+				outcome: "deleted",
+			},
+		});
+		expect(await deleting).toEqual({
+			accountId: "account-1",
+			requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+			outcome: "deleted",
+		});
+	});
+
 	test("keeps an incomplete teardown renderable and retryable instead of collapsing it", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });

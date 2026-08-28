@@ -1,3 +1,4 @@
+import { RuntimeRequestError } from "@bittery/client-runtime/client";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
@@ -41,6 +42,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
+import { gateLocalTeardown } from "@/lib/account-deletion";
 import {
 	type AccountRemovalDeps,
 	type AccountRemovalResult,
@@ -57,7 +59,8 @@ import {
 	clearActiveAccountData,
 	forgetWebAccountId,
 	getTransitionalAccountId,
-	writeDeletedServerAccountId,
+	readAccountDeletionMarker,
+	writeAccountDeletionMarker,
 } from "@/lib/storage";
 import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
@@ -129,8 +132,25 @@ function UserNav() {
 	const removalDeps: AccountRemovalDeps = {
 		resolveRuntimeAccountId: () => runtimeClient.resolveAccount(),
 		resolveTransitionalAccountId: getTransitionalAccountId,
-		removeAccount: (accountId: string) =>
-			runtimeClient.removeAccount(accountId),
+		removeAccount: async (accountId: string) => {
+			const transitionalAccountId = await getTransitionalAccountId();
+			if (
+				transitionalAccountId !== null &&
+				gateLocalTeardown(
+					{ runtimeAccountId: accountId, transitionalAccountId },
+					{
+						readMarker: readAccountDeletionMarker,
+						writeMarker: writeAccountDeletionMarker,
+					},
+				) === "recoveryRequired"
+			) {
+				throw new RuntimeRequestError(
+					"AUTHENTICATION_UNAVAILABLE",
+					"Account deletion recovery must finish before removal.",
+				);
+			}
+			return runtimeClient.removeAccount(accountId);
+		},
 		selectAccount: (accountId: string | null) =>
 			runtimeClient.selectAccount(accountId),
 		clearTransitionalAccountData: (accountId: string) =>
@@ -138,7 +158,7 @@ function UserNav() {
 		forgetTransitionalAccountId: forgetWebAccountId,
 		// A deletion the user abandoned leaves this record behind. A log out destroys
 		// everything this browser holds for the Account, so it takes the record too.
-		writeDeletedServerAccountId,
+		clearAccountDeletionMarker: () => writeAccountDeletionMarker(null),
 	};
 
 	// One driver for both actions: neither may navigate away or close over data it did not

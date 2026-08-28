@@ -12,6 +12,9 @@ use crate::{
     test_support::{authenticated_json_headers, seed_user, with_api_test_app_state, ApiTestApp},
 };
 
+use super::account_deletion::{
+    install_account_deletion_metric_recorder, AccountDeletionMetricKind,
+};
 use super::devices::device_rate_limit_key;
 
 fn invalid_credentials_payload() -> Value {
@@ -49,19 +52,26 @@ async fn assert_first_allowed_then_limited(
     payload: Option<Value>,
     token: &str,
 ) {
+    let mut first_headers = authenticated_json_headers(token);
+    if method == Method::DELETE {
+        first_headers.insert(
+            "idempotency-key",
+            "018f05c4-7b6a-4a89-9237-2e612fa96c21".parse().unwrap(),
+        );
+    }
     let first = app
-        .api_json(
-            method.clone(),
-            path,
-            payload.clone(),
-            authenticated_json_headers(token),
-        )
+        .api_json(method.clone(), path, payload.clone(), first_headers)
         .await;
     assert_ne!(first.status, StatusCode::TOO_MANY_REQUESTS);
 
-    let limited = app
-        .api_json(method, path, payload, authenticated_json_headers(token))
-        .await;
+    let mut limited_headers = authenticated_json_headers(token);
+    if method == Method::DELETE {
+        limited_headers.insert(
+            "idempotency-key",
+            "018f05c4-7b6a-4a89-9237-2e612fa96c22".parse().unwrap(),
+        );
+    }
+    let limited = app.api_json(method, path, payload, limited_headers).await;
     assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(limited.body["code"], json!("RATE_LIMITED"));
     assert_eq!(limited.headers["retry-after"], "60");
@@ -73,6 +83,8 @@ async fn sensitive_account_operations_have_independent_per_user_limits() {
         "post_auth_account_rate_limits",
         configure_limits,
         |app| async move {
+            let deletion_rate_metrics =
+                install_account_deletion_metric_recorder("018f05c4-7b6a-4a89-9237-2e612fa96c22");
             seed_user(&app.pool, "usr_limit_a", "Limit A", "limit-a@example.com").await;
             seed_user(&app.pool, "usr_limit_b", "Limit B", "limit-b@example.com").await;
             let session_a = app.issue_session("usr_limit_a").await;
@@ -128,6 +140,21 @@ async fn sensitive_account_operations_have_independent_per_user_limits() {
                 .expect("rate-limit state should load");
                 assert_eq!(count, 1);
             }
+
+            let deletion_outcomes = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM account_deletion_outcome",
+            )
+            .fetch_one(&app.pool)
+            .await
+            .expect("Account deletion outcome count should load");
+            assert_eq!(
+                deletion_outcomes, 1,
+                "the rejected 429 must not retain a row"
+            );
+            assert_eq!(
+                deletion_rate_metrics.take(),
+                vec![AccountDeletionMetricKind::RateLimit],
+            );
 
             let other_user = app
                 .api_json(

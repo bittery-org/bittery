@@ -670,6 +670,8 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_bittery_client_bindings_checksum_func_normalize_account_email(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id(
@@ -911,6 +913,8 @@ external fun uniffi_bittery_client_bindings_fn_free_secretstring(`handle`: Long,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_constructor_secretstring_new(`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Long
+external fun uniffi_bittery_client_bindings_fn_func_normalize_account_email(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun ffi_bittery_client_bindings_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun ffi_bittery_client_bindings_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1032,6 +1036,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_bittery_client_bindings_checksum_func_normalize_account_email() != 25740) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id() != 40485) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -5288,6 +5295,17 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class DeleteServerAccount(
+        val `accountId`: kotlin.String,
+        val `confirmEmail`: kotlin.String,
+        val `requestId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
     object Wipe : RuntimeRequest()
 
 
@@ -5431,6 +5449,15 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.DeleteServerAccount -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`confirmEmail`,
+        this.`requestId`
+    )
+
+            }
             is RuntimeRequest.Wipe -> {// Nothing to destroy
             }
             is RuntimeRequest.CreateLoginItem -> {
@@ -5547,45 +5574,50 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             5 -> RuntimeRequest.RemoveAccount(
                 FfiConverterString.read(buf),
                 )
-            6 -> RuntimeRequest.Wipe
-            7 -> RuntimeRequest.CreateLoginItem(
+            6 -> RuntimeRequest.DeleteServerAccount(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> RuntimeRequest.Wipe
+            8 -> RuntimeRequest.CreateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
                 )
-            8 -> RuntimeRequest.UpdateLoginItem(
+            9 -> RuntimeRequest.UpdateLoginItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeLoginItemDraft.read(buf),
                 )
-            9 -> RuntimeRequest.SetItemFavorite(
+            10 -> RuntimeRequest.SetItemFavorite(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            10 -> RuntimeRequest.TrashItem(
+            11 -> RuntimeRequest.TrashItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> RuntimeRequest.RestoreItem(
+            12 -> RuntimeRequest.RestoreItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            12 -> RuntimeRequest.MoveItem(
+            13 -> RuntimeRequest.MoveItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            13 -> RuntimeRequest.PermanentlyDeleteItem(
+            14 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            14 -> RuntimeRequest.CreateShare(
+            15 -> RuntimeRequest.CreateShare(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateShareDraft.read(buf),
                 )
-            15 -> RuntimeRequest.AcknowledgeShareResult(
+            16 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -5632,6 +5664,15 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.DeleteServerAccount -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`confirmEmail`)
+                + FfiConverterString.allocationSize(value.`requestId`)
             )
         }
         is RuntimeRequest.Wipe -> {
@@ -5751,65 +5792,72 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is RuntimeRequest.Wipe -> {
+            is RuntimeRequest.DeleteServerAccount -> {
                 buf.putInt(6)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`confirmEmail`, buf)
+                FfiConverterString.write(value.`requestId`, buf)
+                Unit
+            }
+            is RuntimeRequest.Wipe -> {
+                buf.putInt(7)
                 Unit
             }
             is RuntimeRequest.CreateLoginItem -> {
-                buf.putInt(7)
+                buf.putInt(8)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.UpdateLoginItem -> {
-                buf.putInt(8)
+                buf.putInt(9)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeLoginItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.SetItemFavorite -> {
-                buf.putInt(9)
+                buf.putInt(10)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterBoolean.write(value.`favorite`, buf)
                 Unit
             }
             is RuntimeRequest.TrashItem -> {
-                buf.putInt(10)
-                FfiConverterString.write(value.`accountId`, buf)
-                FfiConverterString.write(value.`itemId`, buf)
-                Unit
-            }
-            is RuntimeRequest.RestoreItem -> {
                 buf.putInt(11)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
-            is RuntimeRequest.MoveItem -> {
+            is RuntimeRequest.RestoreItem -> {
                 buf.putInt(12)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.MoveItem -> {
+                buf.putInt(13)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`targetVaultId`, buf)
                 Unit
             }
             is RuntimeRequest.PermanentlyDeleteItem -> {
-                buf.putInt(13)
+                buf.putInt(14)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateShare -> {
-                buf.putInt(14)
+                buf.putInt(15)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.AcknowledgeShareResult -> {
-                buf.putInt(15)
+                buf.putInt(16)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
@@ -5837,6 +5885,17 @@ sealed class RuntimeResponse {
     data class AccessChanged(
         val `accountId`: kotlin.String,
         val `access`: uniffi.bittery_client_bindings.AccountAccessState) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class ServerAccountDeletion(
+        val `accountId`: kotlin.String,
+        val `requestId`: kotlin.String,
+        val `outcome`: uniffi.bittery_client_bindings.ServerAccountDeletionOutcome) : RuntimeResponse()
 
     {
 
@@ -5900,16 +5959,21 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.read(buf),
                 FfiConverterTypeAccountAccessState.read(buf),
                 )
-            3 -> RuntimeResponse.Accepted(
+            3 -> RuntimeResponse.ServerAccountDeletion(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeServerAccountDeletionOutcome.read(buf),
+                )
+            4 -> RuntimeResponse.Accepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            4 -> RuntimeResponse.ShareResultAcknowledged(
+            5 -> RuntimeResponse.ShareResultAcknowledged(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            5 -> RuntimeResponse.Teardown(
+            6 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -5933,6 +5997,15 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterTypeAccountAccessState.allocationSize(value.`access`)
+            )
+        }
+        is RuntimeResponse.ServerAccountDeletion -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`requestId`)
+                + FfiConverterTypeServerAccountDeletionOutcome.allocationSize(value.`outcome`)
             )
         }
         is RuntimeResponse.Accepted -> {
@@ -5977,27 +6050,69 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterTypeAccountAccessState.write(value.`access`, buf)
                 Unit
             }
-            is RuntimeResponse.Accepted -> {
+            is RuntimeResponse.ServerAccountDeletion -> {
                 buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`requestId`, buf)
+                FfiConverterTypeServerAccountDeletionOutcome.write(value.`outcome`, buf)
+                Unit
+            }
+            is RuntimeResponse.Accepted -> {
+                buf.putInt(4)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.ShareResultAcknowledged -> {
-                buf.putInt(4)
+                buf.putInt(5)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
             is RuntimeResponse.Teardown -> {
-                buf.putInt(5)
+                buf.putInt(6)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ServerAccountDeletionOutcome {
+
+    DELETED,
+    CONFIRMATION_EMAIL_MISMATCH,
+    BLOCKED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeServerAccountDeletionOutcome: FfiConverterRustBuffer<ServerAccountDeletionOutcome> {
+    override fun read(buf: ByteBuffer) = try {
+        ServerAccountDeletionOutcome.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ServerAccountDeletionOutcome) = 4UL
+
+    override fun write(value: ServerAccountDeletionOutcome, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 
@@ -6641,3 +6756,23 @@ public object FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer<List
         }
     }
 }
+
+
+
+
+
+
+
+
+        /**
+         * Canonicalizes and validates an Account email through the Runtime's shared Rust policy.
+         */
+    @Throws(BindingException::class) fun `normalizeAccountEmail`(`input`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_func_normalize_account_email(
+
+        FfiConverterString.lower(`input`),_status)
+}
+    )
+    }

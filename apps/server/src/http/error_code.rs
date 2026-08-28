@@ -67,6 +67,10 @@ pub enum ErrorCode {
     InvalidItemState,
     /// An email address exceeds the documented length.
     InvalidEmail,
+    /// The supplied email did not confirm Account deletion.
+    AccountDeletionConfirmationMismatch,
+    /// Account deletion is blocked by surviving Team ownership.
+    AccountDeletionBlocked,
     /// A JSON Merge Patch set a field to `null` that cannot be cleared.
     FieldCannotBeCleared,
     /// The audit search term exceeds the documented length.
@@ -130,6 +134,8 @@ impl ErrorCode {
         Self::InvalidVersion,
         Self::InvalidItemState,
         Self::InvalidEmail,
+        Self::AccountDeletionConfirmationMismatch,
+        Self::AccountDeletionBlocked,
         Self::FieldCannotBeCleared,
         Self::SearchTooLong,
         Self::TooManyHiddenVaults,
@@ -177,6 +183,8 @@ impl ErrorCode {
             Self::InvalidVersion => "INVALID_VERSION",
             Self::InvalidItemState => "INVALID_ITEM_STATE",
             Self::InvalidEmail => "INVALID_EMAIL",
+            Self::AccountDeletionConfirmationMismatch => "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+            Self::AccountDeletionBlocked => "ACCOUNT_DELETION_BLOCKED",
             Self::FieldCannotBeCleared => "FIELD_CANNOT_BE_CLEARED",
             Self::SearchTooLong => "SEARCH_TOO_LONG",
             Self::TooManyHiddenVaults => "TOO_MANY_HIDDEN_VAULTS",

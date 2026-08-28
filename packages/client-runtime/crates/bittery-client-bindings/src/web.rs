@@ -184,6 +184,13 @@ async fn drain_published_observations(
 
 #[wasm_bindgen]
 impl WebClientRuntime {
+    #[wasm_bindgen(js_name = normalizeAccountEmail)]
+    pub fn normalize_account_email(input: String) -> Result<String, JsValue> {
+        core::normalize_account_email(&input)
+            .map(core::NormalizedAccountEmail::into_string)
+            .map_err(|_| JsValue::from_str("Account deletion confirmation email is invalid"))
+    }
+
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::from_inner(core::Runtime::new())

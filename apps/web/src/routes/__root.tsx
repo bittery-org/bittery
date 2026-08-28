@@ -11,6 +11,7 @@ import {
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { ThemeProvider } from "next-themes";
 import appCss from "../index.css?url";
+import { recoverAccountDeletionAtStartup } from "../lib/account-deletion-recovery";
 import { initializeStorage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -24,7 +25,10 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 	// accountId, so the web active account must be seeded before any route guard, loader
 	// or component makes an account-scoped call. Root `beforeLoad` runs ahead of all of
 	// them, and `initializeStorage` is memoised so repeated navigations are free.
-	beforeLoad: () => initializeStorage(),
+	beforeLoad: async () => {
+		await initializeStorage();
+		await recoverAccountDeletionAtStartup();
+	},
 	head: () => ({
 		meta: [
 			{

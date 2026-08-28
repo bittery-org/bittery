@@ -45,9 +45,10 @@ if [[ "${BITTERY_BINDING_TEST_HARNESS:-0}" == "1" ]]; then
 	cargo_features=(--features binding-test-harness)
 fi
 cargo build --manifest-path crate/Cargo.toml --release --target wasm32-unknown-unknown "${cargo_features[@]}"
+WASM_TARGET_ROOT="${CARGO_TARGET_DIR:-$PWD/crate/target}"
 wasm-bindgen --target web --omit-default-module-path --out-name index \
 	--out-dir "$WASM_BINDINGS_OUTPUT" \
-	crate/target/wasm32-unknown-unknown/release/bittery_crypto_wasm.wasm
+	"$WASM_TARGET_ROOT/wasm32-unknown-unknown/release/bittery_crypto_wasm.wasm"
 pnpm exec prettier --write \
 	"$WASM_BINDINGS_OUTPUT"/*.js \
 	"$WASM_BINDINGS_OUTPUT"/*.d.ts >/dev/null

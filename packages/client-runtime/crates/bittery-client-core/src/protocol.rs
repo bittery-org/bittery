@@ -96,6 +96,17 @@ pub enum RuntimeRequest {
         )]
         account_id: AccountId,
     },
+    /// Uses this installed Account's Runtime-owned Session to request authoritative Server
+    /// deletion. The host retains the exact request identity until the workflow is closed.
+    DeleteServerAccount {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String", regex(pattern = "^[\\s\\S]+$"))
+        )]
+        account_id: AccountId,
+        confirm_email: String,
+        request_id: String,
+    },
     /// Irreversibly removes every Runtime-owned Account and Device record.
     Wipe,
     CreateLoginItem {
@@ -202,6 +213,9 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .finish(),
             Self::RemoveAccount { .. } => formatter.write_str("RemoveAccount([redacted scope])"),
+            Self::DeleteServerAccount { .. } => {
+                formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
+            }
             Self::Wipe => formatter.write_str("Wipe"),
             Self::CreateLoginItem {
                 account_id,
@@ -296,6 +310,7 @@ impl RuntimeRequest {
             Self::QuickUnlock { account_id, .. } => Some(account_id),
             Self::Lock { account_id } | Self::SignOut { account_id } => Some(account_id),
             Self::RemoveAccount { account_id } => Some(account_id),
+            Self::DeleteServerAccount { account_id, .. } => Some(account_id),
             Self::Wipe => None,
             Self::CreateLoginItem { account_id, .. }
             | Self::UpdateLoginItem { account_id, .. }
@@ -458,6 +473,15 @@ pub enum RuntimeResponse {
         account_id: AccountId,
         access: AccountAccessState,
     },
+    ServerAccountDeletion {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String", regex(pattern = "^[\\s\\S]+$"))
+        )]
+        account_id: AccountId,
+        request_id: String,
+        outcome: ServerAccountDeletionOutcome,
+    },
     Accepted {
         operation_id: String,
         item_id: String,
@@ -519,6 +543,18 @@ pub enum TeardownScope {
 pub enum TeardownStatus {
     Complete,
     Incomplete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerAccountDeletionOutcome {
+    Deleted,
+    ConfirmationEmailMismatch,
+    Blocked,
 }
 
 /// Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.
@@ -1083,5 +1119,45 @@ impl RequestCancellation {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod server_account_deletion_protocol_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn server_account_deletion_protocol_is_explicit_scoped_and_redacted() {
+        let request = RuntimeRequest::DeleteServerAccount {
+            account_id: AccountId::from("account-1"),
+            confirm_email: "user@example.com".into(),
+            request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d01".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            json!({
+                "type": "deleteServerAccount",
+                "accountId": "account-1",
+                "confirmEmail": "user@example.com",
+                "requestId": "018f05c4-7b6a-4a89-9237-2e612fa96d01"
+            })
+        );
+        assert!(!format!("{request:?}").contains("user@example.com"));
+
+        let response = RuntimeResponse::ServerAccountDeletion {
+            account_id: AccountId::from("account-1"),
+            request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d01".into(),
+            outcome: ServerAccountDeletionOutcome::Deleted,
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            json!({
+                "type": "serverAccountDeletion",
+                "accountId": "account-1",
+                "requestId": "018f05c4-7b6a-4a89-9237-2e612fa96d01",
+                "outcome": "deleted"
+            })
+        );
     }
 }

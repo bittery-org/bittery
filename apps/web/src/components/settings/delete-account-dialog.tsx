@@ -1,5 +1,4 @@
 import { useRuntimeClient } from "@bittery/client-runtime/react";
-import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -19,18 +18,23 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
-	type AccountDeletionDeps,
+	type DeleteAccountEverywhereDeps,
+	deleteAccountEverywhere,
+} from "@/lib/account-deletion";
+import {
 	type AccountDeletionIncomplete,
+	type AccountRemovalDeps,
 	clearBrowserStoredDataOnly,
-	deleteAccountEverywhereFromDevice,
+	removeAccountFromDevice,
 	retryCannotFinish,
 } from "@/lib/account-removal";
+import { normalizeAccountEmail } from "@/lib/crypto";
 import {
 	clearActiveAccountData,
 	forgetWebAccountId,
 	getTransitionalAccountId,
-	readDeletedServerAccountId,
-	writeDeletedServerAccountId,
+	readAccountDeletionMarker,
+	writeAccountDeletionMarker,
 } from "@/lib/storage";
 import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
@@ -63,7 +67,6 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [confirmEmail, setConfirmEmail] = useState("");
 	const [confirmText, setConfirmText] = useState("");
 	const [deletion, setDeletion] = useState<DeletionState>(CONFIRMING);
-	const apiClient = useApiClient();
 	const navigate = useNavigate();
 	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
@@ -78,10 +81,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	// Server still holds locks the user out of an Account that still exists. Everything
 	// after the Server is ordinary Account removal, so it is the same composition the
 	// sidebar's "Log out" uses.
-	const deletionDeps = (email: string): AccountDeletionDeps => ({
-		deleteServerAccount: async () => {
-			await apiClient.auth.deleteAccount({ confirmEmail: email });
-		},
+	const removalDeps: AccountRemovalDeps = {
 		resolveRuntimeAccountId: () => runtimeClient.resolveAccount(),
 		resolveTransitionalAccountId: getTransitionalAccountId,
 		removeAccount: (accountId: string) =>
@@ -91,8 +91,30 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		clearTransitionalAccountData: (accountId: string) =>
 			clearActiveAccountData(accountId, () => manager.refresh()),
 		forgetTransitionalAccountId: forgetWebAccountId,
-		readDeletedServerAccountId,
-		writeDeletedServerAccountId,
+		clearAccountDeletionMarker: () => writeAccountDeletionMarker(null),
+	};
+
+	const deletionDeps = (
+		previous: AccountDeletionIncomplete | null,
+	): DeleteAccountEverywhereDeps => ({
+		async resolveTarget() {
+			const runtimeAccountId = runtimeClient.resolveAccount();
+			const transitionalAccountId = await getTransitionalAccountId();
+			return runtimeAccountId === null || transitionalAccountId === null
+				? null
+				: { runtimeAccountId, transitionalAccountId };
+		},
+		readMarker: readAccountDeletionMarker,
+		writeMarker: writeAccountDeletionMarker,
+		createRequestId: () => window.crypto.randomUUID(),
+		normalizeAccountEmail,
+		deleteServerAccount: (input) => runtimeClient.deleteServerAccount(input),
+		removeLocalAccount: (target) =>
+			removeAccountFromDevice(previous, {
+				...removalDeps,
+				resolveRuntimeAccountId: () => target.runtimeAccountId,
+				resolveTransitionalAccountId: async () => target.transitionalAccountId,
+			}),
 	});
 
 	const runDeletion = async (
@@ -100,11 +122,10 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		previous: AccountDeletionIncomplete | null,
 	) => {
 		setDeletion({ phase: "deleting", action, previous });
-		const deps = deletionDeps(confirmEmail);
 		const result =
 			action === "clearBrowserData" && previous !== null
-				? await clearBrowserStoredDataOnly(previous, deps)
-				: await deleteAccountEverywhereFromDevice(previous, deps);
+				? await clearBrowserStoredDataOnly(previous, removalDeps)
+				: await deleteAccountEverywhere(confirmEmail, deletionDeps(previous));
 		if (result.status === "deleted") {
 			lastIncompleteReport.current = null;
 			setDeletion(CONFIRMING);
@@ -120,6 +141,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 		if (result.status === "browserDataCleared") {
+			writeAccountDeletionMarker(null);
 			// The Server Account is gone and this browser let go, but the Runtime did not.
 			// This is its own terminal status: no navigation and no removal retry.
 			lastIncompleteReport.current = null;
@@ -129,8 +151,28 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		}
 		// Never a success toast and never a navigation: the Server, the Runtime or this
 		// browser still holds something the user asked to be gone.
-		lastIncompleteReport.current = result;
-		setDeletion({ phase: "incomplete", result });
+		const attempts = (previous?.attempts ?? 0) + 1;
+		const report: AccountDeletionIncomplete =
+			"local" in result && result.local !== undefined
+				? {
+						...result.local,
+						attempts,
+						serverAccountDeleted: true,
+						canClearBrowserDataOnly:
+							result.local.target?.transitionalAccountId !== null &&
+							attempts >= 2,
+					}
+				: {
+						status: "incomplete",
+						target: result.target ?? null,
+						attempts,
+						areas: ["serverAccount"],
+						code: null,
+						serverAccountDeleted: result.serverAccountDeleted ?? false,
+						canClearBrowserDataOnly: false,
+					};
+		lastIncompleteReport.current = report;
+		setDeletion({ phase: "incomplete", result: report });
 		toast.error(
 			action === "clearBrowserData"
 				? m.settings_delete_account_dialog_toast_clear_browser_data_failed()

@@ -3,6 +3,7 @@ import { createApiClient } from "../client.ts";
 import { ApiError } from "../errors.ts";
 import type {
 	ApiResult,
+	DeleteAccountResponse,
 	LoginAttempt,
 	OperationOutcome,
 	SyncChanges,
@@ -23,6 +24,31 @@ function metadata() {
 }
 
 describe("Bittery API facade", () => {
+	test("returns the generated typed Account deletion response", async () => {
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getAccessToken: () => "opaque-session",
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async () =>
+				Response.json({
+					requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+					outcome: "deleted",
+				}),
+		});
+
+		const result = await client.auth.deleteAccount(
+			{ confirmEmail: "person@example.test" },
+			{ idempotencyKey: "018f47a2-6f40-47da-8d53-a55e557dc723" },
+		);
+		const response: DeleteAccountResponse = result.data;
+		expect(response.outcome).toBe("deleted");
+	});
+
 	test("drains issued vault-key pages with a request-scoped bearer token", async () => {
 		const requests: Request[] = [];
 		let providerCalls = 0;

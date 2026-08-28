@@ -84,6 +84,7 @@ impl Pause {
 enum HttpPauseStep {
     Bootstrap,
     Events,
+    AccountDeletion,
 }
 
 struct HttpPause {
@@ -110,6 +111,7 @@ impl HttpPause {
             (self.step, route),
             (HttpPauseStep::Bootstrap, V1Route::SyncBootstrap)
                 | (HttpPauseStep::Events, V1Route::SyncEvents)
+                | (HttpPauseStep::AccountDeletion, V1Route::DeleteAccount)
         )
     }
 
@@ -421,6 +423,7 @@ struct RoutingAuthHttp {
     disconnected: AtomicBool,
     unauthorized_sync_once: AtomicBool,
     pause: Mutex<Option<Arc<HttpPause>>>,
+    account_deletion_responses: Mutex<VecDeque<(u16, Value)>>,
 }
 
 struct RoutingAuthState {
@@ -469,6 +472,7 @@ impl RoutingAuthHttp {
             disconnected: AtomicBool::new(false),
             unauthorized_sync_once: AtomicBool::new(false),
             pause: Mutex::new(None),
+            account_deletion_responses: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -675,6 +679,7 @@ enum V1Route<'a> {
     FinishLogin,
     TravelMode,
     RefreshSession,
+    DeleteAccount,
     SyncBootstrap,
     SyncChanges,
     SyncEvents,
@@ -689,6 +694,7 @@ fn v1_route(url: &str) -> Option<V1Route<'_>> {
         "auth/login-attempts/attempt-1/finish" => Some(V1Route::FinishLogin),
         "travel-mode" => Some(V1Route::TravelMode),
         "sessions/current/refresh" => Some(V1Route::RefreshSession),
+        "users/me" => Some(V1Route::DeleteAccount),
         "sync/bootstrap" => Some(V1Route::SyncBootstrap),
         "sync/changes" => Some(V1Route::SyncChanges),
         "sync/events" => Some(V1Route::SyncEvents),
@@ -753,6 +759,26 @@ impl SerializedHttpExecutor for RoutingAuthHttp {
             V1Route::FinishLogin => self.finish_login(&mut state),
             V1Route::TravelMode => self.travel_mode(),
             V1Route::RefreshSession => self.refresh_session(),
+            V1Route::DeleteAccount => {
+                let request = state.requests.last().unwrap();
+                let request_id = request["headers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|header| header["name"] == "Idempotency-Key")
+                    .and_then(|header| header["value"].as_str())
+                    .expect("deletion request identity header")
+                    .to_owned();
+                let response = self.account_deletion_responses.lock().unwrap().pop_front();
+                match response {
+                    Some((status @ (400 | 409), body)) => routing_problem_completed(status, body),
+                    Some((status, body)) => routing_completed(status, body),
+                    None => routing_completed(
+                        200,
+                        json!({"requestId": request_id, "outcome": "deleted"}),
+                    ),
+                }
+            }
             V1Route::SyncBootstrap => self.bootstrap_page(&mut state),
             V1Route::SyncChanges => self.changes_page(&mut state),
             V1Route::SyncEvents => self.sse_events(),
@@ -786,6 +812,19 @@ fn routing_completed(status: u16, body: Value) -> String {
         "type": "completed",
         "status": status,
         "headers": [{"name": "Content-Type", "value": "application/json"}],
+        "body": serde_json::to_vec(&body).unwrap()
+    })
+    .to_string()
+}
+
+fn routing_problem_completed(status: u16, body: Value) -> String {
+    json!({
+        "type": "completed",
+        "status": status,
+        "headers": [
+            {"name": "Content-Type", "value": "application/problem+json"},
+            {"name": "Idempotency-Replayed", "value": "true"}
+        ],
         "body": serde_json::to_vec(&body).unwrap()
     })
     .to_string()
@@ -1035,6 +1074,502 @@ async fn sign_in_routes_the_verified_ceremony_into_one_published_unlocked_accoun
             .as_ref()
             .map(|identity| identity.email.as_str()),
         Some(NORMALIZED_EMAIL)
+    );
+}
+
+#[tokio::test]
+async fn server_account_deletion_uses_the_scoped_session_and_exact_wire_contract() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    http.clear_requests();
+    let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96d11";
+
+    let response = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id: account_id.clone(),
+                confirm_email: "  ＵＳＥＲ-1＠ＥＸＡＭＰＬＥ．ＣＯＭ  ".into(),
+                request_id: request_id.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response,
+        RuntimeResponse::ServerAccountDeletion {
+            account_id,
+            request_id: request_id.into(),
+            outcome: crate::protocol::ServerAccountDeletionOutcome::Deleted,
+        }
+    );
+
+    let requests = http.requests();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request["method"], "DELETE");
+    assert!(request["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/api/v1/users/me"));
+    assert_eq!(
+        routing_request_body(request),
+        json!({"confirmEmail": NORMALIZED_EMAIL})
+    );
+    let headers = request["headers"].as_array().unwrap();
+    assert!(headers.iter().any(|header| {
+        header["name"] == "Authorization" && header["value"] == "Bearer fresh-token"
+    }));
+    assert!(headers
+        .iter()
+        .any(|header| { header["name"] == "Idempotency-Key" && header["value"] == request_id }));
+}
+
+#[tokio::test]
+async fn server_account_deletion_refreshes_once_then_retries_identical_bytes() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96d12";
+    *http.account_deletion_responses.lock().unwrap() = VecDeque::from([
+        (401, json!({"error": "expired"})),
+        (200, json!({"requestId": request_id, "outcome": "deleted"})),
+    ]);
+    http.clear_requests();
+
+    runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id: account_id.clone(),
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: request_id.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    let requests = http.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0]["url"].as_str().unwrap().ends_with("/users/me"));
+    assert!(requests[1]["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/sessions/current/refresh"));
+    assert!(requests[2]["url"].as_str().unwrap().ends_with("/users/me"));
+    assert_eq!(requests[0]["body"], requests[2]["body"]);
+    let first_headers = requests[0]["headers"].as_array().unwrap();
+    let retry_headers = requests[2]["headers"].as_array().unwrap();
+    assert!(first_headers.iter().any(|header| {
+        header["name"] == "Authorization" && header["value"] == "Bearer fresh-token"
+    }));
+    assert!(retry_headers.iter().any(|header| {
+        header["name"] == "Authorization" && header["value"] == "Bearer refreshed-token"
+    }));
+    assert_eq!(
+        first_headers
+            .iter()
+            .find(|header| header["name"] == "Idempotency-Key"),
+        retry_headers
+            .iter()
+            .find(|header| header["name"] == "Idempotency-Key")
+    );
+    let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+    let stored = runtime
+        .platform_storage
+        .load_current_session(&account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .expect("refreshed Session must remain stored under the same Account incarnation");
+    assert_eq!(stored.account_id, account_id);
+    assert_eq!(stored.incarnation, snapshot.incarnation);
+    assert_eq!(stored.session_id.as_deref(), Some("session-1"));
+    assert_eq!(stored.token.as_ref(), "refreshed-token");
+}
+
+#[tokio::test]
+async fn server_account_deletion_ambiguity_does_not_refresh_or_claim_no_deletion() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    http.clear_requests();
+    http.disconnect();
+    let error = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id,
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d13".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+    assert_eq!(error.message, "Account deletion is not confirmed");
+    assert!(
+        http.requests().is_empty(),
+        "no refresh may follow transport loss"
+    );
+}
+
+fn account_deletion_problem(request_id: &str, status: u16, code: &str) -> Value {
+    json!({
+        "type": format!("https://bittery.com/problems/{}", code.to_ascii_lowercase().replace('_', "-")),
+        "title": "Account deletion closed",
+        "status": status,
+        "code": code,
+        "detail": "closed",
+        "instance": format!("urn:bittery:account-deletion:{request_id}"),
+        "requestId": request_id,
+        "retryable": false
+    })
+}
+
+#[tokio::test]
+async fn server_account_deletion_maps_closed_refusals_and_rejects_mismatched_echoes() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    let mismatch_id = "018f05c4-7b6a-4a89-9237-2e612fa96d14";
+    *http.account_deletion_responses.lock().unwrap() = VecDeque::from([(
+        400,
+        account_deletion_problem(mismatch_id, 400, "ACCOUNT_DELETION_CONFIRMATION_MISMATCH"),
+    )]);
+    let mismatch = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id: account_id.clone(),
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: mismatch_id.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        mismatch,
+        RuntimeResponse::ServerAccountDeletion {
+            account_id: account_id.clone(),
+            request_id: mismatch_id.into(),
+            outcome: crate::protocol::ServerAccountDeletionOutcome::ConfirmationEmailMismatch,
+        }
+    );
+
+    let blocked_id = "018f05c4-7b6a-4a89-9237-2e612fa96d18";
+    *http.account_deletion_responses.lock().unwrap() = VecDeque::from([(
+        409,
+        account_deletion_problem(blocked_id, 409, "ACCOUNT_DELETION_BLOCKED"),
+    )]);
+    let blocked = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id: account_id.clone(),
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: blocked_id.into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        blocked,
+        RuntimeResponse::ServerAccountDeletion {
+            account_id: account_id.clone(),
+            request_id: blocked_id.into(),
+            outcome: crate::protocol::ServerAccountDeletionOutcome::Blocked,
+        }
+    );
+
+    *http.account_deletion_responses.lock().unwrap() = VecDeque::from([(
+        200,
+        json!({
+            "requestId": "018f05c4-7b6a-4a89-9237-2e612fa96d99",
+            "outcome": "deleted"
+        }),
+    )]);
+    let error = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id,
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d15".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+}
+
+#[tokio::test]
+async fn server_account_deletion_pre_dispatch_cancellation_contacts_no_authority() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    http.clear_requests();
+    let cancellation = RequestCancellation::new();
+    cancellation.cancel();
+    let error = runtime
+        .request(
+            RuntimeRequest::DeleteServerAccount {
+                account_id,
+                confirm_email: NORMALIZED_EMAIL.into(),
+                request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d16".into(),
+            },
+            cancellation,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    assert!(http.requests().is_empty());
+}
+
+#[tokio::test]
+async fn server_account_deletion_holds_the_account_fence_against_sign_out() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    let pause = HttpPause::new(HttpPauseStep::AccountDeletion);
+    http.pause_at(pause.clone());
+    let deleting_runtime = runtime.clone();
+    let deleting_account = account_id.clone();
+    let deletion = tokio::spawn(async move {
+        deleting_runtime
+            .request(
+                RuntimeRequest::DeleteServerAccount {
+                    account_id: deleting_account,
+                    confirm_email: NORMALIZED_EMAIL.into(),
+                    request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d17".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    pause.wait_until_reached().await;
+    let signing_out_runtime = runtime.clone();
+    let sign_out = tokio::spawn(async move {
+        signing_out_runtime
+            .request(
+                RuntimeRequest::SignOut { account_id },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !sign_out.is_finished(),
+        "Sign-out must wait for deletion classification"
+    );
+    pause.release();
+    deletion.await.unwrap().unwrap();
+    sign_out.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn server_account_deletion_holds_session_and_admission_against_remove_account() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+    let pause = HttpPause::new(HttpPauseStep::AccountDeletion);
+    http.pause_at(pause.clone());
+    let deleting_runtime = runtime.clone();
+    let deleting_account = account_id.clone();
+    let deletion = tokio::spawn(async move {
+        deleting_runtime
+            .request(
+                RuntimeRequest::DeleteServerAccount {
+                    account_id: deleting_account,
+                    confirm_email: NORMALIZED_EMAIL.into(),
+                    request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d19".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    pause.wait_until_reached().await;
+    let removing_runtime = runtime.clone();
+    let removing_account = account_id.clone();
+    let removal = tokio::spawn(async move {
+        removing_runtime
+            .request(
+                RuntimeRequest::RemoveAccount {
+                    account_id: removing_account,
+                },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !removal.is_finished(),
+        "RemoveAccount must wait for deletion admission"
+    );
+    assert!(runtime
+        .platform_storage
+        .load_current_session(&account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .is_some());
+    removal.abort();
+    assert!(removal.await.unwrap_err().is_cancelled());
+    pause.release();
+    deletion.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn server_account_deletion_finishes_classification_before_close_retires_authority() {
+    let http = Arc::new(RoutingAuthHttp::new(
+        current_kdf_profile(),
+        RoutingAuthBehavior::Success,
+        None,
+    ));
+    let (runtime, _replica, _platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn { account_id, .. } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected SignedIn");
+    };
+    let snapshot = runtime.replica.snapshot(&account_id).unwrap();
+    let pause = HttpPause::new(HttpPauseStep::AccountDeletion);
+    http.pause_at(pause.clone());
+    let deleting_runtime = runtime.clone();
+    let deleting_account = account_id.clone();
+    let deletion = tokio::spawn(async move {
+        deleting_runtime
+            .request(
+                RuntimeRequest::DeleteServerAccount {
+                    account_id: deleting_account,
+                    confirm_email: NORMALIZED_EMAIL.into(),
+                    request_id: "018f05c4-7b6a-4a89-9237-2e612fa96d20".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    pause.wait_until_reached().await;
+    let closing_runtime = runtime.clone();
+    let closing = tokio::spawn(async move { closing_runtime.close().await });
+    tokio::task::yield_now().await;
+    assert!(
+        !closing.is_finished(),
+        "close must wait for deletion classification"
+    );
+    assert!(runtime
+        .platform_storage
+        .load_current_session(&account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .is_some());
+    pause.release();
+    deletion.await.unwrap().unwrap();
+    closing.await.unwrap();
+    assert!(
+        runtime
+            .platform_storage
+            .load_current_session(&account_id, &snapshot.incarnation)
+            .await
+            .unwrap()
+            .is_some(),
+        "close preserves durable exact-retry Session authority"
     );
 }
 

@@ -8,7 +8,8 @@ use time::{Duration, OffsetDateTime};
 
 use super::{
     cleanup_attachment_move_staging, cleanup_expired_sessions, cleanup_pending_attachment_uploads,
-    cleanup_tombstones, prune_rate_limit_state, prune_sync_events,
+    cleanup_tombstones, observe_account_deletion_outcome_rows, prune_rate_limit_state,
+    prune_sync_events,
 };
 use crate::domains::vaults::rotation::plans::cleanup_rotation_plans;
 use crate::integrations::storage::{
@@ -21,6 +22,34 @@ use crate::test_support::{
 struct ClaimObservingStorage {
     pool: PgPool,
     saw_committed_claim: AtomicBool,
+}
+
+#[tokio::test]
+async fn account_deletion_outcome_row_gauge_runs_outside_the_response_path() {
+    with_api_test_app("jobs_account_deletion_outcome_gauge", |app| async move {
+        for (request_id, byte) in [
+            ("018f05c4-7b6a-4a89-9237-2e612fa96c81", 1_u8),
+            ("018f05c4-7b6a-4a89-9237-2e612fa96c82", 2_u8),
+        ] {
+            query(
+                "INSERT INTO account_deletion_outcome (request_id, credential_proof, request_fingerprint, outcome) VALUES ($1::uuid, $2, $3, 'confirmationMismatch')",
+            )
+            .bind(request_id)
+            .bind(vec![byte; 32])
+            .bind(vec![byte + 10; 32])
+            .execute(&app.pool)
+            .await
+            .expect("outcome should seed");
+        }
+
+        assert_eq!(
+            observe_account_deletion_outcome_rows(&app.pool)
+                .await
+                .expect("row gauge should load"),
+            2,
+        );
+    })
+    .await;
 }
 
 #[async_trait::async_trait]

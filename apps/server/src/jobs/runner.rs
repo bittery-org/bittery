@@ -12,7 +12,8 @@ use tracing::{error, info};
 
 use super::sql::{
     cleanup_attachment_move_staging, cleanup_expired_sessions, cleanup_pending_attachment_uploads,
-    cleanup_tombstones, prune_rate_limit_state, prune_sync_events,
+    cleanup_tombstones, observe_account_deletion_outcome_rows, prune_rate_limit_state,
+    prune_sync_events,
 };
 use crate::domains::vaults::{
     fetch_and_store_favicon, list_domains_to_refresh,
@@ -84,6 +85,13 @@ impl JobRunner {
                 "0 30 3 * * * *",
                 context.clone(),
                 run_rate_limit_state_pruning,
+                shutdown_tx.subscribe(),
+            )?,
+            spawn_job(
+                "account-deletion-outcome-observability",
+                "0 */15 * * * * *",
+                context.clone(),
+                run_account_deletion_outcome_observability,
                 shutdown_tx.subscribe(),
             )?,
             spawn_job(
@@ -282,6 +290,14 @@ fn run_rate_limit_state_pruning(context: JobContext) -> JobFuture {
     let pool = context.pool;
     Box::pin(async move {
         prune_rate_limit_state(&pool).await?;
+        Ok(())
+    })
+}
+
+fn run_account_deletion_outcome_observability(context: JobContext) -> JobFuture {
+    let pool = context.pool;
+    Box::pin(async move {
+        observe_account_deletion_outcome_rows(&pool).await?;
         Ok(())
     })
 }

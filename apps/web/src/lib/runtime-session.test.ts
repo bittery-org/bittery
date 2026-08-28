@@ -142,6 +142,16 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		expect(guard).not.toContain("storage.isAuthenticated");
 	});
 
+	test("post-dispatch deletion recovery runs before route authentication can refresh", () => {
+		const root = source("../routes/__root.tsx");
+		const storageReady = root.indexOf("await initializeStorage()");
+		const deletionRecovered = root.indexOf(
+			"await recoverAccountDeletionAtStartup()",
+		);
+		expect(storageReady).toBeGreaterThan(-1);
+		expect(deletionRecovered).toBeGreaterThan(storageReady);
+	});
+
 	// Web "Log out" removes the whole Account from the Device, so it routes through the
 	// Runtime's irreversible teardown, asks first, and reports what survived. `signOut` is
 	// the weaker request and no longer reachable from here.
@@ -239,12 +249,20 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 	// the transitional orchestrator surfaced only the server step and dropped the rest.
 	test("account deletion deletes on the Server first, then destroys through the Runtime", () => {
 		const dialog = source("../components/settings/delete-account-dialog.tsx");
-		expect(dialog).toContain("deleteAccountEverywhereFromDevice");
+		const orchestration = source("./account-deletion.ts");
+		expect(dialog).toContain("deleteAccountEverywhere");
+		expect(dialog).toContain("runtimeClient.deleteServerAccount");
+		expect(dialog).toContain("normalizeAccountEmail");
+		expect(orchestration).toContain(
+			"await deps.normalizeAccountEmail(confirmEmail)",
+		);
+		expect(orchestration).not.toContain(".toLowerCase(");
+		expect(orchestration).not.toContain('.normalize("NFKC")');
 		expect(dialog).toContain("runtimeClient.removeAccount");
 		expect(dialog).toContain("clearActiveAccountData");
 		expect(dialog).toContain("forgetWebAccountId");
 		expect(dialog).not.toContain("@bittery/core/services/account-lifecycle");
-		expect(dialog).not.toContain("deleteAccountEverywhere(");
+		expect(dialog).not.toContain("apiClient.auth.deleteAccount");
 		expect(dialog).not.toContain('failure.step === "delete_server_account"');
 		// The success effects belong to the deleted arm alone. Navigating on anything
 		// else claims a deletion that did not happen.
@@ -275,11 +293,9 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		);
 		expect(runDeletion).toContain('action === "clearBrowserData"');
 		expect(runDeletion).toContain(
-			"await clearBrowserStoredDataOnly(previous, deps)",
+			"await clearBrowserStoredDataOnly(previous, removalDeps)",
 		);
-		expect(runDeletion).toContain(
-			"await deleteAccountEverywhereFromDevice(previous, deps)",
-		);
+		expect(runDeletion).toContain("await deleteAccountEverywhere(");
 
 		const terminalStart = dialog.indexOf(
 			'result.status === "browserDataCleared"',
@@ -327,7 +343,7 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		const dialog = source("../components/settings/delete-account-dialog.tsx");
 		expect(dialog).toContain("useRef<AccountDeletionIncomplete | null>(null)");
 		expect(dialog).toMatch(
-			/lastIncompleteReport\.current = result;[\s\S]{0,120}?setDeletion\(\{ phase: "incomplete"/,
+			/lastIncompleteReport\.current = report;[\s\S]{0,120}?setDeletion\(\{ phase: "incomplete"/,
 		);
 		// The read, not only the write. A ref nothing reads back is a ref that carries
 		// nothing: the reopened dialog would show a fresh confirmation and the next
@@ -340,13 +356,13 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 	// the browser to `/login`. The fact the retry cannot re-derive is written down.
 	test("the deleted Server Account is remembered outside React memory", () => {
 		const dialog = source("../components/settings/delete-account-dialog.tsx");
-		expect(dialog).toContain("readDeletedServerAccountId");
-		expect(dialog).toContain("writeDeletedServerAccountId");
+		expect(dialog).toContain("readAccountDeletionMarker");
+		expect(dialog).toContain("writeAccountDeletionMarker");
 
 		const store = source("./storage.ts");
 		// Keyed by the account it is about, so it can never speak for another one.
 		expect(store).toMatch(
-			/writeDeletedServerAccountId\([\s\S]{0,200}?setItem\(\s*DELETED_SERVER_ACCOUNT_KEY,\s*accountId/,
+			/writeAccountDeletionMarker\([\s\S]{0,300}?JSON\.stringify\(marker\)/,
 		);
 	});
 

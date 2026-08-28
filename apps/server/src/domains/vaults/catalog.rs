@@ -28,7 +28,10 @@ use crate::{
     },
     error::AppError,
     integrations::storage,
-    shared::transaction::{acquire_advisory_lock, database_error},
+    shared::transaction::{
+        acquire_advisory_lock, acquire_team_authority_lock, acquire_user_authority_lock,
+        database_error,
+    },
 };
 
 #[derive(Debug, sqlx::FromRow)]
@@ -71,6 +74,7 @@ pub(super) struct DbVaultOwnerAccessRow {
 #[derive(Debug, sqlx::FromRow)]
 struct DbVaultDeleteRow {
     image_key: Option<String>,
+    team_id: Option<String>,
     role: VaultRole,
 }
 #[derive(Debug, sqlx::FromRow)]
@@ -292,6 +296,20 @@ pub(crate) async fn create_vault(
     let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
+    if let Some(team_id) = team_id.as_deref() {
+        acquire_user_authority_lock(
+            &mut transaction,
+            user_id,
+            "Failed to lock Team Vault creator authority",
+        )
+        .await?;
+        acquire_team_authority_lock(
+            &mut *transaction,
+            team_id,
+            "Failed to lock Team Vault creation authority",
+        )
+        .await?;
+    }
     if input.vault_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (team_id.as_deref(), shared_vault_limit) {
             assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
@@ -478,6 +496,20 @@ pub(crate) async fn convert_vault_type(
     let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault conversion transaction"))?;
+    if let Some(team_id) = target_team_id.as_deref() {
+        acquire_user_authority_lock(
+            &mut transaction,
+            user_id,
+            "Failed to lock Team Vault converter authority",
+        )
+        .await?;
+        acquire_team_authority_lock(
+            &mut *transaction,
+            team_id,
+            "Failed to lock Team Vault conversion authority",
+        )
+        .await?;
+    }
     if previous_type == VaultType::Personal && input.target_type == VaultType::Team {
         if let (Some(team_id), Some(limit)) = (target_team_id.as_deref(), shared_vault_limit) {
             assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
@@ -553,7 +585,7 @@ pub(crate) async fn delete_vault(
     input: VaultIdInput,
 ) -> Result<SuccessResponse, AppError> {
     let Some(vault) = query_as::<_, DbVaultDeleteRow>(
-		"SELECT v.id, v.name, v.type::text AS vault_type, v.image_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
+		"SELECT v.id, v.name, v.type::text AS vault_type, v.image_key, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 	)
 	.bind(&input.vault_id)
 	.bind(user_id)
@@ -580,6 +612,20 @@ pub(crate) async fn delete_vault(
     let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start vault delete transaction"))?;
+    if let Some(team_id) = vault.team_id.as_deref() {
+        acquire_user_authority_lock(
+            &mut transaction,
+            user_id,
+            "Failed to lock Team Vault deleter authority",
+        )
+        .await?;
+        acquire_team_authority_lock(
+            &mut *transaction,
+            team_id,
+            "Failed to lock Team Vault deletion authority",
+        )
+        .await?;
+    }
     insert_vault_deleted_sync_event(
         &mut transaction,
         &input.vault_id,

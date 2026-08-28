@@ -78,6 +78,7 @@ export interface RuntimeAuthClientConfig {
 
 export interface RuntimeWasm {
 	WebClientRuntime: {
+		normalizeAccountEmail?(input: string): string;
 		withExecutors(
 			replicaInvoke: (requestJson: string) => Promise<string>,
 			platformStorageInvoke: (requestJson: string) => Promise<string>,
@@ -132,7 +133,8 @@ export interface RuntimeWorkerServiceDeps {
 type RuntimeCommand =
 	| { type: "request"; requestId: string; requestJson: string }
 	| { type: "observe"; observationId: string; requestJson: string }
-	| { type: "unobserve"; observationId: string };
+	| { type: "unobserve"; observationId: string }
+	| { type: "normalizeAccountEmail"; value: string };
 
 type RuntimeNotification = {
 	type: "observation";
@@ -191,6 +193,13 @@ function parseCommand(value: unknown): RuntimeCommand {
 		throw invalidInput("Runtime commands must be plain objects.");
 	}
 	const command = value as Record<string, unknown>;
+	if (
+		command.type === "normalizeAccountEmail" &&
+		typeof command.value === "string" &&
+		hasExactKeys(command, ["type", "value"])
+	) {
+		return command as RuntimeCommand;
+	}
 	if (
 		command.type === "request" &&
 		typeof command.requestId === "string" &&
@@ -415,6 +424,18 @@ export function createRuntimeWorkerService(
 	return {
 		async request(payload, signal, notify) {
 			const command = parseCommand(payload);
+			if (command.type === "normalizeAccountEmail") {
+				if (signal.aborted)
+					throw invalidInput("Account email normalization was cancelled.");
+				const wasm = await deps.loadWasm();
+				const normalize = wasm.WebClientRuntime.normalizeAccountEmail;
+				if (normalize === undefined) {
+					throw invalidInput(
+						"The Rust Account email normalizer is unavailable.",
+					);
+				}
+				return normalize.call(wasm.WebClientRuntime, command.value);
+			}
 			// A wipe can only hold the Runtime after `runtime()` resumes it. Claim its interest here,
 			// before the first `await`, where no other request's continuation can run.
 			let counted = isDeviceWipe(command);
@@ -530,6 +551,7 @@ export function createRuntimeWorkerService(
 }
 
 export interface WorkerRuntime {
+	normalizeAccountEmail(value: string): Promise<string>;
 	request(
 		requestId: string,
 		requestJson: string,
@@ -568,6 +590,9 @@ export function createWorkerRuntime(
 	let closeTask: Promise<void> | undefined;
 
 	return {
+		normalizeAccountEmail(value) {
+			return channel.request<string>({ type: "normalizeAccountEmail", value });
+		},
 		request(requestId, requestJson, options) {
 			return channel.request<string>(
 				{ type: "request", requestId, requestJson } satisfies RuntimeCommand,

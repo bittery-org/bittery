@@ -7,6 +7,14 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 uniffi::setup_scaffolding!();
 
+/// Canonicalizes and validates an Account email through the Runtime's shared Rust policy.
+#[uniffi::export]
+pub fn normalize_account_email(input: String) -> Result<String, BindingError> {
+    core::normalize_account_email(&input)
+        .map(core::NormalizedAccountEmail::into_string)
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 static SENSITIVE_RUST_BUFFER_FREE_OBSERVATIONS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -245,6 +253,11 @@ pub enum RuntimeRequest {
     RemoveAccount {
         account_id: String,
     },
+    DeleteServerAccount {
+        account_id: String,
+        confirm_email: String,
+        request_id: String,
+    },
     Wipe,
     CreateLoginItem {
         account_id: String,
@@ -314,6 +327,9 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .finish(),
             Self::RemoveAccount { .. } => formatter.write_str("RemoveAccount([redacted scope])"),
+            Self::DeleteServerAccount { .. } => {
+                formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
+            }
             Self::Wipe => formatter.write_str("Wipe"),
             Self::CreateLoginItem {
                 account_id,
@@ -411,6 +427,11 @@ pub enum RuntimeResponse {
         account_id: String,
         access: AccountAccessState,
     },
+    ServerAccountDeletion {
+        account_id: String,
+        request_id: String,
+        outcome: ServerAccountDeletionOutcome,
+    },
     Accepted {
         operation_id: String,
         item_id: String,
@@ -437,6 +458,13 @@ pub enum TeardownScope {
 pub enum TeardownStatus {
     Complete,
     Incomplete,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ServerAccountDeletionOutcome {
+    Deleted,
+    ConfirmationEmailMismatch,
+    Blocked,
 }
 
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
@@ -941,6 +969,15 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             RuntimeRequest::RemoveAccount { account_id } => Self::RemoveAccount {
                 account_id: account_id.into(),
             },
+            RuntimeRequest::DeleteServerAccount {
+                account_id,
+                confirm_email,
+                request_id,
+            } => Self::DeleteServerAccount {
+                account_id: account_id.into(),
+                confirm_email,
+                request_id,
+            },
             RuntimeRequest::Wipe => Self::Wipe,
             RuntimeRequest::CreateLoginItem {
                 account_id,
@@ -1086,6 +1123,15 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 account_id: account_id.into(),
                 access: access.into(),
             },
+            core::RuntimeResponse::ServerAccountDeletion {
+                account_id,
+                request_id,
+                outcome,
+            } => Self::ServerAccountDeletion {
+                account_id: account_id.into(),
+                request_id,
+                outcome: outcome.into(),
+            },
             core::RuntimeResponse::Accepted {
                 operation_id,
                 item_id,
@@ -1111,6 +1157,18 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 status: status.into(),
                 failures: failures.into_iter().map(Into::into).collect(),
             },
+        }
+    }
+}
+
+impl From<core::ServerAccountDeletionOutcome> for ServerAccountDeletionOutcome {
+    fn from(value: core::ServerAccountDeletionOutcome) -> Self {
+        match value {
+            core::ServerAccountDeletionOutcome::Deleted => Self::Deleted,
+            core::ServerAccountDeletionOutcome::ConfirmationEmailMismatch => {
+                Self::ConfirmationEmailMismatch
+            }
+            core::ServerAccountDeletionOutcome::Blocked => Self::Blocked,
         }
     }
 }
@@ -1507,6 +1565,16 @@ pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_account_email_helper_delegates_to_the_validated_core_contract() {
+        assert_eq!(
+            normalize_account_email("  ＭＵ̈ＬＬＥＲ＠ＥＸＡＭＰＬＥ．ＣＯＭ  ".into())
+                .expect("valid email"),
+            "müller@example.com"
+        );
+        assert!(normalize_account_email(format!("{}@example.com", "é".repeat(122))).is_err());
+    }
 
     fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
 

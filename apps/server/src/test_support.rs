@@ -85,6 +85,168 @@ pub(crate) async fn pause_attachment_move_preflight(operation_id: &str) {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct AccountDeletionBeforeCommitControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionBeforeCommitControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionBeforeCommitControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_before_commit_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionBeforeCommitControl> {
+    let control = std::sync::Arc::new(AccountDeletionBeforeCommitControl::default());
+    ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion before-commit hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_before_commit(request_id: &str) {
+    let control = ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion before-commit hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+            .lock()
+            .expect("Account deletion before-commit hooks lock")
+            .remove(request_id);
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountDeletionAfterDecisionControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionAfterDecisionControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_AFTER_DECISION_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionAfterDecisionControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_after_decision_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionAfterDecisionControl> {
+    let control = std::sync::Arc::new(AccountDeletionAfterDecisionControl::default());
+    ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+        .lock()
+        .expect("Account deletion after-decision hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_after_decision(request_id: &str) {
+    let control = ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+        .lock()
+        .expect("Account deletion after-decision hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+            .lock()
+            .expect("Account deletion after-decision hooks lock")
+            .remove(request_id);
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountDeletionAfterCommitControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionAfterCommitControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_AFTER_COMMIT_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionAfterCommitControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_after_commit_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionAfterCommitControl> {
+    let control = std::sync::Arc::new(AccountDeletionAfterCommitControl::default());
+    ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion after-commit hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_after_commit(request_id: &str) {
+    let control = ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion after-commit hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+            .lock()
+            .expect("Account deletion after-commit hooks lock")
+            .remove(request_id);
+    }
+}
+
 pub(crate) fn with_test_config(state: AppState, overrides: &[(&str, &str)]) -> AppState {
     with_test_config_value(state, crate::config::Config::for_test_with(overrides))
 }

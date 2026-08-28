@@ -1,3 +1,4 @@
+import { RuntimeRequestError } from "@bittery/client-runtime/client";
 import {
 	useRuntimeClient,
 	useRuntimeSession,
@@ -21,6 +22,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import {
+	gateLocalTeardown,
+	gateRuntimeAuthentication,
+} from "@/lib/account-deletion";
+import {
 	type AccountRemovalArea,
 	forgetBrowserSessionOnly,
 	retireAccountSession,
@@ -32,7 +37,9 @@ import {
 import {
 	forgetAccountSession,
 	getTransitionalAccountId,
+	readAccountDeletionMarker,
 	storage,
+	writeAccountDeletionMarker,
 } from "@/lib/storage";
 import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
@@ -228,6 +235,19 @@ function SignInFormContent({
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [retirement, setRetirement] =
 		useState<RetirementState>(RETIREMENT_IDLE);
+	const assertRuntimeAuthenticationAllowed = () => {
+		if (
+			gateRuntimeAuthentication({
+				readMarker: readAccountDeletionMarker,
+				writeMarker: writeAccountDeletionMarker,
+			}) === "recoveryRequired"
+		) {
+			throw new RuntimeRequestError(
+				"AUTHENTICATION_UNAVAILABLE",
+				"Account deletion recovery must finish before authentication.",
+			);
+		}
+	};
 
 	// The last report, held across attempts. Both names were resolved at the first press,
 	// and re-resolving is unsafe: a half-failed sweep leaves the transitional store with an
@@ -245,6 +265,22 @@ function SignInFormContent({
 			runtimeClient.resolveAccount(quickUnlockAccountId),
 		resolveTransitionalAccountId: getTransitionalAccountId,
 		signOutRuntimeAccount: async (accountId: string) => {
+			const transitionalAccountId = await getTransitionalAccountId();
+			if (
+				transitionalAccountId !== null &&
+				gateLocalTeardown(
+					{ runtimeAccountId: accountId, transitionalAccountId },
+					{
+						readMarker: readAccountDeletionMarker,
+						writeMarker: writeAccountDeletionMarker,
+					},
+				) === "recoveryRequired"
+			) {
+				throw new RuntimeRequestError(
+					"AUTHENTICATION_UNAVAILABLE",
+					"Account deletion recovery must finish before sign-out.",
+				);
+			}
 			await runtimeClient.signOut(accountId);
 		},
 		forgetTransitionalSession: (accountId: string) =>
@@ -374,6 +410,7 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			if (isQuickUnlock) {
+				assertRuntimeAuthenticationAllowed();
 				// The Account this form is offering wins over any stored pointer, and the
 				// client refuses one the Runtime's catalog no longer recognises. Preferring
 				// the stored id unlocked the wrong Account with the right password.
@@ -389,6 +426,7 @@ function SignInFormContent({
 				return signedIn;
 			}
 			const normalizedEmail = input.email.trim().toLowerCase();
+			assertRuntimeAuthenticationAllowed();
 			if (
 				requiresInsecureTransportConfirmation &&
 				!insecureTransportConfirmed

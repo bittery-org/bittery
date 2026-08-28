@@ -10,6 +10,7 @@ mod platform_storage;
 #[allow(dead_code)]
 mod http_transport;
 // Ticket 19 keeps Server authentication policy behind one typed Rust-owned HTTP seam.
+mod account_email;
 #[allow(dead_code)]
 mod auth_http;
 // Ticket 19 keeps the complete unchanged SRP/KDF ceremony behind one private deep module.
@@ -48,6 +49,7 @@ pub use http_transport::http_transport_contract_schema;
 #[doc(hidden)]
 pub use http_transport::SerializedHttpExecutor;
 
+pub use account_email::{normalize_account_email, NormalizedAccountEmail};
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
 pub use attachment_artifact_store::SqliteAttachmentArtifactStore;
@@ -74,9 +76,11 @@ pub use protocol::{
     LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink,
     PendingShareResult, PendingShareResultsProjection, RequestCancellation, RuntimeError,
     RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection, ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope,
-    TeardownStatus, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    RuntimeStatusProjection, ServerAccountDeletionOutcome, ShareAccessMode, ShareExpiration,
+    TeardownPhase, TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole,
+    VaultProjectionType,
 };
+
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
 pub use replica::persistence_contract_schema;
@@ -96,3 +100,29 @@ pub use runtime::{
     TeardownHostCleanup, TeardownHostCleanupRequest, TeardownHostCleanupResponse,
 };
 pub use runtime::{ObservationHandle, Runtime};
+
+#[cfg(test)]
+mod account_email_tests {
+    use super::normalize_account_email;
+
+    #[test]
+    fn account_email_normalization_uses_shared_crypto_core_vectors_and_utf8_byte_limit() {
+        assert_eq!(
+            normalize_account_email("  MU\u{0308}LLER@EXAMPLE.COM  ")
+                .expect("valid email")
+                .as_str(),
+            "müller@example.com"
+        );
+        assert_eq!(
+            normalize_account_email("ＭＵ̈ＬＬＥＲ＠ＥＸＡＭＰＬＥ．ＣＯＭ")
+                .expect("valid email")
+                .as_str(),
+            "müller@example.com"
+        );
+        let boundary = format!("{}@example.com", "a".repeat(242));
+        assert_eq!(boundary.len(), 254);
+        assert!(normalize_account_email(&boundary).is_ok());
+        assert!(normalize_account_email(&format!("a{boundary}")).is_err());
+        assert!(normalize_account_email(" \t\n ").is_err());
+    }
+}

@@ -20,6 +20,18 @@ const RATE_LIMIT_STATE_RETENTION_DAYS: i64 = 2;
 const TOMBSTONE_RETENTION_DAYS: i64 = 90;
 const TOMBSTONE_BATCH_SIZE: i64 = 200;
 
+pub async fn observe_account_deletion_outcome_rows(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    let row_count = query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM account_deletion_outcome")
+        .fetch_one(pool)
+        .await?;
+    info!(
+        metric = "account_deletion.outcome_rows",
+        value = row_count,
+        "Account deletion retained outcome row count observed"
+    );
+    Ok(row_count)
+}
+
 pub async fn cleanup_expired_sessions(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let mut total_deleted = 0;
 

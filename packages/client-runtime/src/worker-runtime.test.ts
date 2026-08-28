@@ -79,6 +79,34 @@ function runtimeService(runtime: RuntimeDouble) {
 }
 
 describe("Runtime worker service", () => {
+	test("normalizes Account email through the Rust WASM facade", async () => {
+		const runtime = new RuntimeDouble();
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					normalizeAccountEmail(value: string) {
+						expect(value).toBe("  ＭＵ̈ＬＬＥＲ＠ＥＸＡＭＰＬＥ．ＣＯＭ  ");
+						return "müller@example.com";
+					},
+					withExecutors: () => runtime,
+				},
+			}),
+		});
+
+		expect(
+			await service.request(
+				{
+					type: "normalizeAccountEmail",
+					value: "  ＭＵ̈ＬＬＥＲ＠ＥＸＡＭＰＬＥ．ＣＯＭ  ",
+				},
+				new AbortController().signal,
+				() => undefined,
+			),
+		).toBe("müller@example.com");
+	});
 	test("passes every serialized executor and opens once before serving commands", async () => {
 		const runtime = new RuntimeDouble();
 		const calls: string[] = [];

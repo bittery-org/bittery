@@ -31,6 +31,7 @@ import type {
 	CreateVaultInput,
 	CreateVaultResponse,
 	DeleteAccountInput,
+	DeleteAccountResponse,
 	DeletedVaultItem,
 	EmailChangeInput,
 	EmailCheckInput,
@@ -184,8 +185,8 @@ export interface ApiClient {
 		me(): Promise<ApiResult<AuthUser>>;
 		deleteAccount(
 			input: DeleteAccountInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ApiWriteOptions & { readonly idempotencyKey: string },
+		): Promise<ApiResult<DeleteAccountResponse>>;
 		changeEmail(
 			input: EmailChangeInput,
 			options?: ApiWriteOptions,
@@ -1005,6 +1006,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			deleteAccount: (input, write) =>
 				call("DELETE", "/api/v1/users/me", {
 					body: input,
+					params: {
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					headers: writeHeaders(write),
 				}),
 			changeEmail: (input, write) =>

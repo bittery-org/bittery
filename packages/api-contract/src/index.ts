@@ -64,6 +64,7 @@ export type {
 	CreateVaultInput,
 	CreateVaultResponse,
 	DeleteAccountInput,
+	DeleteAccountResponse,
 	DeletedVaultItem,
 	DisableTravelModeInput,
 	EmailChangeInput,

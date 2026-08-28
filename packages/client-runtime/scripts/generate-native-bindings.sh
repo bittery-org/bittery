@@ -3,7 +3,8 @@ set -euo pipefail
 
 package_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_root="${1:-$package_root/generated/native}"
-library="$package_root/target/release/libbittery_client_bindings.so"
+cargo_target_root="${CARGO_TARGET_DIR:-$package_root/target}"
+library="$cargo_target_root/release/libbittery_client_bindings.so"
 
 cargo build --release --manifest-path "$package_root/Cargo.toml" -p bittery-client-bindings
 mkdir -p "$output_root/kotlin" "$output_root/swift"

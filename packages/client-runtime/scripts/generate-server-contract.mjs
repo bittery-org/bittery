@@ -20,6 +20,8 @@ const outputPath = path.join(
 export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
 	"CreateItemBody",
+	"DeleteAccountRequest",
+	"DeleteAccountResponse",
 	"FavoriteBody",
 	"ItemResponseDto",
 	"MoveItemBody",
@@ -49,6 +51,7 @@ const FREE_JSON_FIELDS = new Set([
 const WIRE_FIELD_ORDER = new Map([
 	["StartLoginRequest", ["email", "clientPublicKey"]],
 	["FinishLoginRequest", ["clientPublicKey", "clientProof"]],
+	["DeleteAccountRequest", ["confirmEmail"]],
 ]);
 
 const RUST_RESERVED = new Set([

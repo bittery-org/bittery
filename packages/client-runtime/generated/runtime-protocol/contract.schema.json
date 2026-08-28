@@ -738,6 +738,33 @@
           ]
         },
         {
+          "description": "Uses this installed Account's Runtime-owned Session to request authoritative Server\ndeletion. The host retains the exact request identity until the workflow is closed.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "confirmEmail": {
+              "type": "string"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteServerAccount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "confirmEmail",
+            "requestId"
+          ]
+        },
+        {
           "description": "Irreversibly removes every Runtime-owned Account and Device record.",
           "type": "object",
           "properties": {
@@ -1010,6 +1037,32 @@
         {
           "type": "object",
           "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "outcome": {
+              "$ref": "#/$defs/ServerAccountDeletionOutcome"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "serverAccountDeletion"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "requestId",
+            "outcome"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
             "itemId": {
               "type": "string"
             },
@@ -1112,6 +1165,14 @@
         "revision",
         "accounts",
         "closed"
+      ]
+    },
+    "ServerAccountDeletionOutcome": {
+      "type": "string",
+      "enum": [
+        "deleted",
+        "confirmationEmailMismatch",
+        "blocked"
       ]
     },
     "ShareAccessMode": {

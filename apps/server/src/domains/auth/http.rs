@@ -1,5 +1,7 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
+    http::{HeaderMap, HeaderValue},
+    response::{IntoResponse, Response},
     Json,
 };
 use time::format_description::well_known::Rfc3339;
@@ -138,6 +140,10 @@ response_dto!(RegistrationStatusResponse {
     requires_email_verification: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+});
+response_dto!(DeleteAccountResponse {
+    request_id: String,
+    outcome: String,
 });
 response_dto!(EmailCheckResponse {
     exists: bool,
@@ -715,23 +721,43 @@ async fn store_recovery_key(
     }))
 }
 
-#[utoipa::path(delete, path = "/users/me", operation_id = "deleteAccount", request_body = DeleteAccountRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
+#[utoipa::path(delete, path = "/users/me", operation_id = "deleteAccount", params(("Idempotency-Key" = String, Header, description = "Required canonical UUID v4 deletion request identity")), request_body = DeleteAccountRequest, responses((status = 200, body = DeleteAccountResponse, headers(("Idempotency-Replayed" = String, description = "true when this is a retained exact replay"))), (status = 400, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying"))), (status = 500, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn delete_account(
     State(state): State<AppState>,
-    request: AuthenticatedRequest,
+    request: PublicRequest,
+    headers: HeaderMap,
     ApiJson(input): ApiJson<DeleteAccountRequest>,
-) -> Result<Json<SuccessResponse>, ApiError> {
-    let response = auth::delete_account(
+) -> Result<Response, ApiError> {
+    let request_id = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let answer = auth::delete_server_account(
         &state,
-        &request.session,
-        auth::DeleteAccountInput {
-            confirm_email: input.confirm_email,
-        },
+        request.metadata.auth_token.as_deref(),
+        request_id,
+        &input.confirm_email,
     )
     .await?;
-    Ok(Json(SuccessResponse {
-        success: response.success,
-    }))
+    let mut response = match answer.outcome {
+        auth::AccountDeletionOutcome::Deleted => Json(DeleteAccountResponse {
+            request_id: answer.request_id.clone(),
+            outcome: "deleted".to_string(),
+        })
+        .into_response(),
+        auth::AccountDeletionOutcome::ConfirmationEmailMismatch => {
+            ApiError::account_deletion_confirmation_mismatch(&answer.request_id).into_response()
+        }
+        auth::AccountDeletionOutcome::Blocked => {
+            ApiError::account_deletion_blocked(&answer.request_id).into_response()
+        }
+    };
+    if answer.replayed {
+        response
+            .headers_mut()
+            .insert("idempotency-replayed", HeaderValue::from_static("true"));
+    }
+    Ok(response)
 }
 
 #[utoipa::path(delete, path = "/sessions/{sessionId}", operation_id = "revokeSession", params(("sessionId" = String, Path)), responses((status = 200, body = SuccessResponse), (status = 400, description = "The current session cannot revoke itself", body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = crate::http::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
@@ -1002,6 +1028,20 @@ mod tests {
         );
         assert!(!document.to_string().contains("heartbeat"));
         assert!(!document.to_string().contains("logout"));
+
+        let deletion = &document["paths"]["/users/me"]["delete"];
+        let idempotency_key = deletion["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|parameter| parameter["name"] == "Idempotency-Key")
+            .expect("Account deletion must publish its request identity header");
+        assert_eq!(idempotency_key["in"], "header");
+        assert_eq!(idempotency_key["required"], true);
+        assert_eq!(
+            deletion["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/DeleteAccountResponse"
+        );
 
         for (path, method, status) in [
             ("/auth/signups", "post", "401"),

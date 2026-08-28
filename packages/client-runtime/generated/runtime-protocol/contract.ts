@@ -35,6 +35,11 @@ access: AccountAccessState
 accountId: string
 type: "accessChanged"
 } | {
+accountId: string
+outcome: ServerAccountDeletionOutcome
+requestId: string
+type: "serverAccountDeletion"
+} | {
 itemId: string
 operationId: string
 replicaRevision: string
@@ -53,6 +58,7 @@ status: TeardownStatus
 type: "teardown"
 })
 export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
+export type ServerAccountDeletionOutcome = ("deleted" | "confirmationEmailMismatch" | "blocked")
 /**
  * Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.
  */
@@ -99,6 +105,11 @@ type: "signOut"
 } | {
 accountId: string
 type: "removeAccount"
+} | {
+accountId: string
+confirmEmail: string
+requestId: string
+type: "deleteServerAccount"
 } | {
 type: "wipe"
 } | {

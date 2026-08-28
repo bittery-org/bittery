@@ -8710,6 +8710,17 @@
       },
       "delete": {
         "operationId": "deleteAccount",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required canonical UUID v4 deletion request identity",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8723,10 +8734,18 @@
         "responses": {
           "200": {
             "description": "",
+            "headers": {
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a retained exact replay"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/DeleteAccountResponse"
                 }
               }
             }
@@ -8742,16 +8761,6 @@
             }
           },
           "401": {
-            "description": "",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
             "description": "",
             "content": {
               "application/problem+json": {
@@ -8781,6 +8790,16 @@
                 "description": "Seconds before retrying"
               }
             },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15547,6 +15566,21 @@
         },
         "additionalProperties": false
       },
+      "DeleteAccountResponse": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        }
+      },
       "DeletedVaultItemWithVaultResponse": {
         "type": "object",
         "required": [
@@ -15843,6 +15877,8 @@
           "INVALID_VERSION",
           "INVALID_ITEM_STATE",
           "INVALID_EMAIL",
+          "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+          "ACCOUNT_DELETION_BLOCKED",
           "FIELD_CANNOT_BE_CLEARED",
           "SEARCH_TOO_LONG",
           "TOO_MANY_HIDDEN_VAULTS",

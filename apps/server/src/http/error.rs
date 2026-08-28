@@ -132,6 +132,50 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn account_deletion_confirmation_mismatch(request_id: &str) -> Self {
+        Self::account_deletion_problem(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::AccountDeletionConfirmationMismatch,
+            "Account deletion confirmation mismatch",
+            "The confirmation email does not match the Account.",
+            request_id,
+        )
+    }
+
+    pub(crate) fn account_deletion_blocked(request_id: &str) -> Self {
+        Self::account_deletion_problem(
+            StatusCode::CONFLICT,
+            ErrorCode::AccountDeletionBlocked,
+            "Account deletion blocked",
+            "The Account cannot be deleted while it owns a non-personal Team with members or Vaults.",
+            request_id,
+        )
+    }
+
+    fn account_deletion_problem(
+        status: StatusCode,
+        code: ErrorCode,
+        title: &str,
+        detail: &str,
+        request_id: &str,
+    ) -> Self {
+        Self {
+            status,
+            retry_after: None,
+            problem: Box::new(ProblemDetails {
+                problem_type: code.problem_type(),
+                title: title.to_owned(),
+                status: status.as_u16(),
+                code,
+                detail: detail.to_owned(),
+                instance: format!("urn:bittery:account-deletion:{request_id}"),
+                request_id: request_id.to_owned(),
+                retryable: false,
+                errors: Vec::new(),
+            }),
+        }
+    }
+
     pub(crate) fn api_route_not_found() -> Self {
         Self::new(
             StatusCode::NOT_FOUND,

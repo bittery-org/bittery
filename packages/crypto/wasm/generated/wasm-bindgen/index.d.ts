@@ -16,6 +16,7 @@ export class WebClientRuntime {
   cancel(request_id: string): void;
   close(): Promise<void>;
   constructor();
+  static normalizeAccountEmail(input: string): string;
   observe_json(
     observation_id: string,
     request_json: string,
@@ -1640,6 +1641,7 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_func_normalize_account_email: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
@@ -1727,6 +1729,11 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
     a: bigint,
     b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_func_normalize_account_email: (
+    a: number,
+    b: number,
+    c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
     a: number,
@@ -1914,6 +1921,10 @@ export interface InitOutput {
   readonly webclientruntime_cancel: (a: number, b: number, c: number) => void;
   readonly webclientruntime_close: (a: number) => any;
   readonly webclientruntime_new: () => number;
+  readonly webclientruntime_normalizeAccountEmail: (
+    a: number,
+    b: number,
+  ) => [number, number, number, number];
   readonly webclientruntime_observe_json: (
     a: number,
     b: number,

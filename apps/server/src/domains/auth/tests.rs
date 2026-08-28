@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
-        HeaderMap, HeaderValue, Method, Request,
+        HeaderMap, HeaderValue, Method, Request, StatusCode,
     },
 };
 use bittery_crypto_core::srp6a::SrpClient;
@@ -10,6 +10,10 @@ use serde_json::json;
 use sqlx::{query, query_scalar, PgPool};
 use std::future::Future;
 
+use super::account_deletion::{
+    account_deletion_credential_proof_for_test, install_account_deletion_metric_recorder,
+    AccountDeletionMetricKind,
+};
 use super::{
     deterministic_fake_hint, header_value, normalize_email, normalize_signup_plan,
     parse_bearer_token, parse_pending_vault_keys, plan_member_limit, signup_team_name,
@@ -18,9 +22,10 @@ use super::{
 use crate::db::enums::{BillingPlan, TeamType};
 use crate::domains::auth::email::emailed_code_capture;
 use crate::test_support::{
-    assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_api_test_app, with_api_test_app_state, with_raw_test_db, with_test_config,
-    ApiTestApp,
+    assign_user_to_team, authenticated_json_headers, install_account_deletion_after_commit_hook,
+    install_account_deletion_after_decision_hook, install_account_deletion_before_commit_hook,
+    seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app, with_api_test_app_state,
+    with_raw_test_db, with_test_config, ApiTestApp,
 };
 use crate::{db::events::hash_token, domains::sessions::service::now_utc};
 use time::{Duration, OffsetDateTime};
@@ -32,6 +37,12 @@ const TEST_SRP_ITERATIONS: u32 = 1_000;
 /// decoupled: `kdf_iterations` is metadata the server stores/echoes and does not
 /// affect SRP verification.
 const CURRENT_KDF_ITERATIONS: u32 = 600_000;
+
+fn account_deletion_headers(token: &str, request_id: &'static str) -> HeaderMap {
+    let mut headers = authenticated_json_headers(token);
+    headers.insert("idempotency-key", request_id.parse().unwrap());
+    headers
+}
 
 fn floor_kdf_params_json() -> serde_json::Value {
     kdf_params_json(CURRENT_KDF_ITERATIONS)
@@ -1082,27 +1093,160 @@ async fn auth_session_management_and_account_deletion_flow() {
                 .is_none());
 
             let delete_session = app.issue_session(&fixture.user_id).await;
+            let rotated_session = app.issue_session(&fixture.user_id).await;
             let wrong_confirm = app
                 .api_json(
                     Method::DELETE,
                     "/api/v1/users/me",
                     Some(json!({ "confirmEmail": "wrong@example.com" })),
-                    authenticated_json_headers(&delete_session.token),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c11".parse().unwrap(),
+                        );
+                        headers
+                    },
                 )
                 .await;
             wrong_confirm.assert_contract_status();
-            assert_handler_error(&wrong_confirm.body, "BAD_REQUEST", "Email does not match");
+            assert_eq!(wrong_confirm.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                wrong_confirm.body["code"],
+                json!("ACCOUNT_DELETION_CONFIRMATION_MISMATCH")
+            );
+
+            query("UPDATE \"user\" SET email = $1 WHERE id = $2")
+                .bind("wrong@example.com")
+                .bind(&fixture.user_id)
+                .execute(&app.pool)
+                .await
+                .expect("email state change should succeed");
+            let wrong_confirm_replay = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "wrong@example.com" })),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c11".parse().unwrap(),
+                        );
+                        headers
+                    },
+                )
+                .await;
+            wrong_confirm_replay.assert_contract_status();
+            assert_eq!(wrong_confirm_replay.status, StatusCode::BAD_REQUEST);
+            assert_eq!(wrong_confirm_replay.body, wrong_confirm.body);
+            assert_eq!(wrong_confirm_replay.headers["idempotency-replayed"], "true");
+            query("UPDATE \"user\" SET email = $1 WHERE id = $2")
+                .bind(&fixture.email)
+                .bind(&fixture.user_id)
+                .execute(&app.pool)
+                .await
+                .expect("email fixture restoration should succeed");
 
             let delete_account = app
                 .api_json(
                     Method::DELETE,
                     "/api/v1/users/me",
                     Some(json!({ "confirmEmail": fixture.email })),
-                    authenticated_json_headers(&delete_session.token),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c12".parse().unwrap(),
+                        );
+                        headers
+                    },
                 )
                 .await;
             delete_account.assert_contract_status();
-            assert_eq!(delete_account.body["success"], json!(true));
+            assert_eq!(
+                delete_account.body,
+                json!({
+                    "requestId": "018f05c4-7b6a-4a89-9237-2e612fa96c12",
+                    "outcome": "deleted"
+                })
+            );
+
+            let delete_replay = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": fixture.email })),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c12".parse().unwrap(),
+                        );
+                        headers
+                    },
+                )
+                .await;
+            delete_replay.assert_contract_status();
+            assert_eq!(delete_replay.status, StatusCode::OK);
+            assert_eq!(delete_replay.body, delete_account.body);
+            assert_eq!(delete_replay.headers["idempotency-replayed"], "true");
+
+            let rotated_proof = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": fixture.email })),
+                    account_deletion_headers(
+                        &rotated_session.token,
+                        "018f05c4-7b6a-4a89-9237-2e612fa96c12",
+                    ),
+                )
+                .await;
+            rotated_proof.assert_contract_status();
+            assert_eq!(rotated_proof.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(rotated_proof.body["code"], json!("UNAUTHORIZED"));
+
+            let changed_fingerprint = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "other@example.com" })),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c12".parse().unwrap(),
+                        );
+                        headers
+                    },
+                )
+                .await;
+            changed_fingerprint.assert_contract_status();
+            assert_eq!(changed_fingerprint.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(changed_fingerprint.body["code"], json!("UNAUTHORIZED"));
+
+            let different_id_after_deletion = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": fixture.email })),
+                    {
+                        let mut headers = authenticated_json_headers(&delete_session.token);
+                        headers.insert(
+                            "idempotency-key",
+                            "018f05c4-7b6a-4a89-9237-2e612fa96c13".parse().unwrap(),
+                        );
+                        headers
+                    },
+                )
+                .await;
+            different_id_after_deletion.assert_contract_status();
+            assert_eq!(different_id_after_deletion.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                different_id_after_deletion.body["code"],
+                json!("UNAUTHORIZED")
+            );
 
             let remaining_users =
                 query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM \"user\" WHERE id = $1")
@@ -1113,6 +1257,797 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert_eq!(remaining_users, 0);
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_block_is_retained_across_team_state_changes() {
+    with_api_test_app("account_deletion_retained_team_block", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_owner",
+            "Delete Owner",
+            "owner@example.com",
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            "usr_delete_member",
+            "Delete Member",
+            "member@example.com",
+        )
+        .await;
+        seed_team(
+            &app.pool,
+            "team_delete_block",
+            "Blocked Team",
+            "usr_delete_owner",
+            "organization",
+            "team",
+            "active",
+        )
+        .await;
+        assign_user_to_team(&app.pool, "usr_delete_owner", "team_delete_block", "owner").await;
+        assign_user_to_team(
+            &app.pool,
+            "usr_delete_member",
+            "team_delete_block",
+            "member",
+        )
+        .await;
+        let owner_session = app.issue_session("usr_delete_owner").await;
+        let member_session = app.issue_session("usr_delete_member").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c31";
+        let body = Some(json!({ "confirmEmail": "owner@example.com" }));
+
+        let blocked = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                body.clone(),
+                account_deletion_headers(&owner_session.token, request_id),
+            )
+            .await;
+        blocked.assert_contract_status();
+        assert_eq!(blocked.status, StatusCode::CONFLICT);
+        assert_eq!(blocked.body["code"], json!("ACCOUNT_DELETION_BLOCKED"));
+
+        let foreign_proof = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                body.clone(),
+                account_deletion_headers(&member_session.token, request_id),
+            )
+            .await;
+        foreign_proof.assert_contract_status();
+        assert_eq!(foreign_proof.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(foreign_proof.body["code"], json!("UNAUTHORIZED"));
+
+        query("UPDATE team SET owner_id = $1 WHERE id = $2")
+            .bind("usr_delete_member")
+            .bind("team_delete_block")
+            .execute(&app.pool)
+            .await
+            .expect("team ownership transfer should succeed");
+        let replay = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                body.clone(),
+                account_deletion_headers(&owner_session.token, request_id),
+            )
+            .await;
+        replay.assert_contract_status();
+        assert_eq!(replay.status, StatusCode::CONFLICT);
+        assert_eq!(replay.body, blocked.body);
+        assert_eq!(replay.headers["idempotency-replayed"], "true");
+
+        let corrected = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                body,
+                account_deletion_headers(
+                    &owner_session.token,
+                    "018f05c4-7b6a-4a89-9237-2e612fa96c32",
+                ),
+            )
+            .await;
+        corrected.assert_contract_status();
+        assert_eq!(corrected.status, StatusCode::OK);
+        assert_eq!(corrected.body["outcome"], json!("deleted"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_outcome_and_cascade_roll_back_together() {
+    with_api_test_app("account_deletion_atomic_rollback", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_rollback",
+            "Delete Rollback",
+            "rollback@example.com",
+        )
+        .await;
+        let session = app.issue_session("usr_delete_rollback").await;
+        query(
+            r#"CREATE FUNCTION reject_ticket48_user_delete() RETURNS trigger
+               LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced deletion rollback'; END $$"#,
+        )
+        .execute(&app.pool)
+        .await
+        .expect("failure function should install");
+        query(
+            r#"CREATE TRIGGER reject_ticket48_user_delete
+               BEFORE DELETE ON "user" FOR EACH ROW
+               WHEN (OLD.id = 'usr_delete_rollback')
+               EXECUTE FUNCTION reject_ticket48_user_delete()"#,
+        )
+        .execute(&app.pool)
+        .await
+        .expect("failure trigger should install");
+
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c41";
+        let response = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({ "confirmEmail": "rollback@example.com" })),
+                account_deletion_headers(&session.token, request_id),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let retained = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM account_deletion_outcome WHERE request_id = $1::uuid",
+        )
+        .bind(request_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("outcome count should load");
+        let users = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM \"user\" WHERE id = 'usr_delete_rollback'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("user count should load");
+        let audits = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = 'usr_delete_rollback' AND action = 'account_deleted'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("audit count should load");
+        assert_eq!((retained, users, audits), (0, 1, 0));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_exact_account_deletion_rereads_retained_outcome_after_lock() {
+    with_api_test_app("account_deletion_concurrent_exact", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_concurrent",
+            "Delete Concurrent",
+            "concurrent@example.com",
+        )
+        .await;
+        let session = app.issue_session("usr_delete_concurrent").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c51";
+        let control = install_account_deletion_before_commit_hook(request_id);
+
+        let first_app = app.clone();
+        let first_token = session.token.clone();
+        let first = tokio::spawn(async move {
+            first_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "concurrent@example.com" })),
+                    account_deletion_headers(&first_token, request_id),
+                )
+                .await
+        });
+        control.wait_until_entered().await;
+
+        let second_app = app.clone();
+        let second_token = session.token.clone();
+        let mut second = tokio::spawn(async move {
+            second_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "concurrent@example.com" })),
+                    account_deletion_headers(&second_token, request_id),
+                )
+                .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut second)
+                .await
+                .is_err(),
+            "the duplicate must wait for the request-id transaction lock"
+        );
+
+        control.release();
+        let first = first.await.expect("first request should join");
+        let second = second.await.expect("second request should join");
+        first.assert_contract_status();
+        second.assert_contract_status();
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(second.status, StatusCode::OK);
+        assert_eq!(first.body, second.body);
+        assert!(first.headers.get("idempotency-replayed").is_none());
+        assert_eq!(second.headers["idempotency-replayed"], "true");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_conflicting_body_rereads_retained_outcome_after_request_lock() {
+    with_api_test_app(
+        "account_deletion_concurrent_conflicting_body",
+        |app| async move {
+            seed_user(
+                &app.pool,
+                "usr_delete_conflicting",
+                "Delete Conflicting",
+                "conflicting@example.com",
+            )
+            .await;
+            let session = app.issue_session("usr_delete_conflicting").await;
+            let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c52";
+            let metrics = install_account_deletion_metric_recorder(request_id);
+            let control = install_account_deletion_before_commit_hook(request_id);
+
+            let first_app = app.clone();
+            let first_token = session.token.clone();
+            let first = tokio::spawn(async move {
+                first_app
+                    .api_json(
+                        Method::DELETE,
+                        "/api/v1/users/me",
+                        Some(json!({ "confirmEmail": "conflicting@example.com" })),
+                        account_deletion_headers(&first_token, request_id),
+                    )
+                    .await
+            });
+            control.wait_until_entered().await;
+
+            let second_app = app.clone();
+            let second_token = session.token.clone();
+            let mut second = tokio::spawn(async move {
+                second_app
+                    .api_json(
+                        Method::DELETE,
+                        "/api/v1/users/me",
+                        Some(json!({ "confirmEmail": "changed@example.com" })),
+                        account_deletion_headers(&second_token, request_id),
+                    )
+                    .await
+            });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), &mut second)
+                    .await
+                    .is_err(),
+                "conflicting bytes must wait for the request-id transaction lock"
+            );
+
+            control.release();
+            let first = first.await.expect("first request should join");
+            let second = second.await.expect("second request should join");
+            assert_eq!(first.status, StatusCode::OK);
+            assert_eq!(second.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(second.body["code"], json!("UNAUTHORIZED"));
+            assert!(metrics
+                .take()
+                .contains(&AccountDeletionMetricKind::RequestIdReuse(
+                    "request_fingerprint"
+                )));
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_different_uuid_waits_for_live_user_authority_and_retains_no_loser() {
+    with_api_test_app(
+        "account_deletion_concurrent_different_uuid",
+        |app| async move {
+            seed_user(
+                &app.pool,
+                "usr_delete_different_uuid",
+                "Delete Different UUID",
+                "different-uuid@example.com",
+            )
+            .await;
+            let session = app.issue_session("usr_delete_different_uuid").await;
+            let winner_id = "018f05c4-7b6a-4a89-9237-2e612fa96c53";
+            let loser_id = "018f05c4-7b6a-4a89-9237-2e612fa96c54";
+            let control = install_account_deletion_before_commit_hook(winner_id);
+
+            let first_app = app.clone();
+            let first_token = session.token.clone();
+            let first = tokio::spawn(async move {
+                first_app
+                    .api_json(
+                        Method::DELETE,
+                        "/api/v1/users/me",
+                        Some(json!({ "confirmEmail": "different-uuid@example.com" })),
+                        account_deletion_headers(&first_token, winner_id),
+                    )
+                    .await
+            });
+            control.wait_until_entered().await;
+
+            let second_app = app.clone();
+            let second_token = session.token.clone();
+            let mut second = tokio::spawn(async move {
+                second_app
+                    .api_json(
+                        Method::DELETE,
+                        "/api/v1/users/me",
+                        Some(json!({ "confirmEmail": "different-uuid@example.com" })),
+                        account_deletion_headers(&second_token, loser_id),
+                    )
+                    .await
+            });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), &mut second)
+                    .await
+                    .is_err(),
+                "a different UUID must wait for the same locked User authority"
+            );
+
+            control.release();
+            let first = first.await.expect("first request should join");
+            let second = second.await.expect("second request should join");
+            assert_eq!(first.status, StatusCode::OK);
+            assert_eq!(second.status, StatusCode::UNAUTHORIZED);
+            let retained_loser = query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM account_deletion_outcome WHERE request_id = $1::uuid",
+            )
+            .bind(loser_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("loser outcome count should load");
+            assert_eq!(retained_loser, 0);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_snapshot_excludes_a_concurrent_team_join() {
+    with_api_test_app("account_deletion_team_join_snapshot", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_snapshot_owner",
+            "Snapshot Owner",
+            "snapshot-owner@example.com",
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            "usr_delete_snapshot_joiner",
+            "Snapshot Joiner",
+            "snapshot-joiner@example.com",
+        )
+        .await;
+        seed_team(
+            &app.pool,
+            "team_delete_snapshot",
+            "Snapshot Team",
+            "usr_delete_snapshot_owner",
+            "organization",
+            "team",
+            "active",
+        )
+        .await;
+        assign_user_to_team(
+            &app.pool,
+            "usr_delete_snapshot_owner",
+            "team_delete_snapshot",
+            "owner",
+        )
+        .await;
+        let invitation_token = "0123456789abcdefghijklmnopqrstuv";
+        seed_team_invitation(
+            &app.pool,
+            "invite_delete_snapshot",
+            "team_delete_snapshot",
+            "snapshot-joiner@example.com",
+            "member",
+            "usr_delete_snapshot_owner",
+            invitation_token,
+            Some("[]"),
+        )
+        .await;
+        let owner_session = app.issue_session("usr_delete_snapshot_owner").await;
+        let joiner_session = app.issue_session("usr_delete_snapshot_joiner").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c61";
+        let control = install_account_deletion_after_decision_hook(request_id);
+
+        let deletion_app = app.clone();
+        let deletion_token = owner_session.token.clone();
+        let deletion = tokio::spawn(async move {
+            deletion_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "snapshot-owner@example.com" })),
+                    account_deletion_headers(&deletion_token, request_id),
+                )
+                .await
+        });
+        control.wait_until_entered().await;
+
+        let join_app = app.clone();
+        let join_token = joiner_session.token.clone();
+        let mut join = tokio::spawn(async move {
+            join_app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/public/team-invitations/{invitation_token}/accept"),
+                    None,
+                    authenticated_json_headers(&join_token),
+                )
+                .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut join)
+                .await
+                .is_err(),
+            "Team membership authority must wait for the deletion snapshot"
+        );
+
+        control.release();
+        let deletion = deletion.await.expect("deletion request should join");
+        let join = join.await.expect("join request should join");
+        deletion.assert_contract_status();
+        join.assert_contract_status();
+        assert_eq!(deletion.status, StatusCode::OK);
+        assert!(!join.status.is_success());
+        let joiner_team: Option<String> =
+            query_scalar("SELECT team_id FROM \"user\" WHERE id = $1")
+                .bind("usr_delete_snapshot_joiner")
+                .fetch_one(&app.pool)
+                .await
+                .expect("joiner team should load");
+        assert_eq!(joiner_team, None);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_snapshot_serializes_a_concurrent_team_vault_delete() {
+    with_api_test_app("account_deletion_team_vault_snapshot", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_vault_owner",
+            "Delete Vault Owner",
+            "vault-owner@example.com",
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            "usr_delete_vault_actor",
+            "Delete Vault Actor",
+            "vault-actor@example.com",
+        )
+        .await;
+        seed_team(
+            &app.pool,
+            "team_delete_vault_snapshot",
+            "Vault Snapshot Team",
+            "usr_delete_vault_owner",
+            "organization",
+            "team",
+            "active",
+        )
+        .await;
+        assign_user_to_team(
+            &app.pool,
+            "usr_delete_vault_owner",
+            "team_delete_vault_snapshot",
+            "owner",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            "vault_delete_snapshot",
+            "Snapshot Vault",
+            "team",
+            "usr_delete_vault_actor",
+            Some("team_delete_vault_snapshot"),
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vault_key_delete_snapshot",
+            "vault_delete_snapshot",
+            "usr_delete_vault_actor",
+            "encrypted-vault-key",
+            "owner",
+        )
+        .await;
+        let owner_session = app.issue_session("usr_delete_vault_owner").await;
+        let vault_actor_session = app.issue_session("usr_delete_vault_actor").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c66";
+        let control = install_account_deletion_after_decision_hook(request_id);
+
+        let deletion_app = app.clone();
+        let deletion_token = owner_session.token.clone();
+        let deletion = tokio::spawn(async move {
+            deletion_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "vault-owner@example.com" })),
+                    account_deletion_headers(&deletion_token, request_id),
+                )
+                .await
+        });
+        control.wait_until_entered().await;
+
+        let vault_app = app.clone();
+        let vault_token = vault_actor_session.token.clone();
+        let mut vault_delete = tokio::spawn(async move {
+            vault_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/vaults/vault_delete_snapshot",
+                    None,
+                    authenticated_json_headers(&vault_token),
+                )
+                .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut vault_delete)
+                .await
+                .is_err(),
+            "Team Vault mutation must wait for the deletion snapshot"
+        );
+
+        control.release();
+        let deletion = deletion.await.expect("deletion request should join");
+        let vault_delete = vault_delete.await.expect("Vault deletion should join");
+        assert_eq!(deletion.status, StatusCode::CONFLICT);
+        assert_eq!(deletion.body["code"], json!("ACCOUNT_DELETION_BLOCKED"));
+        assert_eq!(vault_delete.status, StatusCode::OK);
+        let remaining_vaults = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM vault WHERE id = 'vault_delete_snapshot'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("Vault count should load");
+        assert_eq!(remaining_vaults, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_observability_reports_committed_growth_outcome_and_replay() {
+    with_api_test_app("account_deletion_observability", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_observable",
+            "Delete Observable",
+            "observable@example.com",
+        )
+        .await;
+        let session = app.issue_session("usr_delete_observable").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c71";
+        let metrics = install_account_deletion_metric_recorder(request_id);
+
+        let first = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({ "confirmEmail": "wrong@example.com" })),
+                account_deletion_headers(&session.token, request_id),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            metrics.take(),
+            vec![
+                AccountDeletionMetricKind::Insert,
+                AccountDeletionMetricKind::Outcome("confirmationMismatch"),
+                AccountDeletionMetricKind::CommittedInsertGrowth,
+            ]
+        );
+
+        let replay = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({ "confirmEmail": "wrong@example.com" })),
+                account_deletion_headers(&session.token, request_id),
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            metrics.take(),
+            vec![
+                AccountDeletionMetricKind::Replay,
+                AccountDeletionMetricKind::Outcome("confirmationMismatch"),
+            ]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn committed_account_deletion_response_does_not_wait_for_row_count_telemetry() {
+    with_api_test_app(
+        "account_deletion_nonblocking_observability",
+        |app| async move {
+            seed_user(
+                &app.pool,
+                "usr_delete_nonblocking_metrics",
+                "Delete Nonblocking Metrics",
+                "nonblocking-metrics@example.com",
+            )
+            .await;
+            let session = app.issue_session("usr_delete_nonblocking_metrics").await;
+            let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c67";
+            let control = install_account_deletion_after_commit_hook(request_id);
+
+            let request_app = app.clone();
+            let token = session.token.clone();
+            let mut request = tokio::spawn(async move {
+                request_app
+                    .api_json(
+                        Method::DELETE,
+                        "/api/v1/users/me",
+                        Some(json!({ "confirmEmail": "wrong@example.com" })),
+                        account_deletion_headers(&token, request_id),
+                    )
+                    .await
+            });
+            control.wait_until_entered().await;
+
+            let mut table_lock = app.pool.begin().await.expect("table lock should begin");
+            query("LOCK TABLE account_deletion_outcome IN ACCESS EXCLUSIVE MODE")
+                .execute(&mut *table_lock)
+                .await
+                .expect("outcome table should lock");
+            control.release();
+
+            let response =
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut request)
+                    .await
+                    .expect("committed HTTP response must not wait for an observability DB read")
+                    .expect("request should join");
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+            table_lock
+                .rollback()
+                .await
+                .expect("table lock should release");
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn retained_account_deletion_mismatches_report_uuid_reuse_without_changing_the_401() {
+    with_api_test_app(
+        "account_deletion_retained_mismatch_metrics",
+        |app| async move {
+            seed_user(
+                &app.pool,
+                "usr_delete_reuse",
+                "Delete Reuse",
+                "reuse@example.com",
+            )
+            .await;
+            let original = app.issue_session("usr_delete_reuse").await;
+            let foreign = app.issue_session("usr_delete_reuse").await;
+            let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c65";
+            let metrics = install_account_deletion_metric_recorder(request_id);
+
+            let retained = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "wrong@example.com" })),
+                    account_deletion_headers(&original.token, request_id),
+                )
+                .await;
+            assert_eq!(retained.status, StatusCode::BAD_REQUEST);
+            metrics.take();
+
+            let foreign_proof = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "wrong@example.com" })),
+                    account_deletion_headers(&foreign.token, request_id),
+                )
+                .await;
+            assert_eq!(foreign_proof.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(foreign_proof.body["code"], json!("UNAUTHORIZED"));
+            assert_eq!(
+                metrics.take(),
+                vec![AccountDeletionMetricKind::RequestIdReuse(
+                    "credential_proof"
+                )],
+            );
+
+            let changed_body = app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "another@example.com" })),
+                    account_deletion_headers(&original.token, request_id),
+                )
+                .await;
+            assert_eq!(changed_body.status, StatusCode::UNAUTHORIZED);
+            assert_eq!(changed_body.body["code"], json!("UNAUTHORIZED"));
+            assert_eq!(
+                metrics.take(),
+                vec![AccountDeletionMetricKind::RequestIdReuse(
+                    "request_fingerprint"
+                )],
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_observability_reports_deleted_proof_uniqueness_failure() {
+    with_api_test_app("account_deletion_proof_collision_observability", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_proof_collision",
+            "Delete Proof Collision",
+            "proof-collision@example.com",
+        )
+        .await;
+        let session = app.issue_session("usr_delete_proof_collision").await;
+        let request_id = "018f05c4-7b6a-4a89-9237-2e612fa96c63";
+        let metrics = install_account_deletion_metric_recorder(request_id);
+        let control = install_account_deletion_after_decision_hook(request_id);
+
+        let request_app = app.clone();
+        let token = session.token.clone();
+        let request = tokio::spawn(async move {
+            request_app
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "proof-collision@example.com" })),
+                    account_deletion_headers(&token, request_id),
+                )
+                .await
+        });
+        control.wait_until_entered().await;
+
+        query(
+            "INSERT INTO account_deletion_outcome (request_id, credential_proof, request_fingerprint, outcome) VALUES ($1::uuid, $2, $3, 'deleted')",
+        )
+        .bind("018f05c4-7b6a-4a89-9237-2e612fa96c64")
+        .bind(account_deletion_credential_proof_for_test(&session.token).to_vec())
+        .bind(vec![8_u8; 32])
+        .execute(&app.pool)
+        .await
+        .expect("raw competing deleted proof should commit");
+        control.release();
+
+        let response = request.await.expect("request should join");
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            metrics.take(),
+            vec![AccountDeletionMetricKind::UniquenessFailure(
+                "deleted_proof"
+            )],
+        );
+    })
     .await;
 }
 

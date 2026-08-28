@@ -1019,6 +1019,7 @@ export const ffi_bittery_client_bindings_uniffi_contract_version: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_func_normalize_account_email: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
@@ -1106,6 +1107,11 @@ export const uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
 export const uniffi_bittery_client_bindings_fn_free_secretstring: (
   a: bigint,
   b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_func_normalize_account_email: (
+  a: number,
+  b: number,
+  c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
   a: number,
@@ -1293,6 +1299,10 @@ export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_u
 export const webclientruntime_cancel: (a: number, b: number, c: number) => void;
 export const webclientruntime_close: (a: number) => any;
 export const webclientruntime_new: () => number;
+export const webclientruntime_normalizeAccountEmail: (
+  a: number,
+  b: number,
+) => [number, number, number, number];
 export const webclientruntime_observe_json: (
   a: number,
   b: number,

@@ -13,7 +13,10 @@ use crate::{
     domains::vaults::key::validate_encrypted_vault_key,
     error::AppError,
     integrations::stripe::BillingGateway,
-    shared::{generate_secure_token, transaction::database_error},
+    shared::{
+        generate_secure_token,
+        transaction::{acquire_team_authority_lock, acquire_user_authority_lock, database_error},
+    },
 };
 
 use super::service::{
@@ -399,6 +402,18 @@ async fn accept_loaded_invitation(
         .begin()
         .await
         .map_err(|error| database_error(error, "Failed to start transaction"))?;
+    acquire_user_authority_lock(
+        &mut transaction,
+        user_id,
+        "Failed to lock invitation User authority",
+    )
+    .await?;
+    acquire_team_authority_lock(
+        &mut *transaction,
+        &invitation.team_id,
+        "Failed to lock Team invitation acceptance",
+    )
+    .await?;
 
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
         .bind(&invitation.team_id)

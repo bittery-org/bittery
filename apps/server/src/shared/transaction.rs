@@ -47,6 +47,34 @@ pub(crate) async fn acquire_item_attachment_writer_lock<'e>(
     .await
 }
 
+/// Serializes writers that can change one Team's membership or Team-Vault authority.
+pub(crate) async fn acquire_team_authority_lock<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    team_id: &str,
+    context: &'static str,
+) -> Result<(), AppError> {
+    acquire_advisory_lock(
+        executor,
+        &format!("team-authority:{}:{team_id}", team_id.len()),
+        context,
+    )
+    .await
+}
+
+/// Locks one User authority row before a transaction acquires Team authority.
+pub(crate) async fn acquire_user_authority_lock(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &str,
+    context: &'static str,
+) -> Result<(), AppError> {
+    sqlx::query_scalar::<_, String>("SELECT id FROM \"user\" WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, context))?;
+    Ok(())
+}
+
 pub(crate) fn is_retryable_transaction_error(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
