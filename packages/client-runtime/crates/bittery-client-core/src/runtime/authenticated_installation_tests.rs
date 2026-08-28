@@ -1029,6 +1029,13 @@ async fn sign_in_routes_the_verified_ceremony_into_one_published_unlocked_accoun
     assert_eq!(status.accounts.len(), 1);
     assert_eq!(status.accounts[0].account_id, account_id);
     assert_eq!(status.accounts[0].access, AccountAccessState::Unlocked);
+    assert_eq!(
+        status.accounts[0]
+            .display_identity
+            .as_ref()
+            .map(|identity| identity.email.as_str()),
+        Some(NORMALIZED_EMAIL)
+    );
 }
 
 #[tokio::test]
@@ -2072,6 +2079,7 @@ async fn unreadable_replica_outcomes_remain_visible_signed_out_without_a_usable_
             account_id: AccountId::from("account-1"),
             replica_revision: 0,
             access: AccountAccessState::SignedOut,
+            display_identity: None,
             waiting_reason: None,
             failure: None,
         }]
@@ -2130,6 +2138,7 @@ async fn unreadable_replica_outcomes_remain_visible_signed_out_without_a_usable_
     assert_eq!(status.accounts.len(), 1);
     assert_eq!(status.accounts[0].account_id, AccountId::from("account-1"));
     assert_eq!(status.accounts[0].access, AccountAccessState::SignedOut);
+    assert_eq!(status.accounts[0].display_identity, None);
     assert_eq!(items.0.lock().unwrap().len(), delivered_before);
     assert!(!runtime.has_live_master_unlock_key(
         &AccountId::from("account-1"),

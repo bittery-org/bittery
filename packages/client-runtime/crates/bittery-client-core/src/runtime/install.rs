@@ -36,6 +36,10 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
+            .remove(&account_id);
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
@@ -79,6 +83,10 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::SignedOut);
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
+            .remove(&account_id);
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
@@ -416,6 +424,9 @@ impl Runtime {
             installed_snapshot.clone(),
             account_id.clone(),
             incarnation.clone(),
+            AccountDisplayIdentity {
+                email: prepared.metadata.email.clone(),
+            },
             prepared.master_unlock_key,
         );
         let invalidated = match publication {
@@ -537,6 +548,10 @@ impl Runtime {
             .expect("unlocked projection lock poisoned")
             .remove(account_id);
         self.clear_live_master_unlock_keys_for_account(account_id);
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
+            .remove(account_id);
         let mut account_access = self
             .account_access
             .lock()
@@ -565,6 +580,7 @@ impl Runtime {
         snapshot: crate::replica::ReplicaSnapshot,
         account_id: AccountId,
         incarnation: crate::protocol::Incarnation,
+        display_identity: AccountDisplayIdentity,
         master_unlock_key: Zeroizing<[u8; 32]>,
     ) -> Result<Option<Arc<DeliveryToken>>, RuntimeError> {
         let _publication = self.publication.lock().expect("publication lock poisoned");
@@ -596,6 +612,10 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned")
             .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
+            .insert(account_id.clone(), display_identity);
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")

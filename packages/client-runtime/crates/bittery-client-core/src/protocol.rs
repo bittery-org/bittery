@@ -940,8 +940,21 @@ pub struct AccountStatus {
     pub replica_revision: u64,
     pub access: AccountAccessState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_identity: Option<AccountDisplayIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_reason: Option<AccountWaitingReason>,
     pub failure: Option<RuntimeErrorCode>,
+}
+
+/// The non-secret identity a host may render for one installed Account.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDisplayIdentity {
+    pub email: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

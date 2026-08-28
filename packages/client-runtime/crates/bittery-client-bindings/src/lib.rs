@@ -764,12 +764,18 @@ pub enum AccountWaitingReason {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct AccountDisplayIdentity {
+    pub email: String,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct AccountStatus {
     pub account_id: String,
     pub replica_revision: u64,
     pub access: AccountAccessState,
     pub waiting_reason: Option<AccountWaitingReason>,
     pub failure: Option<RuntimeErrorCode>,
+    pub display_identity: Option<AccountDisplayIdentity>,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -1386,6 +1392,7 @@ impl From<core::AccountStatus> for AccountStatus {
             access,
             waiting_reason,
             failure,
+            display_identity,
         } = value;
         Self {
             account_id: account_id.into(),
@@ -1393,7 +1400,14 @@ impl From<core::AccountStatus> for AccountStatus {
             access: access.into(),
             waiting_reason: waiting_reason.map(Into::into),
             failure: failure.map(Into::into),
+            display_identity: display_identity.map(Into::into),
         }
+    }
+}
+
+impl From<core::AccountDisplayIdentity> for AccountDisplayIdentity {
+    fn from(value: core::AccountDisplayIdentity) -> Self {
+        Self { email: value.email }
     }
 }
 

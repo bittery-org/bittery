@@ -379,6 +379,18 @@ fn seed_restartable_catalog(harness: &Harness) {
     );
 }
 
+fn projected_account(runtime: &Runtime, account_id: &str) -> AccountStatus {
+    let projected = runtime
+        .projection(&ObservationRequest::RuntimeStatus {
+            account_id: Some(AccountId::from(account_id)),
+        })
+        .unwrap();
+    let RuntimeProjection::RuntimeStatus(status) = projected.projection else {
+        panic!("expected Runtime status projection");
+    };
+    status.accounts.into_iter().next().unwrap()
+}
+
 #[tokio::test]
 async fn remove_account_is_an_explicit_closed_runtime_request() {
     let runtime = Runtime::new();
@@ -489,6 +501,53 @@ async fn named_teardown_fences_then_deletes_every_authority_without_crossing_acc
 }
 
 #[tokio::test]
+async fn removed_account_display_identity_cannot_leak_into_a_recovered_account() {
+    let harness = wedged_teardown_harness(Fault::None);
+    seed_restartable_catalog(&harness);
+    harness.runtime.open().await.unwrap();
+    assert_eq!(
+        projected_account(&harness.runtime, "account-1")
+            .display_identity
+            .map(|identity| identity.email),
+        Some("person@example.test".into())
+    );
+
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: AccountId::from("account-1"),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !harness
+            .runtime
+            .account_display_identities
+            .lock()
+            .unwrap()
+            .contains_key(&AccountId::from("account-1")),
+        "RemoveAccount retires its display identity before any replacement is installed"
+    );
+    harness
+        .runtime
+        .install_or_replace_account(
+            AccountId::from("account-1"),
+            "recovered-user".into(),
+            "recovered-incarnation".into(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        projected_account(&harness.runtime, "account-1").display_identity,
+        None
+    );
+}
+
+#[tokio::test]
 async fn every_deletion_phase_is_redacted_bounded_and_an_identical_retry_converges() {
     for (fault, expected) in [
         (Fault::Artifact, TeardownPhase::AttachmentArtifacts),
@@ -541,6 +600,31 @@ async fn every_deletion_phase_is_redacted_bounded_and_an_identical_retry_converg
 #[tokio::test]
 async fn wipe_is_explicit_and_deletes_all_known_and_orphan_device_authorities() {
     let harness = teardown_harness(Fault::None);
+    harness
+        .runtime
+        .account_display_identities
+        .lock()
+        .unwrap()
+        .extend([
+            (
+                AccountId::from("account-1"),
+                AccountDisplayIdentity {
+                    email: "one@example.test".into(),
+                },
+            ),
+            (
+                AccountId::from("account-2"),
+                AccountDisplayIdentity {
+                    email: "two@example.test".into(),
+                },
+            ),
+            (
+                AccountId::from("identity-only"),
+                AccountDisplayIdentity {
+                    email: "orphan@example.test".into(),
+                },
+            ),
+        ]);
     harness.platform.values.lock().unwrap().insert(
         (
             "devicePlain".into(),
@@ -570,10 +654,38 @@ async fn wipe_is_explicit_and_deletes_all_known_and_orphan_device_authorities() 
         .snapshot(&AccountId::from("account-2"))
         .is_none());
     assert!(harness.platform.values.lock().unwrap().is_empty());
+    assert!(
+        harness
+            .runtime
+            .account_display_identities
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "Wipe retires every cached Account display identity"
+    );
     assert_eq!(
         *harness.host.scopes.lock().unwrap(),
         [TeardownHostCleanupRequest::WipeDevice]
     );
+}
+
+#[tokio::test]
+async fn close_retires_every_cached_account_display_identity() {
+    let runtime = Runtime::new();
+    runtime.account_display_identities.lock().unwrap().insert(
+        AccountId::from("account-1"),
+        AccountDisplayIdentity {
+            email: "person@example.test".into(),
+        },
+    );
+
+    runtime.close().await;
+
+    assert!(runtime
+        .account_display_identities
+        .lock()
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

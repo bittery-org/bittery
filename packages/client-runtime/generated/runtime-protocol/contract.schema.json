@@ -31,6 +31,18 @@
         "unlocked"
       ]
     },
+    "AccountDisplayIdentity": {
+      "description": "The non-secret identity a host may render for one installed Account.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
     "AccountStatus": {
       "type": "object",
       "properties": {
@@ -39,6 +51,16 @@
         },
         "accountId": {
           "type": "string"
+        },
+        "displayIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AccountDisplayIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "failure": {
           "anyOf": [

@@ -17,8 +17,11 @@ impl Runtime {
         };
 
         let mut reconciled_accounts = Vec::with_capacity(catalog.accounts.len());
-        let mut restored: Vec<(crate::replica::ReplicaSnapshot, AccountAccessState)> =
-            Vec::with_capacity(catalog.accounts.len());
+        let mut restored: Vec<(
+            crate::replica::ReplicaSnapshot,
+            AccountAccessState,
+            AccountDisplayIdentity,
+        )> = Vec::with_capacity(catalog.accounts.len());
         let mut orphaned_generations = Vec::new();
         let mut corrected = false;
 
@@ -56,7 +59,13 @@ impl Runtime {
                 active_incarnation: Some(active),
                 pending_install: None,
             });
-            restored.push((snapshot, access));
+            restored.push((
+                snapshot,
+                access,
+                AccountDisplayIdentity {
+                    email: metadata.email,
+                },
+            ));
         }
 
         if corrected {
@@ -138,11 +147,19 @@ impl Runtime {
 
     fn publish_restored_accounts(
         &self,
-        restored: &[(crate::replica::ReplicaSnapshot, AccountAccessState)],
+        restored: &[(
+            crate::replica::ReplicaSnapshot,
+            AccountAccessState,
+            AccountDisplayIdentity,
+        )],
     ) {
         self.recovery_accounts
             .lock()
             .expect("recovery Account lock poisoned")
+            .clear();
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
             .clear();
         self.live_master_unlock_keys
             .lock()
@@ -150,7 +167,7 @@ impl Runtime {
             .clear();
         let snapshots: Vec<_> = restored
             .iter()
-            .map(|(snapshot, _)| snapshot.clone())
+            .map(|(snapshot, _, _)| snapshot.clone())
             .collect();
         self.replica.replace_cache(&snapshots);
         *self
@@ -158,7 +175,14 @@ impl Runtime {
             .lock()
             .expect("Account access lock poisoned") = restored
             .iter()
-            .map(|(snapshot, access)| (snapshot.account_id.clone(), *access))
+            .map(|(snapshot, access, _)| (snapshot.account_id.clone(), *access))
+            .collect();
+        *self
+            .account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned") = restored
+            .iter()
+            .map(|(snapshot, _, identity)| (snapshot.account_id.clone(), identity.clone()))
             .collect();
         self.unlocked_items
             .lock()
@@ -169,7 +193,7 @@ impl Runtime {
             .lock()
             .expect("Account lock epoch lock poisoned") = restored
             .iter()
-            .map(|(snapshot, _)| (snapshot.account_id.clone(), snapshot.lock_epoch))
+            .map(|(snapshot, _, _)| (snapshot.account_id.clone(), snapshot.lock_epoch))
             .collect();
         self.lock_epoch_pending
             .lock()
@@ -221,6 +245,12 @@ impl Runtime {
         self.recovery_accounts
             .lock()
             .expect("recovery Account lock poisoned")
+            .clear();
+        // This recovery seam has no validated AccountMetadata. Preserve the Account, but
+        // never carry a display identity from a different incarnation into it.
+        self.account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
             .clear();
         {
             let mut access = self

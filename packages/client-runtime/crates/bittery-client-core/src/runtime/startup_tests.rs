@@ -365,6 +365,19 @@ async fn open_restores_final_active_accounts_signed_out_once() {
         Some(AccountAccessState::SignedOut)
     );
     assert_eq!(runtime.lock_epoch(&account("account-1")), Some(0));
+    let projected = runtime
+        .projection(&ObservationRequest::RuntimeStatus { account_id: None })
+        .unwrap();
+    let RuntimeProjection::RuntimeStatus(status) = projected.projection else {
+        panic!("expected Runtime status projection");
+    };
+    assert_eq!(
+        status.accounts[0]
+            .display_identity
+            .as_ref()
+            .map(|identity| identity.email.as_str()),
+        Some("user@example.com")
+    );
 }
 
 #[tokio::test]

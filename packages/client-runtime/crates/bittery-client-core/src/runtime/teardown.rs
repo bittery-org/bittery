@@ -187,6 +187,10 @@ impl Runtime {
                     .lock()
                     .expect("Account access lock poisoned")
                     .remove(account_id);
+                self.account_display_identities
+                    .lock()
+                    .expect("Account display identity lock poisoned")
+                    .remove(account_id);
                 self.recovery_accounts
                     .lock()
                     .expect("recovery Account lock poisoned")
@@ -315,6 +319,13 @@ impl Runtime {
             self.account_access
                 .lock()
                 .expect("Account access lock poisoned")
+                .keys()
+                .cloned(),
+        );
+        accounts.extend(
+            self.account_display_identities
+                .lock()
+                .expect("Account display identity lock poisoned")
                 .keys()
                 .cloned(),
         );

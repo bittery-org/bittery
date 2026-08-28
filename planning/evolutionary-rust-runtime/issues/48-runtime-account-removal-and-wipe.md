@@ -66,6 +66,34 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-28 — RuntimeStatus owns installed-Account display identity
+
+The maintainer decided the remaining Settings deletion reachability frontier: every installed
+Account may expose a small reactive display identity through `RuntimeStatus`, sourced only from the
+Runtime-owned, validated `AccountMetadata`. The initial public identity contains only the
+authoritative email deletion needs. A display name would not unlock this slice and would widen the
+cross-host contract without a present consumer.
+
+Because `RuntimeStatus` is a synchronous projection, the Runtime keeps an in-memory projection cache
+populated while a verified sign-in is installed or validated metadata is restored during open. The
+cache is retired with failed installation, Account removal, wipe, close, and recovery transitions.
+An Account recovered without validated metadata remains visible in the Account catalog but has no
+display identity; hosts must not fabricate one.
+
+This keeps persistence interpretation and lifecycle ownership inside the Runtime. Web must not add a
+metadata mirror, parse Runtime platform-storage keys, recreate transitional `AccountMetadata`, or
+restore transitional JWT/session fields merely to render the deletion control. Settings may use the
+active Runtime Account's published email for that control while its unrelated transitional controls
+remain unchanged.
+
+The focused Settings acceptance now reaches and invokes deletion, but it stops in `serverAccount`:
+the transitional Web API client has no credentials after a Runtime sign-in, so its Server deletion
+request fails before local Runtime teardown starts. Runtime owns the authenticated Session, but its
+public protocol has no authenticated Server Account deletion capability. Deciding that authority
+and its retry semantics is a separate maintainer frontier; this display-identity slice does not add
+a Runtime request, expose a token, or restore transitional credentials. `Status:` stays
+`ready-for-agent`.
+
 ### 2026-08-27 — deletion dialog browser-only escape delivered
 
 Commit `96ade6a5` delivers the Danger Zone deletion's browser-only escape. It appears only after the

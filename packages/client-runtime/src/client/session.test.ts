@@ -172,10 +172,22 @@ describe("Device session states", () => {
 		const { transport, session, release } = await openSession(
 			createMemoryActiveAccountStorage("account-1"),
 		);
-		transport.publish(status([account("account-1", "unlocked")]));
+		transport.publish(
+			status([
+				account("account-1", "unlocked", {
+					displayIdentity: { email: "person@example.test" },
+				}),
+			]),
+		);
 		expect(session.getSnapshot()).toMatchObject({
 			state: "unlocked",
 			accountId: "account-1",
+			accounts: [
+				{
+					accountId: "account-1",
+					displayIdentity: { email: "person@example.test" },
+				},
+			],
 		});
 		release();
 	});

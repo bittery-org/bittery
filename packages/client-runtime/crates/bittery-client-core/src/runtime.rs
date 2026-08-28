@@ -76,11 +76,12 @@ use crate::{
         ReplicaItemRecord, ReplicaPersistence, ReplicaSnapshot, SerializedReplicaExecutor,
         SerializedReplicaPersistence,
     },
-    AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, ItemProjectionStatus,
-    ItemsProjection, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
-    PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
-    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection, TeardownPhase,
-    TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
+    ItemProjectionStatus, ItemsProjection, LoginItemProjection, ObservationRequest,
+    ObservationSink, PendingShareResult, PendingShareResultsProjection, RequestCancellation,
+    RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
+    RuntimeStatusProjection, TeardownPhase, TeardownScope, TeardownStatus, VaultProjection,
+    VaultProjectionRole, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -440,6 +441,7 @@ pub struct Runtime {
     live_master_unlock_keys:
         Arc<Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
+    account_display_identities: Mutex<HashMap<AccountId, AccountDisplayIdentity>>,
     recovery_accounts: Mutex<HashMap<AccountId, RecoveryAccountStatus>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
@@ -827,6 +829,7 @@ impl Runtime {
             unlocked_items: Mutex::new(HashMap::new()),
             live_master_unlock_keys,
             account_access: Mutex::new(HashMap::new()),
+            account_display_identities: Mutex::new(HashMap::new()),
             recovery_accounts: Mutex::new(HashMap::new()),
             account_lock_epochs: Mutex::new(HashMap::new()),
             lock_epoch_pending: Mutex::new(HashMap::new()),
@@ -1650,6 +1653,10 @@ impl Runtime {
                 .lock()
                 .expect("Account access lock poisoned")
                 .clear();
+            self.account_display_identities
+                .lock()
+                .expect("Account display identity lock poisoned")
+                .clear();
             *self
                 .account_lock_epochs
                 .lock()
@@ -2032,6 +2039,12 @@ impl Runtime {
                             .get(&value.account_id)
                             .copied()
                             .unwrap_or(AccountAccessState::SignedOut),
+                        display_identity: self
+                            .account_display_identities
+                            .lock()
+                            .expect("Account display identity lock poisoned")
+                            .get(&value.account_id)
+                            .cloned(),
                         waiting_reason: self
                             .waiting_reasons
                             .lock()
@@ -2060,6 +2073,7 @@ impl Runtime {
                             account_id,
                             replica_revision: recovery.replica_revision,
                             access: AccountAccessState::SignedOut,
+                            display_identity: None,
                             waiting_reason: None,
                             failure: None,
                         }),

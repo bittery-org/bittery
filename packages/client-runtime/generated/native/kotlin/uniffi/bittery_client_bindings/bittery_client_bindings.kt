@@ -4386,6 +4386,39 @@ public object FfiConverterTypeSecretString: FfiConverter<SecretString, Long> {
 
 
 
+data class AccountDisplayIdentity (
+    var `email`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountDisplayIdentity: FfiConverterRustBuffer<AccountDisplayIdentity> {
+    override fun read(buf: ByteBuffer): AccountDisplayIdentity {
+        return AccountDisplayIdentity(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountDisplayIdentity) = (
+            FfiConverterString.allocationSize(value.`email`)
+    )
+
+    override fun write(value: AccountDisplayIdentity, buf: ByteBuffer) {
+            FfiConverterString.write(value.`email`, buf)
+    }
+}
+
+
+
 data class AccountStatus (
     var `accountId`: kotlin.String
     ,
@@ -4396,6 +4429,8 @@ data class AccountStatus (
     var `waitingReason`: AccountWaitingReason?
     ,
     var `failure`: RuntimeErrorCode?
+    ,
+    var `displayIdentity`: AccountDisplayIdentity?
 
 ){
 
@@ -4417,6 +4452,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterTypeAccountAccessState.read(buf),
             FfiConverterOptionalTypeAccountWaitingReason.read(buf),
             FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
+            FfiConverterOptionalTypeAccountDisplayIdentity.read(buf),
         )
     }
 
@@ -4425,7 +4461,8 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterULong.allocationSize(value.`replicaRevision`) +
             FfiConverterTypeAccountAccessState.allocationSize(value.`access`) +
             FfiConverterOptionalTypeAccountWaitingReason.allocationSize(value.`waitingReason`) +
-            FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`)
+            FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`) +
+            FfiConverterOptionalTypeAccountDisplayIdentity.allocationSize(value.`displayIdentity`)
     )
 
     override fun write(value: AccountStatus, buf: ByteBuffer) {
@@ -4434,6 +4471,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterTypeAccountAccessState.write(value.`access`, buf)
             FfiConverterOptionalTypeAccountWaitingReason.write(value.`waitingReason`, buf)
             FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
+            FfiConverterOptionalTypeAccountDisplayIdentity.write(value.`displayIdentity`, buf)
     }
 }
 
@@ -6280,6 +6318,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeAccountDisplayIdentity: FfiConverterRustBuffer<AccountDisplayIdentity?> {
+    override fun read(buf: ByteBuffer): AccountDisplayIdentity? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeAccountDisplayIdentity.read(buf)
+    }
+
+    override fun allocationSize(value: AccountDisplayIdentity?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeAccountDisplayIdentity.allocationSize(value)
+        }
+    }
+
+    override fun write(value: AccountDisplayIdentity?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeAccountDisplayIdentity.write(value, buf)
         }
     }
 }

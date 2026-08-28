@@ -2055,21 +2055,73 @@ public func FfiConverterTypeSecretString_lower(_ value: SecretString) -> UInt64 
 
 
 
+public struct AccountDisplayIdentity: Equatable, Hashable {
+    public var email: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(email: String) {
+        self.email = email
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension AccountDisplayIdentity: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountDisplayIdentity: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountDisplayIdentity {
+        return
+            try AccountDisplayIdentity(
+                email: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AccountDisplayIdentity, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.email, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountDisplayIdentity_lift(_ buf: RustBuffer) throws -> AccountDisplayIdentity {
+    return try FfiConverterTypeAccountDisplayIdentity.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountDisplayIdentity_lower(_ value: AccountDisplayIdentity) -> RustBuffer {
+    return FfiConverterTypeAccountDisplayIdentity.lower(value)
+}
+
+
 public struct AccountStatus: Equatable, Hashable {
     public var accountId: String
     public var replicaRevision: UInt64
     public var access: AccountAccessState
     public var waitingReason: AccountWaitingReason?
     public var failure: RuntimeErrorCode?
+    public var displayIdentity: AccountDisplayIdentity?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(accountId: String, replicaRevision: UInt64, access: AccountAccessState, waitingReason: AccountWaitingReason?, failure: RuntimeErrorCode?) {
+    public init(accountId: String, replicaRevision: UInt64, access: AccountAccessState, waitingReason: AccountWaitingReason?, failure: RuntimeErrorCode?, displayIdentity: AccountDisplayIdentity?) {
         self.accountId = accountId
         self.replicaRevision = replicaRevision
         self.access = access
         self.waitingReason = waitingReason
         self.failure = failure
+        self.displayIdentity = displayIdentity
     }
 
 
@@ -2092,7 +2144,8 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
                 replicaRevision: FfiConverterUInt64.read(from: &buf),
                 access: FfiConverterTypeAccountAccessState.read(from: &buf),
                 waitingReason: FfiConverterOptionTypeAccountWaitingReason.read(from: &buf),
-                failure: FfiConverterOptionTypeRuntimeErrorCode.read(from: &buf)
+                failure: FfiConverterOptionTypeRuntimeErrorCode.read(from: &buf),
+                displayIdentity: FfiConverterOptionTypeAccountDisplayIdentity.read(from: &buf)
         )
     }
 
@@ -2102,6 +2155,7 @@ public struct FfiConverterTypeAccountStatus: FfiConverterRustBuffer {
         FfiConverterTypeAccountAccessState.write(value.access, into: &buf)
         FfiConverterOptionTypeAccountWaitingReason.write(value.waitingReason, into: &buf)
         FfiConverterOptionTypeRuntimeErrorCode.write(value.failure, into: &buf)
+        FfiConverterOptionTypeAccountDisplayIdentity.write(value.displayIdentity, into: &buf)
     }
 }
 
@@ -3955,6 +4009,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeAccountDisplayIdentity: FfiConverterRustBuffer {
+    typealias SwiftType = AccountDisplayIdentity?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAccountDisplayIdentity.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAccountDisplayIdentity.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

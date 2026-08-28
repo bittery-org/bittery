@@ -243,9 +243,16 @@ revision: string
 export interface AccountStatus {
 access: AccountAccessState
 accountId: string
+displayIdentity?: (AccountDisplayIdentity | null)
 failure: (RuntimeErrorCode | null)
 replicaRevision: string
 waitingReason?: (AccountWaitingReason | null)
+}
+/**
+ * The non-secret identity a host may render for one installed Account.
+ */
+export interface AccountDisplayIdentity {
+email: string
 }
 export interface LoginItemDraft {
 customFields?: LoginCustomField[]

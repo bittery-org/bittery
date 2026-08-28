@@ -69,13 +69,13 @@ pub use platform_storage::SerializedPlatformStorageExecutor;
 #[doc(hidden)]
 pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
-    AccountAccessState, AccountId, AccountStatus, AccountWaitingReason, AttachmentProjection,
-    CreateShareDraft, CustomFieldKind, ItemProjectionStatus, ItemsProjection, LoginCustomField,
-    LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink, PendingShareResult,
-    PendingShareResultsProjection, RequestCancellation, RuntimeError, RuntimeErrorCode,
-    RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
-    ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus,
-    VaultProjection, VaultProjectionRole, VaultProjectionType,
+    AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
+    AttachmentProjection, CreateShareDraft, CustomFieldKind, ItemProjectionStatus, ItemsProjection,
+    LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink,
+    PendingShareResult, PendingShareResultsProjection, RequestCancellation, RuntimeError,
+    RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse,
+    RuntimeStatusProjection, ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope,
+    TeardownStatus, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 #[cfg(feature = "persistence-contract-schema")]
 #[doc(hidden)]
