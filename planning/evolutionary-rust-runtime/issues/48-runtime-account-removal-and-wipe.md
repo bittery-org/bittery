@@ -66,6 +66,296 @@ reachability audit proves no final host invokes the transitional lifecycle owner
 
 ## Comments
 
+### 2026-08-28 — Runtime-owned authenticated Server deletion and retained exact retry
+
+The maintainer decided the authenticated Server-delete frontier. Add one narrow Runtime command:
+
+```text
+DeleteServerAccount {
+  accountId: AccountId,
+  confirmEmail: String,
+  requestId: String
+}
+
+ServerAccountDeletion {
+  accountId: AccountId,
+  requestId: String,
+  outcome: "deleted" | "confirmationEmailMismatch" | "blocked"
+}
+```
+
+`accountId` is mandatory explicit Runtime scope; this command never looks up an active Account. It
+selects that installed Account's Server URL and current Runtime-owned Session, but it is not sent as
+a Server User id. `requestId` is a canonical lower-case UUID v4 generated and durably recorded by
+the host before the first dispatch. `confirmEmail` is trimmed, lower-cased, and NFKC-normalized with
+the shared crypto-core normalization before the marker or HTTP request is written. Empty values and
+values longer than 254 UTF-8 bytes are invalid; a well-formed value that differs from the Server's
+equally normalized current email produces `confirmationEmailMismatch`. The Runtime serializes the
+normalized value deterministically and sends the existing `DELETE /api/v1/users/me` a
+`DeleteAccountRequest { confirmEmail }` plus the UUID as its required `Idempotency-Key` header. The
+Server's successful `DeleteAccountResponse { requestId, outcome: "deleted" }` echoes the key. No
+generic authenticated proxy, raw token API, transitional credential mirror, or combined
+Server-and-Device teardown is introduced.
+
+The old Ticket 48 statement that the Runtime “cannot express” Server deletion is superseded only for
+this operation. It described the Runtime before it owned the authenticated Session. The Web Danger
+Zone still owns the explicit server-first workflow and calls the existing local
+`RemoveAccount { accountId }` only after `ServerAccountDeletion.outcome` is authoritatively
+`deleted`. The Runtime command owns authenticated transport, not the product workflow and not local
+teardown.
+
+#### Retained outcome and Server transaction
+
+The generic `idempotency_record` middleware is not sufficient here. It authenticates before a
+handler can replay an answer, commits its claim outside the domain transaction, and may convert an
+expired claim into `IDEMPOTENCY_OUTCOME_INDETERMINATE`. Account deletion instead gets a private,
+route-local `account_deletion_outcome` table. Each row contains only a domain-separated SHA-256
+proof of the exact presented bearer token, the UUID request id, a SHA-256 request fingerprint, the
+closed outcome code (`deleted`, `confirmationMismatch`, or `accountDeletionBlocked`), the
+`created_at` timestamp, and no mutable state. It contains no User id, email, team state, bearer token,
+request body, response body, expiry, or foreign key to the User. Every closed answer consumes its
+globally unique request id. The schema permits exactly one row per request id and at most one
+`deleted` row per credential proof; the same proof may have multiple rate-limited refusal rows when
+the user makes distinct corrected gestures.
+
+Hash inputs are fixed and unambiguous. Define `frame(bytes)` as an unsigned 64-bit big-endian byte
+length followed by exactly those bytes. The credential proof is
+`SHA-256(frame("bittery/account-deletion-proof/v1") || frame(rawBearerUtf8))`. The request fingerprint
+is `SHA-256(frame("bittery/account-deletion-request/v1") || frame("DELETE") ||
+frame("/api/v1/users/me") || frame(canonicalRequestId) || frame(canonicalJsonBody))`. The canonical
+body is the deterministic serialization of the normalized `confirmEmail`. This stores neither the
+credential nor plaintext confirmation email and cannot suffer delimiter ambiguity. Logs may name
+only the request id, status/outcome, and redacted correlation data; they must not contain either
+hash, the body, email, or token.
+
+The opaque Session token has 256 bits of random entropy. Looking up a retained row by its independent,
+globally random UUID v4 request id is therefore acceptable, provided possession of the UUID never
+grants replay. A route-specific extractor may read the already parsed bearer value from
+`RequestMetadata`, but this exception is confined to `DELETE /users/me`. It compares the computed
+proof with the retained proof in constant time and compares the canonical fingerprint exactly. An
+exact old bearer proof may replay after its Session and User have disappeared. A refreshed, rotated,
+new, missing, or foreign bearer never may. A retained row authorizes only replay of its inert
+closed answer at its original HTTP status, never a mutation or any other authenticated route.
+
+Retained rows have no automatic expiry. A durable `dispatchedUnknown` Web marker can remain the only
+evidence that an exact retry is required, so a time-based cleanup job cannot safely guess that no
+caller still needs the row. Any future erasure or acknowledgement policy is a separate explicit
+protocol and must prove that no durable marker can still request replay before deleting the row.
+Until then, operational metrics must expose row count, insert/replay rates, and uniqueness failures;
+privacy stays bounded by the two hashes, closed code, random UUID, and timestamp, and the schema
+bounds storage to one closed row per request id and one deleted row per credential proof.
+Authenticated first attempts remain subject to the existing per-User Account-deletion rate limit.
+Web durably reuses one UUID for one gesture instead of minting on retry, and row-count, outcome,
+insert/replay, rate-limit, and UUID-collision metrics make abuse and growth visible. These are the
+abuse/growth controls; an unsafe time-based cleanup is not one.
+
+One SQL transaction first acquires a request-id-derived advisory transaction lock, then re-reads the
+retained row by globally unique canonical UUID. The signed 64-bit advisory key is only a serialization
+identity derived from a domain-separated hash of the request id; a hash collision merely
+over-serializes unrelated UUIDs and never grants authority. If the row exists, the handler performs
+the constant-time proof comparison and exact fingerprint comparison and replays only when both
+match. It reconstructs the retained outcome's original 200, 400, or 409 response. Any mismatch
+returns the same 401 `UNAUTHORIZED` body as unusable authentication, without
+revealing whether the UUID exists. The same UUID is not independently reusable by another
+credential or request body.
+
+Only when that locked re-read finds no row does the transaction perform and recheck normal live
+Session authentication and enforce the existing Account-deletion rate limit. A 429 rolls back and
+writes no retained row. Otherwise it locks the User/credential authority, normalizes and compares
+the email, and checks the team-owner deletion constraints from one authoritative locked validation
+snapshot. It inserts the corresponding closed outcome before returning any answer. For `deleted`,
+that same transaction also writes the audit event and deletes the User so its Sessions and
+Account-owned rows cascade. For `confirmationMismatch` or `accountDeletionBlocked`, it commits the
+retained refusal atomically with the snapshot that decided it and performs no deletion. No pending
+claim is committed.
+
+A crash before commit leaves no outcome and no destructive effect; a commit makes the original
+status/outcome replay-stable even if the email or team state later changes. A corrected gesture after
+an observed refusal uses a fresh UUID; replaying the old exact request always returns its old refusal.
+Concurrent exact requests share the request-id lock: the first commits deletion, and the second must
+perform the post-lock retained-row re-read and replay. Concurrent different UUIDs serialize when
+they reach the same locked User/credential; after the winner deletes it, the loser cannot revalidate
+a live Session and returns 401 rather than claiming deletion under its own id.
+
+The HTTP contract is exact:
+
+- first success and an exact post-cascade retry both return 200 `DeleteAccountResponse` with the
+  echoed request id and `outcome: "deleted"`; an `Idempotency-Replayed: true` header may distinguish
+  transport history but clients must not give it different meaning;
+- a wrong confirmation returns 400 problem code `ACCOUNT_DELETION_CONFIRMATION_MISMATCH`, mapped by
+  the Runtime to `outcome: "confirmationEmailMismatch"`; an exact retry returns the same 400 even if
+  the Server email later changes to the supplied value;
+- an existing team-owner constraint returns 409 problem code `ACCOUNT_DELETION_BLOCKED`, mapped to
+  `outcome: "blocked"`; an exact retry returns the same 409 even if the team is later dismantled or
+  transferred;
+- malformed email or request id returns 400 (`INVALID_EMAIL` or `INVALID_IDEMPOTENCY_KEY`) without a
+  mutation;
+- an existing request id with a different proof or fingerprint, a different request id after the
+  credential's User was deleted, and a missing, expired, refreshed, foreign, or otherwise unusable
+  credential all return the same 401 `UNAUTHORIZED`, write no row, and perform no mutation; 401 is
+  never deletion; and
+- 408, 425, 429, 5xx, oversized/invalid responses, cancellation after dispatch, and transport loss
+  are not closed semantic answers. A Server-originated 429/5xx rolls back and creates no retained
+  row; an observed intermediary 5xx can still hide a committed closed response, so the client treats
+  every such answer as retryable/unconfirmed and retries the same bytes and request id. Exact
+  retained 400 and 409 replays also carry `Idempotency-Replayed: true`; their canonical problem body
+  is reconstructed solely from the stored closed code.
+
+#### Runtime and Web ownership
+
+`DeleteServerAccount` follows the Runtime's established lock order: acquire the shared teardown
+admission read guard first, reject pending teardown, resolve the exact Account execution lock, then
+acquire and hold that execution fence. After the fence it rechecks that the Runtime is open and that
+the same Account incarnation is still installed. It holds both guards across
+`CurrentSessionDocument` load, the delete attempt, the optional refresh and durable Session
+replacement, the one retry, and terminal classification/publication. A missing Account is
+`ACCOUNT_MISSING`; a missing Session is `AUTHENTICATION_REQUIRED`.
+
+That fence is the deep concurrency seam. Bootstrap, refresh, Sign-out, Account removal, and other
+Session users already take the same Account execution lock, while `RemoveAccount` first takes the
+exclusive teardown admission guard. Therefore none can destroy the bearer, replace the Session, or
+overwrite this command's refresh while deletion is in flight. A refresh response is stored only
+after validating the same Account id, incarnation, prior Session identity, and returned Session; the
+fence prevents a stale refresh from overwriting a newer Sign-in/refresh. The narrow typed
+`AuthHttpClient` method applies the response-size bound, strict response decoding, status mapping,
+and redaction above. It sends once with the loaded token. On that delete attempt's first 401 only,
+it calls the existing Session refresh endpoint once, durably replaces the current Session, and
+retries the identical deletion bytes and request id once. Refresh failure or a second 401 is
+`AUTHENTICATION_REQUIRED`; there is no second refresh. A response request id that differs from the
+command is `INVARIANT_VIOLATION`. Retryable transport/status failures are redacted
+`AUTHENTICATION_UNAVAILABLE`, meaning “not confirmed” for this command, never “not deleted.”
+Because the marker/fence rules preserve the original `CurrentSessionDocument`, the retry presents
+the same bearer proof. The Server checks its retained outcome before live authentication, so a final
+authoritative 401 proves this exact request has no closed retained answer;
+`AUTHENTICATION_REQUIRED` is therefore a definitive no-mutation result, not an ambiguous transport
+result.
+
+Cancellation is checked while admitted and fenced immediately before the first delete dispatch; a
+cancellation there returns `CANCELLED` and no Server authority was sent. Once dispatch begins,
+cancellation cannot interrupt refresh/retry or become a claim that nothing committed: the command
+finishes its fenced classification, and an ambiguous transport result remains unconfirmed. A
+concurrent `close()` marks the Runtime closed and waits for the Account execution fence. A command
+that had not passed its fenced open/incarnation recheck returns `RUNTIME_CLOSED`; an already
+dispatched command completes classification while close waits, publishes no mutable status after
+close, releases the fence, and only then may close retire its in-memory authority. Close preserves
+the durable `CurrentSessionDocument` under its existing contract. Thus close, Sign-out,
+RemoveAccount, and refresh cannot interleave a stale Session overwrite or destroy exact-retry
+authority mid-command.
+
+This command is not a durable accepted Runtime `Operation`: it has no optimistic Replica effect, no
+independent background owner after local Account removal, and Web durably owns the user gesture and
+its exact retry material. Adding it to the Operation journal would create a second workflow owner
+without improving the atomic Server guarantee.
+
+Replace the single transitional-id deletion fact with a versioned Web deletion marker containing
+`runtimeAccountId`, `transitionalAccountId`, normalized `confirmEmail`, `requestId`, and
+`phase: "prepared" | "dispatchedUnknown" | "serverDeleted"`. It contains no Session token or
+cryptographic secret. The Danger Zone resolves the Runtime Account and published email plus the
+transitional Account id, generates the UUID, and must persist the complete `prepared` marker before
+granting transport authority. It then durably promotes the marker to `dispatchedUnknown` before
+invoking the Runtime; if either write fails, it does not contact the Server. This deliberately
+allows a conservative `dispatchedUnknown` marker even if the Runtime rejects before HTTP, but never
+an HTTP dispatch without durable exact-retry material. A marker belongs only when both stored
+Account ids match the resolved deletion target; an Account change must never reuse its email or
+request id.
+
+The Web sequence is then fixed:
+
+1. recover a matching marker, or persist a new `prepared` marker from the explicit target and typed
+   confirmation;
+2. promote `prepared` to `dispatchedUnknown`, then call Runtime `DeleteServerAccount` with exactly
+   the marker values;
+3. on `deleted`, persist `phase: "serverDeleted"` before any local step;
+4. call Runtime `RemoveAccount { accountId }`, then the existing transitional Account cleanup; and
+5. clear the marker only after both local owners report completion.
+
+A forced reload skips the Server when the marker says `serverDeleted`. A `prepared` marker proves no
+transport authority was granted and may either resume through promotion or be definitively
+cancelled. A `dispatchedUnknown` marker always replays the exact Runtime command; it is never called
+abandoned, expired, or safe to forget. Only a definitive pre-dispatch `CANCELLED`, `RUNTIME_CLOSED`,
+`ACCOUNT_MISSING`, or missing-Session refusal may clear it without HTTP. A closed
+`confirmationEmailMismatch`/`blocked` response or an authoritative 401 mapped to
+`AUTHENTICATION_REQUIRED` may also clear it after dispatch: retained-reread-first means the 401 could
+not hide an earlier committed closed outcome. After an observed closed refusal, the next corrected
+user gesture generates and persists a fresh UUID; the consumed request id is never repurposed. A
+transport ambiguity, 429, 5xx, invalid/mismatched response, or post-dispatch cancellation retains
+`dispatchedUnknown` and reports incomplete.
+
+Every Web Sign-out and `RemoveAccount` entry path must inspect a matching marker before invoking the
+Runtime. `dispatchedUnknown` gates the destructive action and routes the user to deletion recovery,
+because destroying the Runtime Session would destroy the only bearer that can prove an exact replay.
+Recovery also runs before any Web-triggered Bootstrap/session-refresh path that could rotate that
+bearer; the Runtime command itself refreshes only after an authoritative 401 proves the old bearer
+has no exact retained outcome. A transport-ambiguous command never refreshes.
+
+Once `serverDeleted` is durably marked, local teardown may proceed and reload skips the Server. The
+existing 4d “Log out after an abandoned deletion” rule applies only to a truly pre-transport
+`prepared` marker, which Log-out may cancel and clear, and to `serverDeleted`, where Log-out may act
+as the local cleanup tail. It never applies to `dispatchedUnknown`. The start-up seeding rule may
+continue the safe local tail, but it cannot erase or reinterpret an unknown dispatch. The existing
+browser-only escape remains available only for `serverDeleted`, and the marker clears only after the
+matching local cleanup completes.
+
+#### Contract work and staged verification
+
+Keep the existing route, so the auth router's route count does not increase. Its request header,
+typed success response, problem statuses, security description, and route assertions do change.
+Regenerate Server OpenAPI and `@bittery/api-contract`, add the two stable problem codes and their
+registry tests, and generate the Rust-owned Runtime protocol artifacts under ADR 0012. Create the
+specialized table with `pnpm run db:create -- account_deletion_outcomes`; merged migrations are
+frozen and must not be edited. The migration supplies a globally unique UUID request-id primary key,
+32-byte proof/fingerprint checks, a closed-outcome check, a partial unique proof constraint for
+`deleted`, creation timestamp, and no expiry or User foreign key. OpenAPI continues to describe this
+as Bearer-secured: the route-specific retained replay is a narrower proof-bound implementation, not
+a public route or general authentication bypass.
+
+Implement the smallest vertical path in this order, test-first:
+
+1. Server transaction and route: first deletion, discarded response followed by exact retry using
+   the now-invalid old bearer, refreshed/rotated/foreign proof, wrong email, team-owner block,
+   fingerprint mismatch, reused global UUID, transaction rollback, and concurrent exact,
+   conflicting-body, and different-id attempts. The concurrent exact test must hold the first
+   transaction through deletion, start the second request, then prove the second re-reads the
+   retained row after acquiring the request-id advisory lock and replays. A mutation that omits that
+   post-lock retained re-read must fail. Further mutations must fail if proof comparison is not
+   constant-time and exact, advisory-key collision grants authority, deletion and outcome use
+   separate transactions, a non-original bearer replays, or any 401 becomes 200.
+   Separate lost-response tests retain a wrong-email 400 and replay it after the User email changes,
+   and retain a team-owner 409 and replay it after the team constraint disappears. They also prove a
+   corrected gesture with a fresh UUID can observe the new state, while reusing the consumed UUID
+   with changed bytes or proof returns the indistinguishable 401. Rate-limit tests prove rejected
+   authenticated gestures cannot grow rows without the existing bound. Pre-acceptance transport
+   failure and Server-originated 429/5xx tests prove no closed row is written; discarded closed
+   responses prove an observed transport/intermediary failure still converges through retained
+   replay.
+2. Runtime `AuthHttpClient` and command: explicit Account scope, exact header/body, current-session
+   load under shared teardown admission then the Account execution fence, one refresh then identical
+   retry, no refresh after an ambiguous transport loss, strict echoed-id/response decoding,
+   redaction, pre-dispatch cancellation, and post-dispatch unconfirmed classification. Race tests
+   cover refresh, Sign-out, RemoveAccount, and close: none may overwrite or destroy the held Session;
+   close waits for an already-dispatched classification and suppresses later publication. Prove no
+   token enters the public protocol, logs, or Operation journal. Status tests map retained/replayed
+   200, 400, and 409 to the three response-union outcomes; final authoritative 401 maps to clearable
+   `AUTHENTICATION_REQUIRED`, while transport/429/5xx remain unconfirmed.
+3. Web pure orchestration and storage: marker-before-dispatch, write failure stopping deletion,
+   explicit `prepared` promotion, `dispatchedUnknown` exact replay, `serverDeleted` skip,
+   definitive closed-refusal and 401 clearing, ambiguous transport/429/5xx retention, Account
+   mismatch isolation, marker clearing only after both local owners, and the already-decided
+   browser-only escape. Forced-reload tests cover every phase and prove `dispatchedUnknown` recovery
+   runs before any Bootstrap refresh.
+   Concurrent Log-out and RemoveAccount tests prove both are allowed for
+   `prepared`/`serverDeleted` according to the rules above, are gated for `dispatchedUnknown`, and
+   cannot destroy Runtime retry authority before replay resolves.
+4. Focused cloud Playwright acceptance from a Runtime full sign-in: successful end-to-end deletion,
+   simulated lost delete response plus reload convergence, wrong-email refusal without local loss,
+   and forced reload during local teardown. Then update transitional-key shape assertions and the Web
+   reachability audit, decide the Chromium gate placement already left to 4d, and run the required
+   TypeScript, Server, Rust, OpenAPI, generated-contract, and clean-tree phase gates.
+
+This decision is deliberately limited to authenticated Account deletion. It does not create a
+general Server-command tunnel, migrate unrelated Settings identity consumers, expose credentials,
+or combine Server deletion with Runtime local removal. `Status:` remains `ready-for-agent`.
+
 ### 2026-08-28 — RuntimeStatus owns installed-Account display identity
 
 The maintainer decided the remaining Settings deletion reachability frontier: every installed
