@@ -1,16 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import type { RuntimeSessionSnapshot } from "@bittery/client-runtime/client";
-import { activeRuntimeAccountDisplayIdentity } from "./settings-runtime-identity";
-
-const settingsSource = readFileSync(
-	new URL("../routes/_app/settings/index.tsx", import.meta.url),
-	"utf8",
-);
-const dangerZoneSource = settingsSource.slice(
-	settingsSource.indexOf("{/* Danger Zone */}"),
-	settingsSource.indexOf("<VaultExportDialog"),
-);
+import {
+	activeRuntimeAccountDeletionTarget,
+	activeRuntimeAccountDisplayIdentity,
+	advanceSettingsDeletionGesture,
+} from "./settings-runtime-identity";
 
 describe("Settings deletion Runtime identity wiring", () => {
 	test("selects only the active Account's validated display identity", () => {
@@ -67,11 +61,75 @@ describe("Settings deletion Runtime identity wiring", () => {
 		expect(activeRuntimeAccountDisplayIdentity(staleSession)).toBeNull();
 	});
 
-	test("uses the active Runtime Account identity instead of auth.me", () => {
-		expect(settingsSource).toContain("useRuntimeSession()");
-		expect(dangerZoneSource).toContain(
-			"<DeleteAccountDialog userEmail={deletionIdentity.email}",
-		);
-		expect(dangerZoneSource).not.toContain("userQuery.data");
+	test("holds the first deletion gesture target across fallback activation and incomplete dismissal", () => {
+		const accountA = {
+			runtimeAccountId: "runtime-account-a",
+			email: "account-a@example.test",
+		};
+		const accountB = {
+			runtimeAccountId: "runtime-account-b",
+			email: "account-b@example.test",
+		};
+		let gesture = advanceSettingsDeletionGesture(null, {
+			type: "started",
+			target: accountA,
+		});
+
+		gesture = advanceSettingsDeletionGesture(gesture, {
+			type: "started",
+			target: accountB,
+		});
+		expect(gesture).toEqual({ target: accountA });
+		expect(
+			advanceSettingsDeletionGesture(gesture, {
+				type: "incompleteDismissed",
+			}),
+		).toEqual({ target: accountA });
+	});
+
+	test("releases a deletion gesture only on cancel or terminal completion", () => {
+		const held = {
+			target: {
+				runtimeAccountId: "runtime-account-a",
+				email: "account-a@example.test",
+			},
+		};
+
+		expect(
+			advanceSettingsDeletionGesture(held, { type: "canceled" }),
+		).toBeNull();
+		expect(
+			advanceSettingsDeletionGesture(held, { type: "terminal" }),
+		).toBeNull();
+	});
+
+	test("pairs the active Runtime account id with its own validated email", () => {
+		const session: RuntimeSessionSnapshot = {
+			state: "unlocked",
+			accountId: "account-2",
+			accounts: [
+				{
+					accountId: "account-1",
+					access: "unlocked",
+					displayIdentity: { email: "wrong@example.test" },
+					failure: null,
+					replicaRevision: "1",
+				},
+				{
+					accountId: "account-2",
+					access: "unlocked",
+					displayIdentity: { email: "right@example.test" },
+					failure: null,
+					replicaRevision: "1",
+				},
+			],
+			waitingReason: null,
+			code: null,
+		};
+
+		expect(activeRuntimeAccountDeletionTarget(session)).toEqual({
+			runtimeAccountId: "account-2",
+			email: "right@example.test",
+		});
 	});
 });

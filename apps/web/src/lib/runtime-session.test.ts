@@ -283,6 +283,8 @@ describe("the Runtime owns the session, and nothing mirrors it", () => {
 		expect(dialog).toContain("report?.canClearBrowserDataOnly");
 		expect(dialog).toContain("delete-account-clear-browser-data");
 		expect(dialog).toContain('result.status === "browserDataCleared"');
+		expect(dialog).toContain("const heldTarget = previous?.target");
+		expect(dialog).toContain("runtimeAccountId: heldTarget.runtimeAccountId");
 
 		// Bounded to the driver. An import or an unrelated handler mentioning the escape
 		// does not prove the clear action dispatches to it instead of deleting again.

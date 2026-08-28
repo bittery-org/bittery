@@ -39,7 +39,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { VaultExportDialog } from "@/components/export/vault-export-dialog";
 import { VaultImportDialog } from "@/components/import/vault-import-dialog";
 import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
@@ -52,7 +52,10 @@ import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-re
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
 import { useImportOnboardingState } from "@/hooks/use-import-onboarding-state";
-import { activeRuntimeAccountDisplayIdentity } from "@/lib/settings-runtime-identity";
+import {
+	activeRuntimeAccountDeletionTarget,
+	advanceSettingsDeletionGesture,
+} from "@/lib/settings-runtime-identity";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/settings/")({
@@ -74,11 +77,17 @@ function SettingsPage() {
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 	const userQuery = useQuery(apiQueries.auth.me(api));
 	const runtimeSession = useRuntimeSession();
-	const deletionIdentity = activeRuntimeAccountDisplayIdentity(runtimeSession);
+	const activeDeletionTarget =
+		activeRuntimeAccountDeletionTarget(runtimeSession);
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 	const [isDeviceSetupDialogOpen, setIsDeviceSetupDialogOpen] = useState(false);
+	const [deletionGesture, dispatchDeletionGesture] = useReducer(
+		advanceSettingsDeletionGesture,
+		null,
+	);
 	const onboardingImport = useImportOnboardingState();
+	const deletionTarget = deletionGesture?.target ?? activeDeletionTarget;
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
@@ -580,8 +589,12 @@ function SettingsPage() {
 								{runtimeSession.state === "loading" ? (
 									<Skeleton className="h-8 w-36" />
 								) : (
-									deletionIdentity && (
-										<DeleteAccountDialog userEmail={deletionIdentity.email} />
+									deletionTarget && (
+										<DeleteAccountDialog
+											key={deletionTarget.runtimeAccountId}
+											target={deletionTarget}
+											onGestureEvent={dispatchDeletionGesture}
+										/>
 									)
 								)}
 							</div>

@@ -235,6 +235,10 @@ function SignInFormContent({
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [retirement, setRetirement] =
 		useState<RetirementState>(RETIREMENT_IDLE);
+	const [browserSessionForgotten, setBrowserSessionForgotten] = useState(false);
+	// The browser-only terminal outcome is authoritative for this form even when a
+	// closed/wedged Runtime can no longer publish a fresh Session projection.
+	const quickUnlockActive = isQuickUnlock && !browserSessionForgotten;
 	const assertRuntimeAuthenticationAllowed = () => {
 		if (
 			gateRuntimeAuthentication({
@@ -316,6 +320,7 @@ function SignInFormContent({
 			// `runtimeSession.state === "locked"`, cannot hold here: every refusal this
 			// escape follows is a Device that is closed or not ready, and `deriveSession`
 			// reads closed as `unavailable`. So the field re-enables in this page load.
+			setBrowserSessionForgotten(true);
 			await queryClient.invalidateQueries({
 				queryKey: ["auth", "sessionState"],
 			});
@@ -396,7 +401,7 @@ function SignInFormContent({
 		queryFn: async () =>
 			(await ceremonyApiClient.auth.checkEmail({ email })).data,
 		enabled:
-			!isQuickUnlock &&
+			!quickUnlockActive &&
 			email.includes("@") &&
 			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
 		staleTime: 60 * 1000,
@@ -409,7 +414,7 @@ function SignInFormContent({
 			password: string;
 			secretKey: string;
 		}) => {
-			if (isQuickUnlock) {
+			if (quickUnlockActive) {
 				assertRuntimeAuthenticationAllowed();
 				// The Account this form is offering wins over any stored pointer, and the
 				// client refuses one the Runtime's catalog no longer recognises. Preferring
@@ -510,10 +515,13 @@ function SignInFormContent({
 			}}
 			className="space-y-4"
 			data-testid="signin-form"
+			data-teardown-status={
+				browserSessionForgotten ? "browserSessionForgotten" : undefined
+			}
 		>
 			{/* A Quick Unlock the Runtime offers needs the Account id and a password, not an
 			    email. The field stays only while there is a known address to show. */}
-			<div hidden={isQuickUnlock && initialEmail === ""}>
+			<div hidden={quickUnlockActive && initialEmail === ""}>
 				<form.Field name="email">
 					{(field) => (
 						<div className="space-y-2">
@@ -530,7 +538,7 @@ function SignInFormContent({
 								}}
 								onChange={(e) => field.handleChange(e.target.value)}
 								required
-								disabled={isQuickUnlock}
+								disabled={quickUnlockActive}
 								className="h-10"
 							/>
 						</div>
@@ -538,14 +546,14 @@ function SignInFormContent({
 				</form.Field>
 			</div>
 
-			{emailCheck?.secretKeyHint && !isQuickUnlock && (
+			{emailCheck?.secretKeyHint && !quickUnlockActive && (
 				<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
 					<span className="font-medium">{m.auth_signin_hint()}:</span>{" "}
 					{emailCheck.secretKeyHint}
 				</div>
 			)}
 
-			{!isQuickUnlock && (
+			{!quickUnlockActive && (
 				<div>
 					<form.Field name="secretKey">
 						{(field) => (
@@ -589,7 +597,7 @@ function SignInFormContent({
 								<Label htmlFor={field.name}>
 									{m.auth_signin_label_password()}
 								</Label>
-								{!isQuickUnlock && (
+								{!quickUnlockActive && (
 									<button
 										type="button"
 										onClick={() => navigate({ to: "/recover" })}
@@ -657,14 +665,14 @@ function SignInFormContent({
 						<Loader2 size={16} className="mr-2 animate-spin" />
 						{m.auth_signin_button_signing_in()}
 					</>
-				) : isQuickUnlock ? (
+				) : quickUnlockActive ? (
 					m.auth_signin_button_unlock_vault()
 				) : (
 					m.auth_signin_button_sign_in()
 				)}
 			</Button>
 
-			{isQuickUnlock && (
+			{quickUnlockActive && (
 				<>
 					{stranded ? null : (
 						<Button
@@ -722,7 +730,7 @@ function SignInFormContent({
 				</>
 			)}
 
-			{!isQuickUnlock &&
+			{!quickUnlockActive &&
 				(canShowSignup ? (
 					<div className="mt-4 text-center text-muted-foreground text-sm">
 						{isCloudMode

@@ -29,6 +29,10 @@ import {
 	retryCannotFinish,
 } from "@/lib/account-removal";
 import { normalizeAccountEmail } from "@/lib/crypto";
+import type {
+	SettingsDeletionGestureEvent,
+	SettingsDeletionTarget,
+} from "@/lib/settings-runtime-identity";
 import {
 	clearActiveAccountData,
 	forgetWebAccountId,
@@ -58,7 +62,13 @@ type DeletionAction = "delete" | "clearBrowserData";
 
 const CONFIRMING: DeletionState = { phase: "confirming" };
 
-export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
+export function DeleteAccountDialog({
+	target,
+	onGestureEvent,
+}: {
+	target: SettingsDeletionTarget;
+	onGestureEvent: (event: SettingsDeletionGestureEvent) => void;
+}) {
 	const { m } = useI18n();
 	const { manager } = useAccountRuntime();
 	const runtimeClient = useRuntimeClient();
@@ -67,6 +77,11 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [confirmEmail, setConfirmEmail] = useState("");
 	const [confirmText, setConfirmText] = useState("");
 	const [deletion, setDeletion] = useState<DeletionState>(CONFIRMING);
+	const [gestureTarget, setGestureTarget] = useState<{
+		readonly runtimeAccountId: string;
+		readonly transitionalAccountId: string | null;
+		readonly email: string;
+	} | null>(null);
 	const navigate = useNavigate();
 	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
@@ -98,11 +113,24 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		previous: AccountDeletionIncomplete | null,
 	): DeleteAccountEverywhereDeps => ({
 		async resolveTarget() {
-			const runtimeAccountId = runtimeClient.resolveAccount();
-			const transitionalAccountId = await getTransitionalAccountId();
-			return runtimeAccountId === null || transitionalAccountId === null
+			const heldTarget = previous?.target;
+			if (
+				heldTarget?.runtimeAccountId !== null &&
+				heldTarget?.runtimeAccountId !== undefined &&
+				heldTarget.transitionalAccountId !== null
+			) {
+				return {
+					runtimeAccountId: heldTarget.runtimeAccountId,
+					transitionalAccountId: heldTarget.transitionalAccountId,
+				};
+			}
+			return gestureTarget === null ||
+				gestureTarget.transitionalAccountId === null
 				? null
-				: { runtimeAccountId, transitionalAccountId };
+				: {
+						runtimeAccountId: gestureTarget.runtimeAccountId,
+						transitionalAccountId: gestureTarget.transitionalAccountId,
+					};
 		},
 		readMarker: readAccountDeletionMarker,
 		writeMarker: writeAccountDeletionMarker,
@@ -130,6 +158,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			lastIncompleteReport.current = null;
 			setDeletion(CONFIRMING);
 			setOpen(false);
+			onGestureEvent({ type: "terminal" });
 			toast.success(m.settings_delete_account_dialog_toast_deleted());
 			try {
 				// The cache holds decrypted Items for an Account that no longer exists.
@@ -199,12 +228,16 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const needsConfirmation =
 		!cleared && !stranded && (report === null || !report.serverAccountDeleted);
 	const confirmed =
-		confirmEmail.toLowerCase() === userEmail.toLowerCase() &&
+		confirmEmail.toLowerCase() ===
+			(gestureTarget?.email ?? target.email).toLowerCase() &&
 		confirmText === confirmPhrase;
 
 	const handleDelete = () => {
 		if (needsConfirmation) {
-			if (confirmEmail.toLowerCase() !== userEmail.toLowerCase()) {
+			if (
+				confirmEmail.toLowerCase() !==
+				(gestureTarget?.email ?? target.email).toLowerCase()
+			) {
 				toast.error(m.settings_delete_account_dialog_toast_email_mismatch());
 				return;
 			}
@@ -224,12 +257,28 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		}
 	};
 
+	const resetGesture = () => {
+		lastIncompleteReport.current = null;
+		setGestureTarget(null);
+		setDeletion(CONFIRMING);
+		setConfirmEmail("");
+		setConfirmText("");
+	};
+
 	const handleOpenChange = (newOpen: boolean) => {
 		if (busy) {
 			return;
 		}
-		setOpen(newOpen);
 		if (newOpen) {
+			if (gestureTarget === null) {
+				onGestureEvent({ type: "started", target });
+				void getTransitionalAccountId().then((transitionalAccountId) => {
+					setGestureTarget({ ...target, transitionalAccountId });
+					setOpen(true);
+				});
+				return;
+			}
+			setOpen(true);
 			if (cleared) {
 				return;
 			}
@@ -240,6 +289,19 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 					? CONFIRMING
 					: { phase: "incomplete", result: lastIncompleteReport.current },
 			);
+			return;
+		}
+		setOpen(false);
+		if (cleared) {
+			onGestureEvent({ type: "terminal" });
+			resetGesture();
+			return;
+		}
+		if (report !== null) {
+			onGestureEvent({ type: "incompleteDismissed" });
+		} else {
+			onGestureEvent({ type: "canceled" });
+			resetGesture();
 			return;
 		}
 		setConfirmEmail("");
@@ -256,6 +318,11 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			</AlertDialogTrigger>
 			<AlertDialogContent
 				data-testid="delete-account-dialog"
+				data-account-id={
+					gestureTarget?.runtimeAccountId ?? target.runtimeAccountId
+				}
+				data-account-email={gestureTarget?.email ?? target.email}
+				data-teardown-status={cleared ? "browserDataCleared" : undefined}
 				onEscapeKeyDown={(event) => {
 					if (busy) event.preventDefault();
 				}}
@@ -344,7 +411,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 							<Label htmlFor="confirmEmail">
 								{m.settings_delete_account_dialog_field_email_label()}{" "}
 								<span className="font-mono text-muted-foreground">
-									{userEmail}
+									{gestureTarget?.email ?? target.email}
 								</span>
 							</Label>
 							<Input

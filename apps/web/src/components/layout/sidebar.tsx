@@ -349,6 +349,7 @@ function LogOutDialog({
 		>
 			<AlertDialogContent
 				data-testid="log-out-dialog"
+				data-teardown-status={cleared ? "browserDataCleared" : undefined}
 				onEscapeKeyDown={(event) => {
 					if (busy) event.preventDefault();
 				}}
