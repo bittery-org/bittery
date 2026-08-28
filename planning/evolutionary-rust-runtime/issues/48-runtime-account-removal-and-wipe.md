@@ -1,7 +1,7 @@
 # Move Account removal and Device Wipe into the Runtime
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 22
 Spec: ../spec.md#web-cutover
 
@@ -65,6 +65,44 @@ idempotent retry after every partial failure point, and no plaintext or credenti
 reachability audit proves no final host invokes the transitional lifecycle owner.
 
 ## Comments
+
+### 2026-08-28 — Ticket 48 complete
+
+Commits `4f3aa61f`, `17bc20e0`, and `e2708c40` close the three 4d debt groups recorded
+below; those earlier open-debt statements are superseded by this evidence.
+
+1. **Web lifecycle reachability is zero.** `4f3aa61f` removes every Web production edge to
+   `@bittery/core/services/account-lifecycle` and replaces the five former call sites with one
+   narrow Web-only transitional browser-store cleanup seam. The hardened whole-entry static graph
+   starts at the real browser entries, follows lazy routes and literal dynamic imports, treats
+   side-effect imports, re-exports, import-equals, `require`, and per-specifier type-only forms
+   conservatively, and proves that no read/create path or lifecycle-owner symbol is reachable.
+2. **Rendered teardown wiring is proven in a real cloud browser.** `17bc20e0` adds seven cloud
+   Playwright paths covering confirmation/cancel/success and query-cache/navigation effects,
+   incomplete Log-out and its second-failure browser-only escape, `manager.refresh()` and
+   `localStorage` throws, Session retirement and email re-enablement, Danger Zone local-tail retry
+   and escape, and abandoned pre-transport marker cleanup. Independent review found and corrected
+   three production defects: the retirement terminal state still left Quick Unlock controlling the
+   form, a deletion gesture could drift to the fallback Account's displayed identity, and its retry
+   could re-resolve that fallback instead of the original Runtime/transitional target. Re-review
+   cleared the corrections. The final tests pin login-Account versus synthetic-seed identity,
+   original-target isolation across fallback activation and dialog dismissal, retained Runtime
+   pointer and terminal escape status, no retry or navigation after an escape, and disabled
+   Playwright trace/screenshot/video artifacts around real credentials.
+3. **All actual-Chromium Runtime suites are always-on.** `e2708c40` adds one serial Xvfb-backed
+   `@bittery/client-runtime` gate and makes root `check:ci` invoke it exactly once, with an explicit
+   portable failure when Xvfb is unavailable and a reachability test for the root script. The gate
+   runs Web Account lease, MV3 binary transfer, and MV3 OPFS upload-spool/teardown in order. Its
+   actual acceptance result is four tests: 1 + 1 + 2 across the three suites. Independent review
+   found no production defect, requested stronger closed-script and root-reachability proof, and
+   re-review cleared those corrections.
+
+From clean `e2708c40`, the orchestrator's final `pnpm check:ci` and `pnpm check:ci:rust` both exited
+successfully with a clean tree. The `check:ci` run itself executed the three Chromium suites and
+reported their 1 + 1 + 2 passing tests. Together with the previously delivered Server, Runtime,
+host-cutover, start-up recovery, destructive-operation, idempotency, fencing, partial-failure,
+protected-state destruction, and redacted-reporting evidence below, this satisfies the ticket's
+Outcome and Verification. `Status:` is now `resolved`.
 
 ### 2026-08-28 — All actual-Chromium Runtime suites join `check:ci`
 
