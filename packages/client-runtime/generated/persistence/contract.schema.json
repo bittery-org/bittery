@@ -634,6 +634,14 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "RETRYABLE_TRANSPORT",
+        "AUTHORITY_MISSING",
+        "ACCESS_DENIED",
+        "READ_ONLY",
+        "QUOTA_EXCEEDED",
+        "SIZE_REJECTED",
+        "SOURCE_FAILURE",
+        "SINK_FAILURE",
         "INVARIANT_VIOLATION"
       ]
     },

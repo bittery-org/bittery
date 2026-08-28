@@ -603,6 +603,12 @@ pub struct StartLoginRequest {
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct SuccessResponse {
+    pub success: bool,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncChangesResponse {
     pub cursor: Option<SyncCursorResponse>,
     pub events: Vec<SyncEventResponse>,
@@ -702,6 +708,17 @@ pub struct TravelModeResponse {
 
 #[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct UpdateAttachmentBody {
+    #[serde(rename = "encryptedName")]
+    pub encrypted_name: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    pub encryption_algorithm: String,
+    #[serde(rename = "encryptionIv")]
+    pub encryption_iv: String,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateItemBody {
     #[serde(rename = "encryptedData")]
     pub encrypted_data: Option<String>,
@@ -709,6 +726,42 @@ pub struct UpdateItemBody {
     pub encryption_algorithm: Option<String>,
     #[serde(rename = "encryptionIv")]
     pub encryption_iv: Option<String>,
+}
+
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VaultAttachmentResponse {
+    #[serde(rename = "attachmentKeyAlgorithm")]
+    pub attachment_key_algorithm: String,
+    #[serde(rename = "attachmentKeyIv")]
+    pub attachment_key_iv: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "encryptedAttachmentKey")]
+    pub encrypted_attachment_key: String,
+    #[serde(rename = "encryptedContentType")]
+    pub encrypted_content_type: String,
+    #[serde(rename = "encryptedContentTypeIv")]
+    pub encrypted_content_type_iv: String,
+    #[serde(rename = "encryptedName")]
+    pub encrypted_name: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    pub encryption_algorithm: String,
+    #[serde(rename = "encryptionIv")]
+    pub encryption_iv: String,
+    #[serde(rename = "envelopeVersion")]
+    pub envelope_version: i32,
+    #[serde(rename = "fileSize")]
+    pub file_size: i32,
+    pub id: String,
+    #[serde(rename = "itemId")]
+    pub item_id: String,
+    #[serde(rename = "storageKey")]
+    pub storage_key: String,
+    #[serde(rename = "uploadedBy")]
+    pub uploaded_by: String,
+    #[serde(rename = "vaultId")]
+    pub vault_id: String,
 }
 
 #[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

@@ -20,6 +20,12 @@ const ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES: u32 = 16 * 1024 * 1024;
 // One grant contains one bounded Attachment authority document and one invocation-scoped signed
 // URL. Leave ample room for object-store credential expansion without accepting an entity page.
 const ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES: u32 = 256 * 1024;
+const ATTACHMENT_AUTHORITY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+// Keep one Item's paginated Attachment authority inside the same aggregate envelope already used
+// for authenticated Vault-key authority, and the same page bound as bounded Bootstrap.
+const MAX_ATTACHMENT_AUTHORITY_PAGES: usize = 4_096;
+const MAX_ATTACHMENT_AUTHORITY_ITEMS: usize = MAX_AUTH_VAULT_KEYS;
+const MAX_ATTACHMENT_AUTHORITY_BYTES: usize = MAX_AUTH_VAULT_KEY_BYTES;
 /// One Operation outcome is a small closed document, never an entity page.
 const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
@@ -121,6 +127,21 @@ pub(crate) struct AttachmentDownloadGrant {
 pub(crate) enum AttachmentDownloadGrantAnswer {
     Grant(Box<AttachmentDownloadGrant>),
     StaleAuthority,
+}
+
+pub(crate) enum AttachmentRenameAnswer {
+    Updated,
+    Ambiguous,
+    Missing,
+    AccessDenied,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentAuthorityPage {
+    items: Vec<crate::server_contract::VaultAttachmentResponse>,
+    has_more: bool,
+    next_cursor: Option<String>,
 }
 
 struct RawHttpResponse {
@@ -509,10 +530,33 @@ impl<'transport> AuthHttpClient<'transport> {
         cancellation: RequestCancellation,
     ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
     {
+        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, false)
+            .await
+    }
+
+    pub(crate) async fn fetch_item_or_absent_for_attachment(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
+        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, true)
+            .await
+    }
+
+    async fn fetch_item_or_absent_with_transport_policy(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
         validate_bearer(token)?;
         validate_identifier(item_id, "Item")?;
         let url = self.endpoint(&["api", "v1", "items", item_id])?;
-        let raw = self
+        let raw = match self
             .execute_raw(
                 HttpMethod::Get,
                 url,
@@ -521,7 +565,14 @@ impl<'transport> AuthHttpClient<'transport> {
                 VAULT_KEY_RESPONSE_BYTES,
                 cancellation,
             )
-            .await?;
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) if transport_is_transient && is_raw_transport_failure(&error) => {
+                return Ok(AuthenticatedOutcome::Transient);
+            }
+            Err(error) => return Err(error),
+        };
         match raw.status {
             200 => {
                 require_json_content_type(&raw.headers)?;
@@ -757,6 +808,149 @@ impl<'transport> AuthHttpClient<'transport> {
         }
     }
 
+    pub(crate) async fn rename_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        body: &crate::server_contract::UpdateAttachmentBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentRenameAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment Rename request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/merge-patch+json".to_owned(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Patch,
+                    self.endpoint(&["api", "v1", "attachments", attachment_id])?
+                        .into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status: 200, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Updated)
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Rename was cancelled",
+                ));
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant("Attachment Rename returned an unexpected status"));
+            }
+        })
+    }
+
+    pub(crate) async fn fetch_attachment_authority(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Vec<crate::server_contract::VaultAttachmentResponse>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let mut cursor = None;
+        let mut authority = AttachmentAuthorityAccumulator::new();
+        loop {
+            authority.begin_page()?;
+            let mut url = self.endpoint(&["api", "v1", "items", item_id, "attachments"])?;
+            {
+                let mut query = url.query_pairs_mut();
+                query.append_pair("limit", "500");
+                if let Some(cursor) = cursor.as_deref() {
+                    query.append_pair("cursor", cursor);
+                }
+            }
+            let page = match self
+                .get_authenticated_json_with_transport_policy::<AttachmentAuthorityPage>(
+                    url,
+                    ATTACHMENT_AUTHORITY_RESPONSE_BYTES,
+                    token,
+                    cancellation.clone(),
+                    true,
+                )
+                .await?
+            {
+                AuthenticatedOutcome::Ok(page) => page,
+                AuthenticatedOutcome::ReauthenticationRequired => {
+                    return Ok(AuthenticatedOutcome::ReauthenticationRequired);
+                }
+                AuthenticatedOutcome::Transient => {
+                    return Ok(AuthenticatedOutcome::Transient);
+                }
+            };
+            let RawJsonPage { raw_body, value } = page;
+            authority.record_raw_page(raw_body.len())?;
+            drop(raw_body);
+            let AttachmentAuthorityPage {
+                items,
+                has_more,
+                next_cursor,
+            } = value;
+            authority.append(items)?;
+            match (has_more, next_cursor) {
+                (false, None) => {
+                    return Ok(AuthenticatedOutcome::Ok(authority.into_items()));
+                }
+                (false, Some(_)) => {
+                    return Err(invariant(
+                        "Attachment authority final page retained a continuation",
+                    ));
+                }
+                (true, _) if authority.last_page_was_empty() => {
+                    return Err(invariant(
+                        "Attachment authority continuation made no progress",
+                    ));
+                }
+                (true, Some(next)) if !next.is_empty() => {
+                    authority.record_cursor(&next)?;
+                    cursor = Some(next);
+                }
+                (true, _) => {
+                    return Err(invariant(
+                        "Attachment authority page omitted its continuation",
+                    ));
+                }
+            }
+        }
+    }
+
     /// Replays one accepted Operation's immutable bytes and attaches what is deliberately not
     /// durable: the Session credential, and the `Idempotency-Key` that carries the Operation ID.
     ///
@@ -820,7 +1014,25 @@ impl<'transport> AuthHttpClient<'transport> {
         token: &str,
         cancellation: RequestCancellation,
     ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
-        let raw = self
+        self.get_authenticated_json_with_transport_policy(
+            url,
+            max_response_bytes,
+            token,
+            cancellation,
+            false,
+        )
+        .await
+    }
+
+    async fn get_authenticated_json_with_transport_policy<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_response_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
+        let raw = match self
             .execute_raw(
                 HttpMethod::Get,
                 url,
@@ -829,7 +1041,14 @@ impl<'transport> AuthHttpClient<'transport> {
                 max_response_bytes,
                 cancellation,
             )
-            .await?;
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) if transport_is_transient && is_raw_transport_failure(&error) => {
+                return Ok(AuthenticatedOutcome::Transient);
+            }
+            Err(error) => return Err(error),
+        };
         match raw.status {
             200 => {
                 require_json_content_type(&raw.headers)?;
@@ -1079,6 +1298,110 @@ struct VaultKeyAccumulator {
     items: Vec<AuthVaultKeyResponse>,
     // Exact serialized JSON-array size: opening/closing brackets, item bytes and separators.
     serialized_bytes: usize,
+}
+
+struct AttachmentAuthorityAccumulator {
+    items: Vec<crate::server_contract::VaultAttachmentResponse>,
+    attachment_ids: HashSet<String>,
+    cursors: HashSet<String>,
+    cursor_bytes: usize,
+    raw_body_bytes: usize,
+    pages: usize,
+    last_page_empty: bool,
+}
+
+impl AttachmentAuthorityAccumulator {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            attachment_ids: HashSet::new(),
+            cursors: HashSet::new(),
+            cursor_bytes: 0,
+            raw_body_bytes: 0,
+            pages: 0,
+            last_page_empty: false,
+        }
+    }
+
+    fn begin_page(&mut self) -> Result<(), RuntimeError> {
+        if self.pages >= MAX_ATTACHMENT_AUTHORITY_PAGES {
+            return Err(invariant("Attachment authority exceeded the page bound"));
+        }
+        self.pages += 1;
+        Ok(())
+    }
+
+    fn append(
+        &mut self,
+        incoming: Vec<crate::server_contract::VaultAttachmentResponse>,
+    ) -> Result<(), RuntimeError> {
+        if incoming.len() > 500 {
+            return Err(invariant(
+                "Attachment authority page exceeded its item bound",
+            ));
+        }
+        self.last_page_empty = incoming.is_empty();
+        let new_count = self
+            .items
+            .len()
+            .checked_add(incoming.len())
+            .ok_or_else(|| invariant("Attachment authority item count overflowed"))?;
+        if new_count > MAX_ATTACHMENT_AUTHORITY_ITEMS {
+            return Err(invariant("Attachment authority exceeded its item bound"));
+        }
+
+        let mut new_ids = HashSet::new();
+        for item in &incoming {
+            if self.attachment_ids.contains(&item.id) || !new_ids.insert(item.id.clone()) {
+                return Err(invariant("Attachment authority duplicated an Attachment"));
+            }
+        }
+
+        self.attachment_ids.extend(new_ids);
+        self.items.extend(incoming);
+        Ok(())
+    }
+
+    fn record_raw_page(&mut self, body_bytes: usize) -> Result<(), RuntimeError> {
+        let raw_body_bytes = self
+            .raw_body_bytes
+            .checked_add(body_bytes)
+            .ok_or_else(|| invariant("Attachment authority byte count overflowed"))?;
+        if raw_body_bytes > MAX_ATTACHMENT_AUTHORITY_BYTES {
+            return Err(invariant("Attachment authority exceeded its byte bound"));
+        }
+        self.raw_body_bytes = raw_body_bytes;
+        Ok(())
+    }
+
+    fn last_page_was_empty(&self) -> bool {
+        self.last_page_empty
+    }
+
+    fn record_cursor(&mut self, cursor: &str) -> Result<(), RuntimeError> {
+        if self.cursors.contains(cursor) {
+            return Err(invariant("Attachment authority cursor repeated"));
+        }
+        if self.cursors.len() >= MAX_ATTACHMENT_AUTHORITY_PAGES - 1 {
+            return Err(invariant("Attachment authority exhausted its cursor bound"));
+        }
+        let cursor_bytes = self
+            .cursor_bytes
+            .checked_add(cursor.len())
+            .ok_or_else(|| invariant("Attachment authority cursor bytes overflowed"))?;
+        if cursor_bytes > MAX_ATTACHMENT_AUTHORITY_BYTES {
+            return Err(invariant(
+                "Attachment authority exceeded its cursor byte bound",
+            ));
+        }
+        self.cursor_bytes = cursor_bytes;
+        self.cursors.insert(cursor.to_owned());
+        Ok(())
+    }
+
+    fn into_items(self) -> Vec<crate::server_contract::VaultAttachmentResponse> {
+        self.items
+    }
 }
 
 impl VaultKeyAccumulator {
@@ -1355,6 +1678,11 @@ fn invariant(message: &'static str) -> RuntimeError {
 
 fn authentication_failure(message: &'static str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::AuthenticationUnavailable, message)
+}
+
+fn is_raw_transport_failure(error: &RuntimeError) -> bool {
+    error.code == RuntimeErrorCode::AuthenticationUnavailable
+        && error.message == "Server request failed"
 }
 
 #[cfg(test)]

@@ -6257,24 +6257,63 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert!(download_url.contains("storage.example.invalid"));
 				assert_eq!(download_response.body["fileSize"], json!(128));
 
+				let original_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("original Attachment key authority should load");
+
 				let update_attachment_response = app
-					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "updated-encrypted-name", "encryptionIv": "updated-attachment-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
+					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "first-renamed-encrypted-name", "encryptionIv": "first-renamed-attachment-iv", "encryptionAlgorithm": "first-rename-algorithm" })), owner_headers.clone())
 					.await;
 				update_attachment_response.assert_contract_status();
-				let updated_attachment_name: String =
-					query_scalar("SELECT encrypted_name FROM item_attachment WHERE id = $1")
-						.bind(&fixture.attachment_id)
-						.fetch_one(&app.pool)
-						.await
-						.expect("updated attachment name should load");
-				let updated_attachment_iv: String =
-					query_scalar("SELECT encryption_iv FROM item_attachment WHERE id = $1")
-						.bind(&fixture.attachment_id)
-						.fetch_one(&app.pool)
-						.await
-						.expect("updated attachment iv should load");
-				assert_eq!(updated_attachment_name, "updated-encrypted-name");
-				assert_eq!(updated_attachment_iv, "updated-attachment-iv");
+				let first_renamed_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("first renamed Attachment authority should load");
+				assert_eq!(first_renamed_authority.0, "first-renamed-encrypted-name");
+				assert_eq!(first_renamed_authority.1, "first-renamed-attachment-iv");
+				assert_eq!(first_renamed_authority.2, "first-rename-algorithm");
+				assert_ne!(first_renamed_authority.0, original_authority.0);
+				assert_ne!(first_renamed_authority.1, original_authority.1);
+				assert_ne!(first_renamed_authority.2, original_authority.2);
+				assert_eq!(first_renamed_authority.3, original_authority.3);
+				assert_eq!(
+					(&first_renamed_authority.4, &first_renamed_authority.5, &first_renamed_authority.6),
+					(&original_authority.4, &original_authority.5, &original_authority.6),
+					"first Rename must not replace Attachment key-envelope authority",
+				);
+				let second_update_attachment_response = app
+					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "second-renamed-encrypted-name", "encryptionIv": "second-renamed-attachment-iv", "encryptionAlgorithm": "second-rename-algorithm" })), owner_headers.clone())
+					.await;
+				second_update_attachment_response.assert_contract_status();
+				let renamed_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("renamed Attachment authority should load");
+				assert_eq!(renamed_authority.0, "second-renamed-encrypted-name");
+				assert_eq!(renamed_authority.1, "second-renamed-attachment-iv");
+				assert_eq!(renamed_authority.2, "second-rename-algorithm");
+				assert_ne!(renamed_authority.0, first_renamed_authority.0);
+				assert_ne!(renamed_authority.1, first_renamed_authority.1);
+				assert_ne!(renamed_authority.2, first_renamed_authority.2);
+				assert_ne!(renamed_authority.0, original_authority.0);
+				assert_ne!(renamed_authority.1, original_authority.1);
+				assert_ne!(renamed_authority.2, original_authority.2);
+				assert_eq!(renamed_authority.3, original_authority.3);
+				assert_eq!(
+					(&renamed_authority.4, &renamed_authority.5, &renamed_authority.6),
+					(&original_authority.4, &original_authority.5, &original_authority.6),
+					"second Rename must not replace Attachment key-envelope authority",
+				);
 
 				let blocked_delete_response = app
 					.api_json(Method::DELETE, &format!("/api/v1/attachments/{}", fixture.attachment_id), None, member_headers)

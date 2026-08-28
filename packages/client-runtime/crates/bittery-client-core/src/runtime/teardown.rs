@@ -135,6 +135,16 @@ impl Runtime {
 
     async fn teardown(&self, scope: TeardownScope) -> Result<RuntimeResponse, RuntimeError> {
         self.ensure_teardown_precondition(&scope)?;
+        let foreground_accounts = match &scope {
+            TeardownScope::Account { account_id } => vec![account_id.clone()],
+            TeardownScope::Device => self.known_teardown_accounts(),
+        };
+        let foreground_retirements = self
+            .foreground_attachments
+            .begin_accounts_retirement(&foreground_accounts);
+        for retirement in &foreground_retirements {
+            retirement.drain().await;
+        }
         let _admission = self.teardown_admission.write().await;
         self.ensure_teardown_precondition(&scope)?;
         {
@@ -255,6 +265,7 @@ impl Runtime {
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all_unless_closed();
+        drop(foreground_retirements);
         Ok(RuntimeResponse::Teardown {
             scope,
             status: if failures.is_empty() {
@@ -352,7 +363,7 @@ impl Runtime {
                 .lock()
                 .expect("observer lock poisoned")
                 .remove(&id);
-            subscription.close();
+            subscription.close_for_lifecycle();
         }
     }
 

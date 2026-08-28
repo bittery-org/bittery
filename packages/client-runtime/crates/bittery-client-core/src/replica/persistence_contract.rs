@@ -404,6 +404,11 @@ pub(super) fn prepare_commit(
             // The Cursor lives in Bootstrap metadata, whose exact diff is collected below.
             continue;
         }
+        if matches!(mutation, PlanMutation::CommitAttachmentAuthority { .. }) {
+            // Attachment authority lives in the active Bootstrap Item row; its exact diff is
+            // collected below with the same guarded commit.
+            continue;
+        }
         if matches!(mutation, PlanMutation::RemoveAllProtectedShareCapabilities) {
             writes.extend(current.share_capabilities.iter().map(|capability| {
                 PreparedReplicaWrite::Delete {
@@ -565,6 +570,7 @@ pub(super) fn prepare_commit(
             },
             PlanMutation::ReconcileAppliedCreate { .. }
             | PlanMutation::ReconcileItemMutation { .. }
+            | PlanMutation::CommitAttachmentAuthority { .. }
             | PlanMutation::RetainRejection { .. }
             | PlanMutation::ReconcileShareOutcome { .. }
             | PlanMutation::AdvanceSyncPageCursor { .. }

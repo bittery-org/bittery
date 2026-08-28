@@ -517,9 +517,25 @@ impl Runtime {
     }
 
     pub(super) fn decrypt_visible_items(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        self.decrypt_visible_items_with_publication(account_id, false)
+            .map(|_| ())
+    }
+
+    pub(super) fn decrypt_visible_items_for_foreground_attachment(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<super::PreparedForegroundAttachmentPublications>, RuntimeError> {
+        self.decrypt_visible_items_with_publication(account_id, true)
+    }
+
+    fn decrypt_visible_items_with_publication(
+        &self,
+        account_id: &AccountId,
+        foreground_attachment: bool,
+    ) -> Result<Option<super::PreparedForegroundAttachmentPublications>, RuntimeError> {
         let snapshot = self.require_snapshot(account_id)?;
         if self.account_access_retirement_is_pending(account_id) {
-            return Ok(());
+            return Ok(None);
         }
         let access = self
             .account_access
@@ -528,7 +544,7 @@ impl Runtime {
             .get(account_id)
             .copied();
         if access != Some(AccountAccessState::Unlocked) {
-            return Ok(());
+            return Ok(None);
         }
         let epoch = *self
             .account_lock_epochs
@@ -537,13 +553,13 @@ impl Runtime {
             .get(account_id)
             .unwrap_or(&snapshot.lock_epoch);
         if epoch != snapshot.lock_epoch {
-            return Ok(());
+            return Ok(None);
         }
         let Some(muk) = self.copy_live_master_unlock_key(account_id, &snapshot.incarnation) else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(generation_id) = snapshot.bootstrap.active_generation.clone() else {
-            return Ok(());
+            return Ok(None);
         };
         let mut projections = Vec::new();
         for ((item_generation, _), item) in &snapshot.bootstrap.items {
@@ -678,7 +694,7 @@ impl Runtime {
             .lock()
             .expect("pending Account access retirement lock poisoned");
         if *pending_retirements > 0 {
-            return Ok(());
+            return Ok(None);
         }
         let current_epoch = *self
             .account_lock_epochs
@@ -694,16 +710,23 @@ impl Runtime {
                 .get(account_id)
                 != Some(&AccountAccessState::Unlocked)
         {
-            return Ok(());
+            return Ok(None);
         }
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
             .insert(account_id.clone(), projections);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
-        self.publish_all_unless_closed();
+        let prepared = if foreground_attachment && !self.is_closed() {
+            Some(self.prepare_all_for_foreground_attachment())
+        } else {
+            if !foreground_attachment {
+                self.publish_all_unless_closed();
+            }
+            None
+        };
         drop(pending_retirements);
-        Ok(())
+        Ok(prepared)
     }
 
     #[cfg(test)]
@@ -732,7 +755,10 @@ impl Runtime {
         Ok(())
     }
 
-    fn require_snapshot(&self, account_id: &AccountId) -> Result<ReplicaSnapshot, RuntimeError> {
+    pub(super) fn require_snapshot(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<ReplicaSnapshot, RuntimeError> {
         self.replica.snapshot(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })
@@ -1198,7 +1224,6 @@ fn decrypt_attachment_projections(
                 attachment_id: attachment.id.clone(),
                 item_id: attachment.item_id.clone(),
                 vault_id: attachment.vault_id.clone(),
-                storage_key: attachment.storage_key.clone(),
                 name,
                 content_type,
                 file_size: attachment.file_size,

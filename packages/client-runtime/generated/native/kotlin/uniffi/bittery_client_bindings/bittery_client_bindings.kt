@@ -686,8 +686,6 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name(
     ): Int
-    external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key(
-    ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id(
@@ -756,6 +754,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url(
     ): Int
+    external fun uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new(
+    ): Int
     external fun uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new(
     ): Int
     external fun uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new(
@@ -783,7 +783,13 @@ internal object UniffiLib {
         uniffiCallbackInterfaceObservationSink.register(this)
 
     }
-    external fun uniffi_bittery_client_bindings_fn_clone_attachmentprojection(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    external fun uniffi_bittery_client_bindings_fn_clone_attachmentname(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_attachmentname(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_constructor_attachmentname_new(`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_clone_attachmentprojection(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_attachmentprojection(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
@@ -800,8 +806,6 @@ external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_file_
 external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
-): RustBuffer.ByValue
-external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_attachmentprojection_uploaded_by(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1060,9 +1064,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name() != 42427) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key() != 4414) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by() != 3091) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1163,6 +1164,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url() != 58893) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new() != 20792) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {
@@ -1639,6 +1643,261 @@ private object FfiConverterSensitiveString {
 //
 
 
+/**
+ * Native-only opaque plaintext input for Attachment Rename.
+ *
+ * UniFFI enum payloads synthesize host-language stringification, so the plaintext cannot be a
+ * `String` field directly on `RuntimeRequest::RenameAttachment`.
+ */
+public interface AttachmentNameInterface {
+
+    companion object
+}
+
+/**
+ * Native-only opaque plaintext input for Attachment Rename.
+ *
+ * UniFFI enum payloads synthesize host-language stringification, so the plaintext cannot be a
+ * `String` field directly on `RuntimeRequest::RenameAttachment`.
+ */
+open class AttachmentName: Disposable, AutoCloseable, AttachmentNameInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor(`value`: kotlin.String) :
+        this(UniffiWithHandle,
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_constructor_attachmentname_new(
+
+        FfiConverterString.lower(`value`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_attachmentname(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_attachmentname(handle, status)
+        }
+    }
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAttachmentName: FfiConverter<AttachmentName, Long> {
+    override fun lower(value: AttachmentName): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): AttachmentName {
+        return AttachmentName(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): AttachmentName {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: AttachmentName) = 8UL
+
+    override fun write(value: AttachmentName, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface AttachmentProjectionInterface {
 
     fun `accountId`(): kotlin.String
@@ -1654,8 +1913,6 @@ public interface AttachmentProjectionInterface {
     fun `itemId`(): kotlin.String
 
     fun `name`(): kotlin.String
-
-    fun `storageKey`(): kotlin.String
 
     fun `uploadedBy`(): kotlin.String
 
@@ -1843,19 +2100,6 @@ open class AttachmentProjection: Disposable, AutoCloseable, AttachmentProjection
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(
-        it,
-        _status)
-}
-    }
-    )
-    }
-
-
-    override fun `storageKey`(): kotlin.String {
-            return FfiConverterString.lift(
-    callWithHandle {
-    uniffiRustCall() { _status ->
-    UniffiLib.uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(
         it,
         _status)
 }
@@ -5079,6 +5323,14 @@ enum class RuntimeErrorCode {
     ACCOUNT_FAILED,
     AUTHENTICATION_REQUIRED,
     AUTHENTICATION_UNAVAILABLE,
+    RETRYABLE_TRANSPORT,
+    AUTHORITY_MISSING,
+    ACCESS_DENIED,
+    READ_ONLY,
+    QUOTA_EXCEEDED,
+    SIZE_REJECTED,
+    SOURCE_FAILURE,
+    SINK_FAILURE,
     INVARIANT_VIOLATION;
 
 
@@ -5404,6 +5656,17 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class RenameAttachment(
+        val `accountId`: kotlin.String,
+        val `attachmentId`: kotlin.String,
+        val `name`: uniffi.bittery_client_bindings.AttachmentName) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
 
 
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
@@ -5537,6 +5800,15 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.RenameAttachment -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`attachmentId`,
+        this.`name`
+    )
+
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -5620,6 +5892,11 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             16 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
+                )
+            17 -> RuntimeRequest.RenameAttachment(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeAttachmentName.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -5758,6 +6035,15 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`operationId`)
             )
         }
+        is RuntimeRequest.RenameAttachment -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`attachmentId`)
+                + FfiConverterTypeAttachmentName.allocationSize(value.`name`)
+            )
+        }
     }
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
@@ -5862,6 +6148,13 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
+            is RuntimeRequest.RenameAttachment -> {
+                buf.putInt(17)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`attachmentId`, buf)
+                FfiConverterTypeAttachmentName.write(value.`name`, buf)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
@@ -5924,6 +6217,16 @@ sealed class RuntimeResponse {
         companion object
     }
 
+    data class AttachmentRenamed(
+        val `accountId`: kotlin.String,
+        val `attachmentId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
     data class Teardown(
         val `scope`: uniffi.bittery_client_bindings.TeardownScope,
         val `status`: uniffi.bittery_client_bindings.TeardownStatus,
@@ -5973,7 +6276,11 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            6 -> RuntimeResponse.Teardown(
+            6 -> RuntimeResponse.AttachmentRenamed(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -6025,6 +6332,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 + FfiConverterString.allocationSize(value.`operationId`)
             )
         }
+        is RuntimeResponse.AttachmentRenamed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`attachmentId`)
+            )
+        }
         is RuntimeResponse.Teardown -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -6070,8 +6385,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
-            is RuntimeResponse.Teardown -> {
+            is RuntimeResponse.AttachmentRenamed -> {
                 buf.putInt(6)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`attachmentId`, buf)
+                Unit
+            }
+            is RuntimeResponse.Teardown -> {
+                buf.putInt(7)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)

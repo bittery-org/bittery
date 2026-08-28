@@ -69,6 +69,29 @@ impl SecretString {
     }
 }
 
+/// Native-only opaque plaintext input for Attachment Rename.
+///
+/// UniFFI enum payloads synthesize host-language stringification, so the plaintext cannot be a
+/// `String` field directly on `RuntimeRequest::RenameAttachment`.
+#[derive(uniffi::Object)]
+pub struct AttachmentName {
+    value: String,
+}
+
+impl fmt::Debug for AttachmentName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AttachmentName([redacted])")
+    }
+}
+
+#[uniffi::export]
+impl AttachmentName {
+    #[uniffi::constructor]
+    pub fn new(value: String) -> Arc<Self> {
+        Arc::new(Self { value })
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct LoginCustomField {
     id: String,
@@ -300,6 +323,11 @@ pub enum RuntimeRequest {
         account_id: String,
         operation_id: String,
     },
+    RenameAttachment {
+        account_id: String,
+        attachment_id: String,
+        name: Arc<AttachmentName>,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -413,6 +441,16 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("operation_id", operation_id)
                 .finish(),
+            Self::RenameAttachment {
+                account_id,
+                attachment_id,
+                ..
+            } => formatter
+                .debug_struct("RenameAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .field("plaintext", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -440,6 +478,10 @@ pub enum RuntimeResponse {
     ShareResultAcknowledged {
         account_id: String,
         operation_id: String,
+    },
+    AttachmentRenamed {
+        account_id: String,
+        attachment_id: String,
     },
     Teardown {
         scope: TeardownScope,
@@ -605,7 +647,6 @@ pub struct AttachmentProjection {
     attachment_id: String,
     item_id: String,
     vault_id: String,
-    storage_key: String,
     name: String,
     content_type: String,
     file_size: i32,
@@ -637,9 +678,6 @@ impl AttachmentProjection {
     }
     pub fn vault_id(&self) -> String {
         self.vault_id.clone()
-    }
-    pub fn storage_key(&self) -> String {
-        self.storage_key.clone()
     }
     pub fn name(&self) -> String {
         self.name.clone()
@@ -776,6 +814,14 @@ pub enum RuntimeErrorCode {
     AccountFailed,
     AuthenticationRequired,
     AuthenticationUnavailable,
+    RetryableTransport,
+    AuthorityMissing,
+    AccessDenied,
+    ReadOnly,
+    QuotaExceeded,
+    SizeRejected,
+    SourceFailure,
+    SinkFailure,
     InvariantViolation,
 }
 
@@ -1057,6 +1103,15 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id: account_id.into(),
                 operation_id,
             },
+            RuntimeRequest::RenameAttachment {
+                account_id,
+                attachment_id,
+                name,
+            } => Self::RenameAttachment {
+                account_id: account_id.into(),
+                attachment_id,
+                name: name.value.clone(),
+            },
         }
     }
 }
@@ -1147,6 +1202,13 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::ShareResultAcknowledged {
                 account_id: account_id.into(),
                 operation_id,
+            },
+            core::RuntimeResponse::AttachmentRenamed {
+                account_id,
+                attachment_id,
+            } => Self::AttachmentRenamed {
+                account_id: account_id.into(),
+                attachment_id,
             },
             core::RuntimeResponse::Teardown {
                 scope,
@@ -1324,7 +1386,6 @@ impl From<core::AttachmentProjection> for AttachmentProjection {
             attachment_id,
             item_id,
             vault_id,
-            storage_key,
             name,
             content_type,
             file_size,
@@ -1336,7 +1397,6 @@ impl From<core::AttachmentProjection> for AttachmentProjection {
             attachment_id,
             item_id,
             vault_id,
-            storage_key,
             name,
             content_type,
             file_size,
@@ -1497,6 +1557,14 @@ impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
             core::RuntimeErrorCode::AccountFailed => Self::AccountFailed,
             core::RuntimeErrorCode::AuthenticationRequired => Self::AuthenticationRequired,
             core::RuntimeErrorCode::AuthenticationUnavailable => Self::AuthenticationUnavailable,
+            core::RuntimeErrorCode::RetryableTransport => Self::RetryableTransport,
+            core::RuntimeErrorCode::AuthorityMissing => Self::AuthorityMissing,
+            core::RuntimeErrorCode::AccessDenied => Self::AccessDenied,
+            core::RuntimeErrorCode::ReadOnly => Self::ReadOnly,
+            core::RuntimeErrorCode::QuotaExceeded => Self::QuotaExceeded,
+            core::RuntimeErrorCode::SizeRejected => Self::SizeRejected,
+            core::RuntimeErrorCode::SourceFailure => Self::SourceFailure,
+            core::RuntimeErrorCode::SinkFailure => Self::SinkFailure,
             core::RuntimeErrorCode::InvariantViolation => Self::InvariantViolation,
         }
     }
@@ -1606,6 +1674,18 @@ mod tests {
 
     #[test]
     fn binding_debug_output_redacts_every_plaintext_and_credential_field() {
+        let attachment_name = AttachmentName::new("UNIQUE_OPAQUE_ATTACHMENT_NAME".into());
+        let attachment_name_debug = format!("{:?}", attachment_name.as_ref());
+        assert!(!attachment_name_debug.contains("UNIQUE_OPAQUE_ATTACHMENT_NAME"));
+
+        let core_rename = core::RuntimeRequest::RenameAttachment {
+            account_id: core::AccountId::from("account-1"),
+            attachment_id: "attachment-1".into(),
+            name: "UNIQUE_CORE_ATTACHMENT_NAME".into(),
+        };
+        let core_rename_debug = format!("{core_rename:?}");
+        assert!(!core_rename_debug.contains("UNIQUE_CORE_ATTACHMENT_NAME"));
+
         let sign_in = RuntimeRequest::SignIn {
             server_url: "https://server.test".into(),
             email: "person@example.test".into(),
@@ -1636,6 +1716,11 @@ mod tests {
                 )],
                 vec!["UNIQUE_TAG".into()],
             ),
+        };
+        let rename = RuntimeRequest::RenameAttachment {
+            account_id: "account-1".into(),
+            attachment_id: "attachment-1".into(),
+            name: AttachmentName::new("UNIQUE_ATTACHMENT_NAME".into()),
         };
         let projection = RuntimeProjection::Items {
             value: ItemsProjection {
@@ -1685,8 +1770,9 @@ mod tests {
             },
         };
 
-        let output =
-            format!("{sign_in:?} {quick_unlock:?} {create:?} {projection:?} {pending_share:?}");
+        let output = format!(
+            "{sign_in:?} {quick_unlock:?} {create:?} {rename:?} {projection:?} {pending_share:?}"
+        );
         for marker in [
             "UNIQUE_MASTER_PASSWORD",
             "UNIQUE_SECRET_KEY",
@@ -1702,6 +1788,7 @@ mod tests {
             "UNIQUE_FIELD_LABEL",
             "UNIQUE_FIELD_VALUE",
             "UNIQUE_TAG",
+            "UNIQUE_ATTACHMENT_NAME",
             "UNIQUE_PROJECTION_TITLE",
             "UNIQUE_PROJECTION_URL",
             "UNIQUE_PROJECTION_URLS",

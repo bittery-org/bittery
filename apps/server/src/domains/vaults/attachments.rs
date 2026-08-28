@@ -913,7 +913,7 @@ pub(crate) async fn update_vault_attachment(
     )
     .await?;
     let updated = query(
-		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3, envelope_version = envelope_version + 1 WHERE id = $4 AND vault_id = $5 AND envelope_version = $6",
+		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3 WHERE id = $4 AND vault_id = $5 AND envelope_version = $6",
 	)
 	.bind(&input.encrypted_name)
 	.bind(&input.encryption_iv)

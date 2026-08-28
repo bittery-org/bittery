@@ -530,6 +530,132 @@ fileprivate struct FfiConverterString: FfiConverter {
 }
 
 
+
+
+/**
+ * Native-only opaque plaintext input for Attachment Rename.
+ *
+ * UniFFI enum payloads synthesize host-language stringification, so the plaintext cannot be a
+ * `String` field directly on `RuntimeRequest::RenameAttachment`.
+ */
+public protocol AttachmentNameProtocol: AnyObject, Sendable {
+
+}
+/**
+ * Native-only opaque plaintext input for Attachment Rename.
+ *
+ * UniFFI enum payloads synthesize host-language stringification, so the plaintext cannot be a
+ * `String` field directly on `RuntimeRequest::RenameAttachment`.
+ */
+open class AttachmentName: AttachmentNameProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_attachmentname(self.handle, $0) }
+    }
+public convenience init(value: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_attachmentname_new(
+        FfiConverterString.lower(value),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_attachmentname(handle, $0) }
+    }
+
+
+
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAttachmentName: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = AttachmentName
+
+    public static func lift(_ handle: UInt64) throws -> AttachmentName {
+        return AttachmentName(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: AttachmentName) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AttachmentName {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: AttachmentName, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentName_lift(_ handle: UInt64) throws -> AttachmentName {
+    return try FfiConverterTypeAttachmentName.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentName_lower(_ value: AttachmentName) -> UInt64 {
+    return FfiConverterTypeAttachmentName.lower(value)
+}
+
+
+
+
 fileprivate struct FfiConverterSensitiveString {
     public static func lift(_ value: RustBuffer) throws -> String {
         defer { value.deallocateSensitive() }
@@ -555,8 +681,6 @@ public protocol AttachmentProjectionProtocol: AnyObject, Sendable {
     func itemId()  -> String
 
     func name()  -> String
-
-    func storageKey()  -> String
 
     func uploadedBy()  -> String
 
@@ -667,14 +791,6 @@ open func itemId() -> String  {
 open func name() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_bittery_client_bindings_fn_method_attachmentprojection_name(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func storageKey() -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -2957,6 +3073,14 @@ public enum RuntimeErrorCode: Equatable, Hashable {
     case accountFailed
     case authenticationRequired
     case authenticationUnavailable
+    case retryableTransport
+    case authorityMissing
+    case accessDenied
+    case readOnly
+    case quotaExceeded
+    case sizeRejected
+    case sourceFailure
+    case sinkFailure
     case invariantViolation
 
 
@@ -2993,7 +3117,23 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
 
         case 7: return .authenticationUnavailable
 
-        case 8: return .invariantViolation
+        case 8: return .retryableTransport
+
+        case 9: return .authorityMissing
+
+        case 10: return .accessDenied
+
+        case 11: return .readOnly
+
+        case 12: return .quotaExceeded
+
+        case 13: return .sizeRejected
+
+        case 14: return .sourceFailure
+
+        case 15: return .sinkFailure
+
+        case 16: return .invariantViolation
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -3031,8 +3171,40 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
 
 
-        case .invariantViolation:
+        case .retryableTransport:
             writeInt(&buf, Int32(8))
+
+
+        case .authorityMissing:
+            writeInt(&buf, Int32(9))
+
+
+        case .accessDenied:
+            writeInt(&buf, Int32(10))
+
+
+        case .readOnly:
+            writeInt(&buf, Int32(11))
+
+
+        case .quotaExceeded:
+            writeInt(&buf, Int32(12))
+
+
+        case .sizeRejected:
+            writeInt(&buf, Int32(13))
+
+
+        case .sourceFailure:
+            writeInt(&buf, Int32(14))
+
+
+        case .sinkFailure:
+            writeInt(&buf, Int32(15))
+
+
+        case .invariantViolation:
+            writeInt(&buf, Int32(16))
 
         }
     }
@@ -3173,6 +3345,8 @@ public enum RuntimeRequest {
     )
     case acknowledgeShareResult(accountId: String, operationId: String
     )
+    case renameAttachment(accountId: String, attachmentId: String, name: AttachmentName
+    )
 
 
 
@@ -3239,6 +3413,9 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 16: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 17: return .renameAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), name: try FfiConverterTypeAttachmentName.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3348,6 +3525,13 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
+
+        case let .renameAttachment(accountId,attachmentId,name):
+            writeInt(&buf, Int32(17))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(attachmentId, into: &buf)
+            FfiConverterTypeAttachmentName.write(name, into: &buf)
+
         }
     }
 }
@@ -3382,6 +3566,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     case accepted(operationId: String, itemId: String, replicaRevision: UInt64
     )
     case shareResultAcknowledged(accountId: String, operationId: String
+    )
+    case attachmentRenamed(accountId: String, attachmentId: String
     )
     case teardown(scope: TeardownScope, status: TeardownStatus, failures: [TeardownPhase]
     )
@@ -3421,7 +3607,10 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 5: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
-        case 6: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 6: return .attachmentRenamed(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 7: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3464,8 +3653,14 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterString.write(operationId, into: &buf)
 
 
-        case let .teardown(scope,status,failures):
+        case let .attachmentRenamed(accountId,attachmentId):
             writeInt(&buf, Int32(6))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(attachmentId, into: &buf)
+
+
+        case let .teardown(scope,status,failures):
+            writeInt(&buf, Int32(7))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
@@ -4481,9 +4676,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name() != 42427) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key() != 4414) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by() != 3091) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4584,6 +4776,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url() != 58893) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new() != 20792) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {

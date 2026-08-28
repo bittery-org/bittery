@@ -2063,7 +2063,9 @@ async fn lock_and_close_wait_for_the_explicit_account_preparation_writer() {
                 .await
         }
     });
-    tokio::task::yield_now().await;
+    while !runtime.account_access_retirement_is_pending(&account_id) {
+        tokio::task::yield_now().await;
+    }
     assert!(!retirement.is_finished());
     driver.release.notify_one();
     retirement.await.unwrap().unwrap();

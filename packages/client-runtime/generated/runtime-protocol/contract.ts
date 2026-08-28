@@ -49,6 +49,10 @@ accountId: string
 operationId: string
 type: "shareResultAcknowledged"
 } | {
+accountId: string
+attachmentId: string
+type: "attachmentRenamed"
+} | {
 /**
  * @maxItems 4
  */
@@ -70,7 +74,7 @@ type: "account"
 type: "device"
 })
 export type TeardownStatus = ("complete" | "incomplete")
-export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "INVARIANT_VIOLATION")
+export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "RETRYABLE_TRANSPORT" | "AUTHORITY_MISSING" | "ACCESS_DENIED" | "READ_ONLY" | "QUOTA_EXCEEDED" | "SIZE_REJECTED" | "SOURCE_FAILURE" | "SINK_FAILURE" | "INVARIANT_VIOLATION")
 export type RuntimeProjection = ({
 type: "items"
 value: ItemsProjection
@@ -153,6 +157,11 @@ type: "createShare"
 accountId: string
 operationId: string
 type: "acknowledgeShareResult"
+} | {
+accountId: string
+attachmentId: string
+name: string
+type: "renameAttachment"
 })
 export type ShareAccessMode = ("anyone" | "email-restricted")
 export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")
@@ -206,7 +215,6 @@ createdAt: string
 fileSize: number
 itemId: string
 name: string
-storageKey: string
 uploadedBy: string
 vaultId: string
 }

@@ -1638,6 +1638,7 @@ export interface InitOutput {
     d: number,
   ) => void;
   readonly ffi_bittery_client_bindings_uniffi_contract_version: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
@@ -1649,7 +1650,6 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
@@ -1679,8 +1679,12 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
-  readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+  readonly uniffi_bittery_client_bindings_fn_clone_attachmentname: (
     a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_attachmentname_new: (
+    a: number,
     b: number,
   ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
@@ -1702,10 +1706,10 @@ export interface InitOutput {
     i: number,
     j: number,
   ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_constructor_secretstring_new: (
-    a: number,
+  readonly uniffi_bittery_client_bindings_fn_free_attachmentname: (
+    a: bigint,
     b: number,
-  ) => bigint;
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
     a: bigint,
     b: number,
@@ -1723,10 +1727,6 @@ export interface InitOutput {
     b: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
-    a: bigint,
-    b: number,
-  ) => void;
-  readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
     a: bigint,
     b: number,
   ) => void;
@@ -1765,11 +1765,6 @@ export interface InitOutput {
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_name: (
-    a: number,
-    b: bigint,
-    c: number,
-  ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key: (
     a: number,
     b: bigint,
     c: number,
@@ -1981,6 +1976,10 @@ export interface InitOutput {
     d: any,
   ) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
+  readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+    a: bigint,
+    b: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
     a: bigint,
     b: number,
@@ -2033,6 +2032,10 @@ export interface InitOutput {
   readonly ffi_bittery_client_bindings_rust_future_free_void: (
     a: bigint,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_constructor_secretstring_new: (
+    a: number,
+    b: number,
+  ) => bigint;
   readonly ffi_bittery_client_bindings_rust_future_cancel_rust_buffer: (
     a: bigint,
   ) => void;
@@ -2065,6 +2068,10 @@ export interface InitOutput {
   ) => void;
   readonly ffi_bittery_client_bindings_rust_future_cancel_u64: (
     a: bigint,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
+    a: bigint,
+    b: number,
   ) => void;
   readonly ffi_bittery_crypto_api_rustbuffer_alloc: (
     a: number,

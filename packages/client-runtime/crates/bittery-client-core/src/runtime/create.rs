@@ -211,6 +211,21 @@ impl Runtime {
                 "caller cancelled before durable acceptance",
             ));
         }
+        // Share acceptance participates in the same global Item-writer order as every other
+        // existing-Item mutation: Item writer first, then the Account execution fence. This owns
+        // the complete atomic Operation/capability acceptance, so foreground Attachment authority
+        // cannot be admitted against a snapshot that is about to gain a Share owner.
+        let item_lock = self.item_mutation_lock(&account_id, &item_id);
+        let _item_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "caller cancelled before durable acceptance",
+                ));
+            }
+            guard = item_lock.lock() => guard,
+        };
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
@@ -721,6 +736,21 @@ impl Runtime {
                 "caller cancelled before durable acceptance",
             ));
         }
+        // Existing-Item Operations and foreground Attachment mutations share this writer. The
+        // writer is acquired before the Account execution fence in both paths: once Rename has
+        // admitted an Item, no optimistic owner can appear behind its authority snapshot, and an
+        // already-durable owner makes Rename fail immediately instead of waiting for reconciliation.
+        let item_lock = self.item_mutation_lock(&account_id, &item_id);
+        let _item_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "caller cancelled before durable acceptance",
+                ));
+            }
+            guard = item_lock.lock() => guard,
+        };
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;

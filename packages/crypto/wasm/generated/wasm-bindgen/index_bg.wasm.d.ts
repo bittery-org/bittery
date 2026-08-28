@@ -1016,6 +1016,7 @@ export const ffi_bittery_client_bindings_rustbuffer_reserve: (
   d: number,
 ) => void;
 export const ffi_bittery_client_bindings_uniffi_contract_version: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
@@ -1027,7 +1028,6 @@ export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_file_size: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_item_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_storage_key: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
@@ -1057,8 +1057,12 @@ export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_i
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
-export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+export const uniffi_bittery_client_bindings_fn_clone_attachmentname: (
   a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_attachmentname_new: (
+  a: number,
   b: number,
 ) => bigint;
 export const uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
@@ -1080,10 +1084,10 @@ export const uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new: (
   i: number,
   j: number,
 ) => bigint;
-export const uniffi_bittery_client_bindings_fn_constructor_secretstring_new: (
-  a: number,
+export const uniffi_bittery_client_bindings_fn_free_attachmentname: (
+  a: bigint,
   b: number,
-) => bigint;
+) => void;
 export const uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
   a: bigint,
   b: number,
@@ -1101,10 +1105,6 @@ export const uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
   b: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
-  a: bigint,
-  b: number,
-) => void;
-export const uniffi_bittery_client_bindings_fn_free_secretstring: (
   a: bigint,
   b: number,
 ) => void;
@@ -1143,11 +1143,6 @@ export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_item_
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_name: (
-  a: number,
-  b: bigint,
-  c: number,
-) => void;
-export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_storage_key: (
   a: number,
   b: bigint,
   c: number,
@@ -1359,6 +1354,10 @@ export const webclientruntime_withExecutors: (
   d: any,
 ) => number;
 export const webclientruntime_withReplicaExecutor: (a: any) => number;
+export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+  a: bigint,
+  b: number,
+) => bigint;
 export const uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
   a: bigint,
   b: number,
@@ -1415,6 +1414,10 @@ export const ffi_bittery_client_bindings_rust_future_free_u8: (
 export const ffi_bittery_client_bindings_rust_future_free_void: (
   a: bigint,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_constructor_secretstring_new: (
+  a: number,
+  b: number,
+) => bigint;
 export const ffi_bittery_client_bindings_rust_future_cancel_rust_buffer: (
   a: bigint,
 ) => void;
@@ -1447,6 +1450,10 @@ export const ffi_bittery_client_bindings_rust_future_cancel_i64: (
 ) => void;
 export const ffi_bittery_client_bindings_rust_future_cancel_u64: (
   a: bigint,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_secretstring: (
+  a: bigint,
+  b: number,
 ) => void;
 export const ffi_bittery_crypto_api_rustbuffer_alloc: (
   a: number,

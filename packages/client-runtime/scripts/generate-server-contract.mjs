@@ -33,8 +33,11 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"RefreshSessionResponse",
 	"StartLoginRequest",
 	"SyncChangesResponse",
+	"SuccessResponse",
 	"TravelModeResponse",
 	"UpdateItemBody",
+	"UpdateAttachmentBody",
+	"VaultAttachmentResponse",
 ]);
 
 // These fields are intentionally unconstrained JSON in the Server contract. Every other schema in

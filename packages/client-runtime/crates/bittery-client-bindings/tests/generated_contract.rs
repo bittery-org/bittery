@@ -12,6 +12,7 @@ const WEB_BINDING_SOURCE: &str = include_str!("../src/web.rs");
 fn native_generated_values_keep_plaintext_behind_opaque_objects() {
     for name in [
         "SecretString",
+        "AttachmentName",
         "LoginCustomField",
         "LoginItemDraft",
         "LoginItemProjection",
@@ -23,8 +24,11 @@ fn native_generated_values_keep_plaintext_behind_opaque_objects() {
     }
     assert!(KOTLIN.contains("val `masterPassword`: uniffi.bittery_client_bindings.SecretString"));
     assert!(KOTLIN.contains("val `draft`: uniffi.bittery_client_bindings.LoginItemDraft"));
+    assert!(KOTLIN.contains("val `name`: uniffi.bittery_client_bindings.AttachmentName"));
+    assert!(!KOTLIN.contains("val `name`: kotlin.String) : RuntimeRequest()"));
     assert!(SWIFT.contains("masterPassword: SecretString, secretKey: SecretString"));
     assert!(SWIFT.contains("draft: LoginItemDraft"));
+    assert!(SWIFT.contains("name: AttachmentName"));
     assert!(!KOTLIN.contains("override fun toString"));
     assert!(!SWIFT.contains("CustomStringConvertible"));
 }

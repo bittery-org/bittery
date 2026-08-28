@@ -1,6 +1,9 @@
 mod attachment_move_lifecycle;
 #[cfg(test)]
+mod attachment_tests;
+#[cfg(test)]
 pub(crate) use attachment_move_lifecycle::live_artifact_owners;
+mod attachment;
 #[cfg(test)]
 mod attachment_move_lifecycle_tests;
 #[allow(
@@ -24,6 +27,7 @@ mod create_tests;
 mod dispatch;
 #[cfg(test)]
 mod dispatch_tests;
+mod foreground_attachment_lifecycle;
 mod install;
 mod lock;
 mod open;
@@ -278,6 +282,7 @@ struct ProjectedDelivery {
 struct QueuedDelivery {
     projection: RuntimeProjection,
     token: Option<Arc<DeliveryToken>>,
+    foreground_attachment: Option<foreground_attachment_lifecycle::ForegroundAttachmentPublication>,
 }
 
 struct Subscription {
@@ -292,6 +297,7 @@ struct Subscription {
 struct DeliveryState {
     closed: bool,
     delivering_thread: Option<ThreadId>,
+    foreground_delivery: bool,
     last_queued: Option<(Option<DeliveryGeneration>, u64)>,
     queue: VecDeque<QueuedDelivery>,
 }
@@ -304,6 +310,7 @@ struct DeliveryGuard<'a> {
 impl DeliveryGuard<'_> {
     fn finish(&mut self, delivery: &mut DeliveryState) {
         delivery.delivering_thread = None;
+        delivery.foreground_delivery = false;
         self.subscription.delivery_finished.notify_all();
         self.armed = false;
     }
@@ -320,6 +327,7 @@ impl Drop for DeliveryGuard<'_> {
             .lock()
             .expect("observation delivery lock poisoned");
         delivery.delivering_thread = None;
+        delivery.foreground_delivery = false;
         self.subscription.delivery_finished.notify_all();
     }
 }
@@ -340,6 +348,16 @@ impl Subscription {
     }
 
     fn publish(&self, projected: ProjectedDelivery) {
+        self.publish_with_foreground_attachment(projected, None);
+    }
+
+    fn publish_with_foreground_attachment(
+        &self,
+        projected: ProjectedDelivery,
+        foreground_attachment: Option<
+            foreground_attachment_lifecycle::ForegroundAttachmentPublication,
+        >,
+    ) {
         let revision = projected.projection.revision();
         let current_thread = std::thread::current().id();
         {
@@ -363,6 +381,7 @@ impl Subscription {
             delivery.queue.push_back(QueuedDelivery {
                 projection: projected.projection,
                 token: projected.token,
+                foreground_attachment,
             });
             if delivery.delivering_thread.is_some() {
                 return;
@@ -389,14 +408,31 @@ impl Subscription {
                     delivery_guard.finish(&mut delivery);
                     return;
                 };
+                // Lifecycle may close a foreground subscription as soon as callback begin wins;
+                // unlike ordinary deliveries, it must not wait for that copied host payload.
+                delivery.foreground_delivery = next.foreground_attachment.is_some();
                 next
             };
-            let _lease = match next.token {
-                Some(token) => match token.begin() {
-                    Some(lease) => Some(lease),
-                    None => continue,
-                },
-                None => None,
+            let foreground_started = next
+                .foreground_attachment
+                .as_ref()
+                .is_some_and(|publication| publication.begin());
+            if next.foreground_attachment.is_some() && !foreground_started {
+                continue;
+            }
+            // Foreground Attachment delivery has already linearized against lifecycle and owns a
+            // copied projection plus this Arc-backed subscription. It must not acquire a delivery
+            // lease that lifecycle drains while host code runs.
+            let _lease = if foreground_started {
+                None
+            } else {
+                match next.token {
+                    Some(token) => match token.begin() {
+                        Some(lease) => Some(lease),
+                        None => continue,
+                    },
+                    None => None,
+                }
             };
             let _active_delivery = ActiveRuntimeDelivery::enter(self.runtime_identity);
             self.sink.publish(next.projection);
@@ -404,6 +440,14 @@ impl Subscription {
     }
 
     fn close(&self) {
+        self.close_with_foreground_ownership(false);
+    }
+
+    fn close_for_lifecycle(&self) {
+        self.close_with_foreground_ownership(true);
+    }
+
+    fn close_with_foreground_ownership(&self, foreground_owns_payload: bool) {
         let current_thread = std::thread::current().id();
         let mut delivery = self
             .delivery
@@ -414,6 +458,7 @@ impl Subscription {
         while delivery
             .delivering_thread
             .is_some_and(|owner| owner != current_thread)
+            && !(foreground_owns_payload && delivery.foreground_delivery)
         {
             delivery = self
                 .delivery_finished
@@ -422,6 +467,23 @@ impl Subscription {
         }
     }
 }
+
+pub(in crate::runtime) struct PreparedForegroundAttachmentPublications {
+    deliveries: Vec<(Arc<Subscription>, ProjectedDelivery)>,
+}
+
+impl PreparedForegroundAttachmentPublications {
+    pub(in crate::runtime) fn publish(
+        self,
+        admission: foreground_attachment_lifecycle::ForegroundAttachmentPublication,
+    ) {
+        for (subscription, projection) in self.deliveries {
+            subscription.publish_with_foreground_attachment(projection, Some(admission.clone()));
+        }
+    }
+}
+
+type ItemMutationLocks = HashMap<(AccountId, String), Arc<tokio::sync::Mutex<()>>>;
 
 pub struct Runtime {
     replica: Arc<Replica>,
@@ -454,6 +516,8 @@ pub struct Runtime {
     waiting_reasons: Mutex<HashMap<AccountId, AccountWaitingReason>>,
     delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
+    item_mutation_locks: Mutex<ItemMutationLocks>,
+    foreground_attachments: foreground_attachment_lifecycle::ForegroundAttachmentRegistry,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -842,6 +906,9 @@ impl Runtime {
             waiting_reasons: Mutex::new(HashMap::new()),
             delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
+            item_mutation_locks: Mutex::new(HashMap::new()),
+            foreground_attachments:
+                foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default(),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -949,7 +1016,10 @@ impl Runtime {
                 .lock()
                 .expect("Account access lock poisoned")
                 .iter()
-                .filter(|(_, access)| **access == AccountAccessState::Unlocked)
+                .filter(|(account_id, access)| {
+                    **access == AccountAccessState::Unlocked
+                        && !self.account_access_retirement_is_pending(account_id)
+                })
                 .map(|(account_id, _)| account_id.clone())
                 .collect();
             let snapshots: Vec<_> = self
@@ -1152,6 +1222,28 @@ impl Runtime {
                 return self.wipe_device().await;
             }
             _ => {}
+        }
+        if let RuntimeRequest::RenameAttachment {
+            account_id,
+            attachment_id,
+            name,
+        } = &request
+        {
+            let teardown_admission = self.teardown_admission.read().await;
+            self.reject_request_during_pending_teardown(&RuntimeRequest::RenameAttachment {
+                account_id: account_id.clone(),
+                attachment_id: attachment_id.clone(),
+                name: name.clone(),
+            })?;
+            return self
+                .rename_attachment(
+                    account_id.clone(),
+                    attachment_id.clone(),
+                    name.clone(),
+                    cancellation,
+                    teardown_admission,
+                )
+                .await;
         }
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
@@ -1474,6 +1566,9 @@ impl Runtime {
                 self.acknowledge_share_result(account_id, operation_id, cancellation)
                     .await
             }
+            RuntimeRequest::RenameAttachment { .. } => unreachable!(
+                "Rename is handled before ordinary admission so callback delivery can release it"
+            ),
             // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
             // so this reports an error rather than panicking on the request path.
             RuntimeRequest::RemoveAccount { .. } | RuntimeRequest::Wipe => Err(RuntimeError::new(
@@ -1582,6 +1677,25 @@ impl Runtime {
         }
     }
 
+    fn prepare_all_for_foreground_attachment(&self) -> PreparedForegroundAttachmentPublications {
+        let subscriptions: Vec<_> = self
+            .observers
+            .lock()
+            .expect("observer lock poisoned")
+            .values()
+            .cloned()
+            .collect();
+        let deliveries = subscriptions
+            .into_iter()
+            .filter_map(|subscription| {
+                self.projection(&subscription.request)
+                    .ok()
+                    .map(|projection| (subscription, projection))
+            })
+            .collect();
+        PreparedForegroundAttachmentPublications { deliveries }
+    }
+
     fn publish_all_unless_closed(&self) {
         if !self.is_closed() {
             self.publish_all();
@@ -1603,6 +1717,7 @@ impl Runtime {
             }
         } else {
             self.wake_dispatch();
+            self.foreground_attachments.fence_all_and_drain().await;
             let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks
@@ -1684,7 +1799,7 @@ impl Runtime {
                 token.wait_for_other_threads();
             }
             for subscription in subscriptions {
-                subscription.close();
+                subscription.close_for_lifecycle();
             }
             self.observers
                 .lock()
@@ -1725,10 +1840,24 @@ impl Runtime {
             .clone())
     }
 
+    fn item_mutation_lock(
+        &self,
+        account_id: &AccountId,
+        item_id: &str,
+    ) -> Arc<tokio::sync::Mutex<()>> {
+        self.item_mutation_locks
+            .lock()
+            .expect("Item mutation lock map poisoned")
+            .entry((account_id.clone(), item_id.to_owned()))
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
     fn generation_is_preparation_eligible(&self, snapshot: &ReplicaSnapshot) -> bool {
         !self.is_closed()
             && self.ready.load(Ordering::SeqCst)
             && !self.account_teardown_is_pending(&snapshot.account_id)
+            && !self.account_access_retirement_is_pending(&snapshot.account_id)
             && snapshot.failure.is_none()
             && self
                 .account_access
@@ -1744,10 +1873,6 @@ impl Runtime {
                         && current.incarnation == snapshot.incarnation
                         && current.lock_epoch == snapshot.lock_epoch
                 })
-    }
-
-    fn identity(&self) -> usize {
-        std::ptr::from_ref(self).addr()
     }
 
     fn invalidate_delivery(&self, account_id: &AccountId) -> Option<Arc<DeliveryToken>> {
@@ -1819,6 +1944,10 @@ impl Runtime {
             .lock()
             .expect("live master unlock key lock poisoned")
             .retain(|(installed_account_id, _), _| installed_account_id != account_id);
+    }
+
+    fn identity(&self) -> usize {
+        std::ptr::from_ref(self).addr()
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<ProjectedDelivery, RuntimeError> {

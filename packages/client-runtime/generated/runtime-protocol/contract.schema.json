@@ -126,9 +126,6 @@
         "name": {
           "type": "string"
         },
-        "storageKey": {
-          "type": "string"
-        },
         "uploadedBy": {
           "type": "string"
         },
@@ -141,7 +138,6 @@
         "attachmentId",
         "itemId",
         "vaultId",
-        "storageKey",
         "name",
         "contentType",
         "fileSize",
@@ -534,6 +530,14 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "RETRYABLE_TRANSPORT",
+        "AUTHORITY_MISSING",
+        "ACCESS_DENIED",
+        "READ_ONLY",
+        "QUOTA_EXCEEDED",
+        "SIZE_REJECTED",
+        "SOURCE_FAILURE",
+        "SINK_FAILURE",
         "INVARIANT_VIOLATION"
       ]
     },
@@ -986,6 +990,31 @@
             "accountId",
             "operationId"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "renameAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId",
+            "name"
+          ]
         }
       ]
     },
@@ -1105,6 +1134,27 @@
             "type",
             "accountId",
             "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentRenamed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
           ]
         },
         {

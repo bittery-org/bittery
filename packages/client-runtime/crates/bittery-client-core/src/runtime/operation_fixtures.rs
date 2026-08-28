@@ -126,14 +126,17 @@ impl crate::platform_storage::SerializedPlatformStorageExecutor for MemoryPlatfo
     ) -> Result<Zeroizing<String>, RuntimeError> {
         let request: Value = serde_json::from_str(&request_json).unwrap();
         let area = request["area"].as_str().unwrap().to_owned();
-        let key = request["key"].as_str().unwrap().to_owned();
         Ok(Zeroizing::new(match request["type"].as_str().unwrap() {
-            "get" => json!({
-                "type": "value",
-                "value": self.values.lock().unwrap().get(&(area, key)).cloned(),
-            })
-            .to_string(),
+            "get" => {
+                let key = request["key"].as_str().unwrap().to_owned();
+                json!({
+                    "type": "value",
+                    "value": self.values.lock().unwrap().get(&(area, key)).cloned(),
+                })
+                .to_string()
+            }
             "set" => {
+                let key = request["key"].as_str().unwrap().to_owned();
                 self.values
                     .lock()
                     .unwrap()
@@ -141,7 +144,18 @@ impl crate::platform_storage::SerializedPlatformStorageExecutor for MemoryPlatfo
                 json!({ "type": "done" }).to_string()
             }
             "delete" => {
+                let key = request["key"].as_str().unwrap().to_owned();
                 self.values.lock().unwrap().remove(&(area, key));
+                json!({ "type": "done" }).to_string()
+            }
+            "deletePrefix" => {
+                let prefix = request["prefix"].as_str().unwrap();
+                self.values
+                    .lock()
+                    .unwrap()
+                    .retain(|(candidate_area, key), _| {
+                        candidate_area != &area || !key.starts_with(prefix)
+                    });
                 json!({ "type": "done" }).to_string()
             }
             other => panic!("unexpected platform storage request {other}"),

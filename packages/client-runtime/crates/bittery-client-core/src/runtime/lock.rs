@@ -145,6 +145,12 @@ impl Runtime {
         let pending_retirement =
             PendingAccessRetirement::new(self.account_access_retirement_intent(account_id));
         let execution_guard = execution_lock.lock().await;
+        let foreground_retirement = self
+            .foreground_attachments
+            .begin_account_retirement(account_id);
+        drop(execution_guard);
+        foreground_retirement.drain().await;
+        let execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
         let Some(mut snapshot) = self.replica.snapshot(account_id) else {
             drop(execution_guard);
@@ -260,6 +266,7 @@ impl Runtime {
             .lock()
             .expect("pending lock epoch lock poisoned")
             .remove(account_id);
+        drop(foreground_retirement);
         Ok(access)
     }
 

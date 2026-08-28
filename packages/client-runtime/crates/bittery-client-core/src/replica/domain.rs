@@ -34,6 +34,39 @@ impl GuardedCommitPlan {
     }
 }
 
+/// One exact foreground Attachment authority commit.
+///
+/// Unlike Operation reconciliation, a stale fetched Item is not a successful no-op: the caller
+/// must retry from fresh authority and may not publish the requested Attachment effect.
+pub(crate) struct ForegroundAttachmentCommitPlan {
+    pub(crate) guard: GuardedCommitPlan,
+    pub(crate) attachment_id: String,
+    pub(crate) item: AuthorityItemRecord,
+}
+
+impl ForegroundAttachmentCommitPlan {
+    pub(crate) fn new(
+        account_id: AccountId,
+        expected_incarnation: Incarnation,
+        expected_replica_revision: u64,
+        expected_lock_epoch: u64,
+        attachment_id: String,
+        item: AuthorityItemRecord,
+    ) -> Self {
+        Self {
+            guard: GuardedCommitPlan::new(
+                account_id,
+                expected_incarnation,
+                expected_replica_revision,
+                expected_lock_epoch,
+                Vec::new(),
+            ),
+            attachment_id,
+            item,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -100,6 +133,11 @@ pub(crate) enum PlanMutation {
         outcome: ObservedOutcome,
         item: Option<Box<AuthorityItemRecord>>,
         cursor: Option<CursorAdvance>,
+    },
+    /// Publishes a foreground Attachment mutation only with the freshly fetched owning Item.
+    CommitAttachmentAuthority {
+        attachment_id: String,
+        item: Box<AuthorityItemRecord>,
     },
     /// Retains one terminal rejection: retry stops, the receipt says why, the ciphertext stays.
     RetainRejection {
@@ -996,6 +1034,14 @@ pub(crate) enum PlanResult {
         )]
         actual_revision: u64,
     },
+    Missing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ForegroundAttachmentCommitResult {
+    Applied { replica_revision: u64 },
+    StaleReplica { actual_revision: u64 },
+    StaleAuthority { current_item_version: i32 },
     Missing,
 }
 
@@ -1906,6 +1952,19 @@ impl AccountReplica {
                 self.items
                     .retain(|_, overlay| overlay.operation_id != operation.operation_id);
                 self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::CommitAttachmentAuthority {
+                attachment_id,
+                item,
+            } => {
+                if !item.attachments.iter().any(|attachment| {
+                    attachment.id == attachment_id && attachment.item_id == item.id
+                }) {
+                    return Err(replica_invariant(
+                        "the authoritative Item does not contain the named Attachment",
+                    ));
+                }
+                self.write_authoritative_item(*item)?;
             }
             PlanMutation::RetainRejection { outcome, cursor } => {
                 let operation = self.operation_for(&outcome)?;

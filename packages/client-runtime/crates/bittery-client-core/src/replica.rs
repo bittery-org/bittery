@@ -38,7 +38,8 @@ pub(crate) use domain::{
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
     BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
     BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase, CleanupBootstrapGenerationPlan,
-    CleanupBootstrapGenerationResult, CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest,
+    CleanupBootstrapGenerationResult, CursorAdvance, ForegroundAttachmentCommitPlan,
+    ForegroundAttachmentCommitResult, GuardedCommitPlan, ImmutableHttpRequest,
     MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
     OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
     PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan,
@@ -1528,6 +1529,129 @@ impl Replica {
                 }
             }
         }
+    }
+
+    /// Executes one authority-fetched plan against exactly the revision it observed.
+    ///
+    /// Foreground Attachment work must not replay an earlier fetch over a concurrent Sync commit.
+    pub(crate) async fn execute_exact(
+        &self,
+        plan: GuardedCommitPlan,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = plan.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(PlanResult::Missing);
+        };
+        if current.incarnation != plan.expected_incarnation {
+            self.cache(current);
+            return Ok(PlanResult::Missing);
+        }
+        if current.lock_epoch != plan.expected_lock_epoch {
+            self.cache(current);
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Replica work was fenced by Account lock",
+            ));
+        }
+        if current.revision != plan.expected_replica_revision {
+            let actual_revision = current.revision;
+            self.cache(current);
+            return Ok(PlanResult::Stale { actual_revision });
+        }
+        let PreparedCommitOutcome {
+            wire: prepared,
+            next_snapshot,
+        } = prepare_commit(current, plan)?;
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::Commit { prepared })
+            .await?;
+        let ReplicaPersistenceResponse::Committed { result } = response else {
+            return Err(replica_invariant(
+                "Replica persistence returned a non-commit response for a commit",
+            ));
+        };
+        match result {
+            PlanResult::Applied { replica_revision }
+                if replica_revision == next_snapshot.revision =>
+            {
+                self.cache(next_snapshot);
+                Ok(PlanResult::Applied { replica_revision })
+            }
+            PlanResult::Applied { .. } => Err(replica_invariant(
+                "Replica persistence committed an unexpected revision",
+            )),
+            PlanResult::Missing => {
+                self.load(&account_id).await?;
+                Ok(PlanResult::Missing)
+            }
+            PlanResult::Stale { actual_revision } => {
+                self.load(&account_id).await?;
+                Ok(PlanResult::Stale { actual_revision })
+            }
+        }
+    }
+
+    /// Commits authority fetched by one foreground Attachment request exactly once.
+    ///
+    /// Lock order belongs to the Runtime: per-Item writer, then Account execution fence, then this
+    /// synchronous Replica preparation. Persistence still receives the established guarded commit;
+    /// this deeper result distinguishes an older fetched Item from an applied write without
+    /// changing Operation reconciliation's background-wins no-op semantics.
+    pub(crate) async fn execute_foreground_attachment_exact(
+        &self,
+        plan: ForegroundAttachmentCommitPlan,
+    ) -> Result<ForegroundAttachmentCommitResult, RuntimeError> {
+        let account_id = plan.guard.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(ForegroundAttachmentCommitResult::Missing);
+        };
+        if current.incarnation != plan.guard.expected_incarnation {
+            self.cache(current);
+            return Ok(ForegroundAttachmentCommitResult::Missing);
+        }
+        if current.lock_epoch != plan.guard.expected_lock_epoch {
+            self.cache(current);
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Replica work was fenced by Account lock",
+            ));
+        }
+        if current.revision != plan.guard.expected_replica_revision {
+            let actual_revision = current.revision;
+            self.cache(current);
+            return Ok(ForegroundAttachmentCommitResult::StaleReplica { actual_revision });
+        }
+        if let Some(current_version) = current
+            .bootstrap
+            .snapshot()
+            .visible_items
+            .iter()
+            .find(|item| item.id == plan.item.id)
+            .map(|item| item.version)
+            .filter(|current_version| *current_version > plan.item.version)
+        {
+            self.cache(current);
+            return Ok(ForegroundAttachmentCommitResult::StaleAuthority {
+                current_item_version: current_version,
+            });
+        }
+        let guarded = GuardedCommitPlan {
+            mutations: vec![PlanMutation::CommitAttachmentAuthority {
+                attachment_id: plan.attachment_id,
+                item: Box::new(plan.item),
+            }],
+            ..plan.guard
+        };
+        Ok(match self.execute_exact(guarded).await? {
+            PlanResult::Applied { replica_revision } => {
+                ForegroundAttachmentCommitResult::Applied { replica_revision }
+            }
+            PlanResult::Stale { actual_revision } => {
+                ForegroundAttachmentCommitResult::StaleReplica { actual_revision }
+            }
+            PlanResult::Missing => ForegroundAttachmentCommitResult::Missing,
+        })
     }
 
     pub(crate) async fn begin_bootstrap(

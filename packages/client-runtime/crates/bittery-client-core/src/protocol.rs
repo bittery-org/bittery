@@ -186,6 +186,15 @@ pub enum RuntimeRequest {
         account_id: AccountId,
         operation_id: String,
     },
+    RenameAttachment {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
+        name: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -299,6 +308,16 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("operation_id", operation_id)
                 .finish(),
+            Self::RenameAttachment {
+                account_id,
+                attachment_id,
+                ..
+            } => formatter
+                .debug_struct("RenameAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .field("plaintext", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -320,7 +339,8 @@ impl RuntimeRequest {
             | Self::MoveItem { account_id, .. }
             | Self::PermanentlyDeleteItem { account_id, .. }
             | Self::CreateShare { account_id, .. }
-            | Self::AcknowledgeShareResult { account_id, .. } => Some(account_id),
+            | Self::AcknowledgeShareResult { account_id, .. }
+            | Self::RenameAttachment { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -499,6 +519,14 @@ pub enum RuntimeResponse {
         )]
         account_id: AccountId,
         operation_id: String,
+    },
+    AttachmentRenamed {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
     },
     Teardown {
         scope: TeardownScope,
@@ -875,7 +903,6 @@ pub struct AttachmentProjection {
     pub attachment_id: String,
     pub item_id: String,
     pub vault_id: String,
-    pub storage_key: String,
     pub name: String,
     pub content_type: String,
     #[cfg_attr(
@@ -1032,6 +1059,14 @@ pub enum RuntimeErrorCode {
     AccountFailed,
     AuthenticationRequired,
     AuthenticationUnavailable,
+    RetryableTransport,
+    AuthorityMissing,
+    AccessDenied,
+    ReadOnly,
+    QuotaExceeded,
+    SizeRejected,
+    SourceFailure,
+    SinkFailure,
     InvariantViolation,
 }
 
